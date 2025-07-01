@@ -138,7 +138,6 @@
             pkgs.alejandra
             pkgs.nixos-rebuild
             pkgs.libspatialite
-            (import ./nix/deploy.nix { inherit pkgs; })
           ];
           env =
             {
