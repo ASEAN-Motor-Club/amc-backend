@@ -82,7 +82,7 @@
                 RestartSec = "10";
               };
               script = ''
-                ${self.packages.x86_64-linux.default}/bin/uvicorn amc_backend.asgi:app \
+                ${self.packages.x86_64-linux.default}/bin/uvicorn amc_backend.asgi:application \
                   --host ${cfg.host} \
                   --port ${toString cfg.port} \
                   --workers ${toString cfg.workers}
