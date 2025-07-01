@@ -20,6 +20,6 @@ build-backend = "hatchling.build"
 
 [tool.hatch.build.targets.wheel]
 sources = [
-  "backend",
+  "src",
 ]
 
