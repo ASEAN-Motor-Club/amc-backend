@@ -42,10 +42,10 @@
       flake = {
         nixosModules.backend = { config, pkgs, lib, ... }:
         let
-          cfg = config.amc-backend;
+          cfg = config.services.amc-backend;
         in
         {
-          options.amc-backend = {
+          options.services.amc-backend = {
             enable = lib.mkEnableOption "Enable Module";
             host = lib.mkOption {
               type = lib.types.str;
