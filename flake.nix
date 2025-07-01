@@ -65,6 +65,11 @@
               example = true;
               description = "The port number for the main process to listen to";
             };
+            environment = lib.mkOption {
+              type = lib.types.attrsOf lib.types.str;
+              default = {};
+              description = "Environment variables";
+            };
           };
           config = lib.mkIf cfg.enable {
             systemd.services.amc-backend = {
@@ -74,8 +79,8 @@
               environment = {
                 DB_URL = "sqlite:///var/lib/amc.sqlite3";
                 SPATIALITE_LIBRARY_PATH = pkgs.libspatialite;
-              };
-              restartIfChanged = false;
+              } // cfg.environment;
+              restartIfChanged = true;
               serviceConfig = {
                 Type = "simple";
                 Restart = "on-failure";
