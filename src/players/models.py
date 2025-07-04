@@ -3,11 +3,21 @@ from django.utils import timezone
 
 
 class Player(models.Model):
+  unique_id = models.PositiveBigIntegerField(primary_key=True)
   discord_user_id = models.PositiveBigIntegerField(unique=True)
-  unique_id = models.PositiveBigIntegerField(unique=True)
-  discord_name = models.CharField(max_length=200)
+  discord_name = models.CharField(max_length=200, null=True)
+
   def __str__(self):
       return self.discord_name
+
+
+class Character(models.Model):
+  player = models.ForeignKey(Player, on_delete=models.CASCADE)
+  name = models.CharField(max_length=200)
+  # levels
+
+  def __str__(self):
+      return self.name
 
 
 class Team(models.Model):
@@ -15,9 +25,6 @@ class Team(models.Model):
   tag = models.CharField(max_length=6)
   discord_thread_id = models.PositiveBigIntegerField(unique=True)
 
-  # This sets up the many-to-many relationship with Player,
-  # specifying that the TeamMembership model should be used as the
-  # intermediary ("through") table.
   players = models.ManyToManyField(
       Player,
       through='TeamMembership',
@@ -29,18 +36,9 @@ class Team(models.Model):
 
 
 class TeamMembership(models.Model):
-  """
-  This is the "through" model that connects a Player to a Team.
-  It allows us to store extra data about the specific relationship
-  between a player and a team, such as when they joined.
-  """
   player = models.ForeignKey(Player, on_delete=models.CASCADE)
   team = models.ForeignKey(Team, on_delete=models.CASCADE)
   date_joined = models.DateTimeField(default=timezone.now)
-
-  # You could add other fields here to describe the membership, for example:
-  # is_captain = models.BooleanField(default=False)
-  # role = models.CharField(max_length=100, blank=True)
 
   class Meta:
     # This constraint ensures that a player can only be a member
@@ -49,4 +47,10 @@ class TeamMembership(models.Model):
 
   def __str__(self):
     return f"{self.player.discord_name} in {self.team.name}"
+
+
+class PlayerStatusLog(models.Model):
+  player = models.ForeignKey(Player, on_delete=models.CASCADE)
+  timestamp = models.DateTimeField(auto_now=True)
+
 
