@@ -40,6 +40,9 @@
         "aarch64-darwin"
       ];
       flake = {
+        overlays.default = final: prev: {
+          amc-backend = self.packages.${prev.system}.default;
+        };
         nixosModules.backend = { config, pkgs, lib, ... }:
         let
           cfg = config.services.amc-backend;
@@ -47,6 +50,16 @@
         {
           options.services.amc-backend = {
             enable = lib.mkEnableOption "Enable Module";
+            user = lib.mkOption {
+              type = lib.types.str;
+              default = "amc";
+              description = "The user that the process runs under";
+            };
+            group = lib.mkOption {
+              type = lib.types.str;
+              default = "amc";
+              description = "The user group that the process runs under";
+            };
             host = lib.mkOption {
               type = lib.types.str;
               default = "0.0.0.0";
@@ -72,17 +85,49 @@
             };
           };
           config = lib.mkIf cfg.enable {
+            nixpkgs.overlays = [ self.overlays.default ];
+
+            users.users.${cfg.user} = {
+              isSystemUser = true;
+              group = cfg.group;
+              description = "AMC Backend";
+            };
+            users.groups.${cfg.group} = {
+              members = [ cfg.user ];
+            };
+
+            services.postgresql = {
+              enable = true;
+              package = pkgs.postgresql_16;
+              extensions = with pkgs.postgresql_16.pkgs; [ postgis timescaledb ];
+              ensureDatabases = [
+                cfg.user
+              ];
+              ensureUsers = [
+                { name = cfg.user; ensureDBOwnership = true; }
+              ];
+              settings = {
+                client_encoding = "UTF8";
+                timezone = "UTC";
+              };
+              authentication = pkgs.lib.mkOverride 10 ''
+                local all all trust
+                host all all ::1/128 trust
+              '';
+            };
+            services.redis.enable = true;
+
             systemd.services.amc-backend = {
               wantedBy = [ "multi-user.target" ]; 
               after = [ "network.target" ];
               description = "API Server";
               environment = {
-                DB_URL = "sqlite:///var/lib/amc.sqlite3";
-                SPATIALITE_LIBRARY_PATH = pkgs.libspatialite;
               } // cfg.environment;
               restartIfChanged = true;
               serviceConfig = {
                 Type = "simple";
+                User = cfg.user;
+                Group = cfg.group;
                 Restart = "on-failure";
                 RestartSec = "10";
               };
@@ -93,6 +138,45 @@
                   --workers ${toString cfg.workers}
               '';
             };
+
+            systemd.services.amc-worker = {
+              wantedBy = [ "multi-user.target" ]; 
+              after = [ "network.target" ];
+              description = "Job queue and background worker";
+              environment = {
+                DJANGO_SETTINGS_MODULE = "amc_backend.settings";
+              } // cfg.environment;
+              restartIfChanged = true;
+              serviceConfig = {
+                Type = "simple";
+                User = cfg.user;
+                Group = cfg.group;
+                Restart = "on-failure";
+                RestartSec = "10";
+              };
+              script = ''
+                ${self.packages.x86_64-linux.default}/bin/arq amc.tasks.WorkerSettings
+              '';
+            };
+
+            systemd.services.amc-backend-migrate = {
+              description = "Migrate backend db";
+              environment = {
+                DJANGO_SETTINGS_MODULE = "amc_backend.settings";
+              } // cfg.environment;
+              restartIfChanged = false;
+              serviceConfig = {
+                Type = "oneshot";
+                User = cfg.user;
+                Group = cfg.group;
+              };
+              script = ''
+                ${self.packages.x86_64-linux.default}/bin/django-admin migrate
+              '';
+            };
+            environment.systemPackages = [
+              self.packages.x86_64-linux.default
+            ];
           };
         };
       };
@@ -139,13 +223,20 @@
             python
             pkgs.uv
             pkgs.ruff
+            pkgs.basedpyright
+            pkgs.jq
             pkgs.nil
             pkgs.alejandra
             pkgs.nixos-rebuild
             pkgs.libspatialite
+            pkgs.postgresql_16
+            pkgs.redis
           ];
           env =
             {
+              # Needed for postgis
+              # GDAL_LIBRARY_PATH  = "${pkgs.gdal}/lib/libgdal.dylib";
+
               # Prevent uv from managing Python downloads
               UV_PYTHON_DOWNLOADS = "never";
               # Force uv to use nixpkgs Python interpreter

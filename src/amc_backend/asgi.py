@@ -9,8 +9,18 @@ https://docs.djangoproject.com/en/5.2/howto/deployment/asgi/
 
 import os
 
-from django.core.asgi import get_asgi_application
+from django_asgi_lifespan.asgi import get_asgi_application
 
 os.environ.setdefault('DJANGO_SETTINGS_MODULE', 'amc_backend.settings')
 
-application = get_asgi_application()
+django_application = get_asgi_application()
+
+
+async def application(scope, receive, send):
+    if scope["type"] in {"http", "lifespan"}:
+        await django_application(scope, receive, send)
+    else:
+        raise NotImplementedError(
+            f"Unknown scope type {scope['type']}"
+        )
+

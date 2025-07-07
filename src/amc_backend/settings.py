@@ -26,7 +26,7 @@ SECRET_KEY = 'django-insecure-#ro&u^cq!$zns+(-sn!c67=nrhyt$1=dyc7b)@0-21m_5!(328
 # SECURITY WARNING: don't run with debug turned on in production!
 DEBUG = bool(os.environ.get('DEBUG'))
 
-ALLOWED_HOSTS = os.environ.get('ALLOWED_HOSTS', '').split(',')
+ALLOWED_HOSTS = os.environ.get('ALLOWED_HOSTS', 'localhost').split(' ')
 
 
 # Application definition
@@ -38,7 +38,7 @@ INSTALLED_APPS = [
     'django.contrib.sessions',
     'django.contrib.messages',
     'django.contrib.staticfiles',
-    'players',
+    'amc',
 ]
 
 MIDDLEWARE = [
@@ -49,6 +49,7 @@ MIDDLEWARE = [
     'django.contrib.auth.middleware.AuthenticationMiddleware',
     'django.contrib.messages.middleware.MessageMiddleware',
     'django.middleware.clickjacking.XFrameOptionsMiddleware',
+    'django_asgi_lifespan.middleware.LifespanStateMiddleware',
 ]
 
 ROOT_URLCONF = 'amc_backend.urls'
@@ -76,8 +77,15 @@ WSGI_APPLICATION = 'amc_backend.wsgi.application'
 
 DATABASES = {
     'default': {
-        'ENGINE': 'django.db.backends.sqlite3',
-        'NAME': os.environ.get('DATABASE_PATH', BASE_DIR / 'db.sqlite3'),
+        'ENGINE': 'django.db.backends.postgresql',
+        'NAME': os.environ.get("DB_NAME", 'amc'),
+        'HOST': os.environ.get("PGHOST"),
+        'PORT': os.environ.get('PGPORT'),
+        'USER': os.environ.get('PGUSER'),
+        'CONN_MAX_AGE': int(os.environ.get('CONN_MAX_AGE', '0')),
+        'OPTIONS': {
+          'pool': bool(os.environ.get('POOL_DATABASE')),
+        }
     }
 }
 
@@ -122,3 +130,7 @@ STATIC_URL = 'static/'
 # https://docs.djangoproject.com/en/5.2/ref/settings/#default-auto-field
 
 DEFAULT_AUTO_FIELD = 'django.db.models.BigAutoField'
+GDAL_LIBRARY_PATH = os.environ.get('GDAL_LIBRARY_PATH')
+
+MOD_SERVER_API_URL = os.environ.get("MOD_SERVER_API_URL", "http://127.0.0.1:5001")
+REDIS_SETTINGS = {}

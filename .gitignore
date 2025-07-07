@@ -4,3 +4,4 @@
 .env
 .envrc
 **/*.sqlite3
+*.rdb

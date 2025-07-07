@@ -1,0 +1,7 @@
+from ninja import NinjaAPI
+
+api = NinjaAPI()
+api.add_router('/players', 'amc.api.routes.players_router')
+api.add_router('/player_positions', 'amc.api.routes.player_positions_router')
+
+
