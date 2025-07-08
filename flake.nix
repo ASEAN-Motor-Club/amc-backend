@@ -115,7 +115,7 @@
                 host all all ::1/128 trust
               '';
             };
-            services.redis.enable = true;
+            services.redis.servers."amc-backend".enable = true;
 
             systemd.services.amc-backend = {
               wantedBy = [ "multi-user.target" ]; 
