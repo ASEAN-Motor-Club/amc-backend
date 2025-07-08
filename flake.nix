@@ -46,6 +46,10 @@
         nixosModules.backend = { config, pkgs, lib, ... }:
         let
           cfg = config.services.amc-backend;
+          geoDjangoDepsPaths = {
+            GEOS_LIBRARY_PATH = ''${pkgs.geos}/lib/libgeos_c.${if pkgs.system == "aarch64-darwin" then "dylib" else "so"}'';
+            GDAL_LIBRARY_PATH = ''${pkgs.gdal}/lib/libgdal.${if pkgs.system == "aarch64-darwin" then "dylib" else "so"}'';
+          };
         in
         {
           options.services.amc-backend = {
@@ -123,7 +127,7 @@
               after = [ "network.target" ];
               description = "API Server";
               environment = {
-              } // cfg.environment;
+              } // geoDjangoDepsPaths // cfg.environment;
               restartIfChanged = true;
               serviceConfig = {
                 Type = "simple";
@@ -146,7 +150,7 @@
               description = "Job queue and background worker";
               environment = {
                 DJANGO_SETTINGS_MODULE = "amc_backend.settings";
-              } // cfg.environment;
+              } // geoDjangoDepsPaths // cfg.environment;
               restartIfChanged = true;
               serviceConfig = {
                 Type = "simple";
@@ -243,6 +247,8 @@
               # Force uv to use nixpkgs Python interpreter
               UV_PYTHON = python.interpreter;
               SPATIALITE_LIBRARY_PATH = "${pkgs.libspatialite}/lib/libspatialite.dylib";
+              GEOS_LIBRARY_PATH = ''${pkgs.geos}/lib/libgeos_c.${if pkgs.system == "aarch64-darwin" then "dylib" else "so"}'';
+              GDAL_LIBRARY_PATH = ''${pkgs.gdal}/lib/libgdal.${if pkgs.system == "aarch64-darwin" then "dylib" else "so"}'';
             }
             // lib.optionalAttrs pkgs.stdenv.isLinux {
               # Python libraries often load native shared objects using dlopen(3).
