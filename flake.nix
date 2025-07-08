@@ -116,6 +116,7 @@
               '';
             };
             services.redis.servers."amc-backend".enable = true;
+            services.redis.servers."amc-backend".port = 6379;
 
             systemd.services.amc-backend = {
               wantedBy = [ "multi-user.target" ]; 
