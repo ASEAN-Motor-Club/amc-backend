@@ -33,6 +33,15 @@
     pyproject-build-systems,
     ...
   }:
+    let
+      # TODO: patch on packager level
+      # uv2nix makes it harder to patch source code, since we're importing wheels not sdist
+      # These are needed for GeoDjango
+      mkPostgisDeps = pkgs: {
+        GEOS_LIBRARY_PATH = ''${pkgs.geos}/lib/libgeos_c.${if pkgs.stdenv.hostPlatform.isDarwin then "dylib" else "so"}'';
+        GDAL_LIBRARY_PATH = ''${pkgs.gdal}/lib/libgdal.${if pkgs.stdenv.hostPlatform.isDarwin then "dylib" else "so"}'';
+      };
+    in
     flake-parts.lib.mkFlake {inherit inputs;} {
       systems = [
         "x86_64-linux"
@@ -42,14 +51,11 @@
       flake = {
         overlays.default = final: prev: {
           amc-backend = self.packages.${prev.system}.default;
+          amc-backend-static = self.packages.${prev.system}.staticRoot;
         };
         nixosModules.backend = { config, pkgs, lib, ... }:
         let
           cfg = config.services.amc-backend;
-          geoDjangoDepsPaths = {
-            GEOS_LIBRARY_PATH = ''${pkgs.geos}/lib/libgeos_c.${if pkgs.system == "aarch64-darwin" then "dylib" else "so"}'';
-            GDAL_LIBRARY_PATH = ''${pkgs.gdal}/lib/libgdal.${if pkgs.system == "aarch64-darwin" then "dylib" else "so"}'';
-          };
         in
         {
           options.services.amc-backend = {
@@ -127,7 +133,9 @@
               after = [ "network.target" ];
               description = "API Server";
               environment = {
-              } // geoDjangoDepsPaths // cfg.environment;
+                inherit (mkPostgisDeps pkgs) GEOS_LIBRARY_PATH GDAL_LIBRARY_PATH;
+                DJANGO_STATIC_ROOT = self.packages.x86_64-linux.staticRoot;
+              } // cfg.environment;
               restartIfChanged = true;
               serviceConfig = {
                 Type = "simple";
@@ -149,8 +157,9 @@
               after = [ "network.target" ];
               description = "Job queue and background worker";
               environment = {
+                inherit (mkPostgisDeps pkgs) GEOS_LIBRARY_PATH GDAL_LIBRARY_PATH;
                 DJANGO_SETTINGS_MODULE = "amc_backend.settings";
-              } // geoDjangoDepsPaths // cfg.environment;
+              } // cfg.environment;
               restartIfChanged = true;
               serviceConfig = {
                 Type = "simple";
@@ -221,8 +230,30 @@
               ]
             );
 
+        staticRoot = 
+          let
+            inherit (pkgs) stdenv;
+            venv = self'.packages.default;
+          in
+          stdenv.mkDerivation {
+            name = "amc-backend-static";
+            inherit (pythonSet.amc-backend) src;
+
+            dontConfigure = true;
+            dontBuild = true;
+            inherit (mkPostgisDeps pkgs) GEOS_LIBRARY_PATH GDAL_LIBRARY_PATH;
+
+            nativeBuildInputs = [
+              venv
+            ];
+
+            installPhase = ''
+              env DJANGO_STATIC_ROOT="$out" python src/manage.py collectstatic --noinput
+            '';
+          };
       in {
         packages.default = pythonSet.mkVirtualEnv "amc-backend-env" workspace.deps.default;
+        packages.staticRoot = staticRoot;
         devShells.default = pkgs.mkShell {
           packages = [
             python
@@ -247,8 +278,7 @@
               # Force uv to use nixpkgs Python interpreter
               UV_PYTHON = python.interpreter;
               SPATIALITE_LIBRARY_PATH = "${pkgs.libspatialite}/lib/libspatialite.dylib";
-              GEOS_LIBRARY_PATH = ''${pkgs.geos}/lib/libgeos_c.${if pkgs.system == "aarch64-darwin" then "dylib" else "so"}'';
-              GDAL_LIBRARY_PATH = ''${pkgs.gdal}/lib/libgdal.${if pkgs.system == "aarch64-darwin" then "dylib" else "so"}'';
+              inherit (mkPostgisDeps pkgs) GEOS_LIBRARY_PATH GDAL_LIBRARY_PATH;
             }
             // lib.optionalAttrs pkgs.stdenv.isLinux {
               # Python libraries often load native shared objects using dlopen(3).
