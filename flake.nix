@@ -113,6 +113,10 @@
               type = lib.types.int;
               default = 8000;
             };
+            relpPort = lib.mkOption {
+              type = lib.types.int;
+              default = 2514;
+            };
             backendSettings = lib.mkOption {
               type = lib.types.submodule backendOptionsSubmodule;
               default = {};
@@ -159,6 +163,7 @@
                 ];
                 services.amc-log-listener = {
                   enable = true;
+                  relpPort = cfg.relpPort;
                 };
               };
             };
