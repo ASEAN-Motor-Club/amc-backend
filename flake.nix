@@ -51,6 +51,7 @@
       flake = {
         overlays.default = final: prev: {
           amc-backend = self.packages.${prev.system}.default;
+          amc-scripts = self.packages.${prev.system}.scripts;
           amc-backend-static = self.packages.${prev.system}.staticRoot;
         };
         nixosModules.backend = { config, pkgs, lib, ... }:
@@ -253,6 +254,7 @@
           };
       in {
         packages.default = pythonSet.mkVirtualEnv "amc-backend-env" workspace.deps.default;
+        packages.scripts = pythonSet.mkVirtualEnv "amc-scripts-env"  { scripts = []; };
         packages.staticRoot = staticRoot;
         devShells.default = pkgs.mkShell {
           packages = [

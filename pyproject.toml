@@ -36,6 +36,11 @@ packages = [
   "src/amc",
 ]
 
+[tool.uv.workspace]
+members = [
+    "packages/scripts",
+]
+
 [dependency-groups]
 dev = [
     "basedpyright>=1.29.5",

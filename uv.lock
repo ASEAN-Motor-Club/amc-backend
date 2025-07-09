@@ -6,6 +6,12 @@ resolution-markers = [
     "python_full_version < '3.13'",
 ]
 
+[manifest]
+members = [
+    "amc-backend",
+    "scripts",
+]
+
 [[package]]
 name = "aiohappyeyeballs"
 version = "2.6.1"
@@ -730,6 +736,17 @@ wheels = [
 hiredis = [
     { name = "hiredis" },
 ]
+
+[[package]]
+name = "scripts"
+version = "0.1.0"
+source = { editable = "packages/scripts" }
+dependencies = [
+    { name = "arq" },
+]
+
+[package.metadata]
+requires-dist = [{ name = "arq", specifier = ">=0.26.3" }]
 
 [[package]]
 name = "sniffio"
