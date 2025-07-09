@@ -1,16 +1,16 @@
 from datetime import datetime
-from django.test import TestCase
+from django.test import SimpleTestCase
 from amc.server_logs import (
     parse_log_line,
-    PlayerChatMessage,
-    PlayerLogin,
-    PlayerEnteredVehicle,
-    CompanyAdded,
-    Announcement,
+    PlayerChatMessageLogEvent,
+    PlayerLoginLogEvent,
+    PlayerEnteredVehicleLogEvent,
+    CompanyAddedLogEvent,
+    AnnouncementLogEvent,
     UnknownLogEntry,
 )
 
-class LogParserTestCase(TestCase):
+class LogParserTestCase(SimpleTestCase):
     """
     Test suite for the log parsing logic.
     """
@@ -26,7 +26,7 @@ class LogParserTestCase(TestCase):
         result = parse_log_line(log_line)
 
         # Assert the type is correct
-        self.assertIsInstance(result, PlayerChatMessage)
+        self.assertIsInstance(result, PlayerChatMessageLogEvent)
 
         # Assert the content is correct
         self.assertEqual(result.timestamp, expected_timestamp)
@@ -43,7 +43,7 @@ class LogParserTestCase(TestCase):
 
         result = parse_log_line(log_line)
 
-        self.assertIsInstance(result, PlayerLogin)
+        self.assertIsInstance(result, PlayerLoginLogEvent)
         self.assertEqual(result.timestamp, expected_timestamp)
         self.assertEqual(result.player_name, "Admin")
         self.assertEqual(result.player_id, 1)
@@ -57,7 +57,7 @@ class LogParserTestCase(TestCase):
 
         result = parse_log_line(log_line)
 
-        self.assertIsInstance(result, CompanyAdded)
+        self.assertIsInstance(result, CompanyAddedLogEvent)
         self.assertEqual(result.timestamp, expected_timestamp)
         self.assertEqual(result.company_name, "MegaCorp")
         self.assertTrue(result.is_corp)
@@ -73,7 +73,7 @@ class LogParserTestCase(TestCase):
 
         result = parse_log_line(log_line)
 
-        self.assertIsInstance(result, PlayerEnteredVehicle)
+        self.assertIsInstance(result, PlayerEnteredVehicleLogEvent)
         self.assertEqual(result.timestamp, expected_timestamp)
         self.assertEqual(result.player_name, "freeman")
         self.assertEqual(result.player_id, 123)
@@ -90,7 +90,7 @@ class LogParserTestCase(TestCase):
 
         result = parse_log_line(log_line)
 
-        self.assertIsInstance(result, Announcement)
+        self.assertIsInstance(result, AnnouncementLogEvent)
         self.assertEqual(result.timestamp, expected_timestamp)
         self.assertEqual(result.message, "Server is restarting in 5 minutes.")
 

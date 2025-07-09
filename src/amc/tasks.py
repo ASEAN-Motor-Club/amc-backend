@@ -3,7 +3,25 @@ import django
 django.setup()
 from django.db.utils import IntegrityError
 from amc.models import ServerLog
-from amc.server_logs import parse_log_line, LogEvent
+from amc.server_logs import (
+  parse_log_line,
+  LogEvent,
+  PlayerChatMessageLogEvent,
+  PlayerCreatedCompanyLogEvent,
+  PlayerLevelChangedLogEvent,
+  PlayerLoginLogEvent,
+  PlayerLogoutLogEvent,
+  PlayerEnteredVehicleLogEvent,
+  PlayerExitedVehicleLogEvent,
+  PlayerBoughtVehicleLogEvent,
+  PlayerSoldVehicleLogEvent,
+  PlayerRestockedDepotLogEvent,
+  CompanyAddedLogEvent,
+  CompanyRemovedLogEvent,
+  AnnouncementLogEvent,
+  SecurityAlertLogEvent,
+  UnknownLogEntry,
+)
 from django.conf import settings
 
 REDIS_SETTINGS = RedisSettings(**settings.REDIS_SETTINGS)
@@ -18,6 +36,9 @@ async def process_log_line(ctx, line):
   except IntegrityError:
     return {'status': 'duplicate', 'timestamp': event.timestamp}
 
+  match event:
+    case PlayerLoginLogEvent():
+      pass
   return {'status': 'created', 'timestamp': event.timestamp}
 
 async def startup(ctx):

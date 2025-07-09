@@ -11,20 +11,20 @@ class BaseLogEvent(ABC):
   timestamp: datetime
 
 @dataclass(frozen=True)
-class PlayerChatMessage(BaseLogEvent):
+class PlayerChatMessageLogEvent(BaseLogEvent):
   """Represents a message sent by a player in the game chat."""
   player_name: str
   player_id: int
   message: str
 
 @dataclass(frozen=True)
-class PlayerCreatedCompany(BaseLogEvent):
+class PlayerCreatedCompanyLogEventLogEvent(BaseLogEvent):
   """Represents a message sent by a player in the game chat."""
   player_name: str
   company_name: str
 
 @dataclass(frozen=True)
-class PlayerLevelChanged(BaseLogEvent):
+class PlayerLevelChangedLogEvent(BaseLogEvent):
   """Represents a message sent by a player in the game chat."""
   player_name: str
   player_id: int
@@ -32,27 +32,19 @@ class PlayerLevelChanged(BaseLogEvent):
   level_value: int
 
 @dataclass(frozen=True)
-class PlayerLogin(BaseLogEvent):
+class PlayerLoginLogEvent(BaseLogEvent):
   """Represents a player successfully logging into the server."""
   player_name: str
   player_id: int
 
 @dataclass(frozen=True)
-class PlayerLogout(BaseLogEvent):
+class PlayerLogoutLogEvent(BaseLogEvent):
   """Represents a player logging out."""
   player_name: str
   player_id: int
 
 @dataclass(frozen=True)
-class PlayerEnteredVehicle(BaseLogEvent):
-  """Represents a player logging out."""
-  player_name: str
-  player_id: int
-  vehicle_name: str
-  vehicle_id: int
-
-@dataclass(frozen=True)
-class PlayerExitedVehicle(BaseLogEvent):
+class PlayerEnteredVehicleLogEvent(BaseLogEvent):
   """Represents a player logging out."""
   player_name: str
   player_id: int
@@ -60,7 +52,7 @@ class PlayerExitedVehicle(BaseLogEvent):
   vehicle_id: int
 
 @dataclass(frozen=True)
-class PlayerBoughtVehicle(BaseLogEvent):
+class PlayerExitedVehicleLogEvent(BaseLogEvent):
   """Represents a player logging out."""
   player_name: str
   player_id: int
@@ -68,7 +60,7 @@ class PlayerBoughtVehicle(BaseLogEvent):
   vehicle_id: int
 
 @dataclass(frozen=True)
-class PlayerSoldVehicle(BaseLogEvent):
+class PlayerBoughtVehicleLogEvent(BaseLogEvent):
   """Represents a player logging out."""
   player_name: str
   player_id: int
@@ -76,13 +68,21 @@ class PlayerSoldVehicle(BaseLogEvent):
   vehicle_id: int
 
 @dataclass(frozen=True)
-class PlayerRestockedDepot(BaseLogEvent):
+class PlayerSoldVehicleLogEvent(BaseLogEvent):
+  """Represents a player logging out."""
+  player_name: str
+  player_id: int
+  vehicle_name: str
+  vehicle_id: int
+
+@dataclass(frozen=True)
+class PlayerRestockedDepotLogEvent(BaseLogEvent):
   """Represents a player logging out."""
   player_name: str
   depot_name: str
 
 @dataclass(frozen=True)
-class CompanyAdded(BaseLogEvent):
+class CompanyAddedLogEvent(BaseLogEvent):
   """Represents a player logging out."""
   company_name: str
   is_corp: bool
@@ -90,7 +90,7 @@ class CompanyAdded(BaseLogEvent):
   owner_id: int
 
 @dataclass(frozen=True)
-class CompanyRemoved(BaseLogEvent):
+class CompanyRemovedLogEvent(BaseLogEvent):
   """Represents a player logging out."""
   company_name: str
   is_corp: bool
@@ -98,12 +98,12 @@ class CompanyRemoved(BaseLogEvent):
   owner_id: int
 
 @dataclass(frozen=True)
-class Announcement(BaseLogEvent):
+class AnnouncementLogEvent(BaseLogEvent):
   """Represents a player logging out."""
   message: str
 
 @dataclass(frozen=True)
-class SecurityAlert(BaseLogEvent):
+class SecurityAlertLogEvent(BaseLogEvent):
   """Represents a player logging out."""
   player_name: str
   player_id: int
@@ -115,20 +115,20 @@ class UnknownLogEntry(BaseLogEvent):
   original_line: str
 
 LogEvent = (
-  PlayerChatMessage
-  | PlayerCreatedCompany
-  | PlayerLevelChanged
-  | PlayerLogin
-  | PlayerLogout
-  | PlayerEnteredVehicle
-  | PlayerExitedVehicle
-  | PlayerBoughtVehicle
-  | PlayerSoldVehicle
-  | PlayerRestockedDepot
-  | CompanyAdded
-  | CompanyRemoved
-  | Announcement
-  | SecurityAlert
+  PlayerChatMessageLogEvent
+  | PlayerCreatedCompanyLogEventLogEvent
+  | PlayerLevelChangedLogEvent
+  | PlayerLoginLogEvent
+  | PlayerLogoutLogEvent
+  | PlayerEnteredVehicleLogEvent
+  | PlayerExitedVehicleLogEvent
+  | PlayerBoughtVehicleLogEvent
+  | PlayerSoldVehicleLogEvent
+  | PlayerRestockedDepotLogEvent
+  | CompanyAddedLogEvent
+  | CompanyRemovedLogEvent
+  | AnnouncementLogEvent
+  | SecurityAlertLogEvent
   | UnknownLogEntry
 )
 
@@ -140,7 +140,7 @@ def parse_log_line(line: str) -> LogEvent:
     return UnknownLogEntry(timestamp=timezone.now(), original_line=line)
 
   if pattern_match := re.match(r"\[CHAT\] (?P<player_name>\w+) \((?P<player_id>\d+)\): (?P<message>.+)", content):
-    return PlayerChatMessage(
+    return PlayerChatMessageLogEvent(
       timestamp=timestamp,
       player_name=pattern_match.group('player_name'),
       player_id=int(pattern_match.group('player_id')),
@@ -148,41 +148,41 @@ def parse_log_line(line: str) -> LogEvent:
     )
 
   if pattern_match := re.match(r"\[CHAT\] (?P<player_name>\w+) has restocked (?P<depot_name>.+)", content):
-    return PlayerRestockedDepot(
+    return PlayerRestockedDepotLogEvent(
       timestamp=timestamp,
       player_name=pattern_match.group('player_name'),
       depot_name=pattern_match.group('depot_name'),
     )
 
   if pattern_match := re.match(r"\[CHAT\] (?P<company_name>.+) is Created by (?P<player_name>\w+)", content):
-    return PlayerCreatedCompany(
+    return PlayerCreatedCompanyLogEventLogEvent(
       timestamp=timestamp,
       player_name=pattern_match.group('player_name'),
       company_name=pattern_match.group('company_name'),
     )
 
   if pattern_match := re.match(r"\[CHAT\] (?P<message>.+)", content):
-    return Announcement(
+    return AnnouncementLogEvent(
       timestamp=timestamp,
       message=pattern_match.group('message'),
     )
 
   if pattern_match := re.match(r"Player Login: (?P<player_name>\w+) \((?P<player_id>\d+)\)", content):
-    return PlayerLogin(
+    return PlayerLoginLogEvent(
       timestamp=timestamp,
       player_name=pattern_match.group('player_name'),
       player_id=int(pattern_match.group('player_id')),
     )
 
   if pattern_match := re.match(r"Player Logout: (?P<player_name>\w+) \((?P<player_id>\d+)\)", content):
-    return PlayerLogout(
+    return PlayerLogoutLogEvent(
       timestamp=timestamp,
       player_name=pattern_match.group('player_name'),
       player_id=int(pattern_match.group('player_id')),
     )
 
   if pattern_match := re.match(r"Player level changed. Player=(?P<player_name>\w+) \((?P<player_id>\d+)\) Level=(?P<level_type>[^(]+)\((?P<level_value>\d+)\)", content):
-    return PlayerLevelChanged(
+    return PlayerLevelChangedLogEvent(
       timestamp=timestamp,
       player_name=pattern_match.group('player_name'),
       player_id=int(pattern_match.group('player_id')),
@@ -191,7 +191,7 @@ def parse_log_line(line: str) -> LogEvent:
     )
 
   if pattern_match := re.match(r"Player entered vehicle. Player=(?P<player_name>\w+) \((?P<player_id>\d+)\) Vehicle=(?P<vehicle_name>[^(]+)\((?P<vehicle_id>\d+)\)", content):
-    return PlayerEnteredVehicle(
+    return PlayerEnteredVehicleLogEvent(
       timestamp=timestamp,
       player_name=pattern_match.group('player_name'),
       player_id=int(pattern_match.group('player_id')),
@@ -200,7 +200,7 @@ def parse_log_line(line: str) -> LogEvent:
     )
 
   if pattern_match := re.match(r"Player exited vehicle. Player=(?P<player_name>\w+) \((?P<player_id>\d+)\) Vehicle=(?P<vehicle_name>[^(]+)\((?P<vehicle_id>\d+)\)", content):
-    return PlayerExitedVehicle(
+    return PlayerExitedVehicleLogEvent(
       timestamp=timestamp,
       player_name=pattern_match.group('player_name'),
       player_id=int(pattern_match.group('player_id')),
@@ -209,7 +209,7 @@ def parse_log_line(line: str) -> LogEvent:
     )
 
   if pattern_match := re.match(r"Player bought vehicle. Player=(?P<player_name>\w+) \((?P<player_id>\d+)\) Vehicle=(?P<vehicle_name>[^(]+)\((?P<vehicle_id>\d+)\)", content):
-    return PlayerBoughtVehicle(
+    return PlayerBoughtVehicleLogEvent(
       timestamp=timestamp,
       player_name=pattern_match.group('player_name'),
       player_id=int(pattern_match.group('player_id')),
@@ -218,7 +218,7 @@ def parse_log_line(line: str) -> LogEvent:
     )
 
   if pattern_match := re.match(r"Player sold vehicle. Player=(?P<player_name>\w+) \((?P<player_id>\d+)\) Vehicle=(?P<vehicle_name>[^(]+)\((?P<vehicle_id>\d+)\)", content):
-    return PlayerSoldVehicle(
+    return PlayerSoldVehicleLogEvent(
       timestamp=timestamp,
       player_name=pattern_match.group('player_name'),
       player_id=int(pattern_match.group('player_id')),
@@ -227,7 +227,7 @@ def parse_log_line(line: str) -> LogEvent:
     )
 
   if pattern_match := re.match(r"Company added. Name=(?P<company_name>[^(]+)\(Corp\?(?P<is_corp>\w+)\) Owner=(?P<owner_name>\w+)\((?P<owner_id>\d+)\)", content):
-    return CompanyAdded(
+    return CompanyAddedLogEvent(
       timestamp=timestamp,
       company_name=pattern_match.group('company_name'),
       is_corp=pattern_match.group('is_corp') == 'true',
@@ -236,7 +236,7 @@ def parse_log_line(line: str) -> LogEvent:
     )
 
   if pattern_match := re.match(r"Company removed. Name=(?P<company_name>[^(]+)\(Corp\?(?P<is_corp>\w+)\) Owner=(?P<owner_name>\w+)\((?P<owner_id>\d+)\)", content):
-    return CompanyRemoved(
+    return CompanyRemovedLogEvent(
       timestamp=timestamp,
       company_name=pattern_match.group('company_name'),
       is_corp=pattern_match.group('is_corp') == 'true',
@@ -245,7 +245,7 @@ def parse_log_line(line: str) -> LogEvent:
     )
 
   if pattern_match := re.match(r"[Security Alert]: \[(?P<player_name>\w+):(?P<player_id>\d+)\] (?P<message>.+)", content):
-    return SecurityAlert(
+    return SecurityAlertLogEvent(
       timestamp=timestamp,
       player_name=pattern_match.group('player_name'),
       player_id=int(pattern_match.group('player_id')),
