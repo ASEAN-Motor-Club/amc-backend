@@ -32,13 +32,18 @@ ALLOWED_HOSTS = os.environ.get('ALLOWED_HOSTS', 'localhost 127.0.0.1').split(' '
 # Application definition
 
 INSTALLED_APPS = [
-    'django.contrib.gis',
     'django.contrib.admin',
     'django.contrib.auth',
     'django.contrib.contenttypes',
     'django.contrib.sessions',
     'django.contrib.messages',
     'django.contrib.staticfiles',
+]
+
+if os.environ.get('GDAL_LIBRARY_PATH') and os.environ.get('GEOS_LIBRARY_PATH'):
+    INSTALLED_APPS += ['django.contrib.gis']
+
+INSTALLED_APPS += [
     'amc',
 ]
 
@@ -78,7 +83,7 @@ WSGI_APPLICATION = 'amc_backend.wsgi.application'
 
 DATABASES = {
     'default': {
-        'ENGINE': 'django.contrib.gis.db.backends.postgis',
+        'ENGINE': 'django.db.backends.postgresql',
         'NAME': os.environ.get("DB_NAME", 'amc'),
         'HOST': os.environ.get("PGHOST"),
         'PORT': os.environ.get('PGPORT'),
@@ -89,6 +94,10 @@ DATABASES = {
         }
     }
 }
+
+# When postgis dependencies are not available, fall back to normal postgres
+if os.environ.get('GDAL_LIBRARY_PATH') and os.environ.get('GEOS_LIBRARY_PATH'):
+  DATABASES['default']['ENGINE'] = 'django.contrib.gis.db.backends.postgis'
 
 
 # Password validation

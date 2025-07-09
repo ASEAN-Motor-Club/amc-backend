@@ -265,7 +265,7 @@
             pkgs.alejandra
             pkgs.nixos-rebuild
             pkgs.libspatialite
-            pkgs.postgresql_16
+            (pkgs.postgresql_16.withPackages(p: [p.postgis]))
             pkgs.redis
           ];
           env =
