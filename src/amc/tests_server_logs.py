@@ -1,5 +1,5 @@
 from datetime import datetime
-from django.test import SimpleTestCase
+from django.test import SimpleTestCase, TestCase
 from amc.server_logs import (
     parse_log_line,
     PlayerChatMessageLogEvent,
@@ -8,6 +8,10 @@ from amc.server_logs import (
     CompanyAddedLogEvent,
     AnnouncementLogEvent,
     UnknownLogEntry,
+)
+from amc.tasks import process_log_event
+from amc.models import (
+  PlayerChatLog
 )
 
 class LogParserTestCase(SimpleTestCase):
@@ -120,3 +124,22 @@ class LogParserTestCase(SimpleTestCase):
         self.assertEqual(result.original_line, log_line)
         # The timestamp will be datetime.now(), so we just check it exists
         self.assertIsInstance(result.timestamp, datetime)
+
+
+class ProcessLogEventTestCase(TestCase):
+  async def test_player_chat_message(self):
+    event = PlayerChatMessageLogEvent(
+      timestamp=datetime.now(),
+      player_id=1234,
+      player_name='freeman',
+      message='test'
+    )
+    await process_log_event(event)
+    self.assertTrue(
+      await PlayerChatLog.objects.filter(
+        character__name=event.player_name,
+        character__player__unique_id=event.player_id,
+        text=event.message
+      ).aexists()
+    )
+

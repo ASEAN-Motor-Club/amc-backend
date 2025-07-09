@@ -18,7 +18,7 @@ class PlayerChatMessageLogEvent(BaseLogEvent):
   message: str
 
 @dataclass(frozen=True)
-class PlayerCreatedCompanyLogEventLogEvent(BaseLogEvent):
+class PlayerCreatedCompanyLogEvent(BaseLogEvent):
   """Represents a message sent by a player in the game chat."""
   player_name: str
   company_name: str
@@ -116,7 +116,7 @@ class UnknownLogEntry(BaseLogEvent):
 
 LogEvent = (
   PlayerChatMessageLogEvent
-  | PlayerCreatedCompanyLogEventLogEvent
+  | PlayerCreatedCompanyLogEvent
   | PlayerLevelChangedLogEvent
   | PlayerLoginLogEvent
   | PlayerLogoutLogEvent
@@ -155,7 +155,7 @@ def parse_log_line(line: str) -> LogEvent:
     )
 
   if pattern_match := re.match(r"\[CHAT\] (?P<company_name>.+) is Created by (?P<player_name>\w+)", content):
-    return PlayerCreatedCompanyLogEventLogEvent(
+    return PlayerCreatedCompanyLogEvent(
       timestamp=timestamp,
       player_name=pattern_match.group('player_name'),
       company_name=pattern_match.group('company_name'),

@@ -169,7 +169,7 @@
                 RestartSec = "10";
               };
               script = ''
-                ${self.packages.x86_64-linux.default}/bin/arq amc.tasks.WorkerSettings
+                ${self.packages.x86_64-linux.default}/bin/arq amc.worker.WorkerSettings
               '';
             };
 

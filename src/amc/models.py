@@ -1,5 +1,4 @@
 from django.db import models
-from django.db.models import F, Func
 from django.utils import timezone
 from typing import override, final
 

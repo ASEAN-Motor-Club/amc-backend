@@ -1,6 +1,3 @@
-from arq.connections import RedisSettings
-import django
-django.setup()
 from django.db.utils import IntegrityError
 from amc.models import ServerLog
 from amc.server_logs import (
@@ -22,9 +19,24 @@ from amc.server_logs import (
   SecurityAlertLogEvent,
   UnknownLogEntry,
 )
-from django.conf import settings
+from amc.models import Player, Character, PlayerChatLog
 
-REDIS_SETTINGS = RedisSettings(**settings.REDIS_SETTINGS)
+
+async def process_log_event(event: LogEvent):
+  match event:
+    case PlayerLoginLogEvent():
+      pass
+    case PlayerChatMessageLogEvent(timestamp, player_name, player_id, message):
+      player, _ = await Player.objects.aget_or_create(unique_id=player_id)
+      character, _ = await Character.objects.aget_or_create(player=player, name=player_name)
+      await PlayerChatLog.objects.acreate(
+        timestamp=timestamp,
+        character=character, 
+        text=message,
+      )
+    case _:
+      raise ValueError('Unknown log')
+
 
 async def process_log_line(ctx, line):
   event: LogEvent = parse_log_line(line)
@@ -36,20 +48,10 @@ async def process_log_line(ctx, line):
   except IntegrityError:
     return {'status': 'duplicate', 'timestamp': event.timestamp}
 
-  match event:
-    case PlayerLoginLogEvent():
-      pass
+  try:
+    await process_log_event(event)
+  except ValueError as e:
+    return {'status': 'error', 'timestamp': event.timestamp, 'error': str(e)}
+
   return {'status': 'created', 'timestamp': event.timestamp}
-
-async def startup(ctx):
-  pass
-
-async def shutdown(ctx):
-  pass
-
-class WorkerSettings:
-    functions = [process_log_line]
-    on_startup = startup
-    on_shutdown = shutdown
-    redis_settings = REDIS_SETTINGS
 
