@@ -51,9 +51,47 @@
       flake = {
         overlays.default = final: prev: {
           amc-backend = self.packages.${prev.system}.default;
-          amc-scripts = self.packages.${prev.system}.scripts;
           amc-backend-static = self.packages.${prev.system}.staticRoot;
         };
+        overlays.scripts = final: prev: {
+          amc-scripts = self.packages.${prev.system}.scripts;
+        };
+
+        nixosModules.log-listener = { config, pkgs, lib, ... }:
+        let
+          cfg = config.services.amc-log-listener;
+        in
+        {
+          options.services.amc-log-listener = {
+            enable = lib.mkEnableOption "Log listener";
+            relpPort = lib.mkOption {
+              type = lib.types.int;
+              default = 2514;
+              example = true;
+              description = "The port number for RELP log listener";
+            };
+          };
+          config = lib.mkIf cfg.enable {
+            nixpkgs.overlays = [ self.overlays.scripts ];
+            services.rsyslogd = {
+              enable = true;
+              extraConfig = ''
+                module(load="imrelp")
+                module(load="omprog")
+
+                input(type="imrelp" port="${toString cfg.relpPort}" maxDataSize="10k" ruleset="mt-in")
+                Ruleset(name="mt-in") {
+                  action (
+                    type="omprog"
+                    binary="${pkgs.amc-scripts}/bin/ingest_logs"
+                    reportFailures="on"
+                  )
+                }
+              '';
+            };
+          };
+        };
+
         nixosModules.backend = { config, pkgs, lib, ... }:
         let
           cfg = config.services.amc-backend;
@@ -77,6 +115,11 @@
               example = true;
               description = "The host for the main process to listen to";
             };
+            allowedHosts = lib.mkOption {
+              type = lib.types.listOf lib.types.str;
+              default = [];
+              example = ["www.example.com"];
+            };
             port = lib.mkOption {
               type = lib.types.int;
               default = 8000;
@@ -97,6 +140,7 @@
           };
           config = lib.mkIf cfg.enable {
             nixpkgs.overlays = [ self.overlays.default ];
+            nixpkgs.config.allowUnfree = true; # for timescaledb
 
             users.users.${cfg.user} = {
               isSystemUser = true;
@@ -136,6 +180,7 @@
               environment = {
                 inherit (mkPostgisDeps pkgs) GEOS_LIBRARY_PATH GDAL_LIBRARY_PATH;
                 DJANGO_STATIC_ROOT = self.packages.x86_64-linux.staticRoot;
+                ALLOWED_HOSTS = lib.strings.concatStringsSep " " cfg.allowedHosts;
               } // cfg.environment;
               restartIfChanged = true;
               serviceConfig = {
