@@ -34,12 +34,56 @@
     ...
   }:
     let
+      lib = nixpkgs.lib;
       # TODO: patch on packager level
       # uv2nix makes it harder to patch source code, since we're importing wheels not sdist
       # These are needed for GeoDjango
       mkPostgisDeps = pkgs: {
         GEOS_LIBRARY_PATH = ''${pkgs.geos}/lib/libgeos_c.${if pkgs.stdenv.hostPlatform.isDarwin then "dylib" else "so"}'';
         GDAL_LIBRARY_PATH = ''${pkgs.gdal}/lib/libgdal.${if pkgs.stdenv.hostPlatform.isDarwin then "dylib" else "so"}'';
+      };
+      backendOptionsSubmodule = {
+        options = {
+          enable = lib.mkEnableOption "Enable Module";
+          user = lib.mkOption {
+            type = lib.types.str;
+            default = "amc";
+            description = "The user that the process runs under";
+          };
+          group = lib.mkOption {
+            type = lib.types.str;
+            default = "amc";
+            description = "The user group that the process runs under";
+          };
+          host = lib.mkOption {
+            type = lib.types.str;
+            default = "0.0.0.0";
+            example = true;
+            description = "The host for the main process to listen to";
+          };
+          allowedHosts = lib.mkOption {
+            type = lib.types.listOf lib.types.str;
+            default = [];
+            example = ["www.example.com"];
+          };
+          port = lib.mkOption {
+            type = lib.types.int;
+            default = 8000;
+            example = true;
+            description = "The port number for the main process to listen to";
+          };
+          workers = lib.mkOption {
+            type = lib.types.int;
+            default = 1;
+            example = true;
+            description = "The port number for the main process to listen to";
+          };
+          environment = lib.mkOption {
+            type = lib.types.attrsOf lib.types.str;
+            default = {};
+            description = "Environment variables";
+          };
+        };
       };
     in
     flake-parts.lib.mkFlake {inherit inputs;} {
@@ -55,6 +99,70 @@
         };
         overlays.scripts = final: prev: {
           amc-scripts = self.packages.${prev.system}.scripts;
+        };
+
+        nixosModules.containers = { config, pkgs, lib, ... }: let
+          cfg = config.services.amc-backend-containers;
+        in {
+          options.services.amc-backend-containers = {
+            enable = lib.mkEnableOption "AMC Backend containers";
+            fqdn = lib.mkOption {
+              type = lib.types.str;
+            };
+            port = lib.mkOption {
+              type = lib.types.int;
+              default = 8000;
+            };
+            backendSettings = lib.mkOption {
+              type = lib.types.submodule backendOptionsSubmodule;
+              default = {};
+            };
+          };
+          config = lib.mkIf cfg.enable {
+            services.nginx.virtualHosts.${cfg.fqdn} = {
+              enableACME = true;
+              forceSSL = true;
+              locations = {
+                "/" = {
+                  proxyPass = "http://127.0.0.1:${toString cfg.port}/api/";
+                  recommendedProxySettings = true;
+                };
+                "/admin" = {
+                  proxyPass = "http://127.0.0.1:${toString cfg.port}";
+                  recommendedProxySettings = true;
+                };
+                "/static/" = let
+                  staticRoot = self.packages.${pkgs.system}.staticRoot;
+                in {
+                  alias = "${staticRoot}/";
+                };
+              };
+            };
+            containers.amc-backend = {
+              autoStart = true;
+              config = { config, pkgs, ... }: {
+                imports = [
+                  self.nixosModules.backend
+                ];
+                services.amc-backend = cfg.backendSettings // {
+                  enable = lib.mkDefault true;
+                  port = lib.mkDefault cfg.port;
+                  allowedHosts = lib.mkDefault [ cfg.fqdn ];
+                };
+              };
+            };
+            containers.amc-log-listener = {
+              autoStart = true;
+              config = { config, pkgs, ... }: {
+                imports = [
+                  self.nixosModules.log-listener
+                ];
+                services.amc-log-listener = {
+                  enable = true;
+                };
+              };
+            };
+          };
         };
 
         nixosModules.log-listener = { config, pkgs, lib, ... }:
@@ -97,47 +205,7 @@
           cfg = config.services.amc-backend;
         in
         {
-          options.services.amc-backend = {
-            enable = lib.mkEnableOption "Enable Module";
-            user = lib.mkOption {
-              type = lib.types.str;
-              default = "amc";
-              description = "The user that the process runs under";
-            };
-            group = lib.mkOption {
-              type = lib.types.str;
-              default = "amc";
-              description = "The user group that the process runs under";
-            };
-            host = lib.mkOption {
-              type = lib.types.str;
-              default = "0.0.0.0";
-              example = true;
-              description = "The host for the main process to listen to";
-            };
-            allowedHosts = lib.mkOption {
-              type = lib.types.listOf lib.types.str;
-              default = [];
-              example = ["www.example.com"];
-            };
-            port = lib.mkOption {
-              type = lib.types.int;
-              default = 8000;
-              example = true;
-              description = "The port number for the main process to listen to";
-            };
-            workers = lib.mkOption {
-              type = lib.types.int;
-              default = 1;
-              example = true;
-              description = "The port number for the main process to listen to";
-            };
-            environment = lib.mkOption {
-              type = lib.types.attrsOf lib.types.str;
-              default = {};
-              description = "Environment variables";
-            };
-          };
+          options.services.amc-backend = backendOptionsSubmodule.options;
           config = lib.mkIf cfg.enable {
             nixpkgs.overlays = [ self.overlays.default ];
             nixpkgs.config.allowUnfree = true; # for timescaledb
