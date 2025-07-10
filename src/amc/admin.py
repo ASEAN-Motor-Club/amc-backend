@@ -3,7 +3,7 @@ from .models import Player, Character, PlayerChatLog, ServerLog
 
 @admin.register(PlayerChatLog)
 class PlayerChatLogAdmin(admin.ModelAdmin):
-  list_display = ['character__name', 'text']
+  list_display = ['timestamp', 'character__name', 'text']
 
 @admin.register(ServerLog)
 class ServerLogAdmin(admin.ModelAdmin):

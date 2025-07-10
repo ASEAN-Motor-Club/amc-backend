@@ -11,7 +11,8 @@ from amc.server_logs import (
 )
 from amc.tasks import process_log_event
 from amc.models import (
-  PlayerChatLog
+  PlayerChatLog,
+  PlayerVehicleLog,
 )
 
 class LogParserTestCase(SimpleTestCase):
@@ -140,6 +141,25 @@ class ProcessLogEventTestCase(TestCase):
         character__name=event.player_name,
         character__player__unique_id=event.player_id,
         text=event.message
+      ).aexists()
+    )
+
+  async def test_player_entered_vehicle(self):
+    event = PlayerEnteredVehicleLogEvent(
+      timestamp=datetime.now(),
+      player_id=1234,
+      player_name='freeman',
+      vehicle_id=2345,
+      vehicle_name='Dabo',
+    )
+    await process_log_event(event)
+    self.assertTrue(
+      await PlayerVehicleLog.objects.filter(
+        character__name=event.player_name,
+        character__player__unique_id=event.player_id,
+        vehicle__name=event.vehicle_name,
+        vehicle__id=event.vehicle_id,
+        action=PlayerVehicleLog.Action.ENTERED
       ).aexists()
     )
 

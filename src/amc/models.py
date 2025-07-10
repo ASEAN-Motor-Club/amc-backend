@@ -1,6 +1,14 @@
 from django.db import models
 from django.utils import timezone
+from django.utils.translation import gettext_lazy as _
 from typing import override, final
+from amc.server_logs import (
+  PlayerVehicleLogEvent,
+  PlayerEnteredVehicleLogEvent,
+  PlayerExitedVehicleLogEvent,
+  PlayerBoughtVehicleLogEvent,
+  PlayerSoldVehicleLogEvent,
+)
 
 @final
 class Player(models.Model):
@@ -61,10 +69,56 @@ class TeamMembership(models.Model):
 
 
 @final
+class Vehicle(models.Model):
+  id = models.PositiveBigIntegerField(primary_key=True)
+  name = models.CharField(max_length=200)
+
+  @override
+  def __str__(self):
+    return self.name
+
+
+@final
 class PlayerChatLog(models.Model):
   character = models.ForeignKey(Character, on_delete=models.CASCADE)
-  timestamp = models.DateTimeField(auto_now=True)
+  timestamp = models.DateTimeField()
   text = models.TextField()
+
+
+@final
+class PlayerVehicleLog(models.Model):
+  class Action(models.TextChoices):
+    ENTERED = "EN", _("Entered")
+    EXITED = "EX", _("Exited")
+    BOUGHT = "BO", _("Bought")
+    SOLD = "SO", _("Sold")
+
+  timestamp = models.DateTimeField()
+  character = models.ForeignKey(Character, on_delete=models.CASCADE)
+  vehicle = models.ForeignKey(Vehicle, on_delete=models.CASCADE)
+  action = models.CharField(max_length=2, choices=Action)
+
+  @classmethod
+  def action_for_event(cls, event: PlayerVehicleLogEvent):
+    match event:
+      case PlayerEnteredVehicleLogEvent():
+        return cls.Action.ENTERED
+      case PlayerExitedVehicleLogEvent():
+        return cls.Action.EXITED
+      case PlayerBoughtVehicleLogEvent():
+        return cls.Action.BOUGHT
+      case PlayerSoldVehicleLogEvent():
+        return cls.Action.SOLD
+      case _:
+        raise ValueError('Unknown vehicle log event')
+
+  class Meta:
+    constraints = [
+      models.UniqueConstraint(
+        fields=['timestamp', 'character', 'vehicle', 'action'],
+        name='unique_vehicle_log_entry'
+      )
+    ]
 
 
 @final

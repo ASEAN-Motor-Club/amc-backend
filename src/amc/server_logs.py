@@ -1,5 +1,5 @@
 import re
-from abc import ABC
+from abc import ABC, ABCMeta
 from dataclasses import dataclass
 from datetime import datetime
 from django.utils import timezone
@@ -44,36 +44,32 @@ class PlayerLogoutLogEvent(BaseLogEvent):
   player_id: int
 
 @dataclass(frozen=True)
-class PlayerEnteredVehicleLogEvent(BaseLogEvent):
+class PlayerVehicleLogEvent(BaseLogEvent, metaclass=ABCMeta):
   """Represents a player logging out."""
   player_name: str
   player_id: int
   vehicle_name: str
   vehicle_id: int
+
+@dataclass(frozen=True)
+class PlayerEnteredVehicleLogEvent(PlayerVehicleLogEvent):
+  """Represents a player logging out."""
+  pass
 
 @dataclass(frozen=True)
 class PlayerExitedVehicleLogEvent(BaseLogEvent):
   """Represents a player logging out."""
-  player_name: str
-  player_id: int
-  vehicle_name: str
-  vehicle_id: int
+  pass
 
 @dataclass(frozen=True)
 class PlayerBoughtVehicleLogEvent(BaseLogEvent):
   """Represents a player logging out."""
-  player_name: str
-  player_id: int
-  vehicle_name: str
-  vehicle_id: int
+  pass
 
 @dataclass(frozen=True)
 class PlayerSoldVehicleLogEvent(BaseLogEvent):
   """Represents a player logging out."""
-  player_name: str
-  player_id: int
-  vehicle_name: str
-  vehicle_id: int
+  pass
 
 @dataclass(frozen=True)
 class PlayerRestockedDepotLogEvent(BaseLogEvent):
