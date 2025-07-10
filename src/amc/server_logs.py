@@ -44,6 +44,11 @@ class PlayerLogoutLogEvent(BaseLogEvent):
   player_id: int
 
 @dataclass(frozen=True)
+class LegacyPlayerLogoutLogEvent(BaseLogEvent):
+  """(Legacy) Represents a player logging out. Missing player_id"""
+  player_name: str
+
+@dataclass(frozen=True)
 class PlayerVehicleLogEvent(BaseLogEvent, metaclass=ABCMeta):
   """Represents a player logging out."""
   player_name: str
@@ -116,6 +121,7 @@ LogEvent = (
   | PlayerLevelChangedLogEvent
   | PlayerLoginLogEvent
   | PlayerLogoutLogEvent
+  | LegacyPlayerLogoutLogEvent
   | PlayerEnteredVehicleLogEvent
   | PlayerExitedVehicleLogEvent
   | PlayerBoughtVehicleLogEvent
@@ -175,6 +181,12 @@ def parse_log_line(line: str) -> LogEvent:
       timestamp=timestamp,
       player_name=pattern_match.group('player_name'),
       player_id=int(pattern_match.group('player_id')),
+    )
+
+  if pattern_match := re.match(r"Player Logout: (?P<player_name>\w+)", content):
+    return LegacyPlayerLogoutLogEvent(
+      timestamp=timestamp,
+      player_name=pattern_match.group('player_name'),
     )
 
   if pattern_match := re.match(r"Player level changed. Player=(?P<player_name>\w+) \((?P<player_id>\d+)\) Level=(?P<level_type>[^(]+)\((?P<level_value>\d+)\)", content):
