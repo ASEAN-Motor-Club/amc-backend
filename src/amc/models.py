@@ -32,7 +32,7 @@ class Character(models.Model):
 
   @override
   def __str__(self):
-    return self.name
+    return f"{self.name} ({self.player.unique_id})"
 
 
 @final
@@ -76,7 +76,7 @@ class Vehicle(models.Model):
 
   @override
   def __str__(self):
-    return self.name
+    return f"{self.name} ({self.id})"
 
 
 @final
