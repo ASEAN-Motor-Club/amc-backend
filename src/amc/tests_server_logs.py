@@ -212,3 +212,32 @@ class ProcessLogEventTestCase(TestCase):
       ).aexists()
     )
 
+  async def test_auto_logout_everyone_on_restart(self):
+    event = PlayerLoginLogEvent(
+      timestamp=datetime.now(),
+      player_id=1235,
+      player_name='freeman',
+    )
+
+    # Use DjangoModelFactory
+    player = await Player.objects.acreate(
+      unique_id=1234,
+    )
+    character = await Character.objects.acreate(
+      name='another_player',
+      player=player,
+    )
+    await PlayerStatusLog.objects.acreate(
+      character=character,
+      timespan=(event.timestamp - timedelta(hours=1), None)
+    )
+
+    await process_log_event(event, True)
+    self.assertTrue(
+      await PlayerStatusLog.objects.filter(
+        character__name=character.name,
+        character__player__unique_id=player.unique_id,
+        timespan=(event.timestamp - timedelta(hours=1), event.timestamp),
+      ).aexists()
+    )
+

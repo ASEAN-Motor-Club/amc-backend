@@ -36,6 +36,12 @@ async def aget_or_create_character(player_name, player_id):
   return (character, player)
 
 async def process_log_event(event: LogEvent, is_new_log_file: bool):
+  if is_new_log_file:
+    await PlayerStatusLog.objects.filter(timespan__upper_inf=True).aupdate(
+      # can't find another way to update only the upper bound
+      timespan=RawSQL("tstzrange( lower(timespan), %t )", (event.timestamp,))
+    )
+
   match event:
     case PlayerChatMessageLogEvent(timestamp, player_name, player_id, message):
       character, _ = await aget_or_create_character(player_name, player_id)
