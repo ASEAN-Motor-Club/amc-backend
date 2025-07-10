@@ -3,6 +3,7 @@ from abc import ABC, ABCMeta
 from dataclasses import dataclass
 from datetime import datetime
 from django.utils import timezone
+from zoneinfo import ZoneInfo
 
 
 @dataclass(frozen=True)
@@ -139,7 +140,7 @@ GAME_TIMESTAMP_FORMAT = '%Y.%m.%d-%H.%M.%S'
 def parse_log_line(line: str) -> LogEvent:
   try:
     _log_timestamp, _hostname, _tag, game_timestamp, content = line.split(' ', 4)
-    timestamp = datetime.strptime(game_timestamp, GAME_TIMESTAMP_FORMAT).replace(tz=timezone.utc)
+    timestamp = datetime.strptime(game_timestamp.strip('[').strip(']'), GAME_TIMESTAMP_FORMAT).replace(tzinfo=ZoneInfo('UTC'))
   except ValueError:
     return UnknownLogEntry(timestamp=timezone.now(), original_line=line)
 
