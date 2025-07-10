@@ -134,10 +134,12 @@ LogEvent = (
   | UnknownLogEntry
 )
 
+GAME_TIMESTAMP_FORMAT = '%Y.%m.%d-%H.%M.%S'
+
 def parse_log_line(line: str) -> LogEvent:
   try:
-    log_timestamp, _hostname, _tag, _game_timestamp, content = line.split(' ', 4)
-    timestamp = datetime.fromisoformat(log_timestamp)
+    _log_timestamp, _hostname, _tag, game_timestamp, content = line.split(' ', 4)
+    timestamp = datetime.strptime(game_timestamp, GAME_TIMESTAMP_FORMAT).replace(tz=timezone.utc)
   except ValueError:
     return UnknownLogEntry(timestamp=timezone.now(), original_line=line)
 
