@@ -26,7 +26,8 @@ from amc.models import (
   PlayerStatusLog,
   PlayerChatLog,
   PlayerVehicleLog,
-  Vehicle
+  Vehicle,
+  Company,
 )
 
 
@@ -72,6 +73,16 @@ async def process_log_event(event: LogEvent, is_new_log_file: bool):
       await PlayerStatusLog.objects.filter(character=character, timespan__upper_inf=True).aupdate(
         # can't find another way to update only the upper bound
         timespan=RawSQL("tstzrange( lower(timespan), %t )", (timestamp,))
+      )
+    case CompanyAddedLogEvent(timestamp, company_name, is_corp, owner_name, owner_id) | CompanyRemovedLogEvent(timestamp, company_name, is_corp, owner_name, owner_id):
+      character, _ = await aget_or_create_character(owner_name, owner_id)
+      await Company.objects.aget_or_create(
+        name=company_name,
+        owner=character,
+        is_corp=is_corp,
+        defaults={
+          'first_seen_at': timestamp
+        }
       )
     case _:
       raise ValueError('Unknown log')

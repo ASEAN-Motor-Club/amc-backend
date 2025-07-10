@@ -15,6 +15,7 @@ from amc.tasks import process_log_event
 from amc.models import (
   Player,
   Character,
+  Company,
   PlayerStatusLog,
   PlayerChatLog,
   PlayerVehicleLog,
@@ -258,6 +259,25 @@ class ProcessLogEventTestCase(TestCase):
         character__name=character.name,
         character__player__unique_id=player.unique_id,
         timespan=(event.timestamp - timedelta(hours=1), event.timestamp),
+      ).aexists()
+    )
+
+  async def test_company_added(self):
+    event = CompanyAddedLogEvent(
+      timestamp=datetime.now(),
+      company_name='ASEAN',
+      is_corp=True,
+      owner_id=1234,
+      owner_name='freeman',
+    )
+    await process_log_event(event, False)
+    self.assertTrue(
+      await Company.objects.filter(
+        owner__name=event.owner_name,
+        owner__player__unique_id=event.owner_id,
+        name=event.company_name,
+        first_seen_at=event.timestamp,
+        is_corp=event.is_corp,
       ).aexists()
     )
 

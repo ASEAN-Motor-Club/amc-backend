@@ -2,6 +2,8 @@ from django.contrib import admin
 from .models import (
   Player,
   Character,
+  Vehicle,
+  Company,
   PlayerChatLog,
   PlayerVehicleLog,
   PlayerStatusLog,
@@ -18,6 +20,17 @@ class CharacterAdmin(admin.ModelAdmin):
   list_display = ['name', 'player__unique_id']
   list_select_related = ['player']
   search_fields = ['player__unique_id']
+
+@admin.register(Vehicle)
+class VehicleAdmin(admin.ModelAdmin):
+  list_display = ['id', 'name']
+  search_fields = ['id', 'name']
+
+@admin.register(Company)
+class CompanyAdmin(admin.ModelAdmin):
+  list_display = ['name', 'owner', 'first_seen_at']
+  list_display_links = ['owner']
+  search_fields = ['owner__name', 'name']
 
 @admin.register(PlayerChatLog)
 class PlayerChatLogAdmin(admin.ModelAdmin):

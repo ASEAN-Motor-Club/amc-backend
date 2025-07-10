@@ -80,6 +80,18 @@ class Vehicle(models.Model):
 
 
 @final
+class Company(models.Model):
+  name = models.CharField(max_length=200)
+  owner = models.ForeignKey(Character, on_delete=models.CASCADE)
+  is_corp = models.BooleanField()
+  first_seen_at = models.DateTimeField()
+
+  @override
+  def __str__(self):
+    return f"{self.name} ({self.id})"
+
+
+@final
 class PlayerStatusLog(models.Model):
   character = models.ForeignKey(Character, on_delete=models.CASCADE)
   timespan = DateTimeRangeField()
