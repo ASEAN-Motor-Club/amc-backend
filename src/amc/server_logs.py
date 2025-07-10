@@ -139,11 +139,13 @@ GAME_TIMESTAMP_FORMAT = '%Y.%m.%d-%H.%M.%S'
 
 def parse_log_line(line: str) -> LogEvent:
   try:
-    _log_timestamp, _hostname, _tag, game_timestamp, content = line.split(' ', 4)
+    _log_timestamp, _hostname, _tag, filename, game_timestamp, content = line.split(' ', 5)
     timestamp = datetime.strptime(game_timestamp.strip('[').strip(']'), GAME_TIMESTAMP_FORMAT).replace(tzinfo=ZoneInfo('UTC'))
   except ValueError:
-    return UnknownLogEntry(timestamp=timezone.now(), original_line=line)
+    return "", UnknownLogEntry(timestamp=timezone.now(), original_line=line)
+  return filename, parse_log_content(timestamp, content)
 
+def parse_log_content(timestamp, content):
   if pattern_match := re.match(r"\[CHAT\] (?P<player_name>\w+) \((?P<player_id>\d+)\): (?P<message>.+)", content):
     return PlayerChatMessageLogEvent(
       timestamp=timestamp,

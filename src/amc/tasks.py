@@ -35,7 +35,7 @@ async def aget_or_create_character(player_name, player_id):
   character, _ = await Character.objects.aget_or_create(player=player, name=player_name)
   return (character, player)
 
-async def process_log_event(event: LogEvent):
+async def process_log_event(event: LogEvent, is_new_log_file: bool):
   match event:
     case PlayerChatMessageLogEvent(timestamp, player_name, player_id, message):
       character, _ = await aget_or_create_character(player_name, player_id)
@@ -72,17 +72,19 @@ async def process_log_event(event: LogEvent):
 
 
 async def process_log_line(ctx, line):
-  event: LogEvent = parse_log_line(line)
+  filename, event = parse_log_line(line)
   try:
-    await ServerLog.objects.acreate(
+    server_log = await ServerLog.objects.acreate(
       timestamp=event.timestamp,
-      text=line
+      text=line,
+      log_path=filename,
     )
   except IntegrityError:
     return {'status': 'duplicate', 'timestamp': event.timestamp}
 
   try:
-    await process_log_event(event)
+    is_new_log_file = await ServerLog.objects.filter(log_path=filename).exclude(id=server_log.id).aexists()
+    await process_log_event(event, is_new_log_file)
   except ValueError as e:
     return {'status': 'error', 'timestamp': event.timestamp, 'error': str(e)}
 

@@ -131,6 +131,7 @@ class PlayerVehicleLog(models.Model):
 @final
 class ServerLog(models.Model):
   timestamp = models.DateTimeField()
+  log_path = models.CharField(max_length=500, null=True)
   text = models.TextField()
 
   class Meta:

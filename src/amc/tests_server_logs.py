@@ -29,11 +29,11 @@ class LogParserTestCase(SimpleTestCase):
         """
         Verifies that a standard player chat message is parsed correctly.
         """
-        log_line = "2024-07-08T10:00:00.123Z hostname tag [2025.03.22-08.13.07] [CHAT] TestPlayer (123): Hello world!"
+        log_line = "2024-07-08T10:00:00.123Z hostname tag filename [2025.03.22-08.13.07] [CHAT] TestPlayer (123): Hello world!"
         expected_timestamp = datetime.fromisoformat("2025-03-22T08:13:07Z").replace(tzinfo=ZoneInfo('UTC'))
 
         # Await the async function call
-        result = parse_log_line(log_line)
+        _filename, result = parse_log_line(log_line)
 
         # Assert the type is correct
         self.assertIsInstance(result, PlayerChatMessageLogEvent)
@@ -48,10 +48,10 @@ class LogParserTestCase(SimpleTestCase):
         """
         Verifies that a player login event is parsed correctly.
         """
-        log_line = "2024-07-08T10:01:00Z hostname tag [2025.03.22-08.13.07] Player Login: Admin (1)"
+        log_line = "2024-07-08T10:01:00Z hostname tag filename [2025.03.22-08.13.07] Player Login: Admin (1)"
         expected_timestamp = datetime.fromisoformat("2025-03-22T08:13:07Z").replace(tzinfo=ZoneInfo('UTC'))
 
-        result = parse_log_line(log_line)
+        _filename, result = parse_log_line(log_line)
 
         self.assertIsInstance(result, PlayerLoginLogEvent)
         self.assertEqual(result.timestamp, expected_timestamp)
@@ -62,10 +62,10 @@ class LogParserTestCase(SimpleTestCase):
         """
         Verifies that a company creation event is parsed, including boolean conversion.
         """
-        log_line = "2024-07-08T10:02:00Z hostname tag [2025.03.22-08.13.07] Company added. Name=MegaCorp(Corp?true) Owner=CEO(99)"
+        log_line = "2024-07-08T10:02:00Z hostname tag filename [2025.03.22-08.13.07] Company added. Name=MegaCorp(Corp?true) Owner=CEO(99)"
         expected_timestamp = datetime.fromisoformat("2025-03-22T08:13:07Z").replace(tzinfo=ZoneInfo('UTC'))
 
-        result = parse_log_line(log_line)
+        _filename, result = parse_log_line(log_line)
 
         self.assertIsInstance(result, CompanyAddedLogEvent)
         self.assertEqual(result.timestamp, expected_timestamp)
@@ -78,10 +78,10 @@ class LogParserTestCase(SimpleTestCase):
         """
         Verifies that a vehicle entered event is parsed
         """
-        log_line = "2024-07-08T10:02:00Z hostname tag [2025.03.22-08.13.07] Player entered vehicle. Player=freeman (123) Vehicle=Dabo(1233)"
+        log_line = "2024-07-08T10:02:00Z hostname tag filename [2025.03.22-08.13.07] Player entered vehicle. Player=freeman (123) Vehicle=Dabo(1233)"
         expected_timestamp = datetime.fromisoformat("2025-03-22T08:13:07Z").replace(tzinfo=ZoneInfo('UTC'))
 
-        result = parse_log_line(log_line)
+        _filename, result = parse_log_line(log_line)
 
         self.assertIsInstance(result, PlayerEnteredVehicleLogEvent)
         self.assertEqual(result.timestamp, expected_timestamp)
@@ -95,10 +95,10 @@ class LogParserTestCase(SimpleTestCase):
         Verifies that a generic chat message is correctly identified as an Announcement.
         This test is important to ensure the order of regex patterns is working correctly.
         """
-        log_line = "2024-07-08T10:03:00Z hostname tag [2025.03.22-08.13.07] [CHAT] Server is restarting in 5 minutes."
+        log_line = "2024-07-08T10:03:00Z hostname tag filename [2025.03.22-08.13.07] [CHAT] Server is restarting in 5 minutes."
         expected_timestamp = datetime.fromisoformat("2025-03-22T08:13:07Z").replace(tzinfo=ZoneInfo('UTC'))
 
-        result = parse_log_line(log_line)
+        _filename, result = parse_log_line(log_line)
 
         self.assertIsInstance(result, AnnouncementLogEvent)
         self.assertEqual(result.timestamp, expected_timestamp)
@@ -109,10 +109,10 @@ class LogParserTestCase(SimpleTestCase):
         Verifies that an un-parsable log line returns an UnknownLogEntry.
         """
         original_content = "This is a weird and unexpected log format."
-        log_line = f"2024-07-08T10:04:00Z hostname tag [2025.03.22-08.13.07] {original_content}"
+        log_line = f"2024-07-08T10:04:00Z hostname tag filename [2025.03.22-08.13.07] {original_content}"
         expected_timestamp = datetime.fromisoformat("2025-03-22T08:13:07Z").replace(tzinfo=ZoneInfo('UTC'))
 
-        result = parse_log_line(log_line)
+        _filename, result = parse_log_line(log_line)
 
         self.assertIsInstance(result, UnknownLogEntry)
         self.assertEqual(result.timestamp, expected_timestamp)
@@ -124,7 +124,7 @@ class LogParserTestCase(SimpleTestCase):
         """
         log_line = "Just some junk data without a timestamp"
 
-        result = parse_log_line(log_line)
+        _filename, result = parse_log_line(log_line)
 
         self.assertIsInstance(result, UnknownLogEntry)
         self.assertEqual(result.original_line, log_line)
@@ -140,7 +140,7 @@ class ProcessLogEventTestCase(TestCase):
       player_name='freeman',
       message='test'
     )
-    await process_log_event(event)
+    await process_log_event(event, False)
     self.assertTrue(
       await PlayerChatLog.objects.filter(
         character__name=event.player_name,
@@ -157,7 +157,7 @@ class ProcessLogEventTestCase(TestCase):
       vehicle_id=2345,
       vehicle_name='Dabo',
     )
-    await process_log_event(event)
+    await process_log_event(event, False)
     self.assertTrue(
       await PlayerVehicleLog.objects.filter(
         character__name=event.player_name,
@@ -174,7 +174,7 @@ class ProcessLogEventTestCase(TestCase):
       player_id=1234,
       player_name='freeman',
     )
-    await process_log_event(event)
+    await process_log_event(event, False)
     self.assertTrue(
       await PlayerStatusLog.objects.filter(
         character__name=event.player_name,
@@ -203,7 +203,7 @@ class ProcessLogEventTestCase(TestCase):
       timespan=(event.timestamp - timedelta(hours=1), None)
     )
 
-    await process_log_event(event)
+    await process_log_event(event, False)
     self.assertTrue(
       await PlayerStatusLog.objects.filter(
         character__name=event.player_name,
