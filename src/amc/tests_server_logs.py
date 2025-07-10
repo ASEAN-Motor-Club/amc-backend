@@ -33,7 +33,7 @@ class LogParserTestCase(SimpleTestCase):
         expected_timestamp = datetime.fromisoformat("2025-03-22T08:13:07Z").replace(tzinfo=ZoneInfo('UTC'))
 
         # Await the async function call
-        _filename, result = parse_log_line(log_line)
+        _log, result = parse_log_line(log_line)
 
         # Assert the type is correct
         self.assertIsInstance(result, PlayerChatMessageLogEvent)
@@ -51,7 +51,7 @@ class LogParserTestCase(SimpleTestCase):
         log_line = "2024-07-08T10:01:00Z hostname tag filename [2025.03.22-08.13.07] Player Login: Admin (1)"
         expected_timestamp = datetime.fromisoformat("2025-03-22T08:13:07Z").replace(tzinfo=ZoneInfo('UTC'))
 
-        _filename, result = parse_log_line(log_line)
+        _log, result = parse_log_line(log_line)
 
         self.assertIsInstance(result, PlayerLoginLogEvent)
         self.assertEqual(result.timestamp, expected_timestamp)
@@ -65,7 +65,7 @@ class LogParserTestCase(SimpleTestCase):
         log_line = "2024-07-08T10:02:00Z hostname tag filename [2025.03.22-08.13.07] Company added. Name=MegaCorp(Corp?true) Owner=CEO(99)"
         expected_timestamp = datetime.fromisoformat("2025-03-22T08:13:07Z").replace(tzinfo=ZoneInfo('UTC'))
 
-        _filename, result = parse_log_line(log_line)
+        _log, result = parse_log_line(log_line)
 
         self.assertIsInstance(result, CompanyAddedLogEvent)
         self.assertEqual(result.timestamp, expected_timestamp)
@@ -81,7 +81,7 @@ class LogParserTestCase(SimpleTestCase):
         log_line = "2024-07-08T10:02:00Z hostname tag filename [2025.03.22-08.13.07] Player entered vehicle. Player=freeman (123) Vehicle=Dabo(1233)"
         expected_timestamp = datetime.fromisoformat("2025-03-22T08:13:07Z").replace(tzinfo=ZoneInfo('UTC'))
 
-        _filename, result = parse_log_line(log_line)
+        _log, result = parse_log_line(log_line)
 
         self.assertIsInstance(result, PlayerEnteredVehicleLogEvent)
         self.assertEqual(result.timestamp, expected_timestamp)
@@ -98,7 +98,7 @@ class LogParserTestCase(SimpleTestCase):
         log_line = "2024-07-08T10:03:00Z hostname tag filename [2025.03.22-08.13.07] [CHAT] Server is restarting in 5 minutes."
         expected_timestamp = datetime.fromisoformat("2025-03-22T08:13:07Z").replace(tzinfo=ZoneInfo('UTC'))
 
-        _filename, result = parse_log_line(log_line)
+        _log, result = parse_log_line(log_line)
 
         self.assertIsInstance(result, AnnouncementLogEvent)
         self.assertEqual(result.timestamp, expected_timestamp)
@@ -112,7 +112,7 @@ class LogParserTestCase(SimpleTestCase):
         log_line = f"2024-07-08T10:04:00Z hostname tag filename [2025.03.22-08.13.07] {original_content}"
         expected_timestamp = datetime.fromisoformat("2025-03-22T08:13:07Z").replace(tzinfo=ZoneInfo('UTC'))
 
-        _filename, result = parse_log_line(log_line)
+        _log, result = parse_log_line(log_line)
 
         self.assertIsInstance(result, UnknownLogEntry)
         self.assertEqual(result.timestamp, expected_timestamp)
@@ -124,7 +124,7 @@ class LogParserTestCase(SimpleTestCase):
         """
         log_line = "Just some junk data without a timestamp"
 
-        _filename, result = parse_log_line(log_line)
+        _log, result = parse_log_line(log_line)
 
         self.assertIsInstance(result, UnknownLogEntry)
         self.assertEqual(result.original_line, log_line)

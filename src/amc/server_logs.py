@@ -116,6 +116,13 @@ class UnknownLogEntry(BaseLogEvent):
   """Represents a log line that could not be parsed into a known event."""
   original_line: str
 
+@dataclass(frozen=True)
+class ServerLog(BaseLogEvent):
+  """Represents line of log."""
+  content: str
+  log_path: str
+
+
 LogEvent = (
   PlayerChatMessageLogEvent
   | PlayerCreatedCompanyLogEvent
@@ -137,13 +144,14 @@ LogEvent = (
 
 GAME_TIMESTAMP_FORMAT = '%Y.%m.%d-%H.%M.%S'
 
-def parse_log_line(line: str) -> LogEvent:
+def parse_log_line(line: str) -> tuple[ServerLog, LogEvent]:
   try:
     _log_timestamp, _hostname, _tag, filename, game_timestamp, content = line.split(' ', 5)
     timestamp = datetime.strptime(game_timestamp.strip('[').strip(']'), GAME_TIMESTAMP_FORMAT).replace(tzinfo=ZoneInfo('UTC'))
+    server_log = ServerLog(timestamp=timestamp, content=content, log_path=filename)
   except ValueError:
-    return "", UnknownLogEntry(timestamp=timezone.now(), original_line=line)
-  return filename, parse_log_content(timestamp, content)
+    return ServerLog(), UnknownLogEntry(timestamp=timezone.now(), original_line=line)
+  return server_log, parse_log_content(timestamp, content)
 
 def parse_log_content(timestamp, content):
   if pattern_match := re.match(r"\[CHAT\] (?P<player_name>\w+) \((?P<player_id>\d+)\): (?P<message>.+)", content):

@@ -78,18 +78,18 @@ async def process_log_event(event: LogEvent, is_new_log_file: bool):
 
 
 async def process_log_line(ctx, line):
-  filename, event = parse_log_line(line)
+  log, event = parse_log_line(line)
   try:
     server_log = await ServerLog.objects.acreate(
-      timestamp=event.timestamp,
-      text=line,
-      log_path=filename,
+      timestamp=log.timestamp,
+      text=log.content,
+      log_path=log.log_path,
     )
   except IntegrityError:
     return {'status': 'duplicate', 'timestamp': event.timestamp}
 
   try:
-    is_new_log_file = await ServerLog.objects.filter(log_path=filename).exclude(id=server_log.id).aexists()
+    is_new_log_file = await ServerLog.objects.filter(log_path=log.log_path).exclude(id=server_log.id).aexists()
     await process_log_event(event, is_new_log_file)
   except ValueError as e:
     return {'status': 'error', 'timestamp': event.timestamp, 'error': str(e)}
