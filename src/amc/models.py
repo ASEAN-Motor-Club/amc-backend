@@ -1,6 +1,7 @@
 from django.db import models
 from django.utils import timezone
 from django.utils.translation import gettext_lazy as _
+from django.contrib.postgres.fields import DateTimeRangeField
 from typing import override, final
 from amc.server_logs import (
   PlayerVehicleLogEvent,
@@ -76,6 +77,12 @@ class Vehicle(models.Model):
   @override
   def __str__(self):
     return self.name
+
+
+@final
+class PlayerStatusLog(models.Model):
+  character = models.ForeignKey(Character, on_delete=models.CASCADE)
+  timespan = DateTimeRangeField()
 
 
 @final

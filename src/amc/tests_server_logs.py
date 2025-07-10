@@ -1,9 +1,10 @@
-from datetime import datetime
+from datetime import datetime, timedelta
 from django.test import SimpleTestCase, TestCase
 from amc.server_logs import (
     parse_log_line,
     PlayerChatMessageLogEvent,
     PlayerLoginLogEvent,
+    PlayerLogoutLogEvent,
     PlayerEnteredVehicleLogEvent,
     CompanyAddedLogEvent,
     AnnouncementLogEvent,
@@ -11,6 +12,9 @@ from amc.server_logs import (
 )
 from amc.tasks import process_log_event
 from amc.models import (
+  Player,
+  Character,
+  PlayerStatusLog,
   PlayerChatLog,
   PlayerVehicleLog,
 )
@@ -160,6 +164,50 @@ class ProcessLogEventTestCase(TestCase):
         vehicle__name=event.vehicle_name,
         vehicle__id=event.vehicle_id,
         action=PlayerVehicleLog.Action.ENTERED
+      ).aexists()
+    )
+
+  async def test_player_login(self):
+    event = PlayerLoginLogEvent(
+      timestamp=datetime.now(),
+      player_id=1234,
+      player_name='freeman',
+    )
+    await process_log_event(event)
+    self.assertTrue(
+      await PlayerStatusLog.objects.filter(
+        character__name=event.player_name,
+        character__player__unique_id=event.player_id,
+        timespan=(event.timestamp, None)
+      ).aexists()
+    )
+
+  async def test_player_logout(self):
+    event = PlayerLogoutLogEvent(
+      timestamp=datetime.now(),
+      player_id=1234,
+      player_name='freeman',
+    )
+
+    # Use DjangoModelFactory
+    player = await Player.objects.acreate(
+      unique_id=event.player_id,
+    )
+    character = await Character.objects.acreate(
+      name=event.player_name,
+      player=player,
+    )
+    await PlayerStatusLog.objects.acreate(
+      character=character,
+      timespan=(event.timestamp - timedelta(hours=1), None)
+    )
+
+    await process_log_event(event)
+    self.assertTrue(
+      await PlayerStatusLog.objects.filter(
+        character__name=event.player_name,
+        character__player__unique_id=event.player_id,
+        timespan=(event.timestamp - timedelta(hours=1), event.timestamp),
       ).aexists()
     )
 

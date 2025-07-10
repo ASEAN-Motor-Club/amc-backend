@@ -1,4 +1,8 @@
 from django.db.utils import IntegrityError
+from django.db.models import F, Func, DateTimeField, ExpressionWrapper
+from django.db.models.functions import Lower
+from django.db.models.expressions import RawSQL
+from django.db.backends.postgresql.psycopg_any import DateTimeRange
 from amc.models import ServerLog
 from amc.server_logs import (
   parse_log_line,
@@ -17,7 +21,12 @@ from amc.server_logs import (
   UnknownLogEntry,
 )
 from amc.models import (
-  Player, Character, PlayerChatLog, PlayerVehicleLog, Vehicle
+  Player,
+  Character,
+  PlayerStatusLog,
+  PlayerChatLog,
+  PlayerVehicleLog,
+  Vehicle
 )
 
 
@@ -44,6 +53,19 @@ async def process_log_event(event: LogEvent):
         character=character, 
         vehicle=vehicle,
         action=action,
+      )
+    case PlayerLoginLogEvent(timestamp, player_name, player_id):
+      character, _ = await aget_or_create_character(player_name, player_id)
+      await PlayerStatusLog.objects.filter(character=character, timespan__upper_inf=True).aupdate(
+        # can't find another way to update only the upper bound
+        timespan=RawSQL("tstzrange( lower(timespan), %t )", (timestamp,))
+      )
+      await PlayerStatusLog.objects.acreate(character=character, timespan=(timestamp, None))
+    case PlayerLogoutLogEvent(timestamp, player_name, player_id):
+      character, _ = await aget_or_create_character(player_name, player_id)
+      await PlayerStatusLog.objects.filter(character=character, timespan__upper_inf=True).aupdate(
+        # can't find another way to update only the upper bound
+        timespan=RawSQL("tstzrange( lower(timespan), %t )", (timestamp,))
       )
     case _:
       raise ValueError('Unknown log')
