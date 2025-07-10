@@ -63,17 +63,17 @@ class PlayerEnteredVehicleLogEvent(PlayerVehicleLogEvent):
   pass
 
 @dataclass(frozen=True)
-class PlayerExitedVehicleLogEvent(BaseLogEvent):
+class PlayerExitedVehicleLogEvent(PlayerVehicleLogEvent):
   """Represents a player logging out."""
   pass
 
 @dataclass(frozen=True)
-class PlayerBoughtVehicleLogEvent(BaseLogEvent):
+class PlayerBoughtVehicleLogEvent(PlayerVehicleLogEvent):
   """Represents a player logging out."""
   pass
 
 @dataclass(frozen=True)
-class PlayerSoldVehicleLogEvent(BaseLogEvent):
+class PlayerSoldVehicleLogEvent(PlayerVehicleLogEvent):
   """Represents a player logging out."""
   pass
 
@@ -150,7 +150,7 @@ def parse_log_line(line: str) -> tuple[ServerLog, LogEvent]:
     timestamp = datetime.strptime(game_timestamp.strip('[').strip(']'), GAME_TIMESTAMP_FORMAT).replace(tzinfo=ZoneInfo('UTC'))
     server_log = ServerLog(timestamp=timestamp, content=content, log_path=filename)
   except ValueError:
-    return ServerLog(), UnknownLogEntry(timestamp=timezone.now(), original_line=line)
+    return ServerLog(timestamp=timezone.now(), content=line, log_path=""), UnknownLogEntry(timestamp=timezone.now(), original_line=line)
   return server_log, parse_log_content(timestamp, content)
 
 def parse_log_content(timestamp, content):

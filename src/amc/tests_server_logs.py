@@ -6,6 +6,7 @@ from amc.server_logs import (
     PlayerLoginLogEvent,
     PlayerLogoutLogEvent,
     PlayerEnteredVehicleLogEvent,
+    PlayerExitedVehicleLogEvent,
     CompanyAddedLogEvent,
     AnnouncementLogEvent,
     UnknownLogEntry,
@@ -165,6 +166,25 @@ class ProcessLogEventTestCase(TestCase):
         vehicle__name=event.vehicle_name,
         vehicle__id=event.vehicle_id,
         action=PlayerVehicleLog.Action.ENTERED
+      ).aexists()
+    )
+
+  async def test_player_exited_vehicle(self):
+    event = PlayerExitedVehicleLogEvent(
+      timestamp=datetime.now(),
+      player_id=1234,
+      player_name='freeman',
+      vehicle_id=2345,
+      vehicle_name='Dabo',
+    )
+    await process_log_event(event, False)
+    self.assertTrue(
+      await PlayerVehicleLog.objects.filter(
+        character__name=event.player_name,
+        character__player__unique_id=event.player_id,
+        vehicle__name=event.vehicle_name,
+        vehicle__id=event.vehicle_id,
+        action=PlayerVehicleLog.Action.EXITED
       ).aexists()
     )
 
