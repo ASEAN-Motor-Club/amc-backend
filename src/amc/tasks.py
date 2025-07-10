@@ -88,11 +88,8 @@ async def process_log_line(ctx, line):
   except IntegrityError:
     return {'status': 'duplicate', 'timestamp': event.timestamp}
 
-  try:
-    is_new_log_file = await ServerLog.objects.filter(log_path=log.log_path).exclude(id=server_log.id).aexists()
-    await process_log_event(event, is_new_log_file)
-  except ValueError as e:
-    return {'status': 'error', 'timestamp': event.timestamp, 'error': str(e)}
+  is_new_log_file = await ServerLog.objects.filter(log_path=log.log_path).exclude(id=server_log.id).aexists()
+  await process_log_event(event, is_new_log_file)
 
   return {'status': 'created', 'timestamp': event.timestamp}
 
