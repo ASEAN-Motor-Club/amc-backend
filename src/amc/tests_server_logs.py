@@ -62,6 +62,19 @@ class LogParserTestCase(SimpleTestCase):
         self.assertEqual(result.player_name, "Admin")
         self.assertEqual(result.player_id, 1)
 
+    async def test_parse_player_logout_legacy(self):
+        """
+        Verifies that a player login event is parsed correctly.
+        """
+        log_line = "2024-07-08T10:01:00Z hostname tag filename [2025.03.22-08.13.07] Player Logout: Admin"
+        expected_timestamp = datetime.fromisoformat("2025-03-22T08:13:07Z").replace(tzinfo=ZoneInfo('UTC'))
+
+        _log, result = parse_log_line(log_line)
+
+        self.assertIsInstance(result, LegacyPlayerLogoutLogEvent)
+        self.assertEqual(result.timestamp, expected_timestamp)
+        self.assertEqual(result.player_name, "Admin")
+
     async def test_parse_company_added(self):
         """
         Verifies that a company creation event is parsed, including boolean conversion.
@@ -82,17 +95,17 @@ class LogParserTestCase(SimpleTestCase):
         """
         Verifies that a vehicle entered event is parsed
         """
-        log_line = "2024-07-08T10:02:00Z hostname tag filename [2025.03.22-08.13.07] Player entered vehicle. Player=freeman (123) Vehicle=Dabo(1233)"
+        log_line = "2024-07-08T10:02:00Z hostname tag filename [2025.03.22-08.13.07] Player entered vehicle. Player=Dr-P (76561198129501840) Vehicle=Atlas 6x4 Semi(854460) "
         expected_timestamp = datetime.fromisoformat("2025-03-22T08:13:07Z").replace(tzinfo=ZoneInfo('UTC'))
 
         _log, result = parse_log_line(log_line)
 
         self.assertIsInstance(result, PlayerEnteredVehicleLogEvent)
         self.assertEqual(result.timestamp, expected_timestamp)
-        self.assertEqual(result.player_name, "freeman")
-        self.assertEqual(result.player_id, 123)
-        self.assertEqual(result.vehicle_name, "Dabo")
-        self.assertEqual(result.vehicle_id, 1233)
+        self.assertEqual(result.player_name, "Dr-P")
+        self.assertEqual(result.player_id, 76561198129501840)
+        self.assertEqual(result.vehicle_name, "Atlas 6x4 Semi")
+        self.assertEqual(result.vehicle_id, 854460)
 
     async def test_parse_generic_announcement(self):
         """
@@ -310,3 +323,4 @@ class ProcessLogEventTestCase(TestCase):
         is_corp=event.is_corp,
       ).aexists()
     )
+
