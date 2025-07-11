@@ -22,6 +22,11 @@
       inputs.uv2nix.follows = "uv2nix";
       inputs.nixpkgs.follows = "nixpkgs";
     };
+
+    ragenix = {
+      url = "github:yaxitech/ragenix";
+      inputs.nixpkgs.follows = "nixpkgs";
+    };
   };
 
   outputs = inputs @ {
@@ -31,10 +36,11 @@
     uv2nix,
     pyproject-nix,
     pyproject-build-systems,
+    ragenix,
     ...
   }:
     let
-      lib = nixpkgs.lib;
+      inherit (nixpkgs) lib;
       # TODO: patch on packager level
       # uv2nix makes it harder to patch source code, since we're importing wheels not sdist
       # These are needed for GeoDjango
@@ -83,6 +89,9 @@
             default = {};
             description = "Environment variables";
           };
+          environmentFile = lib.mkOption {
+            type = lib.types.path;
+          };
         };
       };
     in
@@ -117,6 +126,9 @@
               type = lib.types.int;
               default = 2514;
             };
+            secretFile = lib.mkOption {
+              type = lib.types.path;
+            };
             backendSettings = lib.mkOption {
               type = lib.types.submodule backendOptionsSubmodule;
               default = {};
@@ -136,7 +148,7 @@
                   recommendedProxySettings = true;
                 };
                 "/static/" = let
-                  staticRoot = self.packages.${pkgs.system}.staticRoot;
+                  inherit (self.packages.${pkgs.system}) staticRoot;
                 in {
                   alias = "${staticRoot}/";
                 };
@@ -147,11 +159,18 @@
               config = { config, pkgs, ... }: {
                 imports = [
                   self.nixosModules.backend
+                  ragenix.nixosModules.default
                 ];
+                age.secrets.backend = lib.mkIf cfg.secretFile {
+                  file = cfg.secretFile;
+                  mode = "400";
+                  owner = config.services.amc-backend.user;
+                };
                 services.amc-backend = cfg.backendSettings // {
                   enable = lib.mkDefault true;
                   port = lib.mkDefault cfg.port;
                   allowedHosts = lib.mkDefault [ cfg.fqdn ];
+                  environmentFile = config.age.secrets.backend.path;
                 };
               };
             };
@@ -163,7 +182,7 @@
                 ];
                 services.amc-log-listener = {
                   enable = true;
-                  relpPort = cfg.relpPort;
+                  inherit (cfg) relpPort;
                 };
               };
             };
@@ -217,7 +236,7 @@
 
             users.users.${cfg.user} = {
               isSystemUser = true;
-              group = cfg.group;
+              inherit (cfg) group;
               description = "AMC Backend";
             };
             users.groups.${cfg.group} = {
@@ -246,6 +265,26 @@
             services.redis.servers."amc-backend".enable = true;
             services.redis.servers."amc-backend".port = 6379;
 
+            systemd.services.reset-amc-backend = {
+              description = "Full reset";
+              environment = {
+                inherit (mkPostgisDeps pkgs) GEOS_LIBRARY_PATH GDAL_LIBRARY_PATH;
+                DJANGO_STATIC_ROOT = self.packages.x86_64-linux.staticRoot;
+              };
+              serviceConfig = {
+                Type = "oneshot";
+                User = cfg.user;
+                Group = cfg.group;
+                EnvironmentFile = cfg.environmentFile;
+              };
+              script = ''
+                redis-cli flushdb
+                ${self.packages.x86_64-linux.default}/bin/django-admin flush --noinput
+                ${self.packages.x86_64-linux.default}/bin/django-admin migrate
+                ${self.packages.x86_64-linux.default}/bin/django-admin createsuperuser --noinput
+              '';
+            };
+
             systemd.services.amc-backend = {
               wantedBy = [ "multi-user.target" ]; 
               after = [ "network.target" ];
@@ -262,6 +301,7 @@
                 Group = cfg.group;
                 Restart = "on-failure";
                 RestartSec = "10";
+                EnvironmentFile = cfg.environmentFile;
               };
               script = ''
                 ${self.packages.x86_64-linux.default}/bin/uvicorn amc_backend.asgi:application \
@@ -286,6 +326,7 @@
                 Group = cfg.group;
                 Restart = "on-failure";
                 RestartSec = "10";
+                EnvironmentFile = cfg.environmentFile;
               };
               script = ''
                 ${self.packages.x86_64-linux.default}/bin/arq amc.worker.WorkerSettings
@@ -302,6 +343,7 @@
                 Type = "oneshot";
                 User = cfg.user;
                 Group = cfg.group;
+                EnvironmentFile = cfg.environmentFile;
               };
               script = ''
                 ${self.packages.x86_64-linux.default}/bin/django-admin migrate
