@@ -145,6 +145,7 @@ class ServerLog(models.Model):
   timestamp = models.DateTimeField()
   log_path = models.CharField(max_length=500, null=True)
   text = models.TextField()
+  event_processed = models.BooleanField(default=False)
 
   class Meta:
     constraints = [

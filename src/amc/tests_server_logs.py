@@ -1,9 +1,11 @@
 from datetime import datetime, timedelta
 from django.test import SimpleTestCase, TestCase
+from django.utils import timezone
 from amc.server_logs import (
     parse_log_line,
     PlayerChatMessageLogEvent,
     PlayerLoginLogEvent,
+    LegacyPlayerLogoutLogEvent,
     PlayerLogoutLogEvent,
     PlayerEnteredVehicleLogEvent,
     PlayerExitedVehicleLogEvent,
@@ -130,14 +132,14 @@ class LogParserTestCase(SimpleTestCase):
 
         self.assertIsInstance(result, UnknownLogEntry)
         self.assertEqual(result.original_line, log_line)
-        # The timestamp will be datetime.now(), so we just check it exists
+        # The timestamp will be timezone.now(), so we just check it exists
         self.assertIsInstance(result.timestamp, datetime)
 
 
 class ProcessLogEventTestCase(TestCase):
   async def test_player_chat_message(self):
     event = PlayerChatMessageLogEvent(
-      timestamp=datetime.now(),
+      timestamp=timezone.now(),
       player_id=1234,
       player_name='freeman',
       message='test'
@@ -153,7 +155,7 @@ class ProcessLogEventTestCase(TestCase):
 
   async def test_player_entered_vehicle(self):
     event = PlayerEnteredVehicleLogEvent(
-      timestamp=datetime.now(),
+      timestamp=timezone.now(),
       player_id=1234,
       player_name='freeman',
       vehicle_id=2345,
@@ -172,7 +174,7 @@ class ProcessLogEventTestCase(TestCase):
 
   async def test_player_exited_vehicle(self):
     event = PlayerExitedVehicleLogEvent(
-      timestamp=datetime.now(),
+      timestamp=timezone.now(),
       player_id=1234,
       player_name='freeman',
       vehicle_id=2345,
@@ -191,7 +193,7 @@ class ProcessLogEventTestCase(TestCase):
 
   async def test_player_login(self):
     event = PlayerLoginLogEvent(
-      timestamp=datetime.now(),
+      timestamp=timezone.now(),
       player_id=1234,
       player_name='freeman',
     )
@@ -206,7 +208,7 @@ class ProcessLogEventTestCase(TestCase):
 
   async def test_player_logout(self):
     event = PlayerLogoutLogEvent(
-      timestamp=datetime.now(),
+      timestamp=timezone.now(),
       player_id=1234,
       player_name='freeman',
     )
@@ -233,9 +235,37 @@ class ProcessLogEventTestCase(TestCase):
       ).aexists()
     )
 
+  async def test_player_logout_legacy(self):
+    event = LegacyPlayerLogoutLogEvent(
+      timestamp=timezone.now(),
+      player_name='freeman',
+    )
+
+    # Use DjangoModelFactory
+    player = await Player.objects.acreate(
+      unique_id=1234,
+    )
+    character = await Character.objects.acreate(
+      name=event.player_name,
+      player=player,
+    )
+    await PlayerStatusLog.objects.acreate(
+      character=character,
+      timespan=(event.timestamp - timedelta(hours=1), None)
+    )
+
+    await process_log_event(event, False)
+    self.assertTrue(
+      await PlayerStatusLog.objects.filter(
+        character__name=event.player_name,
+        character__player__unique_id=player.unique_id,
+        timespan=(event.timestamp - timedelta(hours=1), event.timestamp),
+      ).aexists()
+    )
+
   async def test_auto_logout_everyone_on_restart(self):
     event = PlayerLoginLogEvent(
-      timestamp=datetime.now(),
+      timestamp=timezone.now(),
       player_id=1235,
       player_name='freeman',
     )
@@ -264,7 +294,7 @@ class ProcessLogEventTestCase(TestCase):
 
   async def test_company_added(self):
     event = CompanyAddedLogEvent(
-      timestamp=datetime.now(),
+      timestamp=timezone.now(),
       company_name='ASEAN',
       is_corp=True,
       owner_id=1234,
@@ -280,4 +310,3 @@ class ProcessLogEventTestCase(TestCase):
         is_corp=event.is_corp,
       ).aexists()
     )
-

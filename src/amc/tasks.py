@@ -1,19 +1,17 @@
-from django.db.utils import IntegrityError
-from django.db.models import F, Func, DateTimeField, ExpressionWrapper
-from django.db.models.functions import Lower
+from django.db.models import Exists, OuterRef
 from django.db.models.expressions import RawSQL
-from django.db.backends.postgresql.psycopg_any import DateTimeRange
 from amc.models import ServerLog
 from amc.server_logs import (
   parse_log_line,
   LogEvent,
   PlayerChatMessageLogEvent,
+  PlayerRestockedDepotLogEvent,
   PlayerVehicleLogEvent,
   PlayerCreatedCompanyLogEvent,
   PlayerLevelChangedLogEvent,
   PlayerLoginLogEvent,
+  LegacyPlayerLogoutLogEvent,
   PlayerLogoutLogEvent,
-  PlayerRestockedDepotLogEvent,
   CompanyAddedLogEvent,
   CompanyRemovedLogEvent,
   AnnouncementLogEvent,
@@ -74,6 +72,18 @@ async def process_log_event(event: LogEvent, is_new_log_file: bool):
         # can't find another way to update only the upper bound
         timespan=RawSQL("tstzrange( lower(timespan), %t )", (timestamp,))
       )
+    case LegacyPlayerLogoutLogEvent(timestamp, player_name):
+      character = await Character.objects.aget(
+        Exists(
+          PlayerStatusLog.objects.filter(character=OuterRef('pk'), timespan__upper_inf=True)
+        ),
+        name=player_name,
+      )
+
+      await PlayerStatusLog.objects.filter(character=character, timespan__upper_inf=True).aupdate(
+        # can't find another way to update only the upper bound
+        timespan=RawSQL("tstzrange( lower(timespan), %t )", (timestamp,))
+      )
     case CompanyAddedLogEvent(timestamp, company_name, is_corp, owner_name, owner_id) | CompanyRemovedLogEvent(timestamp, company_name, is_corp, owner_name, owner_id):
       character, _ = await aget_or_create_character(owner_name, owner_id)
       await Company.objects.aget_or_create(
@@ -90,17 +100,19 @@ async def process_log_event(event: LogEvent, is_new_log_file: bool):
 
 async def process_log_line(ctx, line):
   log, event = parse_log_line(line)
-  try:
-    server_log = await ServerLog.objects.acreate(
-      timestamp=log.timestamp,
-      text=log.content,
-      log_path=log.log_path,
-    )
-  except IntegrityError:
+  server_log, server_log_created = await ServerLog.objects.aget_or_create(
+    timestamp=log.timestamp,
+    text=log.content,
+    log_path=log.log_path,
+  )
+  if not server_log_created and server_log.event_processed:
     return {'status': 'duplicate', 'timestamp': event.timestamp}
 
   is_new_log_file = await ServerLog.objects.filter(log_path=log.log_path).exclude(id=server_log.id).aexists()
   await process_log_event(event, is_new_log_file)
+
+  server_log.event_processed = True
+  await server_log.asave(update_fields=['event_processed'])
 
   return {'status': 'created', 'timestamp': event.timestamp}
 

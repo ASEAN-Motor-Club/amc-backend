@@ -48,10 +48,11 @@ class PlayerStatusLogAdmin(admin.ModelAdmin):
 class PlayerVehicleLogAdmin(admin.ModelAdmin):
   list_display = ['timestamp', 'character', 'vehicle', 'action']
   list_select_related = ['character', 'character__player', 'vehicle']
+  list_display_links = ['character', 'vehicle']
   ordering = ['-timestamp']
 
 @admin.register(ServerLog)
 class ServerLogAdmin(admin.ModelAdmin):
-  list_display = ['timestamp', 'text']
+  list_display = ['timestamp', 'text', 'event_processed']
   ordering = ['-timestamp']
 
