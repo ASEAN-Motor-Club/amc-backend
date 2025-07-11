@@ -92,9 +92,26 @@ class Company(models.Model):
 
 
 @final
+class ServerLog(models.Model):
+  timestamp = models.DateTimeField()
+  log_path = models.CharField(max_length=500, null=True)
+  text = models.TextField()
+  event_processed = models.BooleanField(default=False)
+
+  class Meta:
+    constraints = [
+      models.UniqueConstraint(
+        fields=['timestamp', 'text'],
+        name='unique_event_log_entry'
+      )
+    ]
+
+
+@final
 class PlayerStatusLog(models.Model):
   character = models.ForeignKey(Character, on_delete=models.CASCADE)
   timespan = DateTimeRangeField()
+  original_log = models.ForeignKey(ServerLog, on_delete=models.CASCADE, null=True)
 
 
 @final
@@ -102,6 +119,17 @@ class PlayerChatLog(models.Model):
   character = models.ForeignKey(Character, on_delete=models.CASCADE)
   timestamp = models.DateTimeField()
   text = models.TextField()
+
+
+@final
+class PlayerRestockDepotLog(models.Model):
+  timestamp = models.DateTimeField()
+  character = models.ForeignKey(
+    Character,
+    on_delete=models.CASCADE,
+    related_name='restock_depot_logs'
+  )
+  depot_name = models.CharField(max_length=200)
 
 
 @final
@@ -139,19 +167,4 @@ class PlayerVehicleLog(models.Model):
       )
     ]
 
-
-@final
-class ServerLog(models.Model):
-  timestamp = models.DateTimeField()
-  log_path = models.CharField(max_length=500, null=True)
-  text = models.TextField()
-  event_processed = models.BooleanField(default=False)
-
-  class Meta:
-    constraints = [
-      models.UniqueConstraint(
-        fields=['timestamp', 'text'],
-        name='unique_event_log_entry'
-      )
-    ]
 

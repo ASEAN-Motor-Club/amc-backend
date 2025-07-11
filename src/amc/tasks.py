@@ -34,9 +34,13 @@ async def aget_or_create_character(player_name, player_id):
   character, _ = await Character.objects.aget_or_create(player=player, name=player_name)
   return (character, player)
 
-async def process_log_event(event: LogEvent, is_new_log_file: bool):
+async def process_log_event(event: LogEvent, server_log, is_new_log_file: bool):
   if is_new_log_file:
-    await PlayerStatusLog.objects.filter(timespan__upper_inf=True).aupdate(
+    await PlayerStatusLog.objects.filter(
+      timespan__upper_inf=True,
+    ).exclude(
+      original_log__log_path=server_log.log_path
+    ).aupdate(
       # can't find another way to update only the upper bound
       timespan=RawSQL("tstzrange( lower(timespan), %t )", (event.timestamp,))
     )
@@ -65,7 +69,11 @@ async def process_log_event(event: LogEvent, is_new_log_file: bool):
         # can't find another way to update only the upper bound
         timespan=RawSQL("tstzrange( lower(timespan), %t )", (timestamp,))
       )
-      await PlayerStatusLog.objects.acreate(character=character, timespan=(timestamp, None))
+      await PlayerStatusLog.objects.acreate(
+        character=character,
+        timespan=(timestamp, None),
+        original_log=server_log,
+      )
     case PlayerLogoutLogEvent(timestamp, player_name, player_id):
       character, _ = await aget_or_create_character(player_name, player_id)
       await PlayerStatusLog.objects.filter(character=character, timespan__upper_inf=True).aupdate(
@@ -75,7 +83,10 @@ async def process_log_event(event: LogEvent, is_new_log_file: bool):
     case LegacyPlayerLogoutLogEvent(timestamp, player_name):
       character = await Character.objects.aget(
         Exists(
-          PlayerStatusLog.objects.filter(character=OuterRef('pk'), timespan__upper_inf=True)
+          PlayerStatusLog.objects.filter(
+            character=OuterRef('pk'),
+            timespan__upper_inf=True
+          )
         ),
         name=player_name,
       )
@@ -94,8 +105,10 @@ async def process_log_event(event: LogEvent, is_new_log_file: bool):
           'first_seen_at': timestamp
         }
       )
+    case UnknownLogEntry():
+      raise ValueError('Unknown log entry')
     case _:
-      raise ValueError('Unknown log')
+      pass
 
 
 async def process_log_line(ctx, line):
@@ -109,7 +122,7 @@ async def process_log_line(ctx, line):
     return {'status': 'duplicate', 'timestamp': event.timestamp}
 
   is_new_log_file = await ServerLog.objects.filter(log_path=log.log_path).exclude(id=server_log.id).aexists()
-  await process_log_event(event, is_new_log_file)
+  await process_log_event(event, server_log, is_new_log_file)
 
   server_log.event_processed = True
   await server_log.asave(update_fields=['event_processed'])

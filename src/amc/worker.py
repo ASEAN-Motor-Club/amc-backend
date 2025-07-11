@@ -17,5 +17,4 @@ class WorkerSettings:
     on_startup = startup
     on_shutdown = shutdown
     redis_settings = REDIS_SETTINGS
-    max_jobs = 1 # to prevent race condition
 

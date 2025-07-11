@@ -18,6 +18,7 @@ from amc.models import (
   Player,
   Character,
   Company,
+  ServerLog,
   PlayerStatusLog,
   PlayerChatLog,
   PlayerVehicleLog,
@@ -150,14 +151,21 @@ class LogParserTestCase(SimpleTestCase):
 
 
 class ProcessLogEventTestCase(TestCase):
+  def setUp(self):
+    self.server_log = ServerLog.objects.create(
+      timestamp=timezone.now(),
+      log_path="path",
+      text="test",
+    )
+
   async def test_player_chat_message(self):
     event = PlayerChatMessageLogEvent(
-      timestamp=timezone.now(),
+      timestamp=self.server_log.timestamp,
       player_id=1234,
       player_name='freeman',
       message='test'
     )
-    await process_log_event(event, False)
+    await process_log_event(event, self.server_log, False)
     self.assertTrue(
       await PlayerChatLog.objects.filter(
         character__name=event.player_name,
@@ -168,13 +176,13 @@ class ProcessLogEventTestCase(TestCase):
 
   async def test_player_entered_vehicle(self):
     event = PlayerEnteredVehicleLogEvent(
-      timestamp=timezone.now(),
+      timestamp=self.server_log.timestamp,
       player_id=1234,
       player_name='freeman',
       vehicle_id=2345,
       vehicle_name='Dabo',
     )
-    await process_log_event(event, False)
+    await process_log_event(event, self.server_log, False)
     self.assertTrue(
       await PlayerVehicleLog.objects.filter(
         character__name=event.player_name,
@@ -187,13 +195,13 @@ class ProcessLogEventTestCase(TestCase):
 
   async def test_player_exited_vehicle(self):
     event = PlayerExitedVehicleLogEvent(
-      timestamp=timezone.now(),
+      timestamp=self.server_log.timestamp,
       player_id=1234,
       player_name='freeman',
       vehicle_id=2345,
       vehicle_name='Dabo',
     )
-    await process_log_event(event, False)
+    await process_log_event(event, self.server_log, False)
     self.assertTrue(
       await PlayerVehicleLog.objects.filter(
         character__name=event.player_name,
@@ -206,11 +214,11 @@ class ProcessLogEventTestCase(TestCase):
 
   async def test_player_login(self):
     event = PlayerLoginLogEvent(
-      timestamp=timezone.now(),
+      timestamp=self.server_log.timestamp,
       player_id=1234,
       player_name='freeman',
     )
-    await process_log_event(event, False)
+    await process_log_event(event, self.server_log, False)
     self.assertTrue(
       await PlayerStatusLog.objects.filter(
         character__name=event.player_name,
@@ -221,7 +229,7 @@ class ProcessLogEventTestCase(TestCase):
 
   async def test_player_logout(self):
     event = PlayerLogoutLogEvent(
-      timestamp=timezone.now(),
+      timestamp=self.server_log.timestamp,
       player_id=1234,
       player_name='freeman',
     )
@@ -239,7 +247,7 @@ class ProcessLogEventTestCase(TestCase):
       timespan=(event.timestamp - timedelta(hours=1), None)
     )
 
-    await process_log_event(event, False)
+    await process_log_event(event, self.server_log, False)
     self.assertTrue(
       await PlayerStatusLog.objects.filter(
         character__name=event.player_name,
@@ -250,7 +258,7 @@ class ProcessLogEventTestCase(TestCase):
 
   async def test_player_logout_legacy(self):
     event = LegacyPlayerLogoutLogEvent(
-      timestamp=timezone.now(),
+      timestamp=self.server_log.timestamp,
       player_name='freeman',
     )
 
@@ -267,7 +275,7 @@ class ProcessLogEventTestCase(TestCase):
       timespan=(event.timestamp - timedelta(hours=1), None)
     )
 
-    await process_log_event(event, False)
+    await process_log_event(event, self.server_log, False)
     self.assertTrue(
       await PlayerStatusLog.objects.filter(
         character__name=event.player_name,
@@ -278,7 +286,7 @@ class ProcessLogEventTestCase(TestCase):
 
   async def test_auto_logout_everyone_on_restart(self):
     event = PlayerLoginLogEvent(
-      timestamp=timezone.now(),
+      timestamp=self.server_log.timestamp,
       player_id=1235,
       player_name='freeman',
     )
@@ -291,12 +299,20 @@ class ProcessLogEventTestCase(TestCase):
       name='another_player',
       player=player,
     )
+    # Current session
     await PlayerStatusLog.objects.acreate(
       character=character,
-      timespan=(event.timestamp - timedelta(hours=1), None)
+      timespan=(event.timestamp - timedelta(hours=1), None),
+      original_log=self.server_log,
+    )
+    # Prev session
+    await PlayerStatusLog.objects.acreate(
+      character=character,
+      timespan=(event.timestamp - timedelta(hours=1), None),
     )
 
-    await process_log_event(event, True)
+    await process_log_event(event, self.server_log, True)
+    # Logs out from prev session
     self.assertTrue(
       await PlayerStatusLog.objects.filter(
         character__name=character.name,
@@ -304,16 +320,24 @@ class ProcessLogEventTestCase(TestCase):
         timespan=(event.timestamp - timedelta(hours=1), event.timestamp),
       ).aexists()
     )
+    # Still logged in in current session
+    self.assertTrue(
+      await PlayerStatusLog.objects.filter(
+        character__name=character.name,
+        character__player__unique_id=player.unique_id,
+        timespan__upper_inf=True,
+      ).aexists()
+    )
 
   async def test_company_added(self):
     event = CompanyAddedLogEvent(
-      timestamp=timezone.now(),
+      timestamp=self.server_log.timestamp,
       company_name='ASEAN',
       is_corp=True,
       owner_id=1234,
       owner_name='freeman',
     )
-    await process_log_event(event, False)
+    await process_log_event(event, self.server_log, False)
     self.assertTrue(
       await Company.objects.filter(
         owner__name=event.owner_name,
