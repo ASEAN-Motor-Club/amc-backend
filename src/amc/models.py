@@ -1,4 +1,5 @@
 from django.db import models
+from django.db.models import F
 from django.utils import timezone
 from django.utils.translation import gettext_lazy as _
 from django.contrib.postgres.fields import DateTimeRangeField
@@ -115,6 +116,11 @@ class ServerLog(models.Model):
 class PlayerStatusLog(models.Model):
   character = models.ForeignKey(Character, on_delete=models.CASCADE)
   timespan = DateTimeRangeField()
+  duration = models.GeneratedField(
+    expression=F('timespan__endswith') - F('timespan__startswith'),
+    output_field=models.DurationField(),
+    db_persist=True,
+  )
   original_log = models.ForeignKey(ServerLog, on_delete=models.CASCADE, null=True)
 
 

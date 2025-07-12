@@ -48,7 +48,7 @@ class PlayerChatLogAdmin(admin.ModelAdmin):
 
 @admin.register(PlayerStatusLog)
 class PlayerStatusLogAdmin(admin.ModelAdmin):
-  list_display = ['character', 'timespan']
+  list_display = ['character', 'timespan', 'duration']
   list_select_related = ['character', 'character__player']
   ordering = ['-timespan']
   readonly_fields = ['character', 'original_log']
