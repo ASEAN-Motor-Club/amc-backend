@@ -26,6 +26,7 @@ class CharacterAdmin(admin.ModelAdmin):
   list_select_related = ['player']
   search_fields = ['player__unique_id']
   inlines = [PlayerStatusLogInlineAdmin]
+  readonly_fields = ['player']
 
 @admin.register(Vehicle)
 class VehicleAdmin(admin.ModelAdmin):
@@ -34,9 +35,10 @@ class VehicleAdmin(admin.ModelAdmin):
 
 @admin.register(Company)
 class CompanyAdmin(admin.ModelAdmin):
-  list_display = ['name', 'owner', 'first_seen_at']
-  list_display_links = ['owner']
+  list_display = ['name', 'owner', 'is_corp', 'first_seen_at']
+  list_filter =  ['is_corp']
   search_fields = ['owner__name', 'name']
+  readonly_fields = ['owner']
 
 @admin.register(PlayerChatLog)
 class PlayerChatLogAdmin(admin.ModelAdmin):
@@ -55,7 +57,6 @@ class PlayerStatusLogAdmin(admin.ModelAdmin):
 class PlayerVehicleLogAdmin(admin.ModelAdmin):
   list_display = ['timestamp', 'character', 'vehicle', 'action']
   list_select_related = ['character', 'character__player', 'vehicle']
-  list_display_links = ['character', 'vehicle']
   ordering = ['-timestamp']
 
 @admin.register(ServerLog)

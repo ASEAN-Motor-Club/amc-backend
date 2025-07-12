@@ -86,6 +86,10 @@ class Company(models.Model):
   is_corp = models.BooleanField()
   first_seen_at = models.DateTimeField()
 
+  class Meta:
+    verbose_name = _('Company')
+    verbose_name_plural = _('Companies')
+
   @override
   def __str__(self):
     return f"{self.name} ({self.id})"
