@@ -157,6 +157,13 @@ class ProcessLogEventTestCase(TestCase):
       log_path="path",
       text="test",
     )
+    self.player = Player.objects.create(
+      unique_id=1234,
+    )
+    self.character = Character.objects.create(
+      name="test",
+      player=self.player,
+    )
 
   async def test_player_chat_message(self):
     event = PlayerChatMessageLogEvent(
@@ -165,7 +172,7 @@ class ProcessLogEventTestCase(TestCase):
       player_name='freeman',
       message='test'
     )
-    await process_log_event(event, self.server_log, False)
+    await process_log_event(event)
     self.assertTrue(
       await PlayerChatLog.objects.filter(
         character__name=event.player_name,
@@ -182,7 +189,7 @@ class ProcessLogEventTestCase(TestCase):
       vehicle_id=2345,
       vehicle_name='Dabo',
     )
-    await process_log_event(event, self.server_log, False)
+    await process_log_event(event)
     self.assertTrue(
       await PlayerVehicleLog.objects.filter(
         character__name=event.player_name,
@@ -201,7 +208,7 @@ class ProcessLogEventTestCase(TestCase):
       vehicle_id=2345,
       vehicle_name='Dabo',
     )
-    await process_log_event(event, self.server_log, False)
+    await process_log_event(event)
     self.assertTrue(
       await PlayerVehicleLog.objects.filter(
         character__name=event.player_name,
@@ -218,7 +225,7 @@ class ProcessLogEventTestCase(TestCase):
       player_id=1234,
       player_name='freeman',
     )
-    await process_log_event(event, self.server_log, False)
+    await process_log_event(event)
     self.assertTrue(
       await PlayerStatusLog.objects.filter(
         character__name=event.player_name,
@@ -227,105 +234,202 @@ class ProcessLogEventTestCase(TestCase):
       ).aexists()
     )
 
+  async def test_player_login_out_of_order_1(self):
+    await PlayerStatusLog.objects.acreate(
+      character=self.character,
+      timespan=(self.server_log.timestamp - timedelta(hours=1), None)
+    )
+
+    event = PlayerLoginLogEvent(
+      timestamp=self.server_log.timestamp,
+      player_id=self.player.unique_id,
+      player_name=self.character.name,
+    )
+    await process_log_event(event)
+    self.assertTrue(
+      await PlayerStatusLog.objects.filter(
+        character=self.character,
+        timespan=(event.timestamp - timedelta(hours=1), None)
+      ).aexists(),
+      "original log stays the same"
+    )
+    self.assertTrue(
+      await PlayerStatusLog.objects.filter(
+        character=self.character,
+        timespan__startswith=event.timestamp,
+        timespan__upper_inf=True
+      ).aexists(),
+      "new log with new login time"
+    )
+
+  async def test_player_login_out_of_order_2(self):
+    await PlayerStatusLog.objects.acreate(
+      character=self.character,
+      timespan=(self.server_log.timestamp - timedelta(hours=1), self.server_log.timestamp + timedelta(hours=1))
+    )
+
+    event = PlayerLoginLogEvent(
+      timestamp=self.server_log.timestamp,
+      player_id=self.player.unique_id,
+      player_name=self.character.name,
+    )
+    await process_log_event(event)
+    self.assertTrue(
+      await PlayerStatusLog.objects.filter(
+        character=self.character,
+        timespan=(event.timestamp, self.server_log.timestamp + timedelta(hours=1))
+      ).aexists()
+    )
+    self.assertTrue(
+      await PlayerStatusLog.objects.filter(
+        character=self.character,
+        timespan=(self.server_log.timestamp - timedelta(hours=1), None)
+      ).aexists()
+    )
+
   async def test_player_logout(self):
     event = PlayerLogoutLogEvent(
       timestamp=self.server_log.timestamp,
-      player_id=1234,
-      player_name='freeman',
+      player_id=self.player.unique_id,
+      player_name=self.character.name,
     )
 
     # Use DjangoModelFactory
-    player = await Player.objects.acreate(
-      unique_id=event.player_id,
-    )
-    character = await Character.objects.acreate(
-      name=event.player_name,
-      player=player,
-    )
     await PlayerStatusLog.objects.acreate(
-      character=character,
+      character=self.character,
       timespan=(event.timestamp - timedelta(hours=1), None)
     )
 
-    await process_log_event(event, self.server_log, False)
+    await process_log_event(event)
     self.assertTrue(
       await PlayerStatusLog.objects.filter(
-        character__name=event.player_name,
-        character__player__unique_id=event.player_id,
+        character=self.character,
         timespan=(event.timestamp - timedelta(hours=1), event.timestamp),
       ).aexists()
+    )
+    self.assertEqual(
+      await PlayerStatusLog.objects.acount(),
+      1
+    )
+
+  async def test_player_logout_out_of_step_between(self):
+    event = PlayerLogoutLogEvent(
+      timestamp=self.server_log.timestamp,
+      player_id=self.player.unique_id,
+      player_name=self.character.name,
+    )
+
+    # Use DjangoModelFactory
+    await PlayerStatusLog.objects.acreate(
+      character=self.character,
+      timespan=(event.timestamp - timedelta(hours=1), event.timestamp + timedelta(hours=1))
+    )
+
+    await process_log_event(event)
+    self.assertTrue(
+      await PlayerStatusLog.objects.filter(
+        character=self.character,
+        timespan=(event.timestamp - timedelta(hours=1), event.timestamp),
+      ).aexists()
+    )
+    self.assertTrue(
+      await PlayerStatusLog.objects.filter(
+        character=self.character,
+        timespan=(None, event.timestamp + timedelta(hours=1)),
+      ).aexists()
+    )
+    self.assertEqual(
+      await PlayerStatusLog.objects.acount(),
+      2
+    )
+
+  async def test_player_logout_out_of_step_after(self):
+    event = PlayerLogoutLogEvent(
+      timestamp=self.server_log.timestamp,
+      player_id=self.player.unique_id,
+      player_name=self.character.name,
+    )
+
+    # Use DjangoModelFactory
+    await PlayerStatusLog.objects.acreate(
+      character=self.character,
+      timespan=(None, event.timestamp - timedelta(hours=1))
+    )
+
+    await process_log_event(event)
+    self.assertTrue(
+      await PlayerStatusLog.objects.filter(
+        character=self.character,
+        timespan=(None, event.timestamp),
+      ).aexists()
+    )
+    self.assertTrue(
+      await PlayerStatusLog.objects.filter(
+        character=self.character,
+        timespan=(None, event.timestamp - timedelta(hours=1)),
+      ).aexists()
+    )
+    self.assertEqual(
+      await PlayerStatusLog.objects.acount(),
+      2
+    )
+
+  async def test_player_logout_out_of_step_multi(self):
+    event = PlayerLogoutLogEvent(
+      timestamp=self.server_log.timestamp,
+      player_id=self.player.unique_id,
+      player_name=self.character.name,
+    )
+
+    # Use DjangoModelFactory
+    await PlayerStatusLog.objects.acreate(
+      character=self.character,
+      timespan=(event.timestamp - timedelta(hours=1), None)
+    )
+    await PlayerStatusLog.objects.acreate(
+      character=self.character,
+      timespan=(event.timestamp - timedelta(hours=2), None)
+    )
+
+    await process_log_event(event)
+    self.assertTrue(
+      await PlayerStatusLog.objects.filter(
+        character=self.character,
+        timespan=(event.timestamp - timedelta(hours=1), event.timestamp),
+      ).aexists()
+    )
+    self.assertTrue(
+      await PlayerStatusLog.objects.filter(
+        character=self.character,
+        timespan=(event.timestamp - timedelta(hours=2), None),
+      ).aexists()
+    )
+    self.assertEqual(
+      await PlayerStatusLog.objects.acount(),
+      2
     )
 
   async def test_player_logout_legacy(self):
     event = LegacyPlayerLogoutLogEvent(
       timestamp=self.server_log.timestamp,
-      player_name='freeman',
+      player_name=self.character.name,
     )
 
     # Use DjangoModelFactory
-    player = await Player.objects.acreate(
-      unique_id=1234,
-    )
-    character = await Character.objects.acreate(
-      name=event.player_name,
-      player=player,
-    )
     await PlayerStatusLog.objects.acreate(
-      character=character,
+      character=self.character,
       timespan=(event.timestamp - timedelta(hours=1), None)
     )
 
-    await process_log_event(event, self.server_log, False)
+    await process_log_event(event)
+    self.assertEqual(
+      await PlayerStatusLog.objects.acount(),
+      1
+    )
     self.assertTrue(
       await PlayerStatusLog.objects.filter(
-        character__name=event.player_name,
-        character__player__unique_id=player.unique_id,
+        character=self.character,
         timespan=(event.timestamp - timedelta(hours=1), event.timestamp),
-      ).aexists()
-    )
-
-  async def test_auto_logout_everyone_on_restart(self):
-    event = PlayerLoginLogEvent(
-      timestamp=self.server_log.timestamp,
-      player_id=1235,
-      player_name='freeman',
-    )
-
-    # Use DjangoModelFactory
-    player = await Player.objects.acreate(
-      unique_id=1234,
-    )
-    character = await Character.objects.acreate(
-      name='another_player',
-      player=player,
-    )
-    # Current session
-    await PlayerStatusLog.objects.acreate(
-      character=character,
-      timespan=(event.timestamp - timedelta(hours=1), None),
-      original_log=self.server_log,
-    )
-    # Prev session
-    await PlayerStatusLog.objects.acreate(
-      character=character,
-      timespan=(event.timestamp - timedelta(hours=1), None),
-    )
-
-    await process_log_event(event, self.server_log, True)
-    # Logs out from prev session
-    self.assertTrue(
-      await PlayerStatusLog.objects.filter(
-        character__name=character.name,
-        character__player__unique_id=player.unique_id,
-        timespan=(event.timestamp - timedelta(hours=1), event.timestamp),
-      ).aexists()
-    )
-    # Still logged in in current session
-    self.assertTrue(
-      await PlayerStatusLog.objects.filter(
-        character__name=character.name,
-        character__player__unique_id=player.unique_id,
-        timespan__upper_inf=True,
       ).aexists()
     )
 
@@ -337,7 +441,7 @@ class ProcessLogEventTestCase(TestCase):
       owner_id=1234,
       owner_name='freeman',
     )
-    await process_log_event(event, self.server_log, False)
+    await process_log_event(event)
     self.assertTrue(
       await Company.objects.filter(
         owner__name=event.owner_name,

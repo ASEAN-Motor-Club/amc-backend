@@ -1,5 +1,6 @@
+from django.db import connection
 from django.db.models import Exists, OuterRef
-from django.db.models.expressions import RawSQL
+from asgiref.sync import sync_to_async
 from amc.models import ServerLog
 from amc.server_logs import (
   parse_log_line,
@@ -34,16 +35,106 @@ async def aget_or_create_character(player_name, player_id):
   character, _ = await Character.objects.aget_or_create(player=player, name=player_name)
   return (character, player)
 
-async def process_log_event(event: LogEvent, server_log, is_new_log_file: bool):
-  if is_new_log_file:
-    await PlayerStatusLog.objects.filter(
-      timespan__upper_inf=True,
-    ).exclude(
-      original_log__log_path=server_log.log_path
-    ).aupdate(
-      # can't find another way to update only the upper bound
-      timespan=RawSQL("tstzrange( lower(timespan), %t )", (event.timestamp,))
+
+async def process_login_event(character_id, timestamp):
+  """Use CTE to update and insert to the PlayerStatusLog table at the same time
+  to prevent race condition"""
+  raw_sql = """
+    WITH original_row AS (
+      SELECT id, timespan, lower(timespan) as login_time
+      FROM amc_playerstatuslog
+      WHERE character_id = %(character_id)s AND timespan @> %(timestamp)s
+      ORDER BY UPPER(timespan) ASC
+      LIMIT 1
+    ),
+    updated_row AS (
+      UPDATE amc_playerstatuslog
+      SET timespan = tstzrange(%(timestamp)s, upper(timespan), '[)')
+      WHERE id = (
+        SELECT id from original_row
+      )
     )
+    INSERT INTO amc_playerstatuslog (character_id, timespan)
+    SELECT
+      %(character_id)s,
+      tstzrange(
+        (
+          CASE WHEN exists (SELECT 1 FROM original_row)
+          THEN (SELECT login_time FROM original_row)
+          ELSE %(timestamp)s
+          END
+        ),
+        NULL,
+        '[)'
+      )
+      WHERE NOT exists (SELECT 1 from original_row WHERE login_time is null)
+    ;
+  """
+  params = {
+    "character_id": character_id,
+    "timestamp": timestamp,
+  }
+  def _execute_raw_sql(sql, params):
+    with connection.cursor() as cursor:
+      cursor.execute(sql, params)
+
+  async_execute_raw_sql = sync_to_async(
+    _execute_raw_sql, 
+    thread_sensitive=True # Important for database connections!
+  )
+  await async_execute_raw_sql(raw_sql, params)
+
+
+async def process_logout_event(character_id, timestamp):
+  """Use CTE to update and insert to the PlayerStatusLog table at the same time
+  to prevent race condition"""
+  raw_sql = """
+    WITH original_row AS (
+      SELECT id, timespan, upper(timespan) as logout_time
+      FROM amc_playerstatuslog
+      WHERE character_id = %(character_id)s AND timespan @> %(timestamp)s
+      ORDER BY LOWER(timespan) DESC
+      LIMIT 1
+    ),
+    updated_row AS (
+      UPDATE amc_playerstatuslog
+      SET timespan = tstzrange(lower(timespan), %(timestamp)s, '[)')
+      WHERE id = (
+        SELECT id from original_row
+      )
+    )
+    INSERT INTO amc_playerstatuslog (character_id, timespan)
+    SELECT
+      %(character_id)s,
+      tstzrange(
+        NULL,
+        (
+          CASE WHEN exists (SELECT 1 FROM original_row)
+          THEN (SELECT logout_time FROM original_row)
+          ELSE %(timestamp)s
+          END
+        ),
+        '[)'
+      )
+      WHERE NOT exists (SELECT 1 from original_row WHERE logout_time is null)
+    ;
+  """
+  params = {
+    "character_id": character_id,
+    "timestamp": timestamp,
+  }
+  def _execute_raw_sql(sql, params):
+    with connection.cursor() as cursor:
+      cursor.execute(sql, params)
+
+  async_execute_raw_sql = sync_to_async(
+    _execute_raw_sql, 
+    thread_sensitive=True # Important for database connections!
+  )
+  await async_execute_raw_sql(raw_sql, params)
+
+
+async def process_log_event(event: LogEvent):
 
   match event:
     case PlayerChatMessageLogEvent(timestamp, player_name, player_id, message):
@@ -65,21 +156,12 @@ async def process_log_event(event: LogEvent, server_log, is_new_log_file: bool):
       )
     case PlayerLoginLogEvent(timestamp, player_name, player_id):
       character, _ = await aget_or_create_character(player_name, player_id)
-      await PlayerStatusLog.objects.filter(character=character, timespan__upper_inf=True).aupdate(
-        # can't find another way to update only the upper bound
-        timespan=RawSQL("tstzrange( lower(timespan), %t )", (timestamp,))
-      )
-      await PlayerStatusLog.objects.acreate(
-        character=character,
-        timespan=(timestamp, None),
-        original_log=server_log,
-      )
+      await process_login_event(character.id, timestamp)
+
     case PlayerLogoutLogEvent(timestamp, player_name, player_id):
       character, _ = await aget_or_create_character(player_name, player_id)
-      await PlayerStatusLog.objects.filter(character=character, timespan__upper_inf=True).aupdate(
-        # can't find another way to update only the upper bound
-        timespan=RawSQL("tstzrange( lower(timespan), %t )", (timestamp,))
-      )
+      await process_logout_event(character.id, timestamp)
+
     case LegacyPlayerLogoutLogEvent(timestamp, player_name):
       character = await Character.objects.aget(
         Exists(
@@ -90,11 +172,8 @@ async def process_log_event(event: LogEvent, server_log, is_new_log_file: bool):
         ),
         name=player_name,
       )
+      await process_logout_event(character.id, timestamp)
 
-      await PlayerStatusLog.objects.filter(character=character, timespan__upper_inf=True).aupdate(
-        # can't find another way to update only the upper bound
-        timespan=RawSQL("tstzrange( lower(timespan), %t )", (timestamp,))
-      )
     case CompanyAddedLogEvent(timestamp, company_name, is_corp, owner_name, owner_id) | CompanyRemovedLogEvent(timestamp, company_name, is_corp, owner_name, owner_id):
       character, _ = await aget_or_create_character(owner_name, owner_id)
       await Company.objects.aget_or_create(
@@ -121,8 +200,7 @@ async def process_log_line(ctx, line):
   if not server_log_created and server_log.event_processed:
     return {'status': 'duplicate', 'timestamp': event.timestamp}
 
-  is_new_log_file = await ServerLog.objects.filter(log_path=log.log_path).exclude(id=server_log.id).aexists()
-  await process_log_event(event, server_log, is_new_log_file)
+  await process_log_event(event)
 
   server_log.event_processed = True
   await server_log.asave(update_fields=['event_processed'])

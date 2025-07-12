@@ -15,11 +15,17 @@ class PlayerAdmin(admin.ModelAdmin):
   list_display = ['unique_id']
   search_fields = ['unique_id', 'character__name']
 
+class PlayerStatusLogInlineAdmin(admin.TabularInline):
+  model = PlayerStatusLog
+  readonly_fields = ['character', 'original_log']
+  exclude = ['original_log']
+
 @admin.register(Character)
 class CharacterAdmin(admin.ModelAdmin):
   list_display = ['name', 'player__unique_id']
   list_select_related = ['player']
   search_fields = ['player__unique_id']
+  inlines = [PlayerStatusLogInlineAdmin]
 
 @admin.register(Vehicle)
 class VehicleAdmin(admin.ModelAdmin):
