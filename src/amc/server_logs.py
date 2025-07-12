@@ -247,7 +247,7 @@ def parse_log_content(timestamp, content):
       vehicle_id=int(pattern_match.group('vehicle_id')),
     )
 
-  if pattern_match := re.match(r"Company added. Name=(?P<company_name>[^(]+)\(Corp\?(?P<is_corp>\w+)\) Owner=(?P<owner_name>\w+)\((?P<owner_id>\d+)\)", content):
+  if pattern_match := re.match(r"Company added. Name=(?P<company_name>[^(]+)\(Corp\?(?P<is_corp>\w+)\) Owner=(?P<owner_name>\S+)\((?P<owner_id>\d+)\)", content):
     return CompanyAddedLogEvent(
       timestamp=timestamp,
       company_name=pattern_match.group('company_name'),
@@ -256,7 +256,7 @@ def parse_log_content(timestamp, content):
       owner_id=int(pattern_match.group('owner_id')),
     )
 
-  if pattern_match := re.match(r"Company removed. Name=(?P<company_name>[^(]+)\(Corp\?(?P<is_corp>\w+)\) Owner=(?P<owner_name>\w+)\((?P<owner_id>\d+)\)", content):
+  if pattern_match := re.match(r"Company removed. Name=(?P<company_name>[^(]+)\(Corp\?(?P<is_corp>\w+)\) Owner=(?P<owner_name>\S+)\((?P<owner_id>\d+)\)", content):
     return CompanyRemovedLogEvent(
       timestamp=timestamp,
       company_name=pattern_match.group('company_name'),
