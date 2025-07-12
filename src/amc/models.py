@@ -26,7 +26,7 @@ class Player(models.Model):
 
 @final
 class Character(models.Model):
-  player = models.ForeignKey(Player, on_delete=models.CASCADE)
+  player = models.ForeignKey(Player, on_delete=models.CASCADE, related_name='characters')
   name = models.CharField(max_length=200)
   # levels
 

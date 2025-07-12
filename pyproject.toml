@@ -14,6 +14,7 @@ dependencies = [
     "aiohttp>=3.12.13",
     "django-asgi-lifespan>=0.4.0",
     "arq>=0.26.3",
+    "factory-boy>=3.3.3",
 ]
 
 [build-system]

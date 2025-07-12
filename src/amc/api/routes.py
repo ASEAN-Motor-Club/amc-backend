@@ -4,8 +4,15 @@ import json
 from django.core.cache import cache
 from ninja import Router
 from django.http import StreamingHttpResponse
-from .schema import PlayerSchema
+from .schema import (
+  PlayerSchema,
+  CharacterSchema,
+)
 from django.conf import settings
+from amc.models import (
+  Player,
+  Character
+)
 
 players_router = Router()
 
@@ -30,6 +37,30 @@ async def list_players(request):
   async with aiohttp.ClientSession(base_url=settings.MOD_SERVER_API_URL) as session:
     players = await get_players(session)
   return players
+
+
+@players_router.get('/players/{unique_id}', response=PlayerSchema)
+async def get_player(request, unique_id):
+  """Retrieve a single player"""
+  player = await Player.objects.aget(unique_id=unique_id)
+  return player
+
+
+@players_router.get('/players/{unique_id}/characters', response=list[CharacterSchema])
+async def get_player_characters(request, unique_id):
+  """Retrieve a single player"""
+  return [
+    character
+    async for character in Character.objects.filter(player__unique_id=unique_id)
+  ]
+
+
+characters_router = Router()
+@characters_router.get('/characters/{id}', response=CharacterSchema)
+async def get_character(request, id):
+  """Retrieve a single character"""
+  character = await Character.objects.aget(id=id)
+  return character
 
 
 player_positions_router = Router()

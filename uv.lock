@@ -95,6 +95,7 @@ dependencies = [
     { name = "django" },
     { name = "django-asgi-lifespan" },
     { name = "django-ninja" },
+    { name = "factory-boy" },
     { name = "gunicorn" },
     { name = "psycopg", extra = ["binary"] },
     { name = "uvicorn", extra = ["standard"] },
@@ -114,6 +115,7 @@ requires-dist = [
     { name = "django", specifier = ">=5.2.3" },
     { name = "django-asgi-lifespan", specifier = ">=0.4.0" },
     { name = "django-ninja", specifier = ">=1.4.3" },
+    { name = "factory-boy", specifier = ">=3.3.3" },
     { name = "gunicorn", specifier = ">=23.0.0" },
     { name = "psycopg", extras = ["binary"], specifier = ">=3.2.9" },
     { name = "uvicorn", extras = ["standard"], specifier = ">=0.34.3" },
@@ -251,6 +253,30 @@ dependencies = [
 sdist = { url = "https://files.pythonhosted.org/packages/cd/1a/f0d051f54375cfd2310f803925993fdc4172e41e627d63ece48194b07892/django_ninja-1.4.3.tar.gz", hash = "sha256:e46d477ca60c228d2a5eb3cc912094928ea830d364501f966661eeada67cb038", size = 3709571, upload-time = "2025-06-04T15:11:13.408Z" }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/08/ec/0cfa9b817f048cdec354354ae0569d7c0fd63907e5b1f927a7ee04a18635/django_ninja-1.4.3-py3-none-any.whl", hash = "sha256:f3204137a059437b95677049474220611f1cf9efedba9213556474b75168fa01", size = 2426185, upload-time = "2025-06-04T15:11:11.314Z" },
+]
+
+[[package]]
+name = "factory-boy"
+version = "3.3.3"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "faker" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/ba/98/75cacae9945f67cfe323829fc2ac451f64517a8a330b572a06a323997065/factory_boy-3.3.3.tar.gz", hash = "sha256:866862d226128dfac7f2b4160287e899daf54f2612778327dd03d0e2cb1e3d03", size = 164146, upload-time = "2025-02-03T09:49:04.433Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/27/8d/2bc5f5546ff2ccb3f7de06742853483ab75bf74f36a92254702f8baecc79/factory_boy-3.3.3-py2.py3-none-any.whl", hash = "sha256:1c39e3289f7e667c4285433f305f8d506efc2fe9c73aaea4151ebd5cdea394fc", size = 37036, upload-time = "2025-02-03T09:49:01.659Z" },
+]
+
+[[package]]
+name = "faker"
+version = "37.4.0"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "tzdata" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/65/f9/66af4019ee952fc84b8fe5b523fceb7f9e631ed8484417b6f1e3092f8290/faker-37.4.0.tar.gz", hash = "sha256:7f69d579588c23d5ce671f3fa872654ede0e67047820255f43a4aa1925b89780", size = 1901976, upload-time = "2025-06-11T17:59:30.818Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/78/5e/c8c3c5ea0896ab747db2e2889bf5a6f618ed291606de6513df56ad8670a8/faker-37.4.0-py3-none-any.whl", hash = "sha256:cb81c09ebe06c32a10971d1bbdb264bb0e22b59af59548f011ac4809556ce533", size = 1942992, upload-time = "2025-06-11T17:59:28.698Z" },
 ]
 
 [[package]]
