@@ -39,14 +39,14 @@ async def list_players(request):
   return players
 
 
-@players_router.get('/players/{unique_id}', response=PlayerSchema)
+@players_router.get('/{unique_id}', response=PlayerSchema)
 async def get_player(request, unique_id):
   """Retrieve a single player"""
   player = await Player.objects.aget(unique_id=unique_id)
   return player
 
 
-@players_router.get('/players/{unique_id}/characters', response=list[CharacterSchema])
+@players_router.get('/{unique_id}/characters', response=list[CharacterSchema])
 async def get_player_characters(request, unique_id):
   """Retrieve a single player"""
   return [
@@ -56,7 +56,7 @@ async def get_player_characters(request, unique_id):
 
 
 characters_router = Router()
-@characters_router.get('/characters/{id}', response=CharacterSchema)
+@characters_router.get('/{id}', response=CharacterSchema)
 async def get_character(request, id):
   """Retrieve a single character"""
   character = await Character.objects.aget(id=id)

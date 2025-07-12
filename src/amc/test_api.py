@@ -16,7 +16,7 @@ class PlayersAPITest(TestCase):
 
   async def test_get_player(self):
     player = await sync_to_async(PlayerFactory)()
-    response = await self.client.get(f"/players/{player.unique_id}")
+    response = await self.client.get(f"/{player.unique_id}")
 
     self.assertEqual(response.status_code, 200)
     self.assertEqual(response.json(), {
@@ -26,7 +26,7 @@ class PlayersAPITest(TestCase):
 
   async def test_get_player_characters(self):
     player = await sync_to_async(PlayerFactory)()
-    response = await self.client.get(f"/players/{player.unique_id}/characters")
+    response = await self.client.get(f"/{player.unique_id}/characters")
 
     self.assertEqual(response.status_code, 200)
     self.assertEqual(response.json(), [
@@ -45,7 +45,7 @@ class CharactersAPITest(TestCase):
 
   async def test_get_character(self):
     character = await sync_to_async(CharacterFactory)()
-    response = await self.client.get(f"/characters/{character.id}")
+    response = await self.client.get(f"/{character.id}")
 
     self.assertEqual(response.status_code, 200)
     self.assertEqual(response.json(), {
