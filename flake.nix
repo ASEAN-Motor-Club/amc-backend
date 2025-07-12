@@ -127,7 +127,8 @@
               default = 2514;
             };
             secretFile = lib.mkOption {
-              type = lib.types.path;
+              type = lib.types.nullOr lib.types.path;
+              default = null;
             };
             backendSettings = lib.mkOption {
               type = lib.types.submodule backendOptionsSubmodule;
@@ -156,12 +157,14 @@
             };
             containers.amc-backend = {
               autoStart = true;
+              bindMounts."/etc/ssh/ssh_host_ed25519_key".isReadOnly = true;
               config = { config, pkgs, ... }: {
                 imports = [
                   self.nixosModules.backend
                   ragenix.nixosModules.default
                 ];
-                age.secrets.backend = lib.mkIf cfg.secretFile {
+                age.identityPaths = [ "/etc/ssh/ssh_host_ed25519_key" ];
+                age.secrets.backend = lib.mkIf (cfg.secretFile != null) {
                   file = cfg.secretFile;
                   mode = "400";
                   owner = config.services.amc-backend.user;
@@ -270,6 +273,7 @@
               environment = {
                 inherit (mkPostgisDeps pkgs) GEOS_LIBRARY_PATH GDAL_LIBRARY_PATH;
                 DJANGO_STATIC_ROOT = self.packages.x86_64-linux.staticRoot;
+                DJANGO_SETTINGS_MODULE = "amc_backend.settings";
               };
               serviceConfig = {
                 Type = "oneshot";
@@ -278,7 +282,6 @@
                 EnvironmentFile = cfg.environmentFile;
               };
               script = ''
-                redis-cli flushdb
                 ${self.packages.x86_64-linux.default}/bin/django-admin flush --noinput
                 ${self.packages.x86_64-linux.default}/bin/django-admin migrate
                 ${self.packages.x86_64-linux.default}/bin/django-admin createsuperuser --noinput
