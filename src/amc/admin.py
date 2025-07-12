@@ -49,6 +49,7 @@ class PlayerStatusLogAdmin(admin.ModelAdmin):
   list_display = ['character', 'timespan']
   list_select_related = ['character', 'character__player']
   ordering = ['-timespan']
+  readonly_fields = ['character', 'original_log']
 
 @admin.register(PlayerVehicleLog)
 class PlayerVehicleLogAdmin(admin.ModelAdmin):
