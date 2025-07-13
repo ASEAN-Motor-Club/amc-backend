@@ -1,3 +1,4 @@
+import re
 from django.db import connection
 from django.db.models import Exists, OuterRef
 from asgiref.sync import sync_to_async
@@ -26,6 +27,8 @@ from amc.models import (
   PlayerChatLog,
   PlayerVehicleLog,
   PlayerRestockDepotLog,
+  BotInvocationLog,
+  SongRequestLog,
   Vehicle,
   Company,
 )
@@ -145,6 +148,19 @@ async def process_log_event(event: LogEvent):
         character=character, 
         text=message,
       )
+      if command_match := re.match(r"/bot (?P<prompt>.+)", message):
+        await BotInvocationLog.objects.acreate(
+          timestamp=timestamp,
+          character=character, 
+          prompt=command_match.group('prompt'),
+        )
+      elif command_match := re.match(r"/song.request (?P<song>.+)", message):
+        await SongRequestLog.objects.acreate(
+          timestamp=timestamp,
+          character=character, 
+          song=command_match.group('song'),
+        )
+
     case PlayerVehicleLogEvent(timestamp, player_name, player_id, vehicle_name, vehicle_id):
       action = PlayerVehicleLog.action_for_event(event)
       character, _ = await aget_or_create_character(player_name, player_id)

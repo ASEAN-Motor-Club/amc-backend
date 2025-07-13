@@ -21,6 +21,8 @@ from amc.models import (
   Character,
   Company,
   ServerLog,
+  BotInvocationLog,
+  SongRequestLog,
   PlayerStatusLog,
   PlayerChatLog,
   PlayerVehicleLog,
@@ -181,6 +183,52 @@ class ProcessLogEventTestCase(TestCase):
         character__name=event.player_name,
         character__player__unique_id=event.player_id,
         text=event.message
+      ).aexists()
+    )
+
+  async def test_player_bot_invocation(self):
+    event = PlayerChatMessageLogEvent(
+      timestamp=self.server_log.timestamp,
+      player_id=1234,
+      player_name='freeman',
+      message='/bot test'
+    )
+    await process_log_event(event)
+    self.assertTrue(
+      await PlayerChatLog.objects.filter(
+        character__name=event.player_name,
+        character__player__unique_id=event.player_id,
+        text=event.message
+      ).aexists()
+    )
+    self.assertTrue(
+      await BotInvocationLog.objects.filter(
+        character__name=event.player_name,
+        character__player__unique_id=event.player_id,
+        prompt="test"
+      ).aexists()
+    )
+
+  async def test_player_song_request(self):
+    event = PlayerChatMessageLogEvent(
+      timestamp=self.server_log.timestamp,
+      player_id=1234,
+      player_name='freeman',
+      message='/song_request test'
+    )
+    await process_log_event(event)
+    self.assertTrue(
+      await PlayerChatLog.objects.filter(
+        character__name=event.player_name,
+        character__player__unique_id=event.player_id,
+        text=event.message
+      ).aexists()
+    )
+    self.assertTrue(
+      await SongRequestLog.objects.filter(
+        character__name=event.player_name,
+        character__player__unique_id=event.player_id,
+        song="test"
       ).aexists()
     )
 

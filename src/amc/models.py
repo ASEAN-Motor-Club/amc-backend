@@ -120,6 +120,20 @@ class ServerLog(models.Model):
 
 
 @final
+class BotInvocationLog(models.Model):
+  character = models.ForeignKey(Character, on_delete=models.CASCADE)
+  timestamp = models.DateTimeField()
+  prompt = models.TextField()
+
+
+@final
+class SongRequestLog(models.Model):
+  character = models.ForeignKey(Character, on_delete=models.CASCADE)
+  timestamp = models.DateTimeField()
+  song = models.TextField()
+
+
+@final
 class PlayerStatusLog(models.Model):
   character = models.ForeignKey(Character, on_delete=models.CASCADE)
   timespan = DateTimeRangeField()
