@@ -9,6 +9,7 @@ from amc.server_logs import (
     PlayerLogoutLogEvent,
     PlayerEnteredVehicleLogEvent,
     PlayerExitedVehicleLogEvent,
+    PlayerRestockedDepotLogEvent,
     CompanyAddedLogEvent,
     AnnouncementLogEvent,
     UnknownLogEntry,
@@ -22,6 +23,7 @@ from amc.models import (
   PlayerStatusLog,
   PlayerChatLog,
   PlayerVehicleLog,
+  PlayerRestockDepotLog,
 )
 from zoneinfo import ZoneInfo
 
@@ -449,6 +451,20 @@ class ProcessLogEventTestCase(TestCase):
         name=event.company_name,
         first_seen_at=event.timestamp,
         is_corp=event.is_corp,
+      ).aexists()
+    )
+
+  async def test_player_restocked_depot(self):
+    event = PlayerRestockedDepotLogEvent(
+      timestamp=self.server_log.timestamp,
+      player_name=self.character.name,
+      depot_name="test",
+    )
+    await process_log_event(event)
+    self.assertTrue(
+      await PlayerRestockDepotLog.objects.filter(
+        character=self.character,
+        depot_name=event.depot_name,
       ).aexists()
     )
 

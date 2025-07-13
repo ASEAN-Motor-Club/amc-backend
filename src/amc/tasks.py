@@ -25,6 +25,7 @@ from amc.models import (
   PlayerStatusLog,
   PlayerChatLog,
   PlayerVehicleLog,
+  PlayerRestockDepotLog,
   Vehicle,
   Company,
 )
@@ -184,6 +185,17 @@ async def process_log_event(event: LogEvent):
           'first_seen_at': timestamp
         }
       )
+
+    case PlayerRestockedDepotLogEvent(timestamp, player_name, depot_name):
+      character = await Character.objects.aget(
+        name=player_name,
+      )
+      await PlayerRestockDepotLog.objects.acreate(
+        timestamp=timestamp,
+        character=character,
+        depot_name=depot_name,
+      )
+
     case UnknownLogEntry():
       raise ValueError('Unknown log entry')
     case _:
