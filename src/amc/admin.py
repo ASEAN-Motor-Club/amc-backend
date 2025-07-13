@@ -7,7 +7,9 @@ from .models import (
   PlayerChatLog,
   PlayerVehicleLog,
   PlayerStatusLog,
-  ServerLog
+  ServerLog,
+  BotInvocationLog,
+  SongRequestLog,
 )
 
 class CharacterInlineAdmin(admin.TabularInline):
@@ -48,6 +50,20 @@ class CompanyAdmin(admin.ModelAdmin):
 @admin.register(PlayerChatLog)
 class PlayerChatLogAdmin(admin.ModelAdmin):
   list_display = ['timestamp', 'character', 'text']
+  list_select_related = ['character', 'character__player']
+  ordering = ['-timestamp']
+  search_fields = ['character__name', 'character__player__unique_id']
+
+@admin.register(BotInvocationLog)
+class BotInvocationLogAdmin(admin.ModelAdmin):
+  list_display = ['timestamp', 'character', 'prompt']
+  list_select_related = ['character', 'character__player']
+  ordering = ['-timestamp']
+  search_fields = ['character__name', 'character__player__unique_id']
+
+@admin.register(SongRequestLog)
+class SongRequestLogAdmin(admin.ModelAdmin):
+  list_display = ['timestamp', 'character', 'song']
   list_select_related = ['character', 'character__player']
   ordering = ['-timestamp']
   search_fields = ['character__name', 'character__player__unique_id']
