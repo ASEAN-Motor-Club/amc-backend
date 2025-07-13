@@ -177,7 +177,7 @@ async def process_log_event(event: LogEvent):
 
     case CompanyAddedLogEvent(timestamp, company_name, is_corp, owner_name, owner_id) | CompanyRemovedLogEvent(timestamp, company_name, is_corp, owner_name, owner_id):
       character, _ = await aget_or_create_character(owner_name, owner_id)
-      await Company.objects.aget_or_create(
+      company, company_created = await Company.objects.aget_or_create(
         name=company_name,
         owner=character,
         is_corp=is_corp,
@@ -185,6 +185,9 @@ async def process_log_event(event: LogEvent):
           'first_seen_at': timestamp
         }
       )
+      if company_created and is_corp:
+        # Announce license requirements
+        pass
 
     case PlayerRestockedDepotLogEvent(timestamp, player_name, depot_name):
       character = await Character.objects.aget(
@@ -195,6 +198,10 @@ async def process_log_event(event: LogEvent):
         character=character,
         depot_name=depot_name,
       )
+
+    case PlayerCreatedCompanyLogEvent(timestamp, player_name, company_name):
+      # Handled by CompanyAddedLogEvent, if created
+      pass
 
     case UnknownLogEntry():
       raise ValueError('Unknown log entry')
