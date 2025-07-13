@@ -203,6 +203,28 @@ async def process_log_event(event: LogEvent):
       # Handled by CompanyAddedLogEvent, if created
       pass
 
+    case PlayerLevelChangedLogEvent(timestamp, player_name, player_id, level_type, level_value):
+      match level_type:
+        case 'CL_Driver':
+          field_name = 'driver_level'
+        case 'CL_Bus':
+          field_name = 'bus_level'
+        case 'CL_Taxi':
+          field_name = 'taxi_level'
+        case 'CL_Police':
+          field_name = 'police_level'
+        case 'CL_Truck':
+          field_name = 'truck_level'
+        case 'CL_Wrecker':
+          field_name = 'wrecker_level'
+        case 'CL_Racer':
+          field_name = 'racer_level'
+        case _:
+          raise ValueError('Unknown level type')
+      await Character.objects.filter(name=player_name, player__unique_id=player_id).aupdate(
+        **{field_name: level_value}
+      )
+
     case UnknownLogEntry():
       raise ValueError('Unknown log entry')
     case _:

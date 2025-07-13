@@ -30,6 +30,13 @@ class Character(models.Model):
   player = models.ForeignKey(Player, on_delete=models.CASCADE, related_name='characters')
   name = models.CharField(max_length=200)
   # levels
+  driver_level = models.PositiveIntegerField(null=True)
+  bus_level = models.PositiveIntegerField(null=True)
+  taxi_level = models.PositiveIntegerField(null=True)
+  police_level = models.PositiveIntegerField(null=True)
+  truck_level = models.PositiveIntegerField(null=True)
+  wrecker_level = models.PositiveIntegerField(null=True)
+  racer_level = models.PositiveIntegerField(null=True)
 
   @override
   def __str__(self):

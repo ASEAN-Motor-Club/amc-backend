@@ -10,6 +10,7 @@ from amc.server_logs import (
     PlayerEnteredVehicleLogEvent,
     PlayerExitedVehicleLogEvent,
     PlayerRestockedDepotLogEvent,
+    PlayerLevelChangedLogEvent,
     CompanyAddedLogEvent,
     AnnouncementLogEvent,
     UnknownLogEntry,
@@ -465,6 +466,22 @@ class ProcessLogEventTestCase(TestCase):
       await PlayerRestockDepotLog.objects.filter(
         character=self.character,
         depot_name=event.depot_name,
+      ).aexists()
+    )
+
+  async def test_player_level_changed(self):
+    event = PlayerLevelChangedLogEvent(
+      timestamp=self.server_log.timestamp,
+      player_name=self.character.name,
+      player_id=self.player.unique_id,
+      level_type='CL_Driver',
+      level_value=2,
+    )
+    await process_log_event(event)
+    self.assertTrue(
+      await Character.objects.filter(
+        id=self.character.id,
+        driver_level=event.level_value
       ).aexists()
     )
 
