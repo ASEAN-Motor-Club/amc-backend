@@ -34,6 +34,13 @@ class PlayersAPITest(TestCase):
         "id": character.id,
         "name": character.name,
         "player_id": player.unique_id,
+        "driver_level": None,
+        "bus_level": None,
+        "taxi_level": None,
+        "police_level": None,
+        "truck_level": None,
+        "wrecker_level": None,
+        "racer_level": None,
       }
       async for character in player.characters.all()
     ])
@@ -52,5 +59,12 @@ class CharactersAPITest(TestCase):
       "id": character.id,
       "name": character.name,
       "player_id": character.player.unique_id,
+      "driver_level": None,
+      "bus_level": None,
+      "taxi_level": None,
+      "police_level": None,
+      "truck_level": None,
+      "wrecker_level": None,
+      "racer_level": None,
     })
 

@@ -14,7 +14,17 @@ class CharacterSchema(ModelSchema):
 
   class Meta:
     model = Character
-    fields = ['id', 'name']
+    fields = [
+      'id',
+      'name',
+      'driver_level',
+      'bus_level',
+      'taxi_level',
+      'police_level',
+      'truck_level',
+      'wrecker_level',
+      'racer_level',
+    ]
 
 
 class PositionSchema(Schema):
