@@ -1,5 +1,6 @@
+from datetime import timedelta
 from django.db import models
-from django.db.models import F
+from django.db.models import F, Sum
 from django.utils import timezone
 from django.utils.translation import gettext_lazy as _
 from django.contrib.postgres.fields import DateTimeRangeField
@@ -12,11 +13,22 @@ from amc.server_logs import (
   PlayerSoldVehicleLogEvent,
 )
 
+class PlayerQuerySet(models.QuerySet):
+  def with_total_session_time(self):
+    return self.annotate(
+      total_session_time=Sum(
+        'characters__status_logs__duration',
+        default=timedelta(0)
+      )
+    )
+
 @final
 class Player(models.Model):
   unique_id = models.PositiveBigIntegerField(primary_key=True)
   discord_user_id = models.PositiveBigIntegerField(unique=True, null=True)
   discord_name = models.CharField(max_length=200, null=True)
+
+  objects = models.Manager.from_queryset(PlayerQuerySet)()
 
   @override
   def __str__(self) -> str:
@@ -135,7 +147,7 @@ class SongRequestLog(models.Model):
 
 @final
 class PlayerStatusLog(models.Model):
-  character = models.ForeignKey(Character, on_delete=models.CASCADE)
+  character = models.ForeignKey(Character, on_delete=models.CASCADE, related_name='status_logs')
   timespan = DateTimeRangeField()
   duration = models.GeneratedField(
     expression=F('timespan__endswith') - F('timespan__startswith'),

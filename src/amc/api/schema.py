@@ -1,8 +1,10 @@
+from datetime import timedelta
 from ninja import Schema, ModelSchema
 from ..models import Player, Character
 
 class PlayerSchema(ModelSchema):
   unique_id: int
+  total_session_time: timedelta
 
   class Meta:
     model = Player

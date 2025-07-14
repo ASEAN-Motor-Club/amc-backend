@@ -42,7 +42,7 @@ async def list_players(request):
 @players_router.get('/{unique_id}', response=PlayerSchema)
 async def get_player(request, unique_id):
   """Retrieve a single player"""
-  player = await Player.objects.aget(unique_id=unique_id)
+  player = await Player.objects.with_total_session_time().aget(unique_id=unique_id)
   return player
 
 

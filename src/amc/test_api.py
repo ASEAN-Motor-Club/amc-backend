@@ -1,3 +1,4 @@
+from datetime import timedelta
 from asgiref.sync import sync_to_async
 from django.test import TestCase
 from ninja.testing import TestAsyncClient
@@ -22,6 +23,7 @@ class PlayersAPITest(TestCase):
     self.assertEqual(response.json(), {
       "discord_user_id": player.discord_user_id,
       "unique_id": player.unique_id,
+      "total_session_time": str(timedelta(0)),
     })
 
   async def test_get_player_characters(self):
