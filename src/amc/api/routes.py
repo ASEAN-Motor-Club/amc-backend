@@ -5,6 +5,7 @@ from django.core.cache import cache
 from ninja import Router
 from django.http import StreamingHttpResponse
 from .schema import (
+  ActivePlayerSchema,
   PlayerSchema,
   CharacterSchema,
 )
@@ -25,16 +26,16 @@ async def get_players(
   if cached_data:
     return cached_data
 
-  async with session.get('/players') as resp:
-    players = (await resp.json()).get('data', [])
+  async with session.get('/player/list', params={'password': ''}) as resp:
+    players = list((await resp.json()).get('data', {}).values())
   cache.set(cache_key, players, timeout=cache_ttl)
   return players
 
 
-@players_router.get('', response=list[PlayerSchema])
+@players_router.get('', response=list[ActivePlayerSchema])
 async def list_players(request):
   """List all the players"""
-  async with aiohttp.ClientSession(base_url=settings.MOD_SERVER_API_URL) as session:
+  async with aiohttp.ClientSession(base_url=settings.GAME_SERVER_API_URL) as session:
     players = await get_players(session)
   return players
 

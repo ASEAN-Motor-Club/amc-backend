@@ -145,6 +145,7 @@ GEOS_LIBRARY_PATH = os.environ.get('GEOS_LIBRARY_PATH')
 GDAL_LIBRARY_PATH = os.environ.get('GDAL_LIBRARY_PATH')
 
 MOD_SERVER_API_URL = os.environ.get("MOD_SERVER_API_URL", "http://127.0.0.1:5001")
+GAME_SERVER_API_URL = os.environ.get("GAME_SERVER_API_URL", "http://127.0.0.1:8080")
 REDIS_SETTINGS = {}
 
 # Discord settings

@@ -2,6 +2,11 @@ from datetime import timedelta
 from ninja import Schema, ModelSchema
 from ..models import Player, Character
 
+class ActivePlayerSchema(Schema):
+  name: str
+  unique_id: int
+
+
 class PlayerSchema(ModelSchema):
   unique_id: int
   total_session_time: timedelta
