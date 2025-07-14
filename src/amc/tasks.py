@@ -1,6 +1,8 @@
 import re
+import asyncio
 from django.db import connection
 from django.db.models import Exists, OuterRef
+from django.conf import settings
 from asgiref.sync import sync_to_async
 from amc.models import ServerLog
 from amc.server_logs import (
@@ -138,7 +140,17 @@ async def process_logout_event(character_id, timestamp):
   await async_execute_raw_sql(raw_sql, params)
 
 
-async def process_log_event(event: LogEvent):
+async def forward_to_discord(client, channel_id, content):
+  if not client.is_ready():
+    await client.wait_until_ready()
+
+  channel = client.get_channel(int(channel_id))
+  if channel:
+    await channel.send(content)
+
+
+async def process_log_event(event: LogEvent, ctx = None):
+  discord_client = ctx['discord_client']
 
   match event:
     case PlayerChatMessageLogEvent(timestamp, player_name, player_id, message):
@@ -160,6 +172,26 @@ async def process_log_event(event: LogEvent):
           character=character, 
           song=command_match.group('song'),
         )
+      if timestamp > ctx['startup_time']:
+        asyncio.run_coroutine_threadsafe(
+          forward_to_discord(
+            discord_client,
+            settings.DISCORD_GAME_CHAT_CHANNEL_ID,
+            f"{player_name}: {message}"
+          ),
+          discord_client.loop
+        )
+
+    case AnnouncementLogEvent(timestamp, message):
+      if timestamp > ctx['startup_time']:
+        asyncio.run_coroutine_threadsafe(
+          forward_to_discord(
+            discord_client,
+            settings.DISCORD_GAME_CHAT_CHANNEL_ID,
+            f"{message}"
+          ),
+          discord_client.loop
+        )
 
     case PlayerVehicleLogEvent(timestamp, player_name, player_id, vehicle_name, vehicle_id):
       action = PlayerVehicleLog.action_for_event(event)
@@ -171,13 +203,32 @@ async def process_log_event(event: LogEvent):
         vehicle=vehicle,
         action=action,
       )
+
     case PlayerLoginLogEvent(timestamp, player_name, player_id):
       character, _ = await aget_or_create_character(player_name, player_id)
       await process_login_event(character.id, timestamp)
+      if timestamp > ctx['startup_time']:
+        asyncio.run_coroutine_threadsafe(
+          forward_to_discord(
+            discord_client,
+            settings.DISCORD_GAME_CHAT_CHANNEL_ID,
+            f"Player Login: {player_name} ({player_id})"
+          ),
+          discord_client.loop
+        )
 
     case PlayerLogoutLogEvent(timestamp, player_name, player_id):
       character, _ = await aget_or_create_character(player_name, player_id)
       await process_logout_event(character.id, timestamp)
+      if timestamp > ctx['startup_time']:
+        asyncio.run_coroutine_threadsafe(
+          forward_to_discord(
+            discord_client,
+            settings.DISCORD_GAME_CHAT_CHANNEL_ID,
+            f"Player Logout: {player_name} ({player_id})"
+          ),
+          discord_client.loop
+        )
 
     case LegacyPlayerLogoutLogEvent(timestamp, player_name):
       character = await Character.objects.aget(
@@ -214,6 +265,15 @@ async def process_log_event(event: LogEvent):
         character=character,
         depot_name=depot_name,
       )
+      if timestamp > ctx['startup_time']:
+        asyncio.run_coroutine_threadsafe(
+          forward_to_discord(
+            discord_client,
+            settings.DISCORD_GAME_CHAT_CHANNEL_ID,
+            f"Player Restocked Depot: {player_name} (Depot: {depot_name})"
+          ),
+          discord_client.loop
+        )
 
     case PlayerCreatedCompanyLogEvent(timestamp, player_name, company_name):
       # Handled by CompanyAddedLogEvent, if created
@@ -243,6 +303,8 @@ async def process_log_event(event: LogEvent):
 
     case UnknownLogEntry():
       raise ValueError('Unknown log entry')
+    case SecurityAlertLogEvent():
+      pass
     case _:
       pass
 
@@ -257,7 +319,7 @@ async def process_log_line(ctx, line):
   if not server_log_created and server_log.event_processed:
     return {'status': 'duplicate', 'timestamp': event.timestamp}
 
-  await process_log_event(event)
+  await process_log_event(event, ctx=ctx)
 
   server_log.event_processed = True
   await server_log.asave(update_fields=['event_processed'])
