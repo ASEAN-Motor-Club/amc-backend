@@ -41,8 +41,9 @@ async def run_discord():
 async def startup(ctx):
   global bot_task_handle
   ctx['startup_time'] = timezone.now()
-  ctx['discord_client'] = client
-  bot_task_handle = asyncio.create_task(run_discord())
+  if settings.DISCORD_TOKEN:
+    ctx['discord_client'] = client
+    bot_task_handle = asyncio.create_task(run_discord())
 
 
 async def shutdown(ctx):
@@ -56,4 +57,5 @@ class WorkerSettings:
     on_startup = startup
     on_shutdown = shutdown
     redis_settings = REDIS_SETTINGS
+    max_jobs = 30
 

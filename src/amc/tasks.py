@@ -150,7 +150,7 @@ async def forward_to_discord(client, channel_id, content):
 
 
 async def process_log_event(event: LogEvent, ctx = None):
-  discord_client = ctx['discord_client']
+  discord_client = ctx.get('discord_client')
 
   match event:
     case PlayerChatMessageLogEvent(timestamp, player_name, player_id, message):
@@ -172,7 +172,7 @@ async def process_log_event(event: LogEvent, ctx = None):
           character=character, 
           song=command_match.group('song'),
         )
-      if timestamp > ctx['startup_time']:
+      if discord_client and timestamp > ctx['startup_time']:
         asyncio.run_coroutine_threadsafe(
           forward_to_discord(
             discord_client,
@@ -183,7 +183,7 @@ async def process_log_event(event: LogEvent, ctx = None):
         )
 
     case AnnouncementLogEvent(timestamp, message):
-      if timestamp > ctx['startup_time']:
+      if discord_client and timestamp > ctx['startup_time']:
         asyncio.run_coroutine_threadsafe(
           forward_to_discord(
             discord_client,
@@ -207,7 +207,7 @@ async def process_log_event(event: LogEvent, ctx = None):
     case PlayerLoginLogEvent(timestamp, player_name, player_id):
       character, _ = await aget_or_create_character(player_name, player_id)
       await process_login_event(character.id, timestamp)
-      if timestamp > ctx['startup_time']:
+      if discord_client and timestamp > ctx['startup_time']:
         asyncio.run_coroutine_threadsafe(
           forward_to_discord(
             discord_client,
@@ -220,7 +220,7 @@ async def process_log_event(event: LogEvent, ctx = None):
     case PlayerLogoutLogEvent(timestamp, player_name, player_id):
       character, _ = await aget_or_create_character(player_name, player_id)
       await process_logout_event(character.id, timestamp)
-      if timestamp > ctx['startup_time']:
+      if discord_client and timestamp > ctx['startup_time']:
         asyncio.run_coroutine_threadsafe(
           forward_to_discord(
             discord_client,
@@ -265,7 +265,7 @@ async def process_log_event(event: LogEvent, ctx = None):
         character=character,
         depot_name=depot_name,
       )
-      if timestamp > ctx['startup_time']:
+      if discord_client and timestamp > ctx['startup_time']:
         asyncio.run_coroutine_threadsafe(
           forward_to_discord(
             discord_client,
