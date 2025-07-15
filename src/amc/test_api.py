@@ -1,4 +1,5 @@
 from datetime import timedelta
+from django.utils import timezone
 from asgiref.sync import sync_to_async
 from django.test import TestCase
 from ninja.testing import TestAsyncClient
@@ -9,6 +10,9 @@ from amc.api.routes import (
 from amc.factories import (
   PlayerFactory,
   CharacterFactory
+)
+from amc.models import (
+  PlayerStatusLog,
 )
 
 class PlayersAPITest(TestCase):
@@ -22,8 +26,28 @@ class PlayersAPITest(TestCase):
     self.assertEqual(response.status_code, 200)
     self.assertEqual(response.json(), {
       "discord_user_id": player.discord_user_id,
-      "unique_id": player.unique_id,
-      "total_session_time": str(timedelta(0)),
+      "unique_id": str(player.unique_id),
+      "total_session_time": 'P0DT00H00M00S',
+      "last_login": None,
+    })
+
+  async def test_get_player_logged_in(self):
+    player = await sync_to_async(PlayerFactory)()
+    character = await player.characters.afirst()
+    now = timezone.now()
+    now = now.replace(microsecond=0)
+    await PlayerStatusLog.objects.acreate(
+      character=character,
+      timespan=(now - timedelta(days=1), now - timedelta(hours=1))
+    )
+    response = await self.client.get(f"/{player.unique_id}")
+
+    self.assertEqual(response.status_code, 200)
+    self.assertEqual(response.json(), {
+      "discord_user_id": player.discord_user_id,
+      "unique_id": str(player.unique_id),
+      "total_session_time": 'P0DT23H00M00S',
+      "last_login": (now - timedelta(days=1)).strftime('%Y-%m-%dT%H:%M:%SZ'),
     })
 
   async def test_get_player_characters(self):
@@ -35,7 +59,7 @@ class PlayersAPITest(TestCase):
       {
         "id": character.id,
         "name": character.name,
-        "player_id": player.unique_id,
+        "player_id": str(player.unique_id),
         "driver_level": None,
         "bus_level": None,
         "taxi_level": None,
@@ -60,7 +84,7 @@ class CharactersAPITest(TestCase):
     self.assertEqual(response.json(), {
       "id": character.id,
       "name": character.name,
-      "player_id": character.player.unique_id,
+      "player_id": str(character.player.unique_id),
       "driver_level": None,
       "bus_level": None,
       "taxi_level": None,
