@@ -1,6 +1,6 @@
 from datetime import timedelta
 from django.db import models
-from django.db.models import F, Sum
+from django.db.models import F, Sum, Max
 from django.utils import timezone
 from django.utils.translation import gettext_lazy as _
 from django.contrib.postgres.fields import DateTimeRangeField
@@ -21,6 +21,12 @@ class PlayerQuerySet(models.QuerySet):
         default=timedelta(0)
       )
     )
+  def with_last_login(self):
+    return self.annotate(
+      last_login=Max(
+        'characters__status_logs__timespan__startswith',
+      )
+    )
 
 @final
 class Player(models.Model):
@@ -37,6 +43,23 @@ class Player(models.Model):
     return f"Unknown player {self.unique_id}"
 
 
+class CharacterQuerySet(models.QuerySet):
+  def with_total_session_time(self):
+    return self.annotate(
+      total_session_time=Sum(
+        'status_logs__duration',
+        default=timedelta(0)
+      )
+    )
+
+  def with_last_login(self):
+    return self.annotate(
+      last_login=Max(
+        'status_logs__timespan__startswith',
+      )
+    )
+
+
 @final
 class Character(models.Model):
   player = models.ForeignKey(Player, on_delete=models.CASCADE, related_name='characters')
@@ -49,6 +72,8 @@ class Character(models.Model):
   truck_level = models.PositiveIntegerField(null=True)
   wrecker_level = models.PositiveIntegerField(null=True)
   racer_level = models.PositiveIntegerField(null=True)
+
+  objects = models.Manager.from_queryset(CharacterQuerySet)()
 
   @override
   def __str__(self):
@@ -155,6 +180,9 @@ class PlayerStatusLog(models.Model):
     db_persist=True,
   )
   original_log = models.ForeignKey(ServerLog, on_delete=models.CASCADE, null=True)
+
+  class Meta:
+    ordering = ['-timespan__startswith']
 
 
 @final

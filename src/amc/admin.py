@@ -29,16 +29,33 @@ class PlayerStatusLogInlineAdmin(admin.TabularInline):
 
 @admin.register(Character)
 class CharacterAdmin(admin.ModelAdmin):
-  list_display = ['name', 'player__unique_id']
+  list_display = ['name', 'player__unique_id', 'last_login', 'total_session_time']
   list_select_related = ['player']
   search_fields = ['player__unique_id', 'name']
   inlines = [PlayerStatusLogInlineAdmin]
   readonly_fields = ['player']
 
+  @admin.display(ordering="last_login", boolean=False)
+  def last_login(self, obj):
+    return obj.last_login
+
+  @admin.display(ordering="total_session_time", boolean=False)
+  def total_session_time(self, obj):
+    return obj.total_session_time
+
+  def get_queryset(self, request):
+    qs = super().get_queryset(request)
+    return qs.with_last_login().with_total_session_time()
+
+class PlayerVehicleLogInlineAdmin(admin.TabularInline):
+  model = PlayerVehicleLog
+  readonly_fields = ['character', 'vehicle']
+
 @admin.register(Vehicle)
 class VehicleAdmin(admin.ModelAdmin):
   list_display = ['id', 'name']
   search_fields = ['id', 'name']
+  inlines = [PlayerVehicleLogInlineAdmin]
 
 @admin.register(Company)
 class CompanyAdmin(admin.ModelAdmin):
@@ -81,7 +98,7 @@ class PlayerVehicleLogAdmin(admin.ModelAdmin):
   list_display = ['timestamp', 'character', 'vehicle', 'action']
   list_select_related = ['character', 'character__player', 'vehicle']
   ordering = ['-timestamp']
-  search_fields = ['character__name', 'character__player__unique_id']
+  search_fields = ['character__name', 'character__player__unique_id', 'vehicle__id']
 
 @admin.register(ServerLog)
 class ServerLogAdmin(admin.ModelAdmin):

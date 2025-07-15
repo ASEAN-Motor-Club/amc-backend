@@ -17,6 +17,20 @@ from amc.models import (
 
 players_router = Router()
 
+async def get_players_mod(
+  session,
+  cache_key: str = "mod_online_players_list",
+  cache_ttl: int = 1
+):
+  cached_data = cache.get(cache_key)
+  if cached_data:
+    return cached_data
+
+  async with session.get('/players') as resp:
+    players = (await resp.json()).get('data', [])
+  cache.set(cache_key, players, timeout=cache_ttl)
+  return players
+
 async def get_players(
   session,
   cache_key: str = "online_players_list",
@@ -43,7 +57,11 @@ async def list_players(request):
 @players_router.get('/{unique_id}', response=PlayerSchema)
 async def get_player(request, unique_id):
   """Retrieve a single player"""
-  player = await Player.objects.with_total_session_time().aget(unique_id=unique_id)
+  player = await (Player.objects
+    .with_total_session_time()
+    .with_last_login()
+    .aget(unique_id=unique_id)
+  )
   return player
 
 
@@ -72,7 +90,7 @@ async def streaming_player_positions(request):
 
   async def event_stream():
     while True:
-      players = await get_players(session)
+      players = await get_players_mod(session)
       player_positions = {
         player['PlayerName']: {
           **{
