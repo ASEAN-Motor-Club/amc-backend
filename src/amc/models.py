@@ -181,6 +181,14 @@ class PlayerStatusLog(models.Model):
   )
   original_log = models.ForeignKey(ServerLog, on_delete=models.CASCADE, null=True)
 
+  @property
+  def login_time(self):
+    return self.timespan.lower
+
+  @property
+  def logout_time(self):
+    return self.timespan.upper
+
   class Meta:
     ordering = ['-timespan__startswith']
 
