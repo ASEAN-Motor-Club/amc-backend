@@ -222,7 +222,9 @@ class PlayerVehicleLog(models.Model):
 
   timestamp = models.DateTimeField()
   character = models.ForeignKey(Character, on_delete=models.CASCADE, related_name='vehicle_logs')
-  vehicle = models.ForeignKey(Vehicle, on_delete=models.CASCADE)
+  vehicle = models.ForeignKey(Vehicle, on_delete=models.CASCADE, null=True)
+  vehicle_game_id = models.PositiveBigIntegerField(null=True)
+  vehicle_name = models.CharField(max_length=100, null=True)
   action = models.CharField(max_length=2, choices=Action)
 
   @classmethod

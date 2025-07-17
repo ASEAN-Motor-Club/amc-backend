@@ -91,13 +91,8 @@ class CharacterAdmin(admin.ModelAdmin):
 
 class PlayerVehicleLogInlineAdmin(admin.TabularInline):
   model = PlayerVehicleLog
-  readonly_fields = ['character', 'vehicle']
-
-@admin.register(Vehicle)
-class VehicleAdmin(admin.ModelAdmin):
-  list_display = ['id', 'name']
-  search_fields = ['id', 'name']
-  inlines = [PlayerVehicleLogInlineAdmin]
+  readonly_fields = ['character']
+  exclude = ['vehicle']
 
 @admin.register(Company)
 class CompanyAdmin(admin.ModelAdmin):
@@ -157,11 +152,12 @@ class PlayerStatusLogAdmin(admin.ModelAdmin):
 
 @admin.register(PlayerVehicleLog)
 class PlayerVehicleLogAdmin(admin.ModelAdmin):
-  list_display = ['timestamp', 'character', 'vehicle', 'action']
-  list_select_related = ['character', 'character__player', 'vehicle']
+  list_display = ['timestamp', 'character', 'vehicle_game_id', 'vehicle_name', 'action']
+  list_select_related = ['character', 'character__player']
   ordering = ['-timestamp']
-  search_fields = ['character__name', 'character__player__unique_id', 'vehicle__id']
-  readonly_fields = ['character', 'vehicle']
+  search_fields = ['character__name', 'character__player__unique_id', 'vehicle_game_id']
+  readonly_fields = ['character']
+  exclude = ['vehicle']
 
 @admin.register(ServerLog)
 class ServerLogAdmin(admin.ModelAdmin):

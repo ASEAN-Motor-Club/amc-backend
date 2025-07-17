@@ -245,8 +245,8 @@ class ProcessLogEventTestCase(TestCase):
       await PlayerVehicleLog.objects.filter(
         character__name=event.player_name,
         character__player__unique_id=event.player_id,
-        vehicle__name=event.vehicle_name,
-        vehicle__id=event.vehicle_id,
+        vehicle_name=event.vehicle_name,
+        vehicle_game_id=event.vehicle_id,
         action=PlayerVehicleLog.Action.ENTERED
       ).aexists()
     )
@@ -264,8 +264,8 @@ class ProcessLogEventTestCase(TestCase):
       await PlayerVehicleLog.objects.filter(
         character__name=event.player_name,
         character__player__unique_id=event.player_id,
-        vehicle__name=event.vehicle_name,
-        vehicle__id=event.vehicle_id,
+        vehicle_name=event.vehicle_name,
+        vehicle_game_id=event.vehicle_id,
         action=PlayerVehicleLog.Action.EXITED
       ).aexists()
     )

@@ -212,12 +212,12 @@ async def process_log_event(event: LogEvent, ctx = {}):
 
     case PlayerVehicleLogEvent(timestamp, player_name, player_id, vehicle_name, vehicle_id):
       action = PlayerVehicleLog.action_for_event(event)
-      vehicle, _ = await Vehicle.objects.aget_or_create(id=vehicle_id, defaults={'name': vehicle_name})
       character, _, _ = await aget_or_create_character(player_name, player_id)
       await PlayerVehicleLog.objects.acreate(
         timestamp=timestamp,
         character=character, 
-        vehicle=vehicle,
+        vehicle_game_id=vehicle_id,
+        vehicle_name=vehicle_name,
         action=action,
       )
 
