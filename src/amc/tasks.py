@@ -39,22 +39,23 @@ from amc.game_server import announce
 
 
 def get_welcome_message(last_login, player_name):
-  if last_login is None:
+  if not last_login:
     return f"Welcome {player_name}! Use /bot to ask me anything. Join the discord at aseanmotorclub.com. Have fun!"
   sec_since_login = (timezone.now() - last_login).seconds
   if sec_since_login > (3600 * 24 * 7):
     return f"Long time no see! Welcome back {player_name}"
   if sec_since_login > 3600:
     return f"Welcome back {player_name}!"
+  return None
 
 
 async def aget_or_create_character(player_name, player_id):
   player, _ = await Player.objects.aget_or_create(unique_id=player_id)
-  character, _ = await (Character.objects
+  character, character_created = await (Character.objects
     .with_last_login()
     .aget_or_create(player=player, name=player_name)
   )
-  return (character, player)
+  return (character, player, character_created)
 
 
 async def process_login_event(character_id, timestamp):
@@ -170,7 +171,7 @@ async def process_log_event(event: LogEvent, ctx = {}):
 
   match event:
     case PlayerChatMessageLogEvent(timestamp, player_name, player_id, message):
-      character, _ = await aget_or_create_character(player_name, player_id)
+      character, _, _ = await aget_or_create_character(player_name, player_id)
       await PlayerChatLog.objects.acreate(
         timestamp=timestamp,
         character=character, 
@@ -211,8 +212,8 @@ async def process_log_event(event: LogEvent, ctx = {}):
 
     case PlayerVehicleLogEvent(timestamp, player_name, player_id, vehicle_name, vehicle_id):
       action = PlayerVehicleLog.action_for_event(event)
-      character, _ = await aget_or_create_character(player_name, player_id)
       vehicle, _ = await Vehicle.objects.aget_or_create(id=vehicle_id, defaults={'name': vehicle_name})
+      character, _, _ = await aget_or_create_character(player_name, player_id)
       await PlayerVehicleLog.objects.acreate(
         timestamp=timestamp,
         character=character, 
@@ -221,16 +222,19 @@ async def process_log_event(event: LogEvent, ctx = {}):
       )
 
     case PlayerLoginLogEvent(timestamp, player_name, player_id):
-      character, _ = await aget_or_create_character(player_name, player_id)
+      character, _, character_created = await aget_or_create_character(player_name, player_id)
       if ctx.get('startup_time') and timestamp > ctx.get('startup_time'):
-        try: 
-          welcome_message = get_welcome_message(character.last_login, player_name)
+        try:
+          last_login = character.last_login if not character_created else None
+          welcome_message = get_welcome_message(last_login, player_name)
           if welcome_message:
             asyncio.create_task(
               announce(welcome_message, http_client)
             )
-        except Exception:
-          pass
+        except Exception as e:
+          asyncio.create_task(
+            announce(f'Failed to greet player: {e}', http_client)
+          )
       await process_login_event(character.id, timestamp)
       if discord_client and ctx.get('startup_time') and timestamp > ctx.get('startup_time'):
         asyncio.run_coroutine_threadsafe(
@@ -243,7 +247,7 @@ async def process_log_event(event: LogEvent, ctx = {}):
         )
 
     case PlayerLogoutLogEvent(timestamp, player_name, player_id):
-      character, _ = await aget_or_create_character(player_name, player_id)
+      character, _, _ = await aget_or_create_character(player_name, player_id)
       await process_logout_event(character.id, timestamp)
       if discord_client and ctx.get('startup_time') and timestamp > ctx.get('startup_time'):
         asyncio.run_coroutine_threadsafe(
@@ -268,7 +272,7 @@ async def process_log_event(event: LogEvent, ctx = {}):
       await process_logout_event(character.id, timestamp)
 
     case CompanyAddedLogEvent(timestamp, company_name, is_corp, owner_name, owner_id) | CompanyRemovedLogEvent(timestamp, company_name, is_corp, owner_name, owner_id):
-      character, _ = await aget_or_create_character(owner_name, owner_id)
+      character, _, _ = await aget_or_create_character(owner_name, owner_id)
       company, company_created = await Company.objects.aget_or_create(
         name=company_name,
         owner=character,
