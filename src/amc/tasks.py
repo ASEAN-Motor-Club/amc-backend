@@ -1,7 +1,6 @@
 import re
 import asyncio
-from datetime import datetime
-from zoneinfo import ZoneInfo
+from django.utils import timezone
 from django.db import connection
 from django.db.models import Exists, OuterRef
 from django.conf import settings
@@ -42,7 +41,7 @@ from amc.game_server import announce
 def get_welcome_message(last_login, player_name):
   if last_login is None:
     return f"Welcome {player_name}! Use /bot to ask me anything. Join the discord at aseanmotorclub.com. Have fun!"
-  sec_since_login = (datetime.now(ZoneInfo("UTC")) - last_login).seconds
+  sec_since_login = (timezone.now() - last_login).seconds
   if sec_since_login > (3600 * 24 * 7):
     return f"Long time no see! Welcome back {player_name}"
   if sec_since_login > 3600:
@@ -189,7 +188,7 @@ async def process_log_event(event: LogEvent, ctx = {}):
           character=character, 
           song=command_match.group('song'),
         )
-      if discord_client and timestamp > ctx['startup_time']:
+      if discord_client and ctx.get('startup_time') and timestamp > ctx.get('startup_time'):
         asyncio.run_coroutine_threadsafe(
           forward_to_discord(
             discord_client,
@@ -200,7 +199,7 @@ async def process_log_event(event: LogEvent, ctx = {}):
         )
 
     case AnnouncementLogEvent(timestamp, message):
-      if discord_client and timestamp > ctx['startup_time']:
+      if discord_client and ctx.get('startup_time') and timestamp > ctx.get('startup_time'):
         asyncio.run_coroutine_threadsafe(
           forward_to_discord(
             discord_client,
@@ -223,14 +222,17 @@ async def process_log_event(event: LogEvent, ctx = {}):
 
     case PlayerLoginLogEvent(timestamp, player_name, player_id):
       character, _ = await aget_or_create_character(player_name, player_id)
-      if timestamp > ctx['startup_time']:
-        welcome_message = get_welcome_message(character.last_login, player_name)
-        if welcome_message:
-          asyncio.create_task(
-            announce(welcome_message, http_client)
-          )
+      if ctx.get('startup_time') and timestamp > ctx.get('startup_time'):
+        try: 
+          welcome_message = get_welcome_message(character.last_login, player_name)
+          if welcome_message:
+            asyncio.create_task(
+              announce(welcome_message, http_client)
+            )
+        except Exception:
+          pass
       await process_login_event(character.id, timestamp)
-      if discord_client and timestamp > ctx['startup_time']:
+      if discord_client and ctx.get('startup_time') and timestamp > ctx.get('startup_time'):
         asyncio.run_coroutine_threadsafe(
           forward_to_discord(
             discord_client,
@@ -243,7 +245,7 @@ async def process_log_event(event: LogEvent, ctx = {}):
     case PlayerLogoutLogEvent(timestamp, player_name, player_id):
       character, _ = await aget_or_create_character(player_name, player_id)
       await process_logout_event(character.id, timestamp)
-      if discord_client and timestamp > ctx['startup_time']:
+      if discord_client and ctx.get('startup_time') and timestamp > ctx.get('startup_time'):
         asyncio.run_coroutine_threadsafe(
           forward_to_discord(
             discord_client,
@@ -288,7 +290,7 @@ async def process_log_event(event: LogEvent, ctx = {}):
         character=character,
         depot_name=depot_name,
       )
-      if discord_client and timestamp > ctx['startup_time']:
+      if discord_client and ctx.get('startup_time') and timestamp > ctx.get('startup_time'):
         asyncio.run_coroutine_threadsafe(
           forward_to_discord(
             discord_client,

@@ -76,7 +76,6 @@ class CharacterAdmin(admin.ModelAdmin):
   search_fields = ['player__unique_id', 'name']
   inlines = [PlayerStatusLogInlineAdmin]
   readonly_fields = ['player', 'last_login', 'total_session_time']
-  ordering = [F('last_login').desc(nulls_last=True)]
 
   @admin.display(ordering="last_login", boolean=False)
   def last_login(self, obj):
@@ -88,7 +87,7 @@ class CharacterAdmin(admin.ModelAdmin):
 
   def get_queryset(self, request):
     qs = super().get_queryset(request)
-    return qs.with_last_login().with_total_session_time()
+    return qs.with_last_login().with_total_session_time().order_by(F('last_login').desc(nulls_last=True))
 
 class PlayerVehicleLogInlineAdmin(admin.TabularInline):
   model = PlayerVehicleLog
