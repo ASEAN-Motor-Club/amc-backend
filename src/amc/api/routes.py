@@ -115,8 +115,8 @@ async def streaming_player_positions(request):
 
 stats_router = Router()
 
-@stats_router.get('/depots_restocked/', response=list[LeaderboardsRestockDepotCharacterSchema])
-async def depots_restocked(request, limit=10, now=timezone.now(), days=7):
+@stats_router.get('/depots_restocked_leaderboard/', response=list[LeaderboardsRestockDepotCharacterSchema])
+async def depots_restocked_leaderboard(request, limit=10, now=timezone.now(), days=7):
   qs = Character.objects.annotate(
     depots_restocked=Count(
       'restock_depot_logs',

@@ -107,7 +107,7 @@ class LeaderboardsAPITest(TestCase):
       timestamp=timezone.now(),
       depot_name='test'
     )
-    response = await self.client.get("/depots_restocked/")
+    response = await self.client.get("/depots_restocked_leaderboard/")
 
     self.assertEqual(response.status_code, 200)
     self.assertEqual(response.json()[0]['depots_restocked'], 1)
