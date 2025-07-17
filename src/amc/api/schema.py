@@ -46,3 +46,9 @@ class PositionSchema(Schema):
   x: float
   y: float
   z: float
+
+
+class LeaderboardsRestockDepotCharacterSchema(CharacterSchema):
+  depots_restocked: int
+
+

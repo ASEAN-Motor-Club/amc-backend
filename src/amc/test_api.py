@@ -6,6 +6,7 @@ from ninja.testing import TestAsyncClient
 from amc.api.routes import (
   players_router,
   characters_router,
+  stats_router,
 )
 from amc.factories import (
   PlayerFactory,
@@ -13,6 +14,7 @@ from amc.factories import (
 )
 from amc.models import (
   PlayerStatusLog,
+  PlayerRestockDepotLog
 )
 
 class PlayersAPITest(TestCase):
@@ -21,7 +23,7 @@ class PlayersAPITest(TestCase):
 
   async def test_get_player(self):
     player = await sync_to_async(PlayerFactory)()
-    response = await self.client.get(f"/{player.unique_id}")
+    response = await self.client.get(f"/{player.unique_id}/")
 
     self.assertEqual(response.status_code, 200)
     self.assertEqual(response.json(), {
@@ -40,7 +42,7 @@ class PlayersAPITest(TestCase):
       character=character,
       timespan=(now - timedelta(days=1), now - timedelta(hours=1))
     )
-    response = await self.client.get(f"/{player.unique_id}")
+    response = await self.client.get(f"/{player.unique_id}/")
 
     self.assertEqual(response.status_code, 200)
     self.assertEqual(response.json(), {
@@ -52,7 +54,7 @@ class PlayersAPITest(TestCase):
 
   async def test_get_player_characters(self):
     player = await sync_to_async(PlayerFactory)()
-    response = await self.client.get(f"/{player.unique_id}/characters")
+    response = await self.client.get(f"/{player.unique_id}/characters/")
 
     self.assertEqual(response.status_code, 200)
     self.assertEqual(response.json(), [
@@ -78,7 +80,7 @@ class CharactersAPITest(TestCase):
 
   async def test_get_character(self):
     character = await sync_to_async(CharacterFactory)()
-    response = await self.client.get(f"/{character.id}")
+    response = await self.client.get(f"/{character.id}/")
 
     self.assertEqual(response.status_code, 200)
     self.assertEqual(response.json(), {
@@ -93,4 +95,20 @@ class CharactersAPITest(TestCase):
       "wrecker_level": None,
       "racer_level": None,
     })
+
+class LeaderboardsAPITest(TestCase):
+  def setUp(self):
+    self.client = TestAsyncClient(stats_router)
+
+  async def test_get_character(self):
+    character = await sync_to_async(CharacterFactory)()
+    await PlayerRestockDepotLog.objects.acreate(
+      character=character,
+      timestamp=timezone.now(),
+      depot_name='test'
+    )
+    response = await self.client.get("/depots_restocked/")
+
+    self.assertEqual(response.status_code, 200)
+    self.assertEqual(response.json()[0]['depots_restocked'], 1)
 

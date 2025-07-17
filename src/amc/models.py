@@ -25,6 +25,7 @@ class PlayerQuerySet(models.QuerySet):
     return self.annotate(
       last_login=Max(
         'characters__status_logs__timespan__startswith',
+        default=None
       )
     )
 
@@ -158,14 +159,14 @@ class ServerLog(models.Model):
 
 @final
 class BotInvocationLog(models.Model):
-  character = models.ForeignKey(Character, on_delete=models.CASCADE)
+  character = models.ForeignKey(Character, on_delete=models.CASCADE, related_name='bot_invocation_logs')
   timestamp = models.DateTimeField()
   prompt = models.TextField()
 
 
 @final
 class SongRequestLog(models.Model):
-  character = models.ForeignKey(Character, on_delete=models.CASCADE)
+  character = models.ForeignKey(Character, on_delete=models.CASCADE, related_name='song_request_logs')
   timestamp = models.DateTimeField()
   song = models.TextField()
 
@@ -195,7 +196,7 @@ class PlayerStatusLog(models.Model):
 
 @final
 class PlayerChatLog(models.Model):
-  character = models.ForeignKey(Character, on_delete=models.CASCADE)
+  character = models.ForeignKey(Character, on_delete=models.CASCADE, related_name='chat_logs')
   timestamp = models.DateTimeField()
   text = models.TextField()
 
@@ -220,7 +221,7 @@ class PlayerVehicleLog(models.Model):
     SOLD = "SO", _("Sold")
 
   timestamp = models.DateTimeField()
-  character = models.ForeignKey(Character, on_delete=models.CASCADE)
+  character = models.ForeignKey(Character, on_delete=models.CASCADE, related_name='vehicle_logs')
   vehicle = models.ForeignKey(Vehicle, on_delete=models.CASCADE)
   action = models.CharField(max_length=2, choices=Action)
 

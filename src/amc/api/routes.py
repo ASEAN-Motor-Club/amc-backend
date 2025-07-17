@@ -1,18 +1,22 @@
 import asyncio
 import aiohttp
 import json
+from datetime import timedelta
 from django.core.cache import cache
+from django.db.models import Count, Q
+from django.utils import timezone
 from ninja import Router
 from django.http import StreamingHttpResponse
 from .schema import (
   ActivePlayerSchema,
   PlayerSchema,
   CharacterSchema,
+  LeaderboardsRestockDepotCharacterSchema,
 )
 from django.conf import settings
 from amc.models import (
   Player,
-  Character
+  Character,
 )
 
 players_router = Router()
@@ -46,7 +50,7 @@ async def get_players(
   return players
 
 
-@players_router.get('', response=list[ActivePlayerSchema])
+@players_router.get('/', response=list[ActivePlayerSchema])
 async def list_players(request):
   """List all the players"""
   async with aiohttp.ClientSession(base_url=settings.GAME_SERVER_API_URL) as session:
@@ -54,7 +58,7 @@ async def list_players(request):
   return players
 
 
-@players_router.get('/{unique_id}', response=PlayerSchema)
+@players_router.get('/{unique_id}/', response=PlayerSchema)
 async def get_player(request, unique_id):
   """Retrieve a single player"""
   player = await (Player.objects
@@ -65,7 +69,7 @@ async def get_player(request, unique_id):
   return player
 
 
-@players_router.get('/{unique_id}/characters', response=list[CharacterSchema])
+@players_router.get('/{unique_id}/characters/', response=list[CharacterSchema])
 async def get_player_characters(request, unique_id):
   """Retrieve a single player"""
   return [
@@ -75,7 +79,7 @@ async def get_player_characters(request, unique_id):
 
 
 characters_router = Router()
-@characters_router.get('/{id}', response=CharacterSchema)
+@characters_router.get('/{id}/', response=CharacterSchema)
 async def get_character(request, id):
   """Retrieve a single character"""
   character = await Character.objects.aget(id=id)
@@ -84,7 +88,7 @@ async def get_character(request, id):
 
 player_positions_router = Router()
 
-@player_positions_router.get('')
+@player_positions_router.get('/')
 async def streaming_player_positions(request):
   session = request.state["aiohttp_client"]
 
@@ -107,4 +111,20 @@ async def streaming_player_positions(request):
       await asyncio.sleep(1)
 
   return StreamingHttpResponse(event_stream(), content_type="text/event-stream")
+
+
+stats_router = Router()
+
+@stats_router.get('/depots_restocked/', response=list[LeaderboardsRestockDepotCharacterSchema])
+async def depots_restocked(request, limit=10, now=timezone.now(), days=7):
+  qs = Character.objects.annotate(
+    depots_restocked=Count(
+      'restock_depot_logs',
+      distinct=True,
+      filter=Q(restock_depot_logs__timestamp__gte=now - timedelta(days=days))
+    ),
+  )
+
+  return [char async for char in qs.order_by('-depots_restocked')[:limit]]
+
 
