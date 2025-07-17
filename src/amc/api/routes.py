@@ -97,7 +97,8 @@ async def streaming_player_positions(request):
             axis.lower(): value
             for axis, value in player['Location'].items()
           },
-          'vehicleKey': player['VehicleKey'],
+          'vehicle_key': player['VehicleKey'],
+          'unique_id': player['UniqueID'],
         }
         for player in players
       }
