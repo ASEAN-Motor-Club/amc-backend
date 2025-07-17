@@ -1,5 +1,7 @@
 import re
 import asyncio
+from datetime import datetime
+from zoneinfo import ZoneInfo
 from django.db import connection
 from django.db.models import Exists, OuterRef
 from django.conf import settings
@@ -34,11 +36,25 @@ from amc.models import (
   Vehicle,
   Company,
 )
+from amc.game_server import announce
+
+
+def get_welcome_message(last_login, player_name):
+  if last_login is None:
+    return f"Welcome {player_name}! Use /bot to ask me anything. Join the discord at aseanmotorclub.com. Have fun!"
+  sec_since_login = (datetime.now(ZoneInfo("UTC")) - last_login).seconds
+  if sec_since_login > (3600 * 24 * 7):
+    return f"Long time no see! Welcome back {player_name}"
+  if sec_since_login > 3600:
+    return f"Welcome back {player_name}!"
 
 
 async def aget_or_create_character(player_name, player_id):
   player, _ = await Player.objects.aget_or_create(unique_id=player_id)
-  character, _ = await Character.objects.aget_or_create(player=player, name=player_name)
+  character, _ = await (Character.objects
+    .with_last_login()
+    .aget_or_create(player=player, name=player_name)
+  )
   return (character, player)
 
 
@@ -149,8 +165,9 @@ async def forward_to_discord(client, channel_id, content):
     await channel.send(content)
 
 
-async def process_log_event(event: LogEvent, ctx = None):
+async def process_log_event(event: LogEvent, ctx = {}):
   discord_client = ctx.get('discord_client')
+  http_client = ctx.get('http_client')
 
   match event:
     case PlayerChatMessageLogEvent(timestamp, player_name, player_id, message):
@@ -206,6 +223,12 @@ async def process_log_event(event: LogEvent, ctx = None):
 
     case PlayerLoginLogEvent(timestamp, player_name, player_id):
       character, _ = await aget_or_create_character(player_name, player_id)
+      if timestamp > ctx['startup_time']:
+        welcome_message = get_welcome_message(character.last_login, player_name)
+        if welcome_message:
+          asyncio.create_task(
+            announce(welcome_message, http_client)
+          )
       await process_login_event(character.id, timestamp)
       if discord_client and timestamp > ctx['startup_time']:
         asyncio.run_coroutine_threadsafe(

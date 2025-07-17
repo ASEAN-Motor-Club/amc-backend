@@ -118,6 +118,10 @@
             fqdn = lib.mkOption {
               type = lib.types.str;
             };
+            allowedHosts = lib.mkOption {
+              type = lib.types.listOf lib.types.str;
+              default = [];
+            };
             port = lib.mkOption {
               type = lib.types.int;
               default = 8000;
@@ -143,6 +147,14 @@
                 "/" = {
                   proxyPass = "http://127.0.0.1:${toString cfg.port}/api/";
                   recommendedProxySettings = true;
+                  extraConfig = ''
+                    add_header 'Access-Control-Allow-Origin' '*' always;
+                    add_header 'Access-Control-Allow-Methods' 'POST, PUT, DELETE, GET, PATCH, OPTIONS' always;
+                  '';
+                };
+                "/api" = {
+                  proxyPass = "http://127.0.0.1:${toString cfg.port}";
+                  recommendedProxySettings = true;
                 };
                 "/admin" = {
                   proxyPass = "http://127.0.0.1:${toString cfg.port}";
@@ -157,6 +169,7 @@
             };
             containers.amc-backend = {
               autoStart = true;
+              restartIfChanged = true;
               bindMounts."/etc/ssh/ssh_host_ed25519_key".isReadOnly = true;
               config = { config, pkgs, ... }: {
                 imports = [
@@ -172,13 +185,14 @@
                 services.amc-backend = cfg.backendSettings // {
                   enable = lib.mkDefault true;
                   port = lib.mkDefault cfg.port;
-                  allowedHosts = lib.mkDefault [ cfg.fqdn ];
+                  allowedHosts = lib.mkDefault ([ cfg.fqdn ] ++ cfg.allowedHosts);
                   environmentFile = config.age.secrets.backend.path;
                 };
               };
             };
             containers.amc-log-listener = {
               autoStart = true;
+              restartIfChanged = false;
               config = { config, pkgs, ... }: {
                 imports = [
                   self.nixosModules.log-listener

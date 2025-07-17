@@ -101,6 +101,7 @@ dependencies = [
     { name = "psycopg", extra = ["binary"] },
     { name = "uvicorn", extra = ["standard"] },
     { name = "uvicorn-worker" },
+    { name = "yarl" },
 ]
 
 [package.dev-dependencies]
@@ -122,6 +123,7 @@ requires-dist = [
     { name = "psycopg", extras = ["binary"], specifier = ">=3.2.9" },
     { name = "uvicorn", extras = ["standard"], specifier = ">=0.34.3" },
     { name = "uvicorn-worker", specifier = ">=0.3.0" },
+    { name = "yarl", specifier = ">=1.20.1" },
 ]
 
 [package.metadata.requires-dev]

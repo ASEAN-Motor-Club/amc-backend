@@ -1,4 +1,5 @@
 import asyncio
+import aiohttp
 from concurrent.futures import ThreadPoolExecutor
 import threading
 from arq.connections import RedisSettings
@@ -41,12 +42,16 @@ async def run_discord():
 async def startup(ctx):
   global bot_task_handle
   ctx['startup_time'] = timezone.now()
+  ctx['http_client'] = aiohttp.ClientSession(base_url=settings.GAME_SERVER_API_URL)
   if settings.DISCORD_TOKEN:
     ctx['discord_client'] = client
     bot_task_handle = asyncio.create_task(run_discord())
 
 
 async def shutdown(ctx):
+  if http_client := ctx.get('http_client'):
+    await http_client.close()
+
   if bot_task_handle:
     asyncio.run_coroutine_threadsafe(client.close(), client.loop)
     await bot_task_handle
