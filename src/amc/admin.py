@@ -1,10 +1,14 @@
 from django.contrib import admin
+from django.utils import timezone
+from django.db.models import F, Count
+from django.contrib.postgres.aggregates import ArrayAgg
 from .models import (
   Player,
   Character,
   Vehicle,
   Company,
   PlayerChatLog,
+  PlayerRestockDepotLog,
   PlayerVehicleLog,
   PlayerStatusLog,
   ServerLog,
@@ -15,17 +19,55 @@ from .models import (
 class CharacterInlineAdmin(admin.TabularInline):
   model = Character
   readonly_fields = ['name']
+  show_change_link = True
+  fields = ['name', 'last_login', 'total_session_time']
+  readonly_fields = ['name', 'last_login', 'total_session_time']
+
+  def last_login(self, character):
+    if character.last_login is not None:
+      return timezone.localtime(character.last_login)
+
+  def total_session_time(self, character):
+    return character.total_session_time
+
+  def get_queryset(self, request):
+    qs = super().get_queryset(request)
+    return qs.with_last_login().with_total_session_time()
+
 
 @admin.register(Player)
 class PlayerAdmin(admin.ModelAdmin):
-  list_display = ['unique_id']
+  list_display = ['unique_id', 'character_names', 'characters_count']
   search_fields = ['unique_id', 'characters__name']
   inlines = [CharacterInlineAdmin]
 
+  def get_queryset(self, request):
+    qs = super().get_queryset(request)
+    return qs.annotate(
+      character_names=ArrayAgg('characters__name'),
+      characters_count=Count('characters'),
+    )
+
+  def character_names(self, player):
+    return ', '.join(player.character_names)
+
+  @admin.display(ordering="characters_count")
+  def characters_count(self, player):
+    return player.characters_count
+
+
 class PlayerStatusLogInlineAdmin(admin.TabularInline):
   model = PlayerStatusLog
-  readonly_fields = ['character', 'timespan', 'duration']
-  exclude = ['original_log']
+  readonly_fields = ['character', 'login_time', 'logout_time', 'duration']
+  exclude = ['original_log', 'timespan']
+
+  def login_time(self, log):
+    if log.login_time is not None:
+      return timezone.localtime(log.login_time)
+
+  def logout_time(self, log):
+    if log.logout_time is not None:
+      return timezone.localtime(log.logout_time)
 
 @admin.register(Character)
 class CharacterAdmin(admin.ModelAdmin):
@@ -33,7 +75,8 @@ class CharacterAdmin(admin.ModelAdmin):
   list_select_related = ['player']
   search_fields = ['player__unique_id', 'name']
   inlines = [PlayerStatusLogInlineAdmin]
-  readonly_fields = ['player']
+  readonly_fields = ['player', 'last_login', 'total_session_time']
+  ordering = [F('last_login').desc(nulls_last=True)]
 
   @admin.display(ordering="last_login", boolean=False)
   def last_login(self, obj):
@@ -70,6 +113,15 @@ class PlayerChatLogAdmin(admin.ModelAdmin):
   list_select_related = ['character', 'character__player']
   ordering = ['-timestamp']
   search_fields = ['character__name', 'character__player__unique_id']
+  readonly_fields = ['character']
+
+@admin.register(PlayerRestockDepotLog)
+class PlayerRestockDepotLogAdmin(admin.ModelAdmin):
+  list_display = ['timestamp', 'character', 'depot_name']
+  list_select_related = ['character', 'character__player']
+  ordering = ['-timestamp']
+  search_fields = ['character__name', 'character__player__unique_id', 'depot_name']
+  readonly_fields = ['character']
 
 @admin.register(BotInvocationLog)
 class BotInvocationLogAdmin(admin.ModelAdmin):
@@ -77,6 +129,7 @@ class BotInvocationLogAdmin(admin.ModelAdmin):
   list_select_related = ['character', 'character__player']
   ordering = ['-timestamp']
   search_fields = ['character__name', 'character__player__unique_id']
+  readonly_fields = ['character']
 
 @admin.register(SongRequestLog)
 class SongRequestLogAdmin(admin.ModelAdmin):
@@ -84,14 +137,24 @@ class SongRequestLogAdmin(admin.ModelAdmin):
   list_select_related = ['character', 'character__player']
   ordering = ['-timestamp']
   search_fields = ['character__name', 'character__player__unique_id']
+  readonly_fields = ['character']
 
 @admin.register(PlayerStatusLog)
 class PlayerStatusLogAdmin(admin.ModelAdmin):
-  list_display = ['character', 'timespan', 'duration']
+  list_display = ['character', 'login_time', 'logout_time', 'duration']
   list_select_related = ['character', 'character__player']
-  ordering = ['-timespan']
-  readonly_fields = ['character', 'original_log']
+  ordering = [F('timespan__startswith').desc(nulls_last=True)]
+  exclude = ['original_log']
+  readonly_fields = ['character', 'login_time', 'logout_time']
   search_fields = ['character__name', 'character__player__unique_id']
+
+  def login_time(self, log):
+    if log.login_time is not None:
+      return timezone.localtime(log.login_time)
+
+  def logout_time(self, log):
+    if log.logout_time is not None:
+      return timezone.localtime(log.logout_time)
 
 @admin.register(PlayerVehicleLog)
 class PlayerVehicleLogAdmin(admin.ModelAdmin):
@@ -99,6 +162,7 @@ class PlayerVehicleLogAdmin(admin.ModelAdmin):
   list_select_related = ['character', 'character__player', 'vehicle']
   ordering = ['-timestamp']
   search_fields = ['character__name', 'character__player__unique_id', 'vehicle__id']
+  readonly_fields = ['character', 'vehicle']
 
 @admin.register(ServerLog)
 class ServerLogAdmin(admin.ModelAdmin):
