@@ -10,10 +10,8 @@ async def announcement_request(message, session, password=''):
 
 async def announce(message, session, password='', clear_banner=True):
     try:
-        with await announcement_request(message, session, password) as resp:
-            if resp.status != 200:
-                raise Exception(f"API returned non-200 status: {resp.status}")
-        await announcement_request('', session, password)
+        await announcement_request(message, session, password)
+        await announcement_request(' ', session, password)
     except Exception as e:
         print(f"Error sending message: {e}")
         raise e
