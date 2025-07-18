@@ -15,20 +15,24 @@ async def process_event(event):
       'config': event['RaceSetup']
     }
   )
-  game_event, created = await GameEvent.objects.aupdate_or_create(
-    guid=event['EventGuid'],
-    state__lte=event['State'],
-    create_defaults={
-      'name': event['EventName'],
-      'guid': event['EventGuid'],
-      'state': event['State'],
-      'race_setup': race_setup,
-    },
-    defaults={
-      'state': event['State'],
-      'race_setup': race_setup,
-    }
-  )
+  try:
+    game_event = await (GameEvent.objects
+      .filter(
+        guid=event['EventGuid'],
+        state__lte=event['State'],
+      )
+      .alatest('start_time')
+    )
+    game_event.state = event['State']
+    game_event.race_setup = race_setup
+    await game_event.asave()
+  except GameEvent.DoesNotExist:
+    game_event = await GameEvent.objects.acreate(
+      guid=event['EventGuid'],
+      name=event['EventName'],
+      state=event['State'],
+      race_setup=race_setup,
+    )
 
   async def process_player(player_info):
     character, *_ = await Character.objects.aget_or_create_character_player(
