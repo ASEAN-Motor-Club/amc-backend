@@ -5,7 +5,6 @@ from django.contrib.postgres.aggregates import ArrayAgg
 from .models import (
   Player,
   Character,
-  Vehicle,
   Company,
   PlayerChatLog,
   PlayerRestockDepotLog,
@@ -14,6 +13,9 @@ from .models import (
   ServerLog,
   BotInvocationLog,
   SongRequestLog,
+  GameEvent,
+  GameEventCharacter,
+  LapSectionTime,
 )
 
 class CharacterInlineAdmin(admin.TabularInline):
@@ -165,3 +167,22 @@ class ServerLogAdmin(admin.ModelAdmin):
   ordering = ['-timestamp']
   list_filter = ['event_processed']
 
+
+class GameEventCharacterInlineAdmin(admin.TabularInline):
+  model = GameEventCharacter
+  readonly_fields = ['character']
+  show_change_link = True
+
+class LapSectionTimeInlineAdmin(admin.TabularInline):
+  model = LapSectionTime
+
+@admin.register(GameEvent)
+class GameEventAdmin(admin.ModelAdmin):
+  list_display = ['guid', 'name', 'start_time']
+  inlines = [GameEventCharacterInlineAdmin]
+
+@admin.register(GameEventCharacter)
+class GameEventCharacterAdmin(admin.ModelAdmin):
+  list_display = ['character', 'game_event']
+  inlines = [LapSectionTimeInlineAdmin]
+  readonly_fields = ['character']

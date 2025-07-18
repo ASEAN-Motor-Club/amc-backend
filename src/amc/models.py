@@ -1,6 +1,8 @@
 from datetime import timedelta
+from deepdiff import DeepHash
 from django.db import models
 from django.db.models import F, Sum, Max
+from django.contrib.postgres.fields import ArrayField
 from django.utils import timezone
 from django.utils.translation import gettext_lazy as _
 from django.contrib.postgres.fields import DateTimeRangeField
@@ -60,6 +62,15 @@ class CharacterQuerySet(models.QuerySet):
       )
     )
 
+class CharacterManager(models.Manager):
+  async def aget_or_create_character_player(self, player_name, player_id):
+    player, player_created = await Player.objects.aget_or_create(unique_id=player_id)
+    character, character_created = await (self.get_queryset()
+      .with_last_login()
+      .aget_or_create(player=player, name=player_name)
+    )
+    return (character, player, character_created, player_created)
+
 
 @final
 class Character(models.Model):
@@ -74,7 +85,7 @@ class Character(models.Model):
   wrecker_level = models.PositiveIntegerField(null=True)
   racer_level = models.PositiveIntegerField(null=True)
 
-  objects = models.Manager.from_queryset(CharacterQuerySet)()
+  objects = CharacterManager.from_queryset(CharacterQuerySet)()
 
   @override
   def __str__(self):
@@ -113,6 +124,129 @@ class TeamMembership(models.Model):
   @override
   def __str__(self):
     return f"{self.player.discord_name} in {self.team.name}"
+
+
+@final
+class RaceSetup(models.Model):
+  config = models.JSONField(null=True, blank=True)
+  hash = models.CharField(max_length=200, unique=True)
+
+  @staticmethod
+  def calculate_hash(race_setup):
+    hashes = DeepHash(race_setup)
+    return hashes[race_setup]
+
+  @override
+  def __str__(self):
+    try:
+      route_name = self.config['Route']['RouteName']
+      num_laps = self.config['NumLaps']
+      return f"{route_name} ({num_laps} laps) - {self.hash[:8]}"
+    except Exception:
+      return "Unknown race setup"
+
+  @property
+  def num_laps(self):
+    return self.config.get('NumLaps', 0)
+
+  @property
+  def num_sections(self):
+    return len(self.config.get('Route', {}).get('Waypoints', []))
+
+@final
+class ScheduledEvent(models.Model):
+  name = models.CharField(max_length=200)
+  start_time = models.DateTimeField()
+  end_time = models.DateTimeField(null=True, blank=True)
+  discord_event_id = models.CharField(max_length=32, null=True, blank=True, unique=True)
+  discord_thread_id = models.CharField(max_length=32, null=True, blank=True, unique=True)
+  race_setup = models.ForeignKey(RaceSetup, on_delete=models.SET_NULL, null=True, related_name='scheduled_events')
+
+  players = models.ManyToManyField(
+    Player,
+    through='ScheduledEventPlayer',
+    related_name='scheduled_events'
+  )
+
+  @override
+  def __str__(self):
+    return self.name
+
+
+@final
+class ScheduledEventPlayer(models.Model):
+  player = models.ForeignKey(Player, on_delete=models.CASCADE)
+  scheduled_event = models.ForeignKey(ScheduledEvent, on_delete=models.CASCADE)
+
+  class Meta:
+    constraints = [
+      models.UniqueConstraint(
+        fields=["player", "scheduled_event"], name="unique_player_scheduled_event"
+      )
+    ]
+
+
+@final
+class GameEvent(models.Model):
+  name = models.CharField(max_length=200)
+  guid = models.CharField(max_length=32, db_index=True, editable=False)
+  start_time = models.DateTimeField(editable=False, auto_now_add=True)
+  last_updated = models.DateTimeField(editable=False, auto_now=True)
+  scheduled_event = models.ForeignKey(ScheduledEvent, on_delete=models.SET_NULL, null=True, blank=True, related_name='game_events')
+  race_setup = models.ForeignKey(RaceSetup, on_delete=models.SET_NULL, null=True, related_name='game_events')
+  state = models.IntegerField()
+
+  characters = models.ManyToManyField(
+    Character,
+    through='GameEventCharacter',
+    related_name='game_events'
+  )
+
+  @override
+  def __str__(self):
+    return self.name
+
+
+@final
+class GameEventCharacter(models.Model):
+  character = models.ForeignKey(Character, on_delete=models.CASCADE)
+  game_event = models.ForeignKey(GameEvent, on_delete=models.CASCADE)
+  rank = models.IntegerField() # raw game value
+  laps = models.IntegerField(default=0)
+  section_index = models.IntegerField(default=-1)
+  last_section_total_time_seconds = models.FloatField()
+  best_lap_time = models.FloatField()
+  lap_times = ArrayField( # raw game value
+    models.FloatField()
+  )
+  wrong_engine = models.BooleanField()
+  wrong_vehicle = models.BooleanField()
+  disqualified = models.BooleanField()
+  finished = models.BooleanField()
+
+  class Meta:
+    constraints = [
+      models.UniqueConstraint(
+        fields=["character", "game_event"], name="unique_character_game_event"
+      )
+    ]
+
+
+@final
+class LapSectionTime(models.Model):
+  game_event_character = models.ForeignKey(GameEventCharacter, on_delete=models.CASCADE, related_name='lap_section_times')
+  section_index = models.IntegerField()
+  lap = models.IntegerField()
+  rank = models.IntegerField()
+  total_time_seconds = models.FloatField()
+
+  class Meta:
+    constraints = [
+      models.UniqueConstraint(
+        fields=["game_event_character", "section_index", "lap"], name="unique_event_lap_section_time"
+      )
+    ]
+
 
 
 @final
