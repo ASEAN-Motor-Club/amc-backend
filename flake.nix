@@ -176,6 +176,9 @@
                   self.nixosModules.backend
                   ragenix.nixosModules.default
                 ];
+                environment.variables = {
+                  inherit (mkPostgisDeps pkgs) GEOS_LIBRARY_PATH GDAL_LIBRARY_PATH;
+                };
                 age.identityPaths = [ "/etc/ssh/ssh_host_ed25519_key" ];
                 age.secrets.backend = lib.mkIf (cfg.secretFile != null) {
                   file = cfg.secretFile;
@@ -268,7 +271,11 @@
                 cfg.user
               ];
               ensureUsers = [
-                { name = cfg.user; ensureDBOwnership = true; }
+                {
+                  name = cfg.user;
+                  ensureDBOwnership = true;
+                  ensureClauses.superuser = true;
+                }
               ];
               settings = {
                 client_encoding = "UTF8";
@@ -310,6 +317,7 @@
                 inherit (mkPostgisDeps pkgs) GEOS_LIBRARY_PATH GDAL_LIBRARY_PATH;
                 DJANGO_STATIC_ROOT = self.packages.x86_64-linux.staticRoot;
                 ALLOWED_HOSTS = lib.strings.concatStringsSep " " cfg.allowedHosts;
+                DJANGO_SETTINGS_MODULE = "amc_backend.settings";
               } // cfg.environment;
               restartIfChanged = true;
               serviceConfig = {
@@ -354,6 +362,7 @@
               description = "Migrate backend db";
               environment = {
                 DJANGO_SETTINGS_MODULE = "amc_backend.settings";
+                inherit (mkPostgisDeps pkgs) GEOS_LIBRARY_PATH GDAL_LIBRARY_PATH;
               } // cfg.environment;
               restartIfChanged = false;
               serviceConfig = {
@@ -363,7 +372,7 @@
                 EnvironmentFile = cfg.environmentFile;
               };
               script = ''
-                ${self.packages.x86_64-linux.default}/bin/django-admin migrate
+                ${self.packages.x86_64-linux.default}/bin/amc-manage migrate
               '';
             };
             environment.systemPackages = [

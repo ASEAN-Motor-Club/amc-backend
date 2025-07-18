@@ -19,6 +19,8 @@ dependencies = [
     "yarl>=1.20.1",
     "deepdiff>=8.5.0",
 ]
+[project.scripts]
+amc-manage = "manage:main"
 
 [build-system]
 requires = ["hatchling"]
@@ -35,9 +37,11 @@ allowedUntypedLibraries = [
 
 [tool.hatch.build.targets.wheel]
 sources = ["src"]
+include = ["src/manage.py"]
 packages = [
   "src/amc_backend",
   "src/amc",
+  "src/manage.py",
 ]
 
 [tool.uv.workspace]
