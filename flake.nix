@@ -358,6 +358,25 @@
               '';
             };
 
+            systemd.services.dummy-server = {
+              wantedBy = [ "multi-user.target" ]; 
+              after = [ "network.target" ];
+              description = "Dummy server";
+              environment = {
+              } // cfg.environment;
+              restartIfChanged = true;
+              serviceConfig = {
+                Type = "simple";
+                User = cfg.user;
+                Group = cfg.group;
+                Restart = "on-failure";
+                RestartSec = "10";
+              };
+              script = ''
+                ${self.packages.x86_64-linux.scripts}/bin/dummy_server
+              '';
+            };
+
             systemd.services.amc-backend-migrate = {
               description = "Migrate backend db";
               environment = {
