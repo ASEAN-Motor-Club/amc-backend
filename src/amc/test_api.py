@@ -1,11 +1,14 @@
 from datetime import timedelta
+from urllib.parse import quote
 from django.utils import timezone
+from django.contrib.gis.geos import Point
 from asgiref.sync import sync_to_async
 from django.test import TestCase
 from ninja.testing import TestAsyncClient
 from amc.api.routes import (
   players_router,
   characters_router,
+  player_locations_router,
   stats_router,
 )
 from amc.factories import (
@@ -14,7 +17,8 @@ from amc.factories import (
 )
 from amc.models import (
   PlayerStatusLog,
-  PlayerRestockDepotLog
+  PlayerRestockDepotLog,
+  CharacterLocation,
 )
 
 class PlayersAPITest(TestCase):
@@ -111,4 +115,59 @@ class LeaderboardsAPITest(TestCase):
 
     self.assertEqual(response.status_code, 200)
     self.assertEqual(response.json()[0]['depots_restocked'], 1)
+
+class PlayerLocationsAPITest(TestCase):
+  def setUp(self):
+    self.client = TestAsyncClient(player_locations_router)
+
+  async def test_list_positions(self):
+    character = await sync_to_async(CharacterFactory)()
+    await CharacterLocation.objects.acreate(
+      character=character,
+      timestamp=timezone.now() - timedelta(hours=3),
+      location=Point(1, 1, 1)
+    )
+    start_time = timezone.now() - timedelta(days=3)
+    start_time_str = quote(start_time.isoformat())
+    end_time = timezone.now()
+    end_time_str = quote(end_time.isoformat())
+    response = await self.client.get(f"/?start_time={start_time_str}&end_time={end_time_str}")
+
+    self.assertEqual(response.status_code, 200)
+    self.assertEqual(response.json()[0]['location']['x'], 1.0)
+
+  async def test_list_positions_character(self):
+    player = await sync_to_async(PlayerFactory)()
+    character = await player.characters.afirst()
+
+    await CharacterLocation.objects.acreate(
+      character=character,
+      timestamp=timezone.now() - timedelta(hours=5),
+      location=Point(1, 1, 1)
+    )
+    await CharacterLocation.objects.acreate(
+      character=character,
+      timestamp=timezone.now() - timedelta(hours=4),
+      location=Point(1, 1, 1)
+    )
+    await CharacterLocation.objects.acreate(
+      character=character,
+      timestamp=timezone.now() - timedelta(hours=3),
+      location=Point(1, 1, 1)
+    )
+    await CharacterLocation.objects.acreate(
+      character=character,
+      timestamp=timezone.now() - timedelta(hours=2),
+      location=Point(1, 1, 1)
+    )
+    start_time = timezone.now() - timedelta(days=3)
+    start_time_str = quote(start_time.isoformat())
+    end_time = timezone.now()
+    end_time_str = quote(end_time.isoformat())
+    response = await self.client.get(f"/?start_time={start_time_str}&end_time={end_time_str}&player_id={player.unique_id}&num_samples=2")
+
+    self.assertEqual(response.status_code, 200)
+    data = response.json()
+    self.assertEqual(len(data), 2)
+    self.assertEqual(data[0]['location']['x'], 1.0)
 

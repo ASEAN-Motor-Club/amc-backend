@@ -1,8 +1,8 @@
 from typing import Optional
 from pydantic import AwareDatetime
 from datetime import timedelta
-from ninja import Schema, ModelSchema
-from ..models import Player, Character
+from ninja import Schema, ModelSchema, Field
+from ..models import Player, Character, CharacterLocation
 
 class ActivePlayerSchema(Schema):
   name: str
@@ -52,3 +52,11 @@ class LeaderboardsRestockDepotCharacterSchema(CharacterSchema):
   depots_restocked: int
 
 
+class CharacterLocationSchema(ModelSchema):
+  location: PositionSchema
+  player_id: str = Field(None, alias="character.player.unqiue_id")
+  character_name: str = Field(None, alias="character.name")
+
+  class Meta:
+    model = CharacterLocation
+    fields = ['timestamp', 'character']
