@@ -1,6 +1,7 @@
 from datetime import timedelta
 from deepdiff import DeepHash
-from django.db import models
+#from django.db import models
+from django.contrib.gis.db import models
 from django.db.models import F, Sum, Max
 from django.contrib.postgres.fields import ArrayField
 from django.utils import timezone
@@ -383,4 +384,16 @@ class PlayerVehicleLog(models.Model):
       )
     ]
 
+@final
+class CharacterLocation(models.Model):
+  timestamp = models.DateTimeField(db_index=True, auto_now_add=True)
+  character = models.ForeignKey(Character, on_delete=models.CASCADE, related_name='locations')
+  location = models.PointField(srid=0, dim=3)
 
+  class Meta:
+    constraints = [
+      models.UniqueConstraint(
+        fields=['timestamp', 'character'],
+        name='unique_character_location'
+      )
+    ]

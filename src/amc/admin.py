@@ -16,6 +16,7 @@ from .models import (
   GameEvent,
   GameEventCharacter,
   LapSectionTime,
+  CharacterLocation,
 )
 
 class CharacterInlineAdmin(admin.TabularInline):
@@ -185,4 +186,9 @@ class GameEventAdmin(admin.ModelAdmin):
 class GameEventCharacterAdmin(admin.ModelAdmin):
   list_display = ['character', 'game_event']
   inlines = [LapSectionTimeInlineAdmin]
+  readonly_fields = ['character']
+
+@admin.register(CharacterLocation)
+class CharacterLocationAdmin(admin.ModelAdmin):
+  list_display = ['timestamp', 'character', 'location']
   readonly_fields = ['character']

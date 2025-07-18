@@ -10,6 +10,7 @@ from django.conf import settings
 from django.utils import timezone
 from amc.tasks import process_log_line
 from amc.events import monitor_events
+from amc.locations import monitor_locations
 import discord
 
 REDIS_SETTINGS = RedisSettings(**settings.REDIS_SETTINGS)
@@ -66,7 +67,8 @@ async def shutdown(ctx):
 class WorkerSettings:
     functions = [process_log_line]
     cron_jobs = [
-        cron(monitor_events, second=None)
+        cron(monitor_events, second=None),
+        cron(monitor_locations, second=None),
     ]
     on_startup = startup
     on_shutdown = shutdown
