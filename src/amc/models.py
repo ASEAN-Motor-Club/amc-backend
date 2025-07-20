@@ -343,6 +343,14 @@ class PlayerChatLog(models.Model):
   timestamp = models.DateTimeField()
   text = models.TextField()
 
+  class Meta:
+    indexes = [
+      GinIndex(
+        SearchVector('text', config='english'),
+        name='chat_text_search_idx',
+      )
+    ]
+
 
 @final
 class PlayerRestockDepotLog(models.Model):
