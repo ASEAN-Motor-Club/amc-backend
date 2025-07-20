@@ -397,3 +397,13 @@ class CharacterLocation(models.Model):
         name='unique_character_location'
       )
     ]
+
+@final
+class PlayerMailMessage(models.Model):
+  from_player = models.ForeignKey(Player, models.CASCADE, related_name='outbox_messages', null=True, blank=True)
+  to_player = models.ForeignKey(Player, models.CASCADE, related_name='inbox_messages')
+  content = models.TextField()
+  sent_at = models.DateTimeField(editable=False, auto_now_add=True)
+  received_at = models.DateTimeField(editable=False, null=True, blank=True)
+
+
