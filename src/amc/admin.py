@@ -173,6 +173,7 @@ class GameEventCharacterInlineAdmin(admin.TabularInline):
   model = GameEventCharacter
   readonly_fields = ['character']
   show_change_link = True
+  ordering = ['rank', '-finished', 'disqualified', 'laps', 'section_index']
 
 class LapSectionTimeInlineAdmin(admin.TabularInline):
   model = LapSectionTime
@@ -184,9 +185,10 @@ class GameEventAdmin(admin.ModelAdmin):
 
 @admin.register(GameEventCharacter)
 class GameEventCharacterAdmin(admin.ModelAdmin):
-  list_display = ['character', 'game_event']
+  list_display = ['id', 'rank', 'character', 'game_event']
   inlines = [LapSectionTimeInlineAdmin]
   readonly_fields = ['character']
+  search_fields = ['game_event__id']
 
 @admin.register(CharacterLocation)
 class CharacterLocationAdmin(admin.ModelAdmin):
