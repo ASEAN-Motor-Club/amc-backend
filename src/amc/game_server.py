@@ -1,3 +1,4 @@
+import asyncio
 from yarl import URL
 import urllib
 
@@ -8,7 +9,9 @@ async def announcement_request(message, session, password=''):
     return await session.post(URL(f"/chat?{params_str}", encoded=True))
 
 
-async def announce(message, session, password='', clear_banner=True):
+async def announce(message, session, password='', clear_banner=True, delay=0):
+    if delay > 0:
+      await asyncio.sleep(delay)
     try:
         await announcement_request(message, session, password)
         await announcement_request(' ', session, password)

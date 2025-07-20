@@ -237,7 +237,7 @@ async def process_log_event(event: LogEvent, ctx = {}):
           welcome_message = get_welcome_message(last_login, player_name)
           if welcome_message:
             asyncio.create_task(
-              announce(welcome_message, http_client)
+              announce(welcome_message, http_client, delay=5)
             )
         except Exception as e:
           asyncio.create_task(
