@@ -1,7 +1,6 @@
 import asyncio
 import aiohttp
 from concurrent.futures import ThreadPoolExecutor
-import threading
 from arq.connections import RedisSettings
 from arq import cron
 import django
@@ -12,6 +11,7 @@ from amc.tasks import process_log_line
 from amc.events import monitor_events
 from amc.locations import monitor_locations
 import discord
+from amc.discord_client import AMCDiscordClient
 
 REDIS_SETTINGS = RedisSettings(**settings.REDIS_SETTINGS)
 
@@ -19,12 +19,11 @@ intents = discord.Intents.default()
 intents.messages = True
 intents.members = True
 intents.message_content = True
-client = discord.Client(intents=intents)
 
 bot_task_handle = None
 global loop
 
-
+client = AMCDiscordClient(intents=intents)
 def run_blocking_bot():
   try:
     client.run(settings.DISCORD_TOKEN)
@@ -47,6 +46,7 @@ async def startup(ctx):
   ctx['startup_time'] = timezone.now()
   ctx['http_client'] = aiohttp.ClientSession(base_url=settings.GAME_SERVER_API_URL)
   ctx['http_client_mod'] = aiohttp.ClientSession(base_url=settings.MOD_SERVER_API_URL)
+
   if settings.DISCORD_TOKEN:
     ctx['discord_client'] = client
     bot_task_handle = asyncio.create_task(run_discord())
@@ -59,8 +59,8 @@ async def shutdown(ctx):
   if http_client_mod := ctx.get('http_client_mod'):
     await http_client_mod.close()
 
-  if bot_task_handle:
-    asyncio.run_coroutine_threadsafe(client.close(), client.loop)
+  if bot_task_handle and (discord_client := ctx.get('discord_client')):
+    asyncio.run_coroutine_threadsafe(discord_client.close(), discord_client.loop)
     await bot_task_handle
 
 

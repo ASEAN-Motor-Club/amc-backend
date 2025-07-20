@@ -169,6 +169,8 @@ async def process_log_event(event: LogEvent, ctx = {}):
   discord_client = ctx.get('discord_client')
   http_client = ctx.get('http_client')
 
+  forward_message = None
+
   match event:
     case PlayerChatMessageLogEvent(timestamp, player_name, player_id, message):
       character, _, _ = await aget_or_create_character(player_name, player_id)
@@ -190,24 +192,16 @@ async def process_log_event(event: LogEvent, ctx = {}):
           song=command_match.group('song'),
         )
       if discord_client and ctx.get('startup_time') and timestamp > ctx.get('startup_time'):
-        asyncio.run_coroutine_threadsafe(
-          forward_to_discord(
-            discord_client,
-            settings.DISCORD_GAME_CHAT_CHANNEL_ID,
-            f"{player_name}: {message}"
-          ),
-          discord_client.loop
+        forward_message = (
+          settings.DISCORD_GAME_CHAT_CHANNEL_ID,
+          f"**{player_name}:** {message}"
         )
 
     case AnnouncementLogEvent(timestamp, message):
       if discord_client and ctx.get('startup_time') and timestamp > ctx.get('startup_time'):
-        asyncio.run_coroutine_threadsafe(
-          forward_to_discord(
-            discord_client,
-            settings.DISCORD_GAME_CHAT_CHANNEL_ID,
-            f"{message}"
-          ),
-          discord_client.loop
+        forward_message = (
+          settings.DISCORD_GAME_CHAT_CHANNEL_ID,
+          f"📢 {message}"
         )
 
     case PlayerVehicleLogEvent(timestamp, player_name, player_id, vehicle_name, vehicle_id):
@@ -220,6 +214,11 @@ async def process_log_event(event: LogEvent, ctx = {}):
         vehicle_name=vehicle_name,
         action=action,
       )
+      if discord_client and ctx.get('startup_time') and timestamp > ctx.get('startup_time'):
+        forward_message = (
+          settings.DISCORD_VEHICLE_LOGS_CHANNEL_ID,
+          f"{player_name} ({player_id}) {action.label} vehicle: {vehicle_name} ({vehicle_id})"
+        )
 
     case PlayerLoginLogEvent(timestamp, player_name, player_id):
       character, _, character_created = await aget_or_create_character(player_name, player_id)
@@ -237,26 +236,18 @@ async def process_log_event(event: LogEvent, ctx = {}):
           )
       await process_login_event(character.id, timestamp)
       if discord_client and ctx.get('startup_time') and timestamp > ctx.get('startup_time'):
-        asyncio.run_coroutine_threadsafe(
-          forward_to_discord(
-            discord_client,
-            settings.DISCORD_GAME_CHAT_CHANNEL_ID,
-            f"Player Login: {player_name} ({player_id})"
-          ),
-          discord_client.loop
+        forward_message = (
+          settings.DISCORD_GAME_CHAT_CHANNEL_ID,
+          f"**🟢 Player Login:** {player_name} ({player_id})"
         )
 
     case PlayerLogoutLogEvent(timestamp, player_name, player_id):
       character, _, _ = await aget_or_create_character(player_name, player_id)
       await process_logout_event(character.id, timestamp)
       if discord_client and ctx.get('startup_time') and timestamp > ctx.get('startup_time'):
-        asyncio.run_coroutine_threadsafe(
-          forward_to_discord(
-            discord_client,
-            settings.DISCORD_GAME_CHAT_CHANNEL_ID,
-            f"Player Logout: {player_name} ({player_id})"
-          ),
-          discord_client.loop
+        forward_message = (
+          settings.DISCORD_GAME_CHAT_CHANNEL_ID,
+          f"**🔴 Player Logout:** {player_name} ({player_id})"
         )
 
     case LegacyPlayerLogoutLogEvent(timestamp, player_name):
@@ -295,13 +286,9 @@ async def process_log_event(event: LogEvent, ctx = {}):
         depot_name=depot_name,
       )
       if discord_client and ctx.get('startup_time') and timestamp > ctx.get('startup_time'):
-        asyncio.run_coroutine_threadsafe(
-          forward_to_discord(
-            discord_client,
-            settings.DISCORD_GAME_CHAT_CHANNEL_ID,
-            f"Player Restocked Depot: {player_name} (Depot: {depot_name})"
-          ),
-          discord_client.loop
+        forward_message = (
+          settings.DISCORD_GAME_CHAT_CHANNEL_ID,
+          f"**📦 Player Restocked Depot:** {player_name} (Depot: {depot_name})"
         )
 
     case PlayerCreatedCompanyLogEvent(timestamp, player_name, company_name):
@@ -337,6 +324,16 @@ async def process_log_event(event: LogEvent, ctx = {}):
     case _:
       pass
 
+  if forward_message and discord_client and ctx.get('startup_time') and timestamp > ctx.get('startup_time'):
+    forward_message_channel_id, forward_message_content = forward_message
+    asyncio.run_coroutine_threadsafe(
+      forward_to_discord(
+        discord_client,
+        forward_message_channel_id,
+        forward_message_content
+      ),
+      discord_client.loop
+    )
 
 async def process_log_line(ctx, line):
   log, event = parse_log_line(line)
