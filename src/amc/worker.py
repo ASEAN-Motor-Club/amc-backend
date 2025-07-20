@@ -11,26 +11,20 @@ from amc.tasks import process_log_line
 from amc.events import monitor_events
 from amc.locations import monitor_locations
 import discord
-from amc.discord_client import AMCDiscordClient
+from amc.discord_client import bot as discord_client
 
 REDIS_SETTINGS = RedisSettings(**settings.REDIS_SETTINGS)
-
-intents = discord.Intents.default()
-intents.messages = True
-intents.members = True
-intents.message_content = True
 
 bot_task_handle = None
 global loop
 
-client = AMCDiscordClient(intents=intents)
 def run_blocking_bot():
   try:
-    client.run(settings.DISCORD_TOKEN)
+    discord_client.run(settings.DISCORD_TOKEN)
   except Exception as e:
     print(f"Error in bot thread: {e}")
   except asyncio.CancelledError:
-    client.close()
+    discord_client.close()
 
 async def run_discord():
   global loop
@@ -48,7 +42,7 @@ async def startup(ctx):
   ctx['http_client_mod'] = aiohttp.ClientSession(base_url=settings.MOD_SERVER_API_URL)
 
   if settings.DISCORD_TOKEN:
-    ctx['discord_client'] = client
+    ctx['discord_client'] = discord_client
     bot_task_handle = asyncio.create_task(run_discord())
 
 
