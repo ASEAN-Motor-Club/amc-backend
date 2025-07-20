@@ -1,5 +1,6 @@
 import re
 import asyncio
+import discord
 from django.utils import timezone
 from django.db import connection
 from django.db.models import Exists, OuterRef
@@ -32,7 +33,6 @@ from amc.models import (
   PlayerRestockDepotLog,
   BotInvocationLog,
   SongRequestLog,
-  Vehicle,
   Company,
 )
 from amc.game_server import announce
@@ -162,7 +162,7 @@ async def forward_to_discord(client, channel_id, content):
 
   channel = client.get_channel(int(channel_id))
   if channel:
-    await channel.send(content)
+    await channel.send(content, allowed_mentions=discord.AllowedMentions.none())
 
 
 async def process_log_event(event: LogEvent, ctx = {}):
