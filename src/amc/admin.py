@@ -167,6 +167,7 @@ class ServerLogAdmin(admin.ModelAdmin):
   list_display = ['timestamp', 'text', 'event_processed']
   ordering = ['-timestamp']
   list_filter = ['event_processed']
+  search_fields = ['text']
 
 
 class GameEventCharacterInlineAdmin(admin.TabularInline):

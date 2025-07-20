@@ -7,6 +7,8 @@ from django.contrib.postgres.fields import ArrayField
 from django.utils import timezone
 from django.utils.translation import gettext_lazy as _
 from django.contrib.postgres.fields import DateTimeRangeField
+from django.contrib.postgres.search import SearchVector
+from django.contrib.postgres.indexes import GinIndex
 from typing import override, final
 from amc.server_logs import (
   PlayerVehicleLogEvent,
@@ -288,6 +290,12 @@ class ServerLog(models.Model):
       models.UniqueConstraint(
         fields=['timestamp', 'text'],
         name='unique_event_log_entry'
+      )
+    ]
+    indexes = [
+      GinIndex(
+        SearchVector('text', config='english'),
+        name='log_text_search_idx',
       )
     ]
 
