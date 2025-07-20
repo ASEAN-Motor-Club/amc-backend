@@ -152,3 +152,19 @@ REDIS_SETTINGS = {}
 DISCORD_TOKEN = os.environ.get("DISCORD_TOKEN")
 DISCORD_GAME_CHAT_CHANNEL_ID = int(os.environ.get('DISCORD_GAME_CHAT_CHANNEL_ID', 0))
 DISCORD_VEHICLE_LOGS_CHANNEL_ID = int(os.environ.get('DISCORD_VEHICLE_LOGS_CHANNEL_ID', 0))
+
+HELP_TEXT = """\
+>>>> www.aseanmotorclub.com <<<<
+Visit the website & Join the Discord!
+
+::::: AVAILABLE COMMANDS :::::
+
+/bot [your question]
+Ask the bot anything related to the game. It understands most of the basic information about the game.
+
+/song_request [name of song and artist]
+Queue up a song on our radio station. Visit aseanmotorclub.com/radio to tune in.
+
+/countdown
+Want to do an impromptu race? Use this command to initiate a 5 second countdown.
+"""

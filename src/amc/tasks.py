@@ -36,11 +36,12 @@ from amc.models import (
   Company,
 )
 from amc.game_server import announce
+from amc.mod_server import show_popup
 
 
 def get_welcome_message(last_login, player_name):
   if not last_login:
-    return f"Welcome {player_name}! Use /bot to ask me anything. Join the discord at aseanmotorclub.com. Have fun!"
+    return f"Welcome {player_name}! Use /help to see the available commands on this server. Join the discord at aseanmotorclub.com. Have fun!"
   sec_since_login = (timezone.now() - last_login).seconds
   if sec_since_login > (3600 * 24 * 7):
     return f"Long time no see! Welcome back {player_name}"
@@ -168,6 +169,7 @@ async def forward_to_discord(client, channel_id, content):
 async def process_log_event(event: LogEvent, ctx = {}):
   discord_client = ctx.get('discord_client')
   http_client = ctx.get('http_client')
+  http_client_mod = ctx.get('http_client_mod')
 
   forward_message = None
 
@@ -179,6 +181,13 @@ async def process_log_event(event: LogEvent, ctx = {}):
         character=character, 
         text=message,
       )
+      if command_match := re.match(r"/help", message):
+        asyncio.create_task(show_popup(http_client_mod, settings.HELP_TEXT, player_id=str(player_id)))
+        await BotInvocationLog.objects.acreate(
+          timestamp=timestamp,
+          character=character, 
+          prompt="help",
+        )
       if command_match := re.match(r"/bot (?P<prompt>.+)", message):
         await BotInvocationLog.objects.acreate(
           timestamp=timestamp,
