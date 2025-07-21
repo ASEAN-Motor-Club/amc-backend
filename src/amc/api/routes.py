@@ -23,12 +23,15 @@ from amc.models import (
   CharacterLocation,
 )
 
+POSITION_UPDATE_RATE = 10
+POSITION_UPDATE_SLEEP = 1.0 / POSITION_UPDATE_RATE
+
 players_router = Router()
 
 async def get_players_mod(
   session,
   cache_key: str = "mod_online_players_list",
-  cache_ttl: int = 1
+  cache_ttl: int = POSITION_UPDATE_SLEEP / 2
 ):
   cached_data = cache.get(cache_key)
   if cached_data:
@@ -146,7 +149,7 @@ async def streaming_player_positions(request):
       }
 
       yield f"data: {json.dumps(player_positions)}\n\n"
-      await asyncio.sleep(1)
+      await asyncio.sleep(POSITION_UPDATE_SLEEP)
 
   return StreamingHttpResponse(event_stream(), content_type="text/event-stream")
 
