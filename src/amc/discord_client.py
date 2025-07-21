@@ -3,14 +3,17 @@ from discord.ext import commands
 import aiohttp
 from django.conf import settings
 from amc.game_server import announce
+from amc_cogs.moderation import ModerationCog
 
 class AMCDiscordBot(commands.Bot):
   def __init__(self, *args, **kwargs):
     super().__init__(*args, command_prefix="/", **kwargs)
 
   async def setup_hook(self):
-    self.http_client = aiohttp.ClientSession(base_url=settings.GAME_SERVER_API_URL)
-    # Placeholder for regular announcements and other tasks
+    self.http_client_game = aiohttp.ClientSession(base_url=settings.GAME_SERVER_API_URL)
+    self.http_client_mod = aiohttp.ClientSession(base_url=settings.MOD_SERVER_API_URL)
+    await self.add_cog(ModerationCog(self), guild=discord.Object(id=settings.DISCORD_GUILD_ID))
+    await self.tree.sync(guild=discord.Object(id=settings.DISCORD_GUILD_ID))
 
   async def on_message(self, message):
     if not message.author.bot and message.channel.id == settings.DISCORD_GAME_CHAT_CHANNEL_ID:
@@ -19,9 +22,11 @@ class AMCDiscordBot(commands.Bot):
         self.http_client,
       )
 
+
 intents = discord.Intents.default()
 intents.messages = True
 intents.members = True
 intents.message_content = True
 
 bot = AMCDiscordBot(intents=intents)
+
