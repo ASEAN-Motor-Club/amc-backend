@@ -6,6 +6,7 @@ from django.db.models import F, Sum, Max
 from django.contrib.postgres.fields import ArrayField
 from django.utils import timezone
 from django.utils.translation import gettext_lazy as _
+from django.contrib.auth import get_user_model
 from django.contrib.postgres.fields import DateTimeRangeField
 from django.contrib.postgres.search import SearchVector
 from django.contrib.postgres.indexes import GinIndex
@@ -17,6 +18,8 @@ from amc.server_logs import (
   PlayerBoughtVehicleLogEvent,
   PlayerSoldVehicleLogEvent,
 )
+
+User = get_user_model()
 
 class PlayerQuerySet(models.QuerySet):
   def with_total_session_time(self):
@@ -39,6 +42,7 @@ class Player(models.Model):
   unique_id = models.PositiveBigIntegerField(primary_key=True)
   discord_user_id = models.PositiveBigIntegerField(unique=True, null=True)
   discord_name = models.CharField(max_length=200, null=True)
+  user = models.OneToOneField(User, models.SET_NULL, related_name='player', null=True)
 
   objects = models.Manager.from_queryset(PlayerQuerySet)()
 
@@ -100,6 +104,10 @@ class Team(models.Model):
   name = models.CharField(max_length=200)
   tag = models.CharField(max_length=6)
   discord_thread_id = models.PositiveBigIntegerField(unique=True)
+  owners = models.ManyToManyField(Player, related_name='teams_owned')
+  logo = models.FileField(upload_to="team_logos", null=True)
+  bg_color = models.CharField(max_length=6, default="FFFFFF")
+  text_color = models.CharField(max_length=6, default="000000")
 
   players = models.ManyToManyField(
     Player,

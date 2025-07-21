@@ -42,6 +42,7 @@ class CharacterInlineAdmin(admin.TabularInline):
 class PlayerAdmin(admin.ModelAdmin):
   list_display = ['unique_id', 'character_names', 'characters_count']
   search_fields = ['unique_id', 'characters__name']
+  autocomplete_fields = ['user']
   inlines = [CharacterInlineAdmin]
 
   def get_queryset(self, request):

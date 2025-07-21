@@ -21,7 +21,7 @@ BASE_DIR = Path(__file__).resolve().parent.parent
 # See https://docs.djangoproject.com/en/5.2/howto/deployment/checklist/
 
 # SECURITY WARNING: keep the secret key used in production secret!
-SECRET_KEY = 'django-insecure-#ro&u^cq!$zns+(-sn!c67=nrhyt$1=dyc7b)@0-21m_5!(328'
+SECRET_KEY = os.environ.get('DJANGO_SECRET_KEY', 'django-insecure-#ro&u^cq!$zns+(-sn!c67=nrhyt$1=dyc7b)@0-21m_5!(328')
 
 # SECURITY WARNING: don't run with debug turned on in production!
 DEBUG = bool(os.environ.get('DEBUG'))
@@ -77,6 +77,7 @@ TEMPLATES = [
 
 WSGI_APPLICATION = 'amc_backend.wsgi.application'
 
+SESSION_COOKIE_DOMAIN = os.environ.get('DJANGO_SESSION_COOKIE_DOMAIN', 'aseanmotorclub.com')
 
 # Database
 # https://docs.djangoproject.com/en/5.2/ref/settings/#databases

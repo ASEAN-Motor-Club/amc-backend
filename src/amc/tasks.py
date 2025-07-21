@@ -37,6 +37,7 @@ from amc.models import (
 )
 from amc.game_server import announce
 from amc.mod_server import show_popup
+from amc.auth import verify_player
 
 
 def get_welcome_message(last_login, player_name):
@@ -175,7 +176,7 @@ async def process_log_event(event: LogEvent, ctx = {}):
 
   match event:
     case PlayerChatMessageLogEvent(timestamp, player_name, player_id, message):
-      character, _, _ = await aget_or_create_character(player_name, player_id)
+      character, player, _ = await aget_or_create_character(player_name, player_id)
       await PlayerChatLog.objects.acreate(
         timestamp=timestamp,
         character=character, 
@@ -187,6 +188,17 @@ async def process_log_event(event: LogEvent, ctx = {}):
           timestamp=timestamp,
           character=character, 
           prompt="help",
+        )
+      if command_match := re.match(r"/verify (?P<signed_message>.+)", message):
+        try:
+          await verify_player(player, command_match.group('signed_message'))
+          asyncio.create_task(show_popup(http_client_mod, "You are now verified!", player_id=str(player_id)))
+        except Exception as e:
+          asyncio.create_task(show_popup(http_client_mod, f"Failed to verify: {e}", player_id=str(player_id)))
+        await BotInvocationLog.objects.acreate(
+          timestamp=timestamp,
+          character=character, 
+          prompt=f"verify {command_match.group('signed_message')}",
         )
       if command_match := re.match(r"/bot (?P<prompt>.+)", message):
         await BotInvocationLog.objects.acreate(
