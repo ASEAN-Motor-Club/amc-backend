@@ -38,6 +38,7 @@ from amc.models import (
 from amc.game_server import announce
 from amc.mod_server import show_popup
 from amc.auth import verify_player
+from amc.mailbox import send_player_messages
 
 
 def get_welcome_message(last_login, player_name):
@@ -266,7 +267,7 @@ async def process_log_event(event: LogEvent, ctx = {}):
         )
 
     case PlayerLoginLogEvent(timestamp, player_name, player_id):
-      character, _, character_created = await aget_or_create_character(player_name, player_id)
+      character, player, character_created = await aget_or_create_character(player_name, player_id)
       if ctx.get('startup_time') and timestamp > ctx.get('startup_time'):
         try:
           last_login = character.last_login if not character_created else None
@@ -280,6 +281,7 @@ async def process_log_event(event: LogEvent, ctx = {}):
             announce(f'Failed to greet player: {e}', http_client)
           )
       await process_login_event(character.id, timestamp)
+      asyncio.create_task(send_player_messages(http_client_mod, player))
       if discord_client and ctx.get('startup_time') and timestamp > ctx.get('startup_time'):
         forward_message = (
           settings.DISCORD_GAME_CHAT_CHANNEL_ID,

@@ -17,6 +17,7 @@ from .models import (
   GameEventCharacter,
   LapSectionTime,
   CharacterLocation,
+  PlayerMailMessage,
 )
 
 class CharacterInlineAdmin(admin.TabularInline):
@@ -40,8 +41,8 @@ class CharacterInlineAdmin(admin.TabularInline):
 
 @admin.register(Player)
 class PlayerAdmin(admin.ModelAdmin):
-  list_display = ['unique_id', 'character_names', 'characters_count', 'verified']
-  search_fields = ['unique_id', 'characters__name']
+  list_display = ['unique_id', 'character_names', 'characters_count', 'discord_user_id', 'verified']
+  search_fields = ['unique_id', 'characters__name', 'discord_user_id']
   autocomplete_fields = ['user']
   inlines = [CharacterInlineAdmin]
 
@@ -77,7 +78,7 @@ class PlayerStatusLogInlineAdmin(admin.TabularInline):
 class CharacterAdmin(admin.ModelAdmin):
   list_display = ['name', 'player__unique_id', 'last_login', 'total_session_time']
   list_select_related = ['player']
-  search_fields = ['player__unique_id', 'name']
+  search_fields = ['player__unique_id', 'player__discord_user_id', 'name']
   inlines = [PlayerStatusLogInlineAdmin]
   readonly_fields = ['player', 'last_login', 'total_session_time']
 
@@ -196,3 +197,10 @@ class GameEventCharacterAdmin(admin.ModelAdmin):
 class CharacterLocationAdmin(admin.ModelAdmin):
   list_display = ['timestamp', 'character', 'location']
   readonly_fields = ['character']
+
+@admin.register(PlayerMailMessage)
+class PlayerMailMessageAdmin(admin.ModelAdmin):
+  list_select_related = ['to_player', 'from_player']
+  list_display = ['sent_at', 'to_player', 'received_at', 'content']
+  autocomplete_fields = ['to_player', 'from_player']
+

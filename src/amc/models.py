@@ -50,11 +50,13 @@ class Player(models.Model):
   def __str__(self) -> str:
     if self.discord_name:
       return self.discord_name
-    return f"Unknown player {self.unique_id}"
+    character = self.characters.first()
+    if character is None:
+      return self.unique_id
+    return f"{character.name} {self.unique_id}"
 
   @property
   @admin.display(
-    ordering="discord_user_id__isnull",
     description="Whether user is verified",
     boolean=True,
   )
