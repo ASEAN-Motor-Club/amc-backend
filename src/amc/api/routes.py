@@ -243,7 +243,7 @@ async def streaming_player_positions(request, diff=False):
           for player in players
         }
 
-      yield f"data: {json.dumps(player_positions)}\n\n"
+      yield f"data: {json.dumps(player_positions, separators=(',', ':'))}\n\n"
       await asyncio.sleep(POSITION_UPDATE_SLEEP)
 
   return StreamingHttpResponse(event_stream(), content_type="text/event-stream")
