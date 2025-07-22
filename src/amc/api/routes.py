@@ -148,10 +148,7 @@ async def player_locations(
   return [cl async for cl in qs]
 
 
-def diff_player_positions(id, players):
-  cache_key = 'last_player_positions_' + str(id)
-  cached_players = cache.get(cache_key, {})
-  
+def diff_player_positions(players, previous_players):
   current_players = {
     p['UniqueID']: {
       'location': {axis: round(value) for axis, value in p['Location'].items()},
@@ -161,8 +158,7 @@ def diff_player_positions(id, players):
     for p in players
   }
   
-  if not cached_players:
-    cache.set(cache_key, current_players, timeout=POSITION_UPDATE_SLEEP)
+  if not previous_players:
     player_positions = {
       uid: {
         **{axis.lower(): value for axis, value in data['location'].items()},
@@ -171,13 +167,13 @@ def diff_player_positions(id, players):
       }
       for uid, data in current_players.items()
     }
-    return player_positions
+    return player_positions, current_players.copy()
   
   player_positions = {}
   
   for uid, current_data in current_players.items():
-    if uid in cached_players:
-      cached_data = cached_players[uid]
+    if uid in previous_players:
+      cached_data = previous_players[uid]
       changes = {}
       
       location_changed = False
@@ -206,30 +202,27 @@ def diff_player_positions(id, players):
         'name': current_data['name']
       }
   
-  for uid in cached_players:
+  for uid in previous_players:
     if uid not in current_players:
       player_positions[uid] = None
   
-  cache.set(cache_key, current_players, timeout=POSITION_UPDATE_SLEEP)
-  
   if player_positions:
-    return player_positions
+    return player_positions, current_players.copy()
   
-  return {}
+  return {}, current_players.copy()
 
 
 player_positions_router = Router()
 @player_positions_router.get('/')
 async def streaming_player_positions(request, diff=False):
   session = request.state["aiohttp_client"]
-  id = uuid.uuid4()
   
   async def event_stream():
+    previous_players = {}
     while True:
       players = await get_players_mod(session)
-      player_positions = {}
       if diff:
-        player_positions = diff_player_positions(id, players)
+        player_positions, previous_players = diff_player_positions(players, previous_players)
       else:
         player_positions = {
           player['PlayerName']: {
