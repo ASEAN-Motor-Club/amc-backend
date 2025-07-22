@@ -40,7 +40,7 @@ class CharacterInlineAdmin(admin.TabularInline):
 
 @admin.register(Player)
 class PlayerAdmin(admin.ModelAdmin):
-  list_display = ['unique_id', 'character_names', 'characters_count']
+  list_display = ['unique_id', 'character_names', 'characters_count', 'verified']
   search_fields = ['unique_id', 'characters__name']
   autocomplete_fields = ['user']
   inlines = [CharacterInlineAdmin]

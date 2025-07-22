@@ -1,6 +1,6 @@
 from datetime import timedelta
 from deepdiff import DeepHash
-#from django.db import models
+from django.contrib import admin
 from django.contrib.gis.db import models
 from django.db.models import F, Sum, Max
 from django.contrib.postgres.fields import ArrayField
@@ -52,6 +52,14 @@ class Player(models.Model):
       return self.discord_name
     return f"Unknown player {self.unique_id}"
 
+  @property
+  @admin.display(
+    ordering="discord_user_id__isnull",
+    description="Whether user is verified",
+    boolean=True,
+  )
+  def verified(self):
+    return self.discord_user_id is not None
 
 class CharacterQuerySet(models.QuerySet):
   def with_total_session_time(self):

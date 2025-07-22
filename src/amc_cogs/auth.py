@@ -21,7 +21,7 @@ class AuthenticationCog(commands.Cog):
     signer = Signer()
     user_id = ctx.user.id
     value = signer.sign(str(user_id))
-    await ctx.response.send_message(f"Send the following in the game chat: `/verify {value}`", ephemeral=True)
+    await ctx.response.send_message(f"Send the following in the game chat:\n```/verify {value}```", ephemeral=True)
 
 
   @app_commands.command(name='login', description='Log in to the AMC Website')

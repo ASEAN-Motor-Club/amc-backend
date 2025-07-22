@@ -22,7 +22,7 @@ class AMCDiscordBot(commands.Bot):
     if not message.author.bot and message.channel.id == settings.DISCORD_GAME_CHAT_CHANNEL_ID:
       await announce(
         f"{message.author.display_name}: {message.content}",
-        self.http_client,
+        self.http_client_game,
       )
 
 

@@ -166,6 +166,22 @@ async def forward_to_discord(client, channel_id, content):
   if channel:
     await channel.send(content, allowed_mentions=discord.AllowedMentions.none())
 
+async def add_discord_verified_role(client, discord_user_id, player_id):
+  guild = client.get_guild(settings.DISCORD_GUILD_ID)
+  if not guild:
+    raise Exception("Could not find a guild with that ID.")
+
+  member = guild.get_member(discord_user_id)
+  if not member:
+    raise Exception("Could not find a member with that ID.")
+
+  # Get the role object from the role ID
+  role = guild.get_role(settings.DISCORD_VERIFIED_ROLE_ID)
+  if not role:
+    raise Exception("Could not find a role with that ID.")
+
+  await member.add_roles(role, reason=f"Action performed by {player_id}")
+
 
 async def process_log_event(event: LogEvent, ctx = {}):
   discord_client = ctx.get('discord_client')
@@ -191,7 +207,15 @@ async def process_log_event(event: LogEvent, ctx = {}):
         )
       if command_match := re.match(r"/verify (?P<signed_message>.+)", message):
         try:
-          await verify_player(player, command_match.group('signed_message'))
+          discord_user_id = await verify_player(player, command_match.group('signed_message'))
+          asyncio.run_coroutine_threadsafe(
+            add_discord_verified_role(
+              discord_client,
+              discord_user_id,
+              player_id
+            ),
+            discord_client.loop
+          )
           asyncio.create_task(show_popup(http_client_mod, "You are now verified!", player_id=str(player_id)))
         except Exception as e:
           asyncio.create_task(show_popup(http_client_mod, f"Failed to verify: {e}", player_id=str(player_id)))
