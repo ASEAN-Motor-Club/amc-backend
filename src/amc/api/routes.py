@@ -1,4 +1,5 @@
 import asyncio
+import uuid
 import aiohttp
 import json
 from pydantic import AwareDatetime
@@ -147,25 +148,100 @@ async def player_locations(
   return [cl async for cl in qs]
 
 
+def diff_player_positions(id, players):
+  cache_key = 'last_player_positions_' + str(id)
+  cached_players = cache.get(cache_key, {})
+  
+  current_players = {
+    p['UniqueID']: {
+      'location': {axis: round(value) for axis, value in p['Location'].items()},
+      'vehicle_key': p['VehicleKey'],
+      'name': p['PlayerName']
+    }
+    for p in players
+  }
+  
+  if not cached_players:
+    cache.set(cache_key, current_players, timeout=POSITION_UPDATE_SLEEP)
+    player_positions = {
+      uid: {
+        **{axis.lower(): value for axis, value in data['location'].items()},
+        'vehicle_key': data['vehicle_key'],
+        'name': data['name']
+      }
+      for uid, data in current_players.items()
+    }
+    return player_positions
+  
+  player_positions = {}
+  
+  for uid, current_data in current_players.items():
+    if uid in cached_players:
+      cached_data = cached_players[uid]
+      changes = {}
+      
+      location_changed = False
+      for axis, value in current_data['location'].items():
+        if cached_data['location'].get(axis) != value:
+          changes[axis.lower()] = value
+          location_changed = True
+      
+      vehicle_changed = cached_data['vehicle_key'] != current_data['vehicle_key']
+      if vehicle_changed:
+        changes['vehicle_key'] = current_data['vehicle_key']
+      
+      name_changed = cached_data['name'] != current_data['name']
+      if name_changed:
+        changes['name'] = current_data['name']
+      
+      if location_changed and vehicle_changed and not name_changed:
+        changes['name'] = current_data['name']
+      
+      if changes:
+        player_positions[uid] = changes
+    else:
+      player_positions[uid] = {
+        **{axis.lower(): value for axis, value in current_data['location'].items()},
+        'vehicle_key': current_data['vehicle_key'],
+        'name': current_data['name']
+      }
+  
+  for uid in cached_players:
+    if uid not in current_players:
+      player_positions[uid] = None
+  
+  cache.set(cache_key, current_players, timeout=POSITION_UPDATE_SLEEP)
+  
+  if player_positions:
+    return player_positions
+  
+  return {}
+
+
 player_positions_router = Router()
 @player_positions_router.get('/')
-async def streaming_player_positions(request):
+async def streaming_player_positions(request, diff=False):
   session = request.state["aiohttp_client"]
-
+  id = uuid.uuid4()
+  
   async def event_stream():
     while True:
       players = await get_players_mod(session)
-      player_positions = {
-        player['PlayerName']: {
-          **{
-            axis.lower(): value
-            for axis, value in player['Location'].items()
-          },
-          'vehicle_key': player['VehicleKey'],
-          'unique_id': player['UniqueID'],
+      player_positions = {}
+      if diff:
+        player_positions = diff_player_positions(id, players)
+      else:
+        player_positions = {
+          player['PlayerName']: {
+            **{
+              axis.lower(): value
+              for axis, value in player['Location'].items()
+            },
+            'vehicle_key': player['VehicleKey'],
+            'unique_id': player['UniqueID'],
+          }
+          for player in players
         }
-        for player in players
-      }
 
       yield f"data: {json.dumps(player_positions)}\n\n"
       await asyncio.sleep(POSITION_UPDATE_SLEEP)
