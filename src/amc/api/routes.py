@@ -151,7 +151,7 @@ async def player_locations(
 def diff_player_positions(players, previous_players):
   current_players = {
     p['UniqueID']: {
-      'location': {axis: round(value) for axis, value in p['Location'].items()},
+      'location': {axis: round(value) for axis, value in p['Location'].items() if axis.lower() != 'z'},
       'vehicle_key': p['VehicleKey'],
       'name': p['PlayerName']
     }
