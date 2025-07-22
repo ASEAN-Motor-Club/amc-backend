@@ -31,19 +31,24 @@ class AuthenticationCog(commands.Cog):
     """
 
     try:
-      player = await Player.objects.aget(
-        discord_user_id=ctx.user.id
+      player, player_created = await Player.objects.select_related('user').aget_or_create(
+        discord_user_id=ctx.user.id,
+        defaults={
+          'unique_id': ctx.user.id,
+        }
       )
     except Player.DoesNotExist:
       await ctx.response.send_message('You are not verified. Please first verify your account with /verify', ephemeral=True)
       return
 
-    user, created = await User.objects.aget_or_create(
-      player=player,
-      defaults={
-        'username': str(player.unique_id),
-      }
-    )
+    user = player.user
+    if user is None:
+      user = await User.objects.acreate(
+        username=str(player.unique_id),
+      )
+      player.user = user
+      await player.asave(update_fields=['user'])
+
 
     # Generate the token and user ID
     token = account_activation_token_generator.make_token(user)

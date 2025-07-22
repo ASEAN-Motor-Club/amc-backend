@@ -12,8 +12,9 @@ async def announcement_request(message, session, password=''):
 async def announce(message, session, password='', clear_banner=True, delay=0):
     if delay > 0:
       await asyncio.sleep(delay)
+    message_sanitized = message.strip().replace('\n', ' ')
     try:
-        await announcement_request(message, session, password)
+        await announcement_request(message_sanitized, session, password)
         await announcement_request(' ', session, password)
     except Exception as e:
         print(f"Error sending message: {e}")

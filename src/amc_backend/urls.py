@@ -17,8 +17,11 @@ Including another URLconf
 from django.contrib import admin
 from django.urls import path
 from .api import api
+from amc.views import login_with_token
 
 urlpatterns = [
     path('admin/', admin.site.urls),
+    path('login/token/', login_with_token, name='token_login'),
+    path('api/login/token/', login_with_token, name='token_login_api'),
     path('api/', api.urls),
 ]

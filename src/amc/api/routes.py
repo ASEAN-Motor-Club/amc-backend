@@ -3,6 +3,7 @@ import aiohttp
 import json
 from pydantic import AwareDatetime
 from datetime import timedelta
+from ninja_extra.security.session import AsyncSessionAuth
 from django.core.cache import cache
 from django.db.models import Count, Q, F, Window
 from django.db.models.functions import Ntile
@@ -65,6 +66,17 @@ async def list_players(request):
   return players
 
 
+
+@players_router.get('/me/', auth=AsyncSessionAuth(), response=PlayerSchema)
+async def get_player_me(request):
+  """Retrieve a single player"""
+  player = await (Player.objects
+    .with_total_session_time()
+    .with_last_login()
+    .aget(user=request.auth)
+  )
+  return player
+
 @players_router.get('/{unique_id}/', response=PlayerSchema)
 async def get_player(request, unique_id):
   """Retrieve a single player"""
@@ -76,12 +88,19 @@ async def get_player(request, unique_id):
   return player
 
 
+
 @players_router.get('/{unique_id}/characters/', response=list[CharacterSchema])
 async def get_player_characters(request, unique_id):
   """Retrieve a single player"""
+
+  q = Q(player__unique_id=unique_id)
+  if unique_id == 'me':
+    user = await request.auser()
+    q = Q(player__user=user)
+
   return [
     character
-    async for character in Character.objects.filter(player__unique_id=unique_id)
+    async for character in Character.objects.filter(q)
   ]
 
 
