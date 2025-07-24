@@ -171,8 +171,22 @@ class RaceSetup(models.Model):
     return self.config.get('NumLaps', 0)
 
   @property
+  def vehicles(self):
+    # TODO map strings
+    return self.config.get('VehicleKeys', [])
+
+  @property
+  def engines(self):
+    # TODO map strings
+    return self.config.get('EngineKeys', [])
+
+  @property
   def num_sections(self):
-    return len(self.config.get('Route', {}).get('Waypoints', []))
+    return len(self.waypoints)
+
+  @property
+  def waypoints(self):
+    return self.config.get('Route', {}).get('Waypoints', [])
 
 @final
 class ScheduledEvent(models.Model):
@@ -216,6 +230,7 @@ class GameEvent(models.Model):
   scheduled_event = models.ForeignKey(ScheduledEvent, on_delete=models.SET_NULL, null=True, blank=True, related_name='game_events')
   race_setup = models.ForeignKey(RaceSetup, on_delete=models.SET_NULL, null=True, related_name='game_events')
   state = models.IntegerField()
+  discord_message_id = models.PositiveBigIntegerField(null=True)
 
   characters = models.ManyToManyField(
     Character,
@@ -231,11 +246,17 @@ class GameEvent(models.Model):
 @final
 class GameEventCharacter(models.Model):
   character = models.ForeignKey(Character, on_delete=models.CASCADE)
-  game_event = models.ForeignKey(GameEvent, on_delete=models.CASCADE)
+  game_event = models.ForeignKey(GameEvent, on_delete=models.CASCADE, related_name='participants')
   rank = models.IntegerField() # raw game value
   laps = models.IntegerField(default=0)
   section_index = models.IntegerField(default=-1)
+  first_section_total_time_seconds = models.FloatField(null=True)
   last_section_total_time_seconds = models.FloatField()
+  net_time = models.GeneratedField(
+    expression=F('last_section_total_time_seconds') - F('first_section_total_time_seconds'),
+    output_field=models.FloatField(),
+    db_persist=True,
+  )
   best_lap_time = models.FloatField()
   lap_times = ArrayField( # raw game value
     models.FloatField()
@@ -246,6 +267,7 @@ class GameEventCharacter(models.Model):
   finished = models.BooleanField()
 
   class Meta:
+    ordering = ['disqualified', '-finished', 'laps', 'section_index', 'net_time']
     constraints = [
       models.UniqueConstraint(
         fields=["character", "game_event"], name="unique_character_game_event"
