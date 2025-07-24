@@ -197,6 +197,7 @@ class GameEventCharacterAdmin(admin.ModelAdmin):
 class CharacterLocationAdmin(admin.ModelAdmin):
   list_display = ['timestamp', 'character', 'location']
   readonly_fields = ['character']
+  search_fields = ['character__name', 'character__player__unique_id']
 
 @admin.register(PlayerMailMessage)
 class PlayerMailMessageAdmin(admin.ModelAdmin):
