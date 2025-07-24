@@ -18,6 +18,11 @@ from .models import (
   LapSectionTime,
   CharacterLocation,
   PlayerMailMessage,
+  ScheduledEvent,
+  RaceSetup,
+  Championship,
+  ChampionshipPoint,
+  Team,
 )
 
 class CharacterInlineAdmin(admin.TabularInline):
@@ -39,12 +44,22 @@ class CharacterInlineAdmin(admin.TabularInline):
     return qs.with_last_login().with_total_session_time()
 
 
+class PlayerInlineAdmin(admin.TabularInline):
+  model = Player
+  fields = ['unique_id', 'discord_user_id']
+  show_change_link = True
+
+class TeamInlineAdmin(admin.TabularInline):
+  model = Team
+  fields = ['tag', 'name']
+  show_change_link = True
+
 @admin.register(Player)
 class PlayerAdmin(admin.ModelAdmin):
   list_display = ['unique_id', 'character_names', 'characters_count', 'discord_user_id', 'verified']
   search_fields = ['unique_id', 'characters__name', 'discord_user_id']
   autocomplete_fields = ['user']
-  inlines = [CharacterInlineAdmin]
+  inlines = [CharacterInlineAdmin, TeamInlineAdmin]
 
   def get_queryset(self, request):
     qs = super().get_queryset(request)
@@ -191,6 +206,50 @@ class GameEventCharacterAdmin(admin.ModelAdmin):
   inlines = [LapSectionTimeInlineAdmin]
   readonly_fields = ['character']
   search_fields = ['game_event__id']
+
+class GameEventInlineAdmin(admin.TabularInline):
+  model = GameEvent
+  fields = ['guid', 'name', 'state', 'start_time']
+  readonly_fields = ['guid', 'start_time']
+  show_change_link = True
+
+class ScheduledEventInlineAdmin(admin.TabularInline):
+  model = ScheduledEvent
+  fields = ['name', 'race_setup', 'start_time']
+  readonly_fields = ['name', 'race_setup', 'start_time']
+  show_change_link = True
+
+@admin.register(Team)
+class TeamAdmin(admin.ModelAdmin):
+  list_display = ['tag', 'name']
+  search_fields = ['tag', 'name']
+  inlines = [PlayerInlineAdmin]
+
+@admin.register(Championship)
+class ChampionshipAdmin(admin.ModelAdmin):
+  list_display = ['name']
+  inlines = [ScheduledEventInlineAdmin]
+  search_fields = ['name']
+
+@admin.register(ChampionshipPoint)
+class ChampionshipPointAdmin(admin.ModelAdmin):
+  list_display = ['championship', 'participant__character', 'team', 'points']
+  list_select_related = ['championship', 'participant__character', 'team']
+  search_fields = ['championship__name']
+
+@admin.register(ScheduledEvent)
+class ScheduledEventAdmin(admin.ModelAdmin):
+  list_display = ['name', 'race_setup', 'start_time', 'discord_event_id']
+  list_select_related = ['race_setup']
+  inlines = [GameEventInlineAdmin]
+  search_fields = ['name', 'race_setup__hash', 'race_setup__route_name']
+  autocomplete_fields = ['race_setup']
+
+@admin.register(RaceSetup)
+class RaceSetupAdmin(admin.ModelAdmin):
+  list_display = ['hash', 'route_name', 'num_laps', 'vehicles', 'engines']
+  search_fields = ['hash', 'route_name']
+  inlines = [GameEventInlineAdmin]
 
 @admin.register(CharacterLocation)
 class CharacterLocationAdmin(admin.ModelAdmin):

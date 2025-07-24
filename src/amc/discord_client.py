@@ -5,6 +5,7 @@ from django.conf import settings
 from amc.game_server import announce
 from amc_cogs.moderation import ModerationCog
 from amc_cogs.auth import AuthenticationCog
+from amc_cogs.events import EventsCog
 
 class AMCDiscordBot(commands.Bot):
   def __init__(self, *args, **kwargs):
@@ -16,6 +17,7 @@ class AMCDiscordBot(commands.Bot):
     guild = discord.Object(id=settings.DISCORD_GUILD_ID)
     await self.add_cog(ModerationCog(self), guild=guild)
     await self.add_cog(AuthenticationCog(self), guild=guild)
+    await self.add_cog(EventsCog(self), guild=guild)
     await self.tree.sync(guild=guild)
 
   async def on_message(self, message):
@@ -30,6 +32,7 @@ intents = discord.Intents.default()
 intents.messages = True
 intents.members = True
 intents.message_content = True
+intents.guild_scheduled_events = True
 
 bot = AMCDiscordBot(intents=intents)
 

@@ -113,6 +113,7 @@ class Character(models.Model):
 class Team(models.Model):
   name = models.CharField(max_length=200)
   tag = models.CharField(max_length=6)
+  description = models.TextField(blank=True)
   discord_thread_id = models.PositiveBigIntegerField(unique=True)
   owners = models.ManyToManyField(Player, related_name='teams_owned')
   logo = models.FileField(upload_to="team_logos", null=True)
@@ -127,7 +128,7 @@ class Team(models.Model):
 
   @override
   def __str__(self):
-    return self.name
+    return f"[{self.tag}] {self.name}"
 
 
 @final
@@ -167,6 +168,10 @@ class RaceSetup(models.Model):
       return "Unknown race setup"
 
   @property
+  def route_name(self):
+    return self.config.get('Route', {}).get('RouteName')
+
+  @property
   def num_laps(self):
     return self.config.get('NumLaps', 0)
 
@@ -189,6 +194,17 @@ class RaceSetup(models.Model):
     return self.config.get('Route', {}).get('Waypoints', [])
 
 @final
+class Championship(models.Model):
+  name = models.CharField(max_length=200)
+  discord_thread_id = models.CharField(max_length=32, null=True, blank=True, unique=True)
+  description = models.TextField(blank=True)
+
+  @override
+  def __str__(self):
+    return self.name
+
+
+@final
 class ScheduledEvent(models.Model):
   name = models.CharField(max_length=200)
   start_time = models.DateTimeField()
@@ -196,6 +212,7 @@ class ScheduledEvent(models.Model):
   discord_event_id = models.CharField(max_length=32, null=True, blank=True, unique=True)
   discord_thread_id = models.CharField(max_length=32, null=True, blank=True, unique=True)
   race_setup = models.ForeignKey(RaceSetup, on_delete=models.SET_NULL, null=True, related_name='scheduled_events')
+  championship = models.ForeignKey(Championship, on_delete=models.SET_NULL, null=True, blank=True, related_name='scheduled_events')
 
   players = models.ManyToManyField(
     Player,
@@ -259,7 +276,8 @@ class GameEventCharacter(models.Model):
   )
   best_lap_time = models.FloatField()
   lap_times = ArrayField( # raw game value
-    models.FloatField()
+    models.FloatField(),
+    blank=True
   )
   wrong_engine = models.BooleanField()
   wrong_vehicle = models.BooleanField()
@@ -273,6 +291,14 @@ class GameEventCharacter(models.Model):
         fields=["character", "game_event"], name="unique_character_game_event"
       )
     ]
+
+
+@final
+class ChampionshipPoint(models.Model):
+  championship = models.ForeignKey(Championship, models.SET_NULL, null=True)
+  participant = models.OneToOneField(GameEventCharacter, models.CASCADE)
+  team = models.ForeignKey(Team, models.SET_NULL, null=True, blank=True)
+  points = models.PositiveIntegerField(default=0, blank=True)
 
 
 @final
