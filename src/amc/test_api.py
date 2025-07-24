@@ -10,10 +10,12 @@ from amc.api.routes import (
   characters_router,
   player_locations_router,
   stats_router,
+  teams_router,
 )
 from amc.factories import (
   PlayerFactory,
-  CharacterFactory
+  CharacterFactory,
+  TeamFactory,
 )
 from amc.models import (
   PlayerStatusLog,
@@ -170,4 +172,16 @@ class PlayerLocationsAPITest(TestCase):
     data = response.json()
     self.assertEqual(len(data), 2)
     self.assertEqual(data[0]['location']['x'], 1.0)
+
+
+class TeamsAPITest(TestCase):
+  def setUp(self):
+    self.client = TestAsyncClient(teams_router)
+
+  async def test_list_teams(self):
+    team = await sync_to_async(TeamFactory)()
+    response = await self.client.get("/")
+    data = response.json()
+    self.assertEqual(len(data), 1)
+    self.assertEqual(data[0]['id'], team.id)
 

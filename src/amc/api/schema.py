@@ -2,7 +2,14 @@ from typing import Optional
 from pydantic import AwareDatetime
 from datetime import timedelta
 from ninja import Schema, ModelSchema, Field
-from ..models import Player, Character, CharacterLocation
+from ..models import (
+  Player,
+  Character,
+  CharacterLocation,
+  Team,
+  ScheduledEvent,
+)
+
 
 class ActivePlayerSchema(Schema):
   name: str
@@ -20,6 +27,7 @@ class PlayerSchema(ModelSchema):
 
   class Config(Schema.Config):
     coerce_numbers_to_str = True
+
 
 class CharacterSchema(ModelSchema):
   player_id: str
@@ -60,3 +68,31 @@ class CharacterLocationSchema(ModelSchema):
   class Meta:
     model = CharacterLocation
     fields = ['timestamp', 'character']
+
+
+class TeamSchema(ModelSchema):
+  class Meta:
+    model = Team
+    fields = [
+      'id',
+      'name',
+      'tag',
+      'description',
+      'logo',
+      'bg_color',
+      'text_color',
+    ]
+
+
+class ScheduledEventSchema(ModelSchema):
+  class Meta:
+    model = ScheduledEvent
+    fields = [
+      'id',
+      'name',
+      'start_time',
+      'end_time',
+      'discord_event_id',
+      'race_setup',
+    ]
+

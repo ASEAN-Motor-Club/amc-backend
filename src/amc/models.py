@@ -193,6 +193,7 @@ class RaceSetup(models.Model):
   def waypoints(self):
     return self.config.get('Route', {}).get('Waypoints', [])
 
+
 @final
 class Championship(models.Model):
   name = models.CharField(max_length=200)
@@ -213,7 +214,6 @@ class ScheduledEvent(models.Model):
   discord_thread_id = models.CharField(max_length=32, null=True, blank=True, unique=True)
   race_setup = models.ForeignKey(RaceSetup, on_delete=models.SET_NULL, null=True, related_name='scheduled_events')
   championship = models.ForeignKey(Championship, on_delete=models.SET_NULL, null=True, blank=True, related_name='scheduled_events')
-
   players = models.ManyToManyField(
     Player,
     through='ScheduledEventPlayer',

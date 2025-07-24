@@ -16,6 +16,8 @@ from .schema import (
   CharacterSchema,
   CharacterLocationSchema,
   LeaderboardsRestockDepotCharacterSchema,
+  TeamSchema,
+  ScheduledEventSchema
 )
 from django.conf import settings
 from amc.models import (
@@ -23,6 +25,8 @@ from amc.models import (
   Character,
   CharacterLocation,
   RaceSetup,
+  Team,
+  ScheduledEvent,
 )
 from amc.utils import lowercase_first_char_in_keys
 
@@ -88,7 +92,6 @@ async def get_player(request, unique_id):
     .aget(unique_id=unique_id)
   )
   return player
-
 
 
 @players_router.get('/{unique_id}/characters/', response=list[CharacterSchema])
@@ -201,4 +204,24 @@ async def get_race_setup_by_hash(request, hash):
     for waypoint in route['waypoints']
   ]
   return route
+
+
+teams_router = Router()
+
+@teams_router.get('/', response=list[TeamSchema])
+async def list_teams(request):
+  return [
+    team
+    async for team in Team.objects.all()
+  ]
+
+
+scheduled_events_router = Router()
+
+@scheduled_events_router.get('/', response=list[ScheduledEventSchema])
+async def list_scheduled_events(request):
+  return [
+    scheduled_event
+    async for scheduled_event in ScheduledEvent.objects.all()
+  ]
 

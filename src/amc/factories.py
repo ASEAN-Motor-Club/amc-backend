@@ -8,7 +8,8 @@ from factory import (
 from factory.django import DjangoModelFactory
 from .models import (
   Player,
-  Character
+  Character,
+  Team,
 )
 
 class CharacterFactory(DjangoModelFactory):
@@ -29,4 +30,12 @@ class PlayerFactory(DjangoModelFactory):
   )
   unique_id = LazyAttribute(lambda _: random.randint(10000000000000000, 99999999999999999))
   discord_user_id = LazyAttribute(lambda _: random.randint(100000000000000000, 999999999999999999))
+
+class TeamFactory(DjangoModelFactory):
+  class Meta:
+    model = Team
+
+  name = Faker('company')
+  description = Faker('catch_phrase')
+  discord_thread_id = LazyAttribute(lambda _: str(random.randint(100000000000000000, 999999999999999999)))
 
