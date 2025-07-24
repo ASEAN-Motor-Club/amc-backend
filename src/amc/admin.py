@@ -220,7 +220,7 @@ class ScheduledEventInlineAdmin(admin.TabularInline):
 
 @admin.register(Team)
 class TeamAdmin(admin.ModelAdmin):
-  list_display = ['tag', 'name']
+  list_display = ['tag', 'name', 'racing']
   search_fields = ['tag', 'name']
   inlines = [TeamPlayerInlineAdmin]
   autocomplete_fields = ['owners']

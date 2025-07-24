@@ -212,7 +212,7 @@ teams_router = Router()
 async def list_teams(request):
   return [
     team
-    async for team in Team.objects.all()
+    async for team in Team.objects.filter(racing=True)
   ]
 
 

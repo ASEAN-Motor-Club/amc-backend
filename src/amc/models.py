@@ -119,6 +119,7 @@ class Team(models.Model):
   logo = models.FileField(upload_to="team_logos", null=True)
   bg_color = models.CharField(max_length=6, default="FFFFFF")
   text_color = models.CharField(max_length=6, default="000000")
+  racing = models.BooleanField(default=True)
 
   players = models.ManyToManyField(
     Player,
