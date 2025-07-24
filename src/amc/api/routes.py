@@ -22,7 +22,9 @@ from amc.models import (
   Player,
   Character,
   CharacterLocation,
+  RaceSetup,
 )
+from amc.utils import lowercase_first_char_in_keys
 
 POSITION_UPDATE_RATE = 10
 POSITION_UPDATE_SLEEP = 1.0 / POSITION_UPDATE_RATE
@@ -187,4 +189,16 @@ async def depots_restocked_leaderboard(request, limit=10, now=timezone.now(), da
 
   return [char async for char in qs.order_by('-depots_restocked')[:limit]]
 
+
+race_setups_router = Router()
+
+@race_setups_router.get('/{hash}/')
+async def get_race_setup_by_hash(request, hash):
+  race_setup = await RaceSetup.objects.aget(hash=hash)
+  route = lowercase_first_char_in_keys(race_setup.config['Route'])
+  route['waypoints'] = [
+    { **waypoint, 'translation': waypoint['location'] }
+    for waypoint in route['waypoints']
+  ]
+  return route
 

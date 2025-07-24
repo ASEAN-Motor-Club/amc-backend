@@ -167,7 +167,7 @@ def create_event_embed(game_event):
   """Displays the event information in an embed."""
 
   race_setup = game_event.race_setup
-  url = f"https://api.aseanmotorclub.com/routes/{race_setup.hash}.json"
+  url = f"https://api.aseanmotorclub.com/race_setups/{race_setup.hash}/"
   track_editor_link = f"https://www.aseanmotorclub.com/track?uri={quote(url, safe='')}"
   embed = discord.Embed(
     title=f"🏁 Event: {game_event.name}",

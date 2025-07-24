@@ -6,4 +6,5 @@ api.add_router('/players/', 'amc.api.routes.players_router')
 api.add_router('/characters/', 'amc.api.routes.characters_router')
 api.add_router('/player_positions/', 'amc.api.routes.player_positions_router')
 api.add_router('/character_locations/', 'amc.api.routes.player_locations_router')
+api.add_router('/race_setups/', 'amc.api.routes.race_setups_router')
 

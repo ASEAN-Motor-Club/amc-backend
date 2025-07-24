@@ -176,7 +176,6 @@ class GameEventCharacterInlineAdmin(admin.TabularInline):
   model = GameEventCharacter
   readonly_fields = ['character']
   show_change_link = True
-  ordering = ['rank', '-finished', 'disqualified', 'laps', 'section_index']
 
 class LapSectionTimeInlineAdmin(admin.TabularInline):
   model = LapSectionTime
