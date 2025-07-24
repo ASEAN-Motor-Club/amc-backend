@@ -44,14 +44,13 @@ class CharacterInlineAdmin(admin.TabularInline):
     return qs.with_last_login().with_total_session_time()
 
 
-class PlayerInlineAdmin(admin.TabularInline):
-  model = Player
-  fields = ['unique_id', 'discord_user_id']
+class TeamPlayerInlineAdmin(admin.TabularInline):
+  model = Team.players.through
+  autocomplete_fields = ['player']
   show_change_link = True
 
-class TeamInlineAdmin(admin.TabularInline):
-  model = Team
-  fields = ['tag', 'name']
+class PlayerTeamInlineAdmin(admin.TabularInline):
+  model = Player.teams.through
   show_change_link = True
 
 @admin.register(Player)
@@ -59,7 +58,7 @@ class PlayerAdmin(admin.ModelAdmin):
   list_display = ['unique_id', 'character_names', 'characters_count', 'discord_user_id', 'verified']
   search_fields = ['unique_id', 'characters__name', 'discord_user_id']
   autocomplete_fields = ['user']
-  inlines = [CharacterInlineAdmin, TeamInlineAdmin]
+  inlines = [CharacterInlineAdmin, PlayerTeamInlineAdmin]
 
   def get_queryset(self, request):
     qs = super().get_queryset(request)
@@ -223,7 +222,8 @@ class ScheduledEventInlineAdmin(admin.TabularInline):
 class TeamAdmin(admin.ModelAdmin):
   list_display = ['tag', 'name']
   search_fields = ['tag', 'name']
-  inlines = [PlayerInlineAdmin]
+  inlines = [TeamPlayerInlineAdmin]
+  autocomplete_fields = ['owners']
 
 @admin.register(Championship)
 class ChampionshipAdmin(admin.ModelAdmin):
