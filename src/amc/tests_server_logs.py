@@ -68,6 +68,34 @@ class LogParserTestCase(SimpleTestCase):
         self.assertEqual(result.player_name, "Admin")
         self.assertEqual(result.player_id, 1)
 
+    async def test_parse_player_login_name_has_space(self):
+        """
+        Verifies that a player login event is parsed correctly.
+        """
+        log_line = "2024-07-08T10:01:00Z hostname tag filename [2025.03.22-08.13.07] Player Login: Admin Admin (1)"
+        expected_timestamp = datetime.fromisoformat("2025-03-22T08:13:07Z").replace(tzinfo=ZoneInfo('UTC'))
+
+        _log, result = parse_log_line(log_line)
+
+        self.assertIsInstance(result, PlayerLoginLogEvent)
+        self.assertEqual(result.timestamp, expected_timestamp)
+        self.assertEqual(result.player_name, "Admin Admin")
+        self.assertEqual(result.player_id, 1)
+
+    async def test_parse_player_login_name_has_brackets(self):
+        """
+        Verifies that a player login event is parsed correctly.
+        """
+        log_line = "2024-07-08T10:01:00Z hostname tag filename [2025.03.22-08.13.07] Player Login: Admin (100) (1)"
+        expected_timestamp = datetime.fromisoformat("2025-03-22T08:13:07Z").replace(tzinfo=ZoneInfo('UTC'))
+
+        _log, result = parse_log_line(log_line)
+
+        self.assertIsInstance(result, PlayerLoginLogEvent)
+        self.assertEqual(result.timestamp, expected_timestamp)
+        self.assertEqual(result.player_name, "Admin (100)")
+        self.assertEqual(result.player_id, 1)
+
     async def test_parse_player_logout_legacy(self):
         """
         Verifies that a player login event is parsed correctly.

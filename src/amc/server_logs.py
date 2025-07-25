@@ -154,7 +154,7 @@ def parse_log_line(line: str) -> tuple[ServerLog, LogEvent]:
   return server_log, parse_log_content(timestamp, content)
 
 def parse_log_content(timestamp, content):
-  if pattern_match := re.match(r"\[CHAT\] (?P<player_name>\S+) \((?P<player_id>\d+)\): (?P<message>.+)", content):
+  if pattern_match := re.match(r"\[CHAT\] (?P<player_name>.+) \((?P<player_id>\d+)\): (?P<message>.+)", content):
     return PlayerChatMessageLogEvent(
       timestamp=timestamp,
       player_name=pattern_match.group('player_name'),
@@ -162,14 +162,14 @@ def parse_log_content(timestamp, content):
       message=pattern_match.group('message'),
     )
 
-  if pattern_match := re.match(r"\[CHAT\] (?P<player_name>\S+) has restocked (?P<depot_name>.+)", content):
+  if pattern_match := re.match(r"\[CHAT\] (?P<player_name>.+) has restocked (?P<depot_name>.+)", content):
     return PlayerRestockedDepotLogEvent(
       timestamp=timestamp,
       player_name=pattern_match.group('player_name'),
       depot_name=pattern_match.group('depot_name'),
     )
 
-  if pattern_match := re.match(r"\[CHAT\] (?P<company_name>.+) is Created by (?P<player_name>\S+)", content):
+  if pattern_match := re.match(r"\[CHAT\] (?P<company_name>.+) is Created by (?P<player_name>.+)", content):
     return PlayerCreatedCompanyLogEvent(
       timestamp=timestamp,
       player_name=pattern_match.group('player_name'),
@@ -182,27 +182,27 @@ def parse_log_content(timestamp, content):
       message=pattern_match.group('message'),
     )
 
-  if pattern_match := re.match(r"Player Login: (?P<player_name>\S+) \((?P<player_id>\d+)\)", content):
+  if pattern_match := re.match(r"Player Login: (?P<player_name>.+) \((?P<player_id>\d+)\)", content):
     return PlayerLoginLogEvent(
       timestamp=timestamp,
       player_name=pattern_match.group('player_name'),
       player_id=int(pattern_match.group('player_id')),
     )
 
-  if pattern_match := re.match(r"Player Logout: (?P<player_name>\S+) \((?P<player_id>\d+)\)", content):
+  if pattern_match := re.match(r"Player Logout: (?P<player_name>.+) \((?P<player_id>\d+)\)", content):
     return PlayerLogoutLogEvent(
       timestamp=timestamp,
       player_name=pattern_match.group('player_name'),
       player_id=int(pattern_match.group('player_id')),
     )
 
-  if pattern_match := re.match(r"Player Logout: (?P<player_name>\S+)", content):
+  if pattern_match := re.match(r"Player Logout: (?P<player_name>.+)", content):
     return LegacyPlayerLogoutLogEvent(
       timestamp=timestamp,
       player_name=pattern_match.group('player_name'),
     )
 
-  if pattern_match := re.match(r"Player level changed. Player=(?P<player_name>\S+) \((?P<player_id>\d+)\) Level=(?P<level_type>[^(]+)\((?P<level_value>\d+)\)", content):
+  if pattern_match := re.match(r"Player level changed. Player=(?P<player_name>.+) \((?P<player_id>\d+)\) Level=(?P<level_type>[^(]+)\((?P<level_value>\d+)\)", content):
     return PlayerLevelChangedLogEvent(
       timestamp=timestamp,
       player_name=pattern_match.group('player_name'),
@@ -211,7 +211,7 @@ def parse_log_content(timestamp, content):
       level_value=int(pattern_match.group('level_value')),
     )
 
-  if pattern_match := re.match(r"Player entered vehicle. Player=(?P<player_name>\S+) \((?P<player_id>\d+)\) Vehicle=(?P<vehicle_name>[^(]+)\((?P<vehicle_id>\d+)\)", content):
+  if pattern_match := re.match(r"Player entered vehicle. Player=(?P<player_name>.+) \((?P<player_id>\d+)\) Vehicle=(?P<vehicle_name>[^(]+)\((?P<vehicle_id>\d+)\)", content):
     return PlayerEnteredVehicleLogEvent(
       timestamp=timestamp,
       player_name=pattern_match.group('player_name'),
@@ -220,7 +220,7 @@ def parse_log_content(timestamp, content):
       vehicle_id=int(pattern_match.group('vehicle_id')),
     )
 
-  if pattern_match := re.match(r"Player exited vehicle. Player=(?P<player_name>\S+) \((?P<player_id>\d+)\) Vehicle=(?P<vehicle_name>[^(]+)\((?P<vehicle_id>\d+)\)", content):
+  if pattern_match := re.match(r"Player exited vehicle. Player=(?P<player_name>.+) \((?P<player_id>\d+)\) Vehicle=(?P<vehicle_name>[^(]+)\((?P<vehicle_id>\d+)\)", content):
     return PlayerExitedVehicleLogEvent(
       timestamp=timestamp,
       player_name=pattern_match.group('player_name'),
@@ -229,7 +229,7 @@ def parse_log_content(timestamp, content):
       vehicle_id=int(pattern_match.group('vehicle_id')),
     )
 
-  if pattern_match := re.match(r"Player bought vehicle. Player=(?P<player_name>\S+) \((?P<player_id>\d+)\) Vehicle=(?P<vehicle_name>[^(]+)\((?P<vehicle_id>\d+)\)", content):
+  if pattern_match := re.match(r"Player bought vehicle. Player=(?P<player_name>.+) \((?P<player_id>\d+)\) Vehicle=(?P<vehicle_name>[^(]+)\((?P<vehicle_id>\d+)\)", content):
     return PlayerBoughtVehicleLogEvent(
       timestamp=timestamp,
       player_name=pattern_match.group('player_name'),
@@ -238,7 +238,7 @@ def parse_log_content(timestamp, content):
       vehicle_id=int(pattern_match.group('vehicle_id')),
     )
 
-  if pattern_match := re.match(r"Player sold vehicle. Player=(?P<player_name>\S+) \((?P<player_id>\d+)\) Vehicle=(?P<vehicle_name>[^(]+)\((?P<vehicle_id>\d+)\)", content):
+  if pattern_match := re.match(r"Player sold vehicle. Player=(?P<player_name>.+) \((?P<player_id>\d+)\) Vehicle=(?P<vehicle_name>[^(]+)\((?P<vehicle_id>\d+)\)", content):
     return PlayerSoldVehicleLogEvent(
       timestamp=timestamp,
       player_name=pattern_match.group('player_name'),
@@ -247,7 +247,7 @@ def parse_log_content(timestamp, content):
       vehicle_id=int(pattern_match.group('vehicle_id')),
     )
 
-  if pattern_match := re.match(r"Company added. Name=(?P<company_name>[^(]+)\(Corp\?(?P<is_corp>\w+)\) Owner=(?P<owner_name>\S+)\((?P<owner_id>\d+)\)", content):
+  if pattern_match := re.match(r"Company added. Name=(?P<company_name>[^(]+)\(Corp\?(?P<is_corp>\w+)\) Owner=(?P<owner_name>.+)\((?P<owner_id>\d+)\)", content):
     return CompanyAddedLogEvent(
       timestamp=timestamp,
       company_name=pattern_match.group('company_name'),
@@ -256,7 +256,7 @@ def parse_log_content(timestamp, content):
       owner_id=int(pattern_match.group('owner_id')),
     )
 
-  if pattern_match := re.match(r"Company removed. Name=(?P<company_name>[^(]+)\(Corp\?(?P<is_corp>\w+)\) Owner=(?P<owner_name>\S+)\((?P<owner_id>\d+)\)", content):
+  if pattern_match := re.match(r"Company removed. Name=(?P<company_name>[^(]+)\(Corp\?(?P<is_corp>\w+)\) Owner=(?P<owner_name>.+)\((?P<owner_id>\d+)\)", content):
     return CompanyRemovedLogEvent(
       timestamp=timestamp,
       company_name=pattern_match.group('company_name'),
@@ -265,7 +265,7 @@ def parse_log_content(timestamp, content):
       owner_id=int(pattern_match.group('owner_id')),
     )
 
-  if pattern_match := re.match(r"[Security Alert]: \[(?P<player_name>\S+):(?P<player_id>\d+)\] (?P<message>.+)", content):
+  if pattern_match := re.match(r"[Security Alert]: \[(?P<player_name>.+):(?P<player_id>\d+)\] (?P<message>.+)", content):
     return SecurityAlertLogEvent(
       timestamp=timestamp,
       player_name=pattern_match.group('player_name'),
@@ -277,4 +277,5 @@ def parse_log_content(timestamp, content):
     timestamp=timestamp,
     original_line=content
   )
+
 
