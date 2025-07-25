@@ -34,11 +34,13 @@ from amc.models import (
   BotInvocationLog,
   SongRequestLog,
   Company,
+  ScheduledEvent,
 )
 from amc.game_server import announce
 from amc.mod_server import show_popup
 from amc.auth import verify_player
 from amc.mailbox import send_player_messages
+from amc.utils import format_in_local_tz
 
 
 def get_welcome_message(last_login, player_name):
@@ -224,6 +226,22 @@ async def process_log_event(event: LogEvent, ctx = {}):
           timestamp=timestamp,
           character=character, 
           prompt=f"verify {command_match.group('signed_message')}",
+        )
+      if command_match := re.match(r"/events", message):
+        events_str = '\n\n'.join([
+          f"""\
+## {event.name}
+{format_in_local_tz(event.start_time)}
+{event.description}"""
+          async for event in ScheduledEvent.objects.filter(end_time__gte=timezone.now())
+        ])
+        asyncio.create_task(
+          show_popup(http_client_mod, f"[EVENTS]\n\n{events_str}", player_id=str(player_id))
+        )
+        await BotInvocationLog.objects.acreate(
+          timestamp=timestamp,
+          character=character, 
+          prompt='/events',
         )
       if command_match := re.match(r"/bot (?P<prompt>.+)", message):
         await BotInvocationLog.objects.acreate(

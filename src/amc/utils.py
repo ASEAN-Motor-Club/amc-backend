@@ -1,3 +1,6 @@
+from datetime import datetime
+from zoneinfo import ZoneInfo
+
 def lowercase_first_char_in_keys(obj):
     """
     Recursively traverses a dictionary or a list of dictionaries and
@@ -26,3 +29,34 @@ def lowercase_first_char_in_keys(obj):
     # If the object is not a dict or list, return it as is (base case)
     else:
         return obj
+
+def format_in_local_tz(dt_aware: datetime, zone_info="Asia/Bangkok") -> str:
+    """
+    Converts a timezone-aware datetime to the Asia/Bangkok timezone
+    and formats it into the string: "Weekday, D Month YYYY HH:MM GMT+offset".
+
+    Args:
+        dt_aware: A timezone-aware datetime object.
+
+    Returns:
+        A formatted string representing the date and time in Bangkok.
+    """
+    # Ensure the input datetime is timezone-aware
+    if dt_aware.tzinfo is None:
+        raise ValueError("Input datetime must be timezone-aware.")
+
+    # 1. Define the target timezone
+    local_tz = ZoneInfo(zone_info)
+
+    # 2. Convert the input datetime to the target timezone
+    local_dt = dt_aware.astimezone(local_tz)
+
+    # 3. Format the timezone string. For Asia/Bangkok, .tzname() returns "+07".
+    tz_str = f"GMT{local_dt.tzname()}"
+
+    # 4. Format the rest of the datetime string and combine with the timezone
+    # The day is formatted using an f-string to avoid a leading zero (e.g., "8" instead of "08")
+    formatted_dt_str = local_dt.strftime(f"%A, {local_dt.day} %B %Y %H:%M")
+
+    return f"{formatted_dt_str} {tz_str}"
+

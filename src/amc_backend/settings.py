@@ -175,6 +175,9 @@ Ask the bot anything related to the game. It understands most of the basic infor
 /song_request [name of song and artist]
 Queue up a song on our radio station. Visit aseanmotorclub.com/radio to tune in.
 
+/events
+List upcoming events
+
 /countdown
 Want to do an impromptu race? Use this command to initiate a 5 second countdown.
 """
