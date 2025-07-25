@@ -185,6 +185,11 @@ async def add_discord_verified_role(client, discord_user_id, player_id):
 
   await member.add_roles(role, reason=f"Action performed by {player_id}")
 
+async def countdown(http_client, start=5, delay=1.0):
+  await announce('Get ready', http_client)
+  for i in range(start, -1, -1):
+    await asyncio.sleep(delay)
+    await announce(str(i) if i > 0 else 'GO!!', http_client, clear_banner=False)
 
 async def process_log_event(event: LogEvent, ctx = {}):
   discord_client = ctx.get('discord_client')
@@ -242,6 +247,13 @@ async def process_log_event(event: LogEvent, ctx = {}):
           timestamp=timestamp,
           character=character, 
           prompt='/events',
+        )
+      if command_match := re.match(r"/countdown", message):
+        asyncio.create_task(countdown(http_client))
+        await BotInvocationLog.objects.acreate(
+          timestamp=timestamp,
+          character=character, 
+          prompt='/countdown',
         )
       if command_match := re.match(r"/bot (?P<prompt>.+)", message):
         await BotInvocationLog.objects.acreate(
