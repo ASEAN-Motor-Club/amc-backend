@@ -66,6 +66,7 @@ class EventsCog(commands.Cog):
         'name': after.name,
         'start_time': after.start_time,
         'end_time': after.end_time,
+        'description': after.description,
       }
     )
 
@@ -76,6 +77,7 @@ class EventsCog(commands.Cog):
       name=event.name,
       start_time=event.start_time,
       end_time=event.end_time,
+      description=event.description,
     )
 
   async def thread_to_team(self, thread):

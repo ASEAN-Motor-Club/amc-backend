@@ -116,7 +116,7 @@ class Team(models.Model):
   description = models.TextField(blank=True)
   discord_thread_id = models.PositiveBigIntegerField(unique=True)
   owners = models.ManyToManyField(Player, related_name='teams_owned')
-  logo = models.FileField(upload_to="team_logos", null=True)
+  logo = models.FileField(upload_to="team_logos", null=True, blank=True)
   bg_color = models.CharField(max_length=6, default="FFFFFF")
   text_color = models.CharField(max_length=6, default="000000")
   racing = models.BooleanField(default=True)
@@ -220,6 +220,7 @@ class ScheduledEvent(models.Model):
     through='ScheduledEventPlayer',
     related_name='scheduled_events'
   )
+  description = models.TextField(blank=True)
 
   @override
   def __str__(self):

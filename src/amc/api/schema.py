@@ -94,5 +94,6 @@ class ScheduledEventSchema(ModelSchema):
       'end_time',
       'discord_event_id',
       'race_setup',
+      'description',
     ]
 
