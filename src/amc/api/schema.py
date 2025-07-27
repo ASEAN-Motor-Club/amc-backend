@@ -107,6 +107,7 @@ class ScheduledEventSchema(ModelSchema):
       'discord_event_id',
       'race_setup',
       'description',
+      'time_trial',
     ]
 
 class ChampionshipPointSchema(ModelSchema):

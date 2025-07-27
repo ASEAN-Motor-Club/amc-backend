@@ -1,4 +1,5 @@
 import random
+from datetime import timedelta
 from factory import (
   SubFactory,
   Faker,
@@ -54,6 +55,7 @@ class ScheduledEventFactory(DjangoModelFactory):
   discord_event_id = LazyAttribute(lambda _: str(random.randint(100000000000000000, 999999999999999999)))
   discord_thread_id = LazyAttribute(lambda _: str(random.randint(100000000000000000, 999999999999999999)))
   start_time = Faker('date_time')
+  end_time = LazyAttribute(lambda e: e.start_time + timedelta(days=3))
 
 class GameEventFactory(DjangoModelFactory):
   class Meta:
@@ -64,6 +66,7 @@ class GameEventFactory(DjangoModelFactory):
   state = LazyAttribute(lambda _: random.randint(1, 3))
   discord_message_id = LazyAttribute(lambda _: str(random.randint(100000000000000000, 999999999999999999)))
   scheduled_event = SubFactory('amc.factories.ScheduledEventFactory')
+  start_time = LazyAttribute(lambda e: e.scheduled_event.start_time + timedelta(hours=1))
 
 class ChampionshipFactory(DjangoModelFactory):
   class Meta:

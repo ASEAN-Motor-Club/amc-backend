@@ -251,20 +251,21 @@ async def list_scheduled_events(request):
 
 @scheduled_events_router.get('/{id}/results/', response=list[ParticipantSchema])
 async def list_scheduled_event_results(request, id):
-  scheduled_event = await ScheduledEvent.objects.aget(id=id)
-  qs = GameEventCharacter.objects.select_related('character').filter(
-    game_event__scheduled_event=scheduled_event,
-  ).select_related('championship_point', 'championship_point__team').annotate(
-    p_rank=Window(
-      expression=RowNumber(),
-      partition_by=[F('character')],
-      order_by=[F('finished').desc(), F('net_time').asc()]
+  scheduled_event = await ScheduledEvent.objects.select_related('race_setup').aget(id=id)
+
+  qs = (GameEventCharacter.objects
+    .select_related('character', 'championship_point', 'championship_point__team')
+    .filter_by_scheduled_event(scheduled_event)
+    .filter_best_time_per_player()
+    .order_by(
+      'disqualified',
+      'wrong_engine',
+      'wrong_vehicle',
+      '-finished',
+      'laps',
+      'section_index',
+      'net_time'
     )
-  ).filter(
-    p_rank=1
-  ).order_by(
-    '-finished',
-    'net_time'
   )
   return [
     participant

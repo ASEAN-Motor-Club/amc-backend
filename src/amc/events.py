@@ -49,6 +49,14 @@ async def process_event(event):
       player_info['PlayerName'],
       int(player_info['CharacterId']['UniqueNetId']),
     )
+    player_finished = await GameEventCharacter.objects.filter(
+      character=character,
+      game_event=game_event,
+      finished=True
+    ).aexists()
+    if player_finished:
+      # Do not update finished players
+      return
 
     defaults = {
       'last_section_total_time_seconds': player_info['LastSectionTotalTimeSeconds'],
@@ -95,12 +103,12 @@ async def process_event(event):
 
     return game_event_character
 
-  participants = await asyncio.gather(*[
+  await asyncio.gather(*[
     process_player(player_info)
     for player_info in event['Players']
   ])
 
-  return game_event, transition, participants
+  return game_event, transition
 
 def format_time(total_seconds: float) -> str:
   if total_seconds is None:
@@ -147,7 +155,7 @@ async def monitor_events(ctx):
       process_event(event)
       for event in events
     ])
-    for (game_event, transition, _) in results:
+    for (game_event, transition) in results:
       if transition == (2, 3): # Finished
         await asyncio.sleep(1)
         participants = [p async for p in (GameEventCharacter.objects

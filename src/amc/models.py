@@ -2,7 +2,7 @@ from datetime import timedelta
 from deepdiff import DeepHash
 from django.contrib import admin
 from django.contrib.gis.db import models
-from django.db.models import F, Sum, Max, Window
+from django.db.models import Q, F, Sum, Max, Window
 from django.db.models.functions import RowNumber
 from django.contrib.postgres.fields import ArrayField
 from django.utils import timezone
@@ -222,6 +222,7 @@ class ScheduledEvent(models.Model):
     related_name='scheduled_events'
   )
   description = models.TextField(blank=True)
+  time_trial = models.BooleanField(default=False)
 
   @override
   def __str__(self):
@@ -262,6 +263,26 @@ class GameEvent(models.Model):
   def __str__(self):
     return self.name
 
+class ParticipantQuerySet(models.QuerySet):
+  def filter_best_time_per_player(self):
+    return self.alias(
+      p_rank=Window(
+        expression=RowNumber(),
+        partition_by=[F('character')],
+        order_by=[F('disqualified').asc(), F('finished').desc(), F('net_time').asc()]
+      )
+    ).filter(p_rank=1)
+
+  def filter_by_scheduled_event(self, scheduled_event):
+    if scheduled_event.time_trial:
+      criteria = Q(
+        game_event__race_setup=scheduled_event.race_setup,
+        game_event__start_time__gte=scheduled_event.start_time,
+        game_event__start_time__lte=scheduled_event.end_time,
+      )
+    else:
+      criteria = Q(game_event__scheduled_event=scheduled_event)
+    return self.filter(criteria)
 
 @final
 class GameEventCharacter(models.Model):
@@ -287,6 +308,7 @@ class GameEventCharacter(models.Model):
   wrong_vehicle = models.BooleanField(default=False)
   disqualified = models.BooleanField(default=False)
   finished = models.BooleanField(default=False)
+  objects = models.Manager.from_queryset(ParticipantQuerySet)()
 
   class Meta:
     ordering = ['disqualified', '-finished', 'laps', 'section_index', 'net_time']

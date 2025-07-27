@@ -210,6 +210,26 @@ class ScheduledEventAPITest(TestCase):
     data = response.json()
     self.assertEqual(len(data), 2)
 
+  async def test_results_time_trial(self):
+    game_event = await sync_to_async(GameEventFactory)(
+      state=3,
+      scheduled_event__time_trial=True,
+    )
+    game_event.start_time = game_event.scheduled_event.start_time + timedelta(hours=1)
+    await game_event.asave()
+    await sync_to_async(GameEventCharacterFactory)(
+      game_event=game_event,
+      finished=True,
+    )
+    await sync_to_async(GameEventCharacterFactory)(
+      game_event=game_event,
+      finished=False,
+    )
+
+    response = await self.client.get(f"/{game_event.scheduled_event_id}/results/")
+    data = response.json()
+    self.assertEqual(len(data), 2)
+
 class ChampionshipAPITest(TestCase):
   def setUp(self):
     self.client = TestAsyncClient(championships_router)
