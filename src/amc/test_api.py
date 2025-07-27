@@ -11,11 +11,17 @@ from amc.api.routes import (
   player_locations_router,
   stats_router,
   teams_router,
+  scheduled_events_router,
+  championships_router,
 )
 from amc.factories import (
   PlayerFactory,
   CharacterFactory,
   TeamFactory,
+  GameEventFactory,
+  GameEventCharacterFactory,
+  ChampionshipFactory,
+  ChampionshipPointFactory,
 )
 from amc.models import (
   PlayerStatusLog,
@@ -184,4 +190,58 @@ class TeamsAPITest(TestCase):
     data = response.json()
     self.assertEqual(len(data), 1)
     self.assertEqual(data[0]['id'], team.id)
+
+class ScheduledEventAPITest(TestCase):
+  def setUp(self):
+    self.client = TestAsyncClient(scheduled_events_router)
+
+  async def test_results(self):
+    game_event = await sync_to_async(GameEventFactory)(state=3)
+    await sync_to_async(GameEventCharacterFactory)(
+      game_event=game_event,
+      finished=True,
+    )
+    await sync_to_async(GameEventCharacterFactory)(
+      game_event=game_event,
+      finished=False,
+    )
+
+    response = await self.client.get(f"/{game_event.scheduled_event_id}/results/")
+    data = response.json()
+    self.assertEqual(len(data), 2)
+
+class ChampionshipAPITest(TestCase):
+  def setUp(self):
+    self.client = TestAsyncClient(championships_router)
+
+  async def test_personal_standings(self):
+    championship = await sync_to_async(ChampionshipFactory)()
+    await sync_to_async(ChampionshipPointFactory)(
+      championship=championship,
+    )
+    await sync_to_async(ChampionshipPointFactory)(
+      championship=championship,
+    )
+
+    response = await self.client.get(f"/{championship.id}/personal_standings/")
+    data = response.json()
+    self.assertEqual(len(data), 2)
+
+  async def test_team_standings(self):
+    championship = await sync_to_async(ChampionshipFactory)()
+    cp = await sync_to_async(ChampionshipPointFactory)(
+      championship=championship,
+    )
+    cp2 = await sync_to_async(ChampionshipPointFactory)(
+      championship=championship,
+      team=cp.team,
+      participant__game_event=cp.participant.game_event,
+    )
+    self.assertEqual(cp.championship, cp2.championship)
+    self.assertEqual(cp.participant.game_event, cp2.participant.game_event)
+    self.assertEqual(cp.team, cp2.team)
+
+    response = await self.client.get(f"/{championship.id}/team_standings/")
+    data = response.json()
+    self.assertEqual(len(data), 1)
 

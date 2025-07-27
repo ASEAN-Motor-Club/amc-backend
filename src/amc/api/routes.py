@@ -5,8 +5,8 @@ from pydantic import AwareDatetime
 from datetime import timedelta
 from ninja_extra.security.session import AsyncSessionAuth
 from django.core.cache import cache
-from django.db.models import Count, Q, F, Window
-from django.db.models.functions import Ntile
+from django.db.models import Count, Q, F, Window, Sum
+from django.db.models.functions import Ntile, RowNumber
 from django.utils import timezone
 from ninja import Router
 from django.http import StreamingHttpResponse
@@ -17,7 +17,11 @@ from .schema import (
   CharacterLocationSchema,
   LeaderboardsRestockDepotCharacterSchema,
   TeamSchema,
-  ScheduledEventSchema
+  ScheduledEventSchema,
+  PatchTeamSchema,
+  ParticipantSchema,
+  PersonalStandingSchema,
+  TeamStandingSchema,
 )
 from django.conf import settings
 from amc.models import (
@@ -27,6 +31,9 @@ from amc.models import (
   RaceSetup,
   Team,
   ScheduledEvent,
+  GameEventCharacter,
+  Championship,
+  ChampionshipPoint,
 )
 from amc.utils import lowercase_first_char_in_keys
 
@@ -215,6 +222,23 @@ async def list_teams(request):
     async for team in Team.objects.filter(racing=True)
   ]
 
+class TeamOwnerSessionAuth(AsyncSessionAuth):
+  async def authenticate(self, request, token):
+    token = await super().authenticate(request, token)
+    if not token:
+      return
+    print(request)
+    return True
+
+# @teams_router.patch('/{team_id}/', response=TeamSchema, auth=AsyncSessionAuth())
+# async def update_team(request, team_id: int, payload: PatchTeamSchema):
+#   team = await Team.objects.aget(id=team_id)
+#   updated_fields = payload.dict(exclude_unset=True)
+#   for attr, value in updated_fields.items():
+#     setattr(team, attr, value)
+#   await team.asave()
+#   return team
+
 
 scheduled_events_router = Router()
 
@@ -223,5 +247,75 @@ async def list_scheduled_events(request):
   return [
     scheduled_event
     async for scheduled_event in ScheduledEvent.objects.all()
+  ]
+
+@scheduled_events_router.get('/{id}/results/', response=list[ParticipantSchema])
+async def list_scheduled_event_results(request, id):
+  scheduled_event = await ScheduledEvent.objects.aget(id=id)
+  qs = GameEventCharacter.objects.select_related('character').filter(
+    game_event__scheduled_event=scheduled_event,
+  ).select_related('championship_point', 'championship_point__team').annotate(
+    p_rank=Window(
+      expression=RowNumber(),
+      partition_by=[F('character')],
+      order_by=[F('finished').desc(), F('net_time').asc()]
+    )
+  ).filter(
+    p_rank=1
+  ).order_by(
+    '-finished',
+    'net_time'
+  )
+  return [
+    participant
+    async for participant in qs
+  ]
+
+championships_router = Router()
+
+@championships_router.get('/{id}/personal_standings/', response=list[PersonalStandingSchema])
+async def list_championship_personal_standings(request, id):
+  championship = await Championship.objects.aget(id=id)
+  qs = ChampionshipPoint.objects.select_related('participant__character').filter(
+    championship=championship,
+  ).values('participant__character').annotate(
+    total_points=Sum('points'),
+    player_id=F('participant__character__player__unique_id'),
+    character_name=F('participant__character__name'),
+    team_id=F('team__id'),
+    team_name=F('team__name'),
+  ).order_by('-total_points')
+  return [
+    standing
+    async for standing in qs
+  ]
+
+@championships_router.get('/{id}/team_standings/', response=list[TeamStandingSchema])
+async def list_championship_team_standings(request, id):
+  championship = await Championship.objects.aget(id=id)
+  top_results_subquery = (ChampionshipPoint.objects
+    .select_related('team')
+    .filter(
+      championship=championship,
+      team__isnull=False,
+    )
+    .annotate(
+      team_pos=Window(
+        expression=RowNumber(),
+        partition_by=[F('team'), F('participant__game_event')],
+        order_by=[F('points').desc()]
+      )
+    )
+    .filter(team_pos__lte=2)
+  )
+  standings = (ChampionshipPoint.objects
+    .filter(pk__in=top_results_subquery.values('pk'))
+    .values('team__id', 'team__tag', 'team__name')
+    .annotate(total_points=Sum('points'))
+    .order_by('-total_points')
+  )
+  return [
+    standing
+    async for standing in standings
   ]
 

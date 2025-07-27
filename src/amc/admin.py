@@ -1,6 +1,7 @@
 from django.contrib import admin
 from django.utils import timezone
-from django.db.models import F, Count
+from django.db.models import F, Count, Window
+from django.db.models.functions import RowNumber
 from django.contrib.postgres.aggregates import ArrayAgg
 from .models import (
   Player,
@@ -196,15 +197,42 @@ class LapSectionTimeInlineAdmin(admin.TabularInline):
 
 @admin.register(GameEvent)
 class GameEventAdmin(admin.ModelAdmin):
-  list_display = ['guid', 'name', 'start_time']
+  list_display = ['guid', 'name', 'start_time', 'scheduled_event']
   inlines = [GameEventCharacterInlineAdmin]
 
 @admin.register(GameEventCharacter)
 class GameEventCharacterAdmin(admin.ModelAdmin):
-  list_display = ['id', 'rank', 'character', 'game_event']
+  list_display = ['id', 'rank', 'character', 'net_time', 'game_event', 'game_event__scheduled_event', 'game_event__last_updated']
   inlines = [LapSectionTimeInlineAdmin]
   readonly_fields = ['character']
-  search_fields = ['game_event__id']
+  search_fields = ['game_event__id', 'game_event__scheduled_event__name']
+  list_filter = ['finished']
+  actions = ['award_event_points']
+
+  @admin.action(description="Award event points")
+  def award_event_points(self, request, queryset):
+    championship = Championship.objects.last()
+    # TODO: Create custom ParticipantQuerySet
+    participants = queryset.filter(finished=True).annotate(
+      p_rank=Window(
+        expression=RowNumber(),
+        partition_by=[F('character')],
+        order_by=[F('net_time').asc()]
+      )
+    ).filter(
+      p_rank=1
+    ).order_by('net_time')
+    cps = [
+      ChampionshipPoint(
+        championship=championship,
+        participant=participant,
+        team=participant.character.player.teams.last(),
+        points=ChampionshipPoint.get_event_points_for_position(i)
+      )
+      for i, participant in enumerate(participants)
+    ]
+    ChampionshipPoint.objects.bulk_create(cps)
+
 
 class GameEventInlineAdmin(admin.TabularInline):
   model = GameEvent

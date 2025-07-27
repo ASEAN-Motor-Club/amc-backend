@@ -8,6 +8,8 @@ from ..models import (
   CharacterLocation,
   Team,
   ScheduledEvent,
+  GameEventCharacter,
+  ChampionshipPoint,
 )
 
 
@@ -83,6 +85,16 @@ class TeamSchema(ModelSchema):
       'text_color',
     ]
 
+class PatchTeamSchema(ModelSchema):
+  class Meta:
+    model = Team
+    fields = [
+      'description',
+      'bg_color',
+      'text_color',
+    ]
+    fields_optional = '__all__'
+
 
 class ScheduledEventSchema(ModelSchema):
   class Meta:
@@ -96,4 +108,43 @@ class ScheduledEventSchema(ModelSchema):
       'race_setup',
       'description',
     ]
+
+class ChampionshipPointSchema(ModelSchema):
+  team: Optional[TeamSchema] = None
+
+  class Meta:
+    model = ChampionshipPoint
+    fields = [
+      'team',
+      'points',
+    ]
+
+class ParticipantSchema(ModelSchema):
+  character: CharacterSchema
+  net_time: Optional[float]
+  championship_point: Optional[ChampionshipPointSchema] = None
+
+  class Meta:
+    model = GameEventCharacter
+    fields = [
+      'finished',
+      'net_time',
+      'laps',
+      'section_index',
+      'first_section_total_time_seconds',
+      'last_section_total_time_seconds',
+    ]
+
+class PersonalStandingSchema(Schema):
+  total_points: int
+  player_id: int
+  character_name: str
+  team_id: Optional[int]
+  team_name: Optional[str]
+
+class TeamStandingSchema(Schema):
+  total_points: int
+  team_id: int = Field(None, alias="team__id")
+  team_tag: str = Field(None, alias="team__tag")
+  team_name: str = Field(None, alias="team__name")
 

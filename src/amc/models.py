@@ -269,22 +269,23 @@ class GameEventCharacter(models.Model):
   rank = models.IntegerField() # raw game value
   laps = models.IntegerField(default=0)
   section_index = models.IntegerField(default=-1)
-  first_section_total_time_seconds = models.FloatField(null=True)
-  last_section_total_time_seconds = models.FloatField()
+  first_section_total_time_seconds = models.FloatField(null=True, blank=True)
+  last_section_total_time_seconds = models.FloatField(null=True, blank=True)
   net_time = models.GeneratedField(
     expression=F('last_section_total_time_seconds') - F('first_section_total_time_seconds'),
-    output_field=models.FloatField(),
+    output_field=models.FloatField(null=True, blank=True),
     db_persist=True,
   )
-  best_lap_time = models.FloatField()
+  best_lap_time = models.FloatField(null=True, blank=True)
   lap_times = ArrayField( # raw game value
     models.FloatField(),
-    blank=True
+    default=list,
+    null=True,
   )
-  wrong_engine = models.BooleanField()
-  wrong_vehicle = models.BooleanField()
-  disqualified = models.BooleanField()
-  finished = models.BooleanField()
+  wrong_engine = models.BooleanField(default=False)
+  wrong_vehicle = models.BooleanField(default=False)
+  disqualified = models.BooleanField(default=False)
+  finished = models.BooleanField(default=False)
 
   class Meta:
     ordering = ['disqualified', '-finished', 'laps', 'section_index', 'net_time']
@@ -298,10 +299,19 @@ class GameEventCharacter(models.Model):
 @final
 class ChampionshipPoint(models.Model):
   championship = models.ForeignKey(Championship, models.SET_NULL, null=True)
-  participant = models.OneToOneField(GameEventCharacter, models.CASCADE)
+  participant = models.OneToOneField(GameEventCharacter, models.CASCADE, related_name='championship_point')
   team = models.ForeignKey(Team, models.SET_NULL, null=True, blank=True)
   points = models.PositiveIntegerField(default=0, blank=True)
 
+  event_points_by_position = [25, 20, 16, 13, 11, 10, 9, 8, 7, 6, 5, 4, 3, 2, 1]
+  time_trial_points_by_position = [10, 8, 6, 5, 4, 3, 2, 1]
+
+  @classmethod
+  def get_event_points_for_position(self, position: int):
+    try:
+      return self.event_points_by_position[position]
+    except IndexError:
+      return 0
 
 @final
 class LapSectionTime(models.Model):
