@@ -184,7 +184,7 @@ def parse_log_content(timestamp, content):
       company_name=pattern_match.group('company_name'),
     )
 
-  if pattern_match := re.match(r"\[CHAT\] (?P<message>\S.+)", content):
+  if pattern_match := re.match(r"\[CHAT\] (?P<message>\S.*)", content):
     return AnnouncementLogEvent(
       timestamp=timestamp,
       message=pattern_match.group('message'),
