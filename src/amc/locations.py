@@ -47,7 +47,7 @@ async def process_player(player_info, ctx):
       was_outside = distance_to_old > target_radius_meters
       is_inside = distance_to_new <= target_radius_meters
 
-      if was_outside and is_inside:
+      if was_outside and is_inside and ctx.get('http_client_mod') is not None:
         asyncio.create_task(
           show_popup(ctx['http_client_mod'], message, player_id=player.unique_id)
         )

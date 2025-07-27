@@ -121,6 +121,8 @@ class ServerLog(BaseLogEvent):
   """Represents line of log."""
   content: str
   log_path: str
+  hostname: str
+  tag: str
 
 
 LogEvent = (
@@ -146,11 +148,17 @@ GAME_TIMESTAMP_FORMAT = '%Y.%m.%d-%H.%M.%S'
 
 def parse_log_line(line: str) -> tuple[ServerLog, LogEvent]:
   try:
-    _log_timestamp, _hostname, _tag, filename, game_timestamp, content = line.split(' ', 5)
+    _log_timestamp, hostname, tag, filename, game_timestamp, content = line.split(' ', 5)
     timestamp = datetime.strptime(game_timestamp.strip('[').strip(']'), GAME_TIMESTAMP_FORMAT).replace(tzinfo=ZoneInfo('UTC'))
-    server_log = ServerLog(timestamp=timestamp, content=content, log_path=filename)
+    server_log = ServerLog(
+      timestamp=timestamp,
+      content=content,
+      log_path=filename,
+      hostname=hostname,
+      tag=tag,
+    )
   except ValueError:
-    return ServerLog(timestamp=timezone.now(), content=line, log_path=""), UnknownLogEntry(timestamp=timezone.now(), original_line=line)
+    return ServerLog(timestamp=timezone.now(), content=line, log_path="", hostname="", tag=""), UnknownLogEntry(timestamp=timezone.now(), original_line=line)
   return server_log, parse_log_content(timestamp, content)
 
 def parse_log_content(timestamp, content):

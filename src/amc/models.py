@@ -398,6 +398,8 @@ class Company(models.Model):
 class ServerLog(models.Model):
   timestamp = models.DateTimeField()
   log_path = models.CharField(max_length=500, null=True)
+  hostname = models.CharField(max_length=100, default='asean-mt-server')
+  tag = models.CharField(max_length=100, default='mt-server')
   text = models.TextField()
   event_processed = models.BooleanField(default=False)
 

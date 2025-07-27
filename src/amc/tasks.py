@@ -191,10 +191,8 @@ async def countdown(http_client, start=5, delay=1.0):
     await asyncio.sleep(delay)
     await announce(str(i) if i > 0 else 'GO!!', http_client, clear_banner=False)
 
-async def process_log_event(event: LogEvent, ctx = {}):
+async def process_log_event(event: LogEvent, http_client=None, http_client_mod=None, ctx = {}):
   discord_client = ctx.get('discord_client')
-  http_client = ctx.get('http_client')
-  http_client_mod = ctx.get('http_client_mod')
 
   forward_message = None
 
@@ -416,13 +414,28 @@ async def process_log_line(ctx, line):
   log, event = parse_log_line(line)
   server_log, server_log_created = await ServerLog.objects.aget_or_create(
     timestamp=log.timestamp,
+    hostname=log.hostname,
+    tag=log.tag,
     text=log.content,
     log_path=log.log_path,
   )
   if not server_log_created and server_log.event_processed:
     return {'status': 'duplicate', 'timestamp': event.timestamp}
 
-  await process_log_event(event, ctx=ctx)
+  # TODO rename context variable names
+  # Separate main server and event server sessions
+  match log.hostname:
+    case 'asean-mt-server':
+      http_client = ctx.get('http_client')
+      http_client_mod = ctx.get('http_client_mod')
+    case 'motortown-server-event':
+      http_client = ctx.get('http_client_event')
+      http_client_mod = ctx.get('http_client_event_mod')
+    case _:
+      http_client = ctx.get('http_client')
+      http_client_mod = ctx.get('http_client_mod')
+
+  await process_log_event(event, http_client=http_client, http_client_mod=http_client_mod, ctx=ctx)
 
   server_log.event_processed = True
   await server_log.asave(update_fields=['event_processed'])
