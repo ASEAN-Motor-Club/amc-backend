@@ -2,7 +2,8 @@ from datetime import timedelta
 from deepdiff import DeepHash
 from django.contrib import admin
 from django.contrib.gis.db import models
-from django.db.models import F, Sum, Max
+from django.db.models import F, Sum, Max, Window
+from django.db.models.functions import RowNumber
 from django.contrib.postgres.fields import ArrayField
 from django.utils import timezone
 from django.utils.translation import gettext_lazy as _
@@ -296,12 +297,49 @@ class GameEventCharacter(models.Model):
     ]
 
 
+class ChampionshipPointQuerySet(models.QuerySet):
+  def personal_standings(request, championship_id):
+    return ChampionshipPoint.objects.filter(
+      championship=championship_id,
+    ).values('participant__character').annotate(
+      total_points=Sum('points'),
+      player_id=F('participant__character__player__unique_id'),
+      character_name=F('participant__character__name'),
+      team_id=F('team__id'),
+      team_name=F('team__name'),
+    ).order_by('-total_points')
+
+  def team_standings(request, championship_id):
+    top_results_subquery = (ChampionshipPoint.objects
+      .select_related('team')
+      .filter(
+        championship=championship_id,
+        team__isnull=False,
+      )
+      .annotate(
+        team_pos=Window(
+          expression=RowNumber(),
+          partition_by=[F('team'), F('participant__game_event__scheduled_event')],
+          order_by=[F('points').desc()]
+        )
+      )
+      .filter(team_pos__lte=2)
+    )
+    return (ChampionshipPoint.objects
+      .filter(pk__in=top_results_subquery.values('pk'))
+      .values('team__id', 'team__tag', 'team__name')
+      .annotate(total_points=Sum('points'))
+      .order_by('-total_points')
+    )
+
 @final
 class ChampionshipPoint(models.Model):
   championship = models.ForeignKey(Championship, models.SET_NULL, null=True)
   participant = models.OneToOneField(GameEventCharacter, models.CASCADE, related_name='championship_point')
   team = models.ForeignKey(Team, models.SET_NULL, null=True, blank=True)
   points = models.PositiveIntegerField(default=0, blank=True)
+
+  objects = models.Manager.from_queryset(ChampionshipPointQuerySet)()
 
   event_points_by_position = [25, 20, 16, 13, 11, 10, 9, 8, 7, 6, 5, 4, 3, 2, 1]
   time_trial_points_by_position = [10, 8, 6, 5, 4, 3, 2, 1]

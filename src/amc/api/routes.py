@@ -275,47 +275,15 @@ championships_router = Router()
 
 @championships_router.get('/{id}/personal_standings/', response=list[PersonalStandingSchema])
 async def list_championship_personal_standings(request, id):
-  championship = await Championship.objects.aget(id=id)
-  qs = ChampionshipPoint.objects.select_related('participant__character').filter(
-    championship=championship,
-  ).values('participant__character').annotate(
-    total_points=Sum('points'),
-    player_id=F('participant__character__player__unique_id'),
-    character_name=F('participant__character__name'),
-    team_id=F('team__id'),
-    team_name=F('team__name'),
-  ).order_by('-total_points')
   return [
     standing
-    async for standing in qs
+    async for standing in ChampionshipPoint.objects.personal_standings(id)
   ]
 
 @championships_router.get('/{id}/team_standings/', response=list[TeamStandingSchema])
 async def list_championship_team_standings(request, id):
-  championship = await Championship.objects.aget(id=id)
-  top_results_subquery = (ChampionshipPoint.objects
-    .select_related('team')
-    .filter(
-      championship=championship,
-      team__isnull=False,
-    )
-    .annotate(
-      team_pos=Window(
-        expression=RowNumber(),
-        partition_by=[F('team'), F('participant__game_event')],
-        order_by=[F('points').desc()]
-      )
-    )
-    .filter(team_pos__lte=2)
-  )
-  standings = (ChampionshipPoint.objects
-    .filter(pk__in=top_results_subquery.values('pk'))
-    .values('team__id', 'team__tag', 'team__name')
-    .annotate(total_points=Sum('points'))
-    .order_by('-total_points')
-  )
   return [
     standing
-    async for standing in standings
+    async for standing in ChampionshipPoint.objects.team_standings(id)
   ]
 

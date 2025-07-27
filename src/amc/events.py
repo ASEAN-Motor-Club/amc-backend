@@ -183,36 +183,37 @@ def create_event_embed(game_event):
 
   participant_list_str = ""
   for rank, participant in enumerate(game_event.participants.all(), start=1):
-    if participant.finished:
-      progress_str = format_time(participant.net_time)
-    else:
-      total_laps = max(race_setup.num_laps, 1)
-      total_waypoints = race_setup.num_sections
-
-      if race_setup.num_laps == 0:
-        total_waypoints = total_waypoints - 1
-
-      progress_percentage = 0.0
-      if total_waypoints > 0:
-        progress_percentage = 100.0 * max(participant.laps - 1, 0) / total_laps
-        progress_percentage += 100.0 * max(participant.section_index, 0) / float(total_waypoints) / total_laps
-      if race_setup.num_laps > 0:
-        progress_str = f"{participant.laps}/{race_setup.num_laps} Laps - {progress_percentage:.1f}%"
+    try:
+      if participant.finished:
+        progress_str = format_time(participant.net_time)
       else:
-        progress_str = f"{progress_percentage:.1f}%"
+        total_laps = max(race_setup.num_laps, 1)
+        total_waypoints = race_setup.num_sections
 
-    participant_line = f"{rank}. {participant.character.name} ({progress_str})"
+        if race_setup.num_laps == 0:
+          total_waypoints = total_waypoints - 1
 
-    if participant.wrong_vehicle:
-      participant_line += " [Wrong Vehicle]"
-    if participant.wrong_engine:
-      participant_line += " [Wrong Engine]"
+        progress_percentage = 0.0
+        if total_waypoints > 0:
+          progress_percentage = 100.0 * max(participant.laps - 1, 0) / total_laps
+          progress_percentage += 100.0 * max(participant.section_index, 0) / float(total_waypoints) / total_laps
+        if race_setup.num_laps > 0:
+          progress_str = f"{participant.laps}/{race_setup.num_laps} Laps - {progress_percentage:.1f}%"
+        else:
+          progress_str = f"{progress_percentage:.1f}%"
 
-    participant_list_str += f"{participant_line}\n"
+      participant_line = f"{rank}. {participant.character.name} ({progress_str})"
+
+      if participant.wrong_vehicle:
+        participant_line += " [Wrong Vehicle]"
+      if participant.wrong_engine:
+        participant_line += " [Wrong Engine]"
+
+      participant_list_str += f"{participant_line}\n"
+    except Exception as e:
+      print(f"Failed to display participant: {e}")
+      pass
   
-  # Ensure the participant list doesn't exceed Discord's field value limit (1024 chars)
-  if len(participant_list_str) > 1024:
-      participant_list_str = participant_list_str[:1020] + "...\n(and more)"
       
   embed.add_field(name="👥 Participants", value=participant_list_str.strip(), inline=False)
 

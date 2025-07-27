@@ -1,18 +1,27 @@
 import re
+import discord
 from discord.ext import commands
 from django.conf import settings
 
-from amc.models import ScheduledEvent, Team, Player
+from amc.models import (
+  ScheduledEvent,
+  Team,
+  Player,
+  Championship,
+  ChampionshipPoint,
+)
 
 
 class EventsCog(commands.Cog):
   def __init__(self, bot, teams_channel_id=settings.DISCORD_TEAMS_CHANNEL_ID):
     self.bot = bot
-    self.teams_channel_id = teams_channel_id 
+    self.teams_channel_id = teams_channel_id
+    self.last_embed_message = None
 
   @commands.Cog.listener()
   async def on_ready(self):
     await self.sync_teams()
+    await self.update_championship_standings()
 
   @commands.Cog.listener()
   async def on_thread_create(self, thread):
@@ -118,5 +127,51 @@ class EventsCog(commands.Cog):
 
     for thread in threads:
       await self.thread_to_team(thread)
+
+  async def update_championship_standings(self):
+    championship = await Championship.objects.alast()
+    if not championship:
+      return
+    personal_standings = [s async for s in ChampionshipPoint.objects.personal_standings(championship)]
+    team_standings = [s async for s in ChampionshipPoint.objects.team_standings(championship)]
+    
+    embed = discord.Embed(
+      title=f"{championship.name} Standings",
+      color=discord.Color.blue(),  # You can choose any color
+    )
+    team_standings_str = '\n'.join([
+      f"{str(rank).rjust(2)}. {s['team__tag'].ljust(6)} {s['team__name'].ljust(30)} {str(s['total_points']).rjust(3)}"
+      for rank, s in enumerate(team_standings, start=1)
+    ])
+    embed.add_field(
+      name="Team Standings",
+      value=f"```\n{team_standings_str}\n```",
+      inline=False
+    )
+    personal_standings_str = '\n'.join([
+      f"{str(rank).rjust(2)}. {s['character_name'].ljust(16)} {str(s['total_points']).rjust(3)}"
+      for rank, s in enumerate(personal_standings, start=1)
+    ])
+    embed.add_field(
+      name="Personal Standings",
+      value=f"```\n{personal_standings_str}\n```",
+      inline=False
+    )
+
+    last_embed_message = self.last_embed_message
+    channel = self.bot.get_channel(settings.DISCORD_CHAMPIONSHIP_CHANNEL_ID)
+    if last_embed_message is None:
+        async for message in channel.history(limit=1):
+          last_embed_message = message
+        if last_embed_message:
+          await last_embed_message.edit(embed=embed)
+        else:
+          last_embed_message = await channel.send(embed=embed)
+    else:
+        try:
+            await last_embed_message.edit(embed=embed)
+        except discord.NotFound:
+            # In case the message was deleted, send a new one
+            last_embed_message = await channel.send(embed=embed)
 
 

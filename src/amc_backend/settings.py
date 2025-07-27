@@ -161,6 +161,7 @@ DISCORD_GAME_CHAT_CHANNEL_ID = int(os.environ.get('DISCORD_GAME_CHAT_CHANNEL_ID'
 DISCORD_VEHICLE_LOGS_CHANNEL_ID = int(os.environ.get('DISCORD_VEHICLE_LOGS_CHANNEL_ID', 0))
 DISCORD_EVENTS_CHANNEL_ID = int(os.environ.get('DISCORD_EVENTS_CHANNEL_ID', 0))
 DISCORD_TEAMS_CHANNEL_ID = int(os.environ.get('DISCORD_TEAMS_CHANNEL_ID', 0))
+DISCORD_CHAMPIONSHIP_CHANNEL_ID = int(os.environ.get('DISCORD_CHAMPIONSHIP_CHANNEL_ID', 0))
 DISCORD_VERIFIED_ROLE_ID = int(os.environ.get('DISCORD_VERIFIED_ROLE_ID', '1376791968662814750'))
 
 HELP_TEXT = """\
@@ -181,3 +182,5 @@ List upcoming events
 /countdown
 Want to do an impromptu race? Use this command to initiate a 5 second countdown.
 """
+
+ADMINS = [("Admin", os.environ.get('ADMIN_EMAIL'))]

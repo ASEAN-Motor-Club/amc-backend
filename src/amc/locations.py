@@ -32,9 +32,12 @@ async def process_player(player_info, ctx):
   }
   new_location_point = Point(**location_data)
 
-  last_character_location = await CharacterLocation.objects.filter(
-    character=character,
-  ).alatest('timestamp')
+  try:
+    last_character_location = await CharacterLocation.objects.filter(
+      character=character,
+    ).alatest('timestamp')
+  except CharacterLocation.DoesNotExist:
+    last_character_location = None
 
   if last_character_location:
     for (target_point, target_radius_meters, message) in point_of_interests:
