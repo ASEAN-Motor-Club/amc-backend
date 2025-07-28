@@ -306,6 +306,7 @@ class GameEventCharacter(models.Model):
     models.FloatField(),
     default=list,
     null=True,
+    blank=True,
   )
   wrong_engine = models.BooleanField(default=False)
   wrong_vehicle = models.BooleanField(default=False)
