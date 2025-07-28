@@ -572,4 +572,8 @@ class DeliveryPoint(models.Model):
   name = models.CharField(max_length=200)
   type = models.CharField(max_length=200)
   coord = models.PointField(srid=0, dim=3)
+  data = models.JSONField(null=True, blank=True)
+  last_updated = models.DateTimeField(editable=False, auto_now=True)
+
+
 

@@ -10,6 +10,7 @@ from ..models import (
   ScheduledEvent,
   GameEventCharacter,
   ChampionshipPoint,
+  DeliveryPoint,
 )
 
 
@@ -149,3 +150,15 @@ class TeamStandingSchema(Schema):
   team_tag: str = Field(None, alias="team__tag")
   team_name: str = Field(None, alias="team__name")
 
+class DeliveryPointSchema(ModelSchema):
+  coord: PositionSchema
+
+  class Meta:
+    model = DeliveryPoint
+    fields = [
+      'guid',
+      'name',
+      'type',
+      'data',
+      'last_updated',
+    ]

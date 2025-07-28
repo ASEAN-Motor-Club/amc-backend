@@ -5,8 +5,8 @@ from pydantic import AwareDatetime
 from datetime import timedelta
 from ninja_extra.security.session import AsyncSessionAuth
 from django.core.cache import cache
-from django.db.models import Count, Q, F, Window, Sum
-from django.db.models.functions import Ntile, RowNumber
+from django.db.models import Count, Q, F, Window
+from django.db.models.functions import Ntile
 from django.utils import timezone
 from ninja import Router
 from django.http import StreamingHttpResponse
@@ -22,6 +22,7 @@ from .schema import (
   ParticipantSchema,
   PersonalStandingSchema,
   TeamStandingSchema,
+  DeliveryPointSchema,
 )
 from django.conf import settings
 from amc.models import (
@@ -34,6 +35,7 @@ from amc.models import (
   GameEventCharacter,
   Championship,
   ChampionshipPoint,
+  DeliveryPoint,
 )
 from amc.utils import lowercase_first_char_in_keys
 
@@ -249,6 +251,10 @@ async def list_scheduled_events(request):
     async for scheduled_event in ScheduledEvent.objects.all()
   ]
 
+@scheduled_events_router.get('/{id}/', response=ScheduledEventSchema)
+async def get_scheduled_event(request, id):
+  return await ScheduledEvent.objects.select_related('race_setup').aget(id=id)
+
 @scheduled_events_router.get('/{id}/results/', response=list[ParticipantSchema])
 async def list_scheduled_event_results(request, id):
   scheduled_event = await ScheduledEvent.objects.select_related('race_setup').aget(id=id)
@@ -287,4 +293,17 @@ async def list_championship_team_standings(request, id):
     standing
     async for standing in ChampionshipPoint.objects.team_standings(id)
   ]
+
+deliverypoints_router = Router()
+
+@deliverypoints_router.get('/', response=list[DeliveryPointSchema])
+async def list_deliverypoints(request):
+  return [
+    dp async for dp in DeliveryPoint.objects.all()
+  ]
+
+@deliverypoints_router.get('/{guid}/', response=list[DeliveryPointSchema])
+async def get_deliverypoint(request, guid):
+  return await DeliveryPoint.objects.aget(guid=guid)
+
 

@@ -10,6 +10,7 @@ from django.utils import timezone
 from amc.tasks import process_log_line
 from amc.events import monitor_events, send_event_embeds
 from amc.locations import monitor_locations
+from amc.deliverypoints import monitor_deliverypoints
 import discord
 from amc.discord_client import bot as discord_client
 
@@ -72,6 +73,7 @@ class WorkerSettings:
         cron(monitor_events, second=None),
         cron(monitor_locations, second=None),
         cron(send_event_embeds, second=set(range(0, 60, 10))),
+        cron(monitor_deliverypoints, second=None),
     ]
     on_startup = startup
     on_shutdown = shutdown

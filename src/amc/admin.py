@@ -24,6 +24,7 @@ from .models import (
   Championship,
   ChampionshipPoint,
   Team,
+  DeliveryPoint,
 )
 
 class CharacterInlineAdmin(admin.TabularInline):
@@ -290,4 +291,10 @@ class PlayerMailMessageAdmin(admin.ModelAdmin):
   list_select_related = ['to_player', 'from_player']
   list_display = ['sent_at', 'to_player', 'received_at', 'content']
   autocomplete_fields = ['to_player', 'from_player']
+
+
+@admin.register(DeliveryPoint)
+class DeliveryPointAdmin(admin.ModelAdmin):
+  list_display = ['guid', 'name', 'coord', 'last_updated']
+  search_fields = ['name', 'guid']
 
