@@ -160,15 +160,16 @@ async def monitor_events(ctx):
       if transition == (2, 3): # Finished
         await asyncio.sleep(1)
         participants = [p async for p in (GameEventCharacter.objects
+          .select_related('character', 'character__player')
           .filter(
             game_event=game_event,
           )
-          .select_related('character')
         )]
         message = f"RESULTS\n\n{print_results(participants)}"
-        asyncio.create_task(
-          show_popup(http_client, message)
-        )
+        await asyncio.gather(*[
+          show_popup(http_client, message, player_id=participant.character.player.unique_id)
+          for participant in participants
+        ])
 
 
 
