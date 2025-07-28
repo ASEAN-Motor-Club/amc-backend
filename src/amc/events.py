@@ -18,7 +18,8 @@ async def process_event(event):
   race_setup, _ = await RaceSetup.objects.aget_or_create(
     hash=race_setup_hash,
     defaults={
-      'config': event['RaceSetup']
+      'config': event['RaceSetup'],
+      'name': event['RaceSetup'].get('Route', {}).get('RouteName')
     }
   )
   try:

@@ -154,6 +154,7 @@ class TeamMembership(models.Model):
 class RaceSetup(models.Model):
   config = models.JSONField(null=True, blank=True)
   hash = models.CharField(max_length=200, unique=True)
+  name = models.CharField(max_length=200, null=True)
 
   @staticmethod
   def calculate_hash(race_setup):
@@ -171,6 +172,8 @@ class RaceSetup(models.Model):
 
   @property
   def route_name(self):
+    if self.name is not None:
+      return self.name
     return self.config.get('Route', {}).get('RouteName')
 
   @property

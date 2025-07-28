@@ -270,13 +270,13 @@ class ScheduledEventAdmin(admin.ModelAdmin):
   list_display = ['name', 'race_setup', 'start_time', 'discord_event_id']
   list_select_related = ['race_setup']
   inlines = [GameEventInlineAdmin]
-  search_fields = ['name', 'race_setup__hash', 'race_setup__route_name']
+  search_fields = ['name', 'race_setup__hash', 'race_setup__name']
   autocomplete_fields = ['race_setup']
 
 @admin.register(RaceSetup)
 class RaceSetupAdmin(admin.ModelAdmin):
   list_display = ['hash', 'route_name', 'num_laps', 'vehicles', 'engines']
-  search_fields = ['hash', 'route_name']
+  search_fields = ['hash', 'name']
   inlines = [GameEventInlineAdmin]
 
 @admin.register(CharacterLocation)
