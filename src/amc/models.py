@@ -566,3 +566,10 @@ class PlayerMailMessage(models.Model):
   received_at = models.DateTimeField(editable=False, null=True, blank=True)
 
 
+@final
+class DeliveryPoint(models.Model):
+  guid = models.CharField(max_length=200, primary_key=True)
+  name = models.CharField(max_length=200)
+  type = models.CharField(max_length=200)
+  coord = models.PointField(srid=0, dim=3)
+
