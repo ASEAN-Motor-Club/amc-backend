@@ -40,7 +40,7 @@ from amc.game_server import announce
 from amc.mod_server import show_popup
 from amc.auth import verify_player
 from amc.mailbox import send_player_messages
-from amc.events import setup_event
+from amc.events import setup_event, show_scheduled_event_results_popup
 from amc.utils import format_in_local_tz
 
 
@@ -212,6 +212,12 @@ async def process_log_event(event: LogEvent, http_client=None, http_client_mod=N
           character=character, 
           prompt="help",
         )
+      if command_match := re.match(r"/results", message):
+        active_event = await ScheduledEvent.objects.filter_active_at(timestamp).select_related('race_setup').afirst()
+        if not active_event:
+          asyncio.create_task(show_popup(http_client_mod, "No active events", player_id=str(player_id)))
+          return
+        asyncio.create_task(show_scheduled_event_results_popup(http_client_mod, active_event, player_id=str(player_id)))
       if command_match := re.match(r"/setup_event", message):
         try:
           event_setup = await setup_event(timestamp, player_id, http_client_mod)

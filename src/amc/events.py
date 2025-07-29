@@ -189,11 +189,47 @@ def format_time(total_seconds: float) -> str:
 
 
 def print_results(participants):
+  def print_result(participant, rank):
+    flags = []
+    if not participant.finished:
+      flags.append('DNF')
+    if participant.wrong_engine:
+      flags.append('ENGINE')
+    if participant.wrong_vehicle:
+      flags.append('VEHICLE')
+
+    flags = ', '.join(flags)
+    return f"#{str(rank).zfill(2)}: {participant.character.name.ljust(16)} {format_time(participant.net_time).ljust(14)} {flags}"
+
   lines = [
-    f"#{str(rank).zfill(2)}: {participant.character.name.ljust(16)} {format_time(participant.net_time)}"
+    print_result(participant, rank)
     for rank, participant in enumerate(participants, start=1)
   ]
   return '\n'.join(lines)
+
+
+async def show_results_popup(http_client, participants, player_id=None):
+  message = f"RESULTS\n\n{print_results(participants)}"
+  if player_id is not None:
+    await show_popup(http_client, message, player_id=player_id)
+    return
+
+  await asyncio.gather(*[
+    show_popup(
+      http_client,
+      message,
+      player_id=participant.character.player.unique_id
+    )
+    for participant in participants
+  ])
+
+
+async def show_scheduled_event_results_popup(http_client, scheduled_event, player_id=None):
+  participants = [
+    p
+    async for p in GameEventCharacter.objects.results_for_scheduled_event(scheduled_event)
+  ]
+  await show_results_popup(http_client, participants, player_id=player_id)
 
 
 async def monitor_events(ctx):
@@ -213,11 +249,7 @@ async def monitor_events(ctx):
             game_event=game_event,
           )
         )]
-        message = f"RESULTS\n\n{print_results(participants)}"
-        await asyncio.gather(*[
-          show_popup(http_client, message, player_id=participant.character.player.unique_id)
-          for participant in participants
-        ])
+        await show_results_popup(http_client, participants)
 
 
 
