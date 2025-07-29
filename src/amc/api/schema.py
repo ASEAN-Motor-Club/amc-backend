@@ -19,19 +19,6 @@ class ActivePlayerSchema(Schema):
   unique_id: str
 
 
-class PlayerSchema(ModelSchema):
-  unique_id: str
-  total_session_time: timedelta
-  last_login: Optional[AwareDatetime]
-
-  class Meta:
-    model = Player
-    fields = ['unique_id', 'discord_user_id']
-
-  class Config(Schema.Config):
-    coerce_numbers_to_str = True
-
-
 class CharacterSchema(ModelSchema):
   player_id: str
 
@@ -51,6 +38,26 @@ class CharacterSchema(ModelSchema):
 
   class Config(Schema.Config):
     coerce_numbers_to_str = True
+
+
+class PlayerSchema(ModelSchema):
+  unique_id: str
+  total_session_time: timedelta
+  last_login: Optional[AwareDatetime] = None
+  main_character: Optional[CharacterSchema] = None
+
+  class Meta:
+    model = Player
+    fields = ['unique_id', 'discord_user_id']
+
+  class Config(Schema.Config):
+    coerce_numbers_to_str = True
+
+  @staticmethod
+  def resolve_main_character(obj):
+    if not obj.main_characters:
+      return None
+    return obj.main_characters[0]
 
 
 class PositionSchema(Schema):
@@ -74,6 +81,8 @@ class CharacterLocationSchema(ModelSchema):
 
 
 class TeamSchema(ModelSchema):
+  players: list[PlayerSchema]
+
   class Meta:
     model = Team
     fields = [

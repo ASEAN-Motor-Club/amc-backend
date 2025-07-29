@@ -296,6 +296,27 @@ class ParticipantQuerySet(models.QuerySet):
       criteria = Q(game_event__scheduled_event=scheduled_event)
     return self.filter(criteria)
 
+  def results_for_scheduled_event(self, scheduled_event):
+    return (self
+      .select_related(
+        'character',
+        'character__player',
+        'championship_point',
+        'championship_point__team'
+      )
+      .filter_by_scheduled_event(scheduled_event)
+      .filter_best_time_per_player()
+      .order_by(
+        'disqualified',
+        'wrong_engine',
+        'wrong_vehicle',
+        '-finished',
+        'laps',
+        'section_index',
+        'net_time'
+      )
+    )
+
 @final
 class GameEventCharacter(models.Model):
   character = models.ForeignKey(Character, on_delete=models.CASCADE)

@@ -35,6 +35,7 @@ class PlayersAPITest(TestCase):
 
   async def test_get_player(self):
     player = await sync_to_async(PlayerFactory)()
+    character = await player.characters.afirst()
     response = await self.client.get(f"/{player.unique_id}/")
 
     self.assertEqual(response.status_code, 200)
@@ -43,6 +44,18 @@ class PlayersAPITest(TestCase):
       "unique_id": str(player.unique_id),
       "total_session_time": 'P0DT00H00M00S',
       "last_login": None,
+      "main_character": {
+        "id": character.id,
+        "name": character.name,
+        "player_id": str(player.unique_id),
+        "driver_level": None,
+        "bus_level": None,
+        "taxi_level": None,
+        "police_level": None,
+        "truck_level": None,
+        "wrecker_level": None,
+        "racer_level": None,
+      },
     })
 
   async def test_get_player_logged_in(self):
@@ -60,6 +73,18 @@ class PlayersAPITest(TestCase):
     self.assertEqual(response.json(), {
       "discord_user_id": player.discord_user_id,
       "unique_id": str(player.unique_id),
+      "main_character": {
+        "id": character.id,
+        "name": character.name,
+        "player_id": str(player.unique_id),
+        "driver_level": None,
+        "bus_level": None,
+        "taxi_level": None,
+        "police_level": None,
+        "truck_level": None,
+        "wrecker_level": None,
+        "racer_level": None,
+      },
       "total_session_time": 'P0DT23H00M00S',
       "last_login": (now - timedelta(days=1)).strftime('%Y-%m-%dT%H:%M:%SZ'),
     })
@@ -186,10 +211,20 @@ class TeamsAPITest(TestCase):
 
   async def test_list_teams(self):
     team = await sync_to_async(TeamFactory)()
+    player = await sync_to_async(PlayerFactory)()
+    await team.players.aadd(player)
     response = await self.client.get("/")
     data = response.json()
     self.assertEqual(len(data), 1)
     self.assertEqual(data[0]['id'], team.id)
+
+  async def test_get_team(self):
+    team = await sync_to_async(TeamFactory)()
+    player = await sync_to_async(PlayerFactory)()
+    await team.players.aadd(player)
+    response = await self.client.get(f"/{team.id}/")
+    data = response.json()
+    self.assertEqual(data['id'], team.id)
 
 class ScheduledEventAPITest(TestCase):
   def setUp(self):

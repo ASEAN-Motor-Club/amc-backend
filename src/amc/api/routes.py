@@ -5,7 +5,7 @@ from pydantic import AwareDatetime
 from datetime import timedelta
 from ninja_extra.security.session import AsyncSessionAuth
 from django.core.cache import cache
-from django.db.models import Count, Q, F, Window
+from django.db.models import Count, Q, F, Window, Prefetch, Max
 from django.db.models.functions import Ntile
 from django.utils import timezone
 from ninja import Router
@@ -81,25 +81,28 @@ async def list_players(request):
   return players
 
 
+players_qs = (Player.objects
+  .with_total_session_time()
+  .with_last_login()
+  .prefetch_related(
+    Prefetch(
+      'characters',
+      queryset=Character.objects.with_total_session_time().order_by('-total_session_time')[:1],
+      to_attr='main_characters'
+    )
+  )
+)
 
 @players_router.get('/me/', auth=AsyncSessionAuth(), response=PlayerSchema)
 async def get_player_me(request):
   """Retrieve a single player"""
-  player = await (Player.objects
-    .with_total_session_time()
-    .with_last_login()
-    .aget(user=request.auth)
-  )
+  player = await players_qs.aget(user=request.auth)
   return player
 
 @players_router.get('/{unique_id}/', response=PlayerSchema)
 async def get_player(request, unique_id):
   """Retrieve a single player"""
-  player = await (Player.objects
-    .with_total_session_time()
-    .with_last_login()
-    .aget(unique_id=unique_id)
-  )
+  player = await players_qs.aget(unique_id=unique_id)
   return player
 
 
@@ -216,13 +219,29 @@ async def get_race_setup_by_hash(request, hash):
 
 
 teams_router = Router()
+teams_qs = (Team.objects
+  .prefetch_related(
+    Prefetch(
+      'players',
+      queryset=players_qs.alias(
+        max_racer_level=Max('characters__racer_level')
+      ).order_by('-max_racer_level')
+    )
+  )
+  .filter(racing=True)
+)
 
 @teams_router.get('/', response=list[TeamSchema])
 async def list_teams(request):
   return [
     team
-    async for team in Team.objects.filter(racing=True)
+    async for team in teams_qs 
   ]
+
+@teams_router.get('/{id}/', response=TeamSchema)
+async def get_team(request, id):
+  team = await teams_qs.aget(id=id)
+  return team
 
 class TeamOwnerSessionAuth(AsyncSessionAuth):
   async def authenticate(self, request, token):
@@ -259,20 +278,7 @@ async def get_scheduled_event(request, id):
 async def list_scheduled_event_results(request, id):
   scheduled_event = await ScheduledEvent.objects.select_related('race_setup').aget(id=id)
 
-  qs = (GameEventCharacter.objects
-    .select_related('character', 'championship_point', 'championship_point__team')
-    .filter_by_scheduled_event(scheduled_event)
-    .filter_best_time_per_player()
-    .order_by(
-      'disqualified',
-      'wrong_engine',
-      'wrong_vehicle',
-      '-finished',
-      'laps',
-      'section_index',
-      'net_time'
-    )
-  )
+  qs = GameEventCharacter.objects.results_for_scheduled_event(scheduled_event)
   return [
     participant
     async for participant in qs
