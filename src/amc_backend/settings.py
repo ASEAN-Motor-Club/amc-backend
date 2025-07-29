@@ -177,11 +177,20 @@ Ask the bot anything related to the game. It understands most of the basic infor
 /song_request [name of song and artist]
 Queue up a song on our radio station. Visit aseanmotorclub.com/radio to tune in.
 
+
+::::: EVENT COMMANDS :::::
+
 /events
-List upcoming events
+List current and upcoming scheduled events
 
 /countdown
 Want to do an impromptu race? Use this command to initiate a 5 second countdown.
+
+/setup_event
+(Event Server only) Creates an event based on the currently active scheduled event.
+
+/results
+See the results of active events
 """
 
 ADMINS = [("Admin", os.environ.get('ADMIN_EMAIL'))]
