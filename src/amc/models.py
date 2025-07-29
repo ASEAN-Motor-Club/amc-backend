@@ -210,6 +210,14 @@ class Championship(models.Model):
     return self.name
 
 
+class ScheduledEventQuerySet(models.QuerySet):
+  def filter_active_at(self, timestamp):
+    return self.filter(
+      start_time__lte=timestamp,
+      end_time__gte=timestamp,
+    )
+
+
 @final
 class ScheduledEvent(models.Model):
   name = models.CharField(max_length=200)
@@ -226,6 +234,7 @@ class ScheduledEvent(models.Model):
   )
   description = models.TextField(blank=True)
   time_trial = models.BooleanField(default=False)
+  objects = models.Manager.from_queryset(ScheduledEventQuerySet)()
 
   @override
   def __str__(self):

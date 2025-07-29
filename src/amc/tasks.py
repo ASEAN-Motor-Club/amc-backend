@@ -40,6 +40,7 @@ from amc.game_server import announce
 from amc.mod_server import show_popup
 from amc.auth import verify_player
 from amc.mailbox import send_player_messages
+from amc.events import setup_event
 from amc.utils import format_in_local_tz
 
 
@@ -210,6 +211,21 @@ async def process_log_event(event: LogEvent, http_client=None, http_client_mod=N
           timestamp=timestamp,
           character=character, 
           prompt="help",
+        )
+      if command_match := re.match(r"/setup_event", message):
+        try:
+          event_setup = await setup_event(timestamp, player_id, http_client_mod)
+          if event_setup:
+            asyncio.create_task(show_popup(http_client_mod, "Event is setup!\n\nPlease join it and start the race.\n\nYour times will be recorded automatically.", player_id=str(player_id)))
+          else:
+            asyncio.create_task(show_popup(http_client_mod, "There does not seem to be an active event. Please first create an event.", player_id=str(player_id)))
+        except Exception as e:
+          asyncio.create_task(show_popup(http_client_mod, f"Failed to setup event: {e}", player_id=str(player_id)))
+
+        await BotInvocationLog.objects.acreate(
+          timestamp=timestamp,
+          character=character, 
+          prompt="/setup_event",
         )
       if command_match := re.match(r"/verify (?P<signed_message>.+)", message):
         try:

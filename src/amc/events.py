@@ -2,7 +2,7 @@ import asyncio
 import discord
 from urllib.parse import quote
 from django.conf import settings
-from django.db.models import Prefetch, aprefetch_related_objects
+from django.db.models import Prefetch
 from amc.mod_server import show_popup
 from amc.models import (
   Character,
@@ -10,7 +10,55 @@ from amc.models import (
   GameEventCharacter,
   LapSectionTime,
   RaceSetup,
+  ScheduledEvent,
 )
+
+async def setup_event(timestamp, player_id, http_client_mod):
+  scheduled_event = await (ScheduledEvent.objects
+    .filter_active_at(timestamp)
+    .select_related('race_setup')
+    .filter(
+      race_setup__isnull=False
+    )
+    .afirst()
+  )
+
+  if scheduled_event is None:
+    return False
+
+  async with http_client_mod.get(f'/players/{player_id}') as resp:
+    players = (await resp.json()).get('data', [])
+    if not players:
+      return False
+    player = players[0]
+
+  race_setup = scheduled_event.race_setup.config
+  race_setup['Route']['Waypoints'] = [
+    {
+      'Translation': waypoint['Location'],
+      'Scale3D': waypoint['Scale3D'],
+      'Rotation': waypoint['Rotation'],
+    }
+    for waypoint in race_setup['Route']['Waypoints']
+  ]
+  if len(race_setup['VehicleKeys']) == 0:
+    race_setup['VehicleKeys'] = []
+  if len(race_setup['EngineKeys']) == 0:
+    race_setup['EngineKeys'] = []
+
+  data = {
+    'EventName': scheduled_event.name,
+    'RaceSetup': race_setup,
+    'OwnerCharacterId': {
+      'CharacterGuid': player['CharacterGuid'],
+      'UniqueNetId': str(player_id),
+    }
+  }
+  async with http_client_mod.post('/events', json=data) as resp:
+    if resp.status < 400:
+      return True
+  return False
+
 
 async def process_event(event):
   transition = None
