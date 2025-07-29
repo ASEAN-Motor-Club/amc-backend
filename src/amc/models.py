@@ -44,6 +44,7 @@ class Player(models.Model):
   discord_user_id = models.PositiveBigIntegerField(unique=True, null=True)
   discord_name = models.CharField(max_length=200, null=True)
   user = models.OneToOneField(User, models.SET_NULL, related_name='player', null=True)
+  adminstrator = models.BooleanField(default=False)
 
   objects = models.Manager.from_queryset(PlayerQuerySet)()
 
