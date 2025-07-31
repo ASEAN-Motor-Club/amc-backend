@@ -82,18 +82,28 @@ class CharacterQuerySet(models.QuerySet):
     )
 
 class CharacterManager(models.Manager):
-  async def aget_or_create_character_player(self, player_name, player_id):
+  async def aget_or_create_character_player(self, player_name, player_id, character_guid=None):
     player, player_created = await Player.objects.aget_or_create(unique_id=player_id)
     character, character_created = await (self.get_queryset()
       .with_last_login()
-      .aget_or_create(player=player, name=player_name)
+      .aget_or_create(
+        player=player,
+        name=player_name,
+        defaults={
+          'guid': character_guid,
+        }
+      )
     )
+    if character_guid is not None and character.guid is None:
+      character.guid = character_guid
+      await character.asave(update_fields=['guid'])
     return (character, player, character_created, player_created)
 
 
 @final
 class Character(models.Model):
   player = models.ForeignKey(Player, on_delete=models.CASCADE, related_name='characters')
+  guid = models.CharField(max_length=32, unique=True, editable=False, null=True)
   name = models.CharField(max_length=200)
   # levels
   driver_level = models.PositiveIntegerField(null=True)
@@ -265,6 +275,7 @@ class GameEvent(models.Model):
   race_setup = models.ForeignKey(RaceSetup, on_delete=models.SET_NULL, null=True, related_name='game_events')
   state = models.IntegerField()
   discord_message_id = models.PositiveBigIntegerField(null=True)
+  owner = models.ForeignKey(Character, models.SET_NULL, null=True, blank=True)
 
   characters = models.ManyToManyField(
     Character,

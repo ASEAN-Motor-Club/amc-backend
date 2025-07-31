@@ -70,6 +70,11 @@ async def process_event(event):
       'name': event['RaceSetup'].get('Route', {}).get('RouteName')
     }
   )
+  owner = await Character.objects.filter(
+    player__unique_id=event['OwnerCharacterId']['UniqueNetId'],
+    guid=event['OwnerCharacterId']['CharacterGuid']
+  ).afirst()
+
   try:
     game_event = await (GameEvent.objects
       .filter(
@@ -83,14 +88,30 @@ async def process_event(event):
       transition = (game_event.state, event['State'])
 
     game_event.state = event['State']
+    game_event.owner = owner
     game_event.race_setup = race_setup
     await game_event.asave()
   except GameEvent.DoesNotExist:
+    try:
+      # TODO: Refactor, use the above query as the existing_event
+      existing_event = await (GameEvent.objects
+        .filter(
+          guid=event['EventGuid'],
+          discord_message_id__isnull=False,
+          state__lte=2,
+        )
+        .alatest('last_updated')
+      )
+      discord_message_id = existing_event.discord_message_id
+    except GameEvent.DoesNotExist:
+      discord_message_id = None
     game_event = await GameEvent.objects.acreate(
       guid=event['EventGuid'],
       name=event['EventName'],
       state=event['State'],
       race_setup=race_setup,
+      discord_message_id=discord_message_id,
+      owner=owner,
     )
 
   async def process_player(player_info):

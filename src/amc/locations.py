@@ -25,6 +25,7 @@ async def process_player(player_info, ctx):
   character, player, *_  = await Character.objects.aget_or_create_character_player(
     player_info['PlayerName'],
     player_info['UniqueID'],
+    character_guid=player_info['CharacterGuid'],
   )
   location_data = {
     axis.lower(): value
