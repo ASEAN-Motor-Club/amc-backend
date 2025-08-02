@@ -379,3 +379,50 @@ async def send_event_embeds(ctx):
         discord_client.loop
       )
 
+
+async def staggered_start(http_client_game, http_client_mod, game_event, player_id=None, delay=20.0):
+  async with http_client_mod.get(f'/events/{game_event.guid}') as resp:
+    events = (await resp.json()).get('data', [])
+
+  if not events:
+    raise Exception('Event not found')
+  event = events[0]
+
+  if event['State'] != 1:
+    raise Exception('Event is not in Ready state')
+
+  participants = [
+    player_info
+    for player_info in event['Players']
+  ]
+  line_up_message = f'<Title>Staggered Start Line Up</>\n<Secondary>Delay = {delay} seconds</>\n<Announce>Please start when your name is called</>\n\n'
+  line_up_message += '\n'.join([
+    f"{idx}. {player_info['PlayerName']}"
+    for idx, player_info in enumerate(participants, start=1)
+  ])
+  for player_info in participants:
+    await show_popup(
+      http_client_mod,
+      line_up_message,
+      player_id=player_info['CharacterId']['UniqueNetId']
+    )
+
+  await http_client_mod.post(f"/events/{event['EventGuid']}/state", json={
+    "State": 2,
+  })
+
+  await asyncio.sleep(5.0) # in-game countdown
+
+  for player_info in participants:
+    await asyncio.sleep(delay)
+    await asyncio.gather(
+      announce(
+        f"{player_info['PlayerName']} GO!!!",
+        http_client_game,
+      ),
+      show_popup(
+        http_client_mod,
+        "<Large>GO!!!</>",
+        player_id=player_info['CharacterId']['UniqueNetId']
+      )
+    )
