@@ -2,8 +2,10 @@ import asyncio
 import discord
 from urllib.parse import quote
 from django.conf import settings
-from django.db.models import Prefetch
+from django.db.models import F, Prefetch, Exists, OuterRef, Window
+from django.db.models.functions import RowNumber
 from amc.mod_server import show_popup
+from amc.game_server import announce
 from amc.models import (
   Character,
   GameEvent,
@@ -24,12 +26,18 @@ async def setup_event(timestamp, player_id, http_client_mod):
   )
 
   if scheduled_event is None:
-    return False
+    raise Exception('There are currently no active events')
+
+  async with http_client_mod.get('/events') as resp:
+    events = (await resp.json()).get('data', [])
+    for event in events:
+      if event['OwnerCharacterId']['UniqueNetId'] == str(player_id):
+        raise Exception('You already have an active event')
 
   async with http_client_mod.get(f'/players/{player_id}') as resp:
     players = (await resp.json()).get('data', [])
     if not players:
-      return False
+      raise Exception('Player not found')
     player = players[0]
 
   race_setup = scheduled_event.race_setup.config
@@ -50,14 +58,15 @@ async def setup_event(timestamp, player_id, http_client_mod):
     'EventName': scheduled_event.name,
     'RaceSetup': race_setup,
     'OwnerCharacterId': {
-      'CharacterGuid': player['CharacterGuid'],
+      'CharacterGuid': player['CharacterGuid'].rjust(32, '0'),
       'UniqueNetId': str(player_id),
     }
   }
-  async with http_client_mod.post('/events', json=data) as resp:
-    if resp.status < 400:
-      return True
-  return False
+  async with http_client_mod.post('/events', json=data) as response:
+    if response.status >= 400:
+      error_body = await response.json()
+      raise Exception(f"API Error: Received status {response.status} instead of 201. Body: {error_body}")
+    return True
 
 
 async def process_event(event):
@@ -98,8 +107,13 @@ async def process_event(event):
         .filter(
           guid=event['EventGuid'],
           discord_message_id__isnull=False,
-          state__lte=2,
         )
+        .exclude(Exists(
+          GameEventCharacter.objects.filter(
+            game_event=OuterRef('pk'),
+            finished=True
+          )
+        ))
         .alatest('last_updated')
       )
       discord_message_id = existing_event.discord_message_id
@@ -144,7 +158,7 @@ async def process_event(event):
         'wrong_vehicle': player_info['bWrongVehicle'],
         'wrong_engine': player_info['bWrongEngine'],
       }
-    if player_info['SectionIndex'] == 0 and player_info['Laps'] == 1:
+    if game_event.state == 2 and player_info['SectionIndex'] == 0 and player_info['Laps'] == 1:
       defaults['first_section_total_time_seconds'] = player_info['LastSectionTotalTimeSeconds']
 
     game_event_character, _ = await GameEventCharacter.objects.aupdate_or_create(
@@ -158,10 +172,10 @@ async def process_event(event):
       }
     )
 
-    if game_event_character.section_index >= 0 and game_event_character.laps >= 1:
+    if game_event.state == 2 and game_event_character.section_index >= 0 and game_event_character.laps >= 1:
       laps = game_event_character.laps - 1
       section_index = game_event_character.section_index
-      await LapSectionTime.objects.aget_or_create(
+      await LapSectionTime.objects.aupdate_or_create(
         game_event_character=game_event_character,
         section_index=section_index,
         lap=laps,
@@ -220,7 +234,7 @@ def print_results(participants):
       flags.append('VEHICLE')
 
     flags = ', '.join(flags)
-    return f"#{str(rank).zfill(2)}: {participant.character.name.ljust(16)} {format_time(participant.net_time).ljust(14)} {flags}"
+    return f"#{str(rank).zfill(2)}: <Bold>{participant.character.name.ljust(16)}</> {format_time(participant.net_time).ljust(14)} <Warning>{flags}</>"
 
   lines = [
     print_result(participant, rank)
@@ -230,7 +244,7 @@ def print_results(participants):
 
 
 async def show_results_popup(http_client, participants, player_id=None):
-  message = f"RESULTS\n\n{print_results(participants)}"
+  message = f"<Title>Results</>\n\n{print_results(participants)}"
   if player_id is not None:
     await show_popup(http_client, message, player_id=player_id)
     return
@@ -255,12 +269,14 @@ async def show_scheduled_event_results_popup(http_client, scheduled_event, playe
 
 async def monitor_events(ctx):
   http_client = ctx.get('http_client_event_mod')
+
   async with http_client.get('/events') as resp:
     events = (await resp.json()).get('data', [])
     results = await asyncio.gather(*[
       process_event(event)
       for event in events
     ])
+
     for (game_event, transition) in results:
       if transition == (2, 3): # Finished
         await asyncio.sleep(1)
@@ -352,8 +368,13 @@ async def send_event_embed(game_event, channel):
     game_event.discord_message_id = message.id
     await game_event.asave(update_fields=['discord_message_id'])
   else:
-    message = await channel.fetch_message(game_event.discord_message_id)
-    await message.edit(content='', embed=embed)
+    try:
+      message = await channel.fetch_message(game_event.discord_message_id)
+      await message.edit(content='', embed=embed)
+    except discord.NotFound:
+      message = await channel.send('', embed=embed)
+      game_event.discord_message_id = message.id
+      await game_event.asave(update_fields=['discord_message_id'])
 
 async def send_event_embeds(ctx):
   http_client = ctx.get('http_client_event_mod')
@@ -370,7 +391,14 @@ async def send_event_embeds(ctx):
       .prefetch_related(
         Prefetch('participants', queryset=GameEventCharacter.objects.select_related('character'))
       )
-      .filter(guid__in=event_guids)
+      .annotate(
+        rank=Window(
+          expression=RowNumber(),
+          partition_by=[F('guid')],
+          order_by=[F('last_updated').desc()]
+        )
+      )
+      .filter(rank=1, guid__in=event_guids)
     )
 
     async for game_event in qs:
@@ -379,6 +407,47 @@ async def send_event_embeds(ctx):
         discord_client.loop
       )
 
+    # Remove expired embeds
+
+    expired_discord_message_ids = list(set([
+      discord_message_id
+      async for discord_message_id in (GameEvent.objects
+        .filter(discord_message_id__isnull=False)
+        .exclude(Exists(
+          GameEventCharacter.objects.filter(
+            game_event=OuterRef('pk'),
+            finished=True
+          )
+        ))
+        .difference(qs)
+        .order_by('-last_updated')
+        .values_list('discord_message_id', flat=True)
+      )[:50]
+    ]))
+    async def delete_expired_messages(mIds):
+      expired_discord_messages = [discord.Object(id=str(mId)) for mId in mIds]
+      if expired_discord_messages:
+        try:
+          await channel.delete_messages(expired_discord_messages)
+          await GameEvent.objects.filter(discord_message_id__in=mIds).aupdate(discord_message_id=None)
+        except Exception as e:
+          print(f'Failed to delete: {e}', flush=True)
+
+    async def delete_unattached_embeds():
+      to_delete = []
+      async for m in channel.history(limit=20):
+        if not (await GameEvent.objects.filter(discord_message_id=m.id).aexists()):
+          to_delete.append(m)
+      await channel.delete_messages(to_delete)
+
+    asyncio.run_coroutine_threadsafe(
+      delete_expired_messages(expired_discord_message_ids),
+      discord_client.loop
+    )
+    asyncio.run_coroutine_threadsafe(
+      delete_unattached_embeds(),
+      discord_client.loop
+    )
 
 async def staggered_start(http_client_game, http_client_mod, game_event, player_id=None, delay=20.0):
   async with http_client_mod.get(f'/events/{game_event.guid}') as resp:
@@ -426,3 +495,4 @@ async def staggered_start(http_client_game, http_client_mod, game_event, player_
         player_id=player_info['CharacterId']['UniqueNetId']
       )
     )
+
