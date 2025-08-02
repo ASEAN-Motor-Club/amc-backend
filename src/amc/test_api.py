@@ -13,6 +13,7 @@ from amc.api.routes import (
   teams_router,
   scheduled_events_router,
   championships_router,
+  results_router,
 )
 from amc.factories import (
   PlayerFactory,
@@ -27,6 +28,7 @@ from amc.models import (
   PlayerStatusLog,
   PlayerRestockDepotLog,
   CharacterLocation,
+  LapSectionTime,
 )
 
 class PlayersAPITest(TestCase):
@@ -262,6 +264,60 @@ class ScheduledEventAPITest(TestCase):
     )
 
     response = await self.client.get(f"/{game_event.scheduled_event_id}/results/")
+    data = response.json()
+    self.assertEqual(len(data), 2)
+
+
+class ResultsAPITestCase(TestCase):
+  def setUp(self):
+    self.client = TestAsyncClient(results_router)
+
+  async def test_lap_section_times(self):
+    game_event = await sync_to_async(GameEventFactory)(
+      state=3,
+      scheduled_event__time_trial=True,
+    )
+    participant = await sync_to_async(GameEventCharacterFactory)(
+      game_event=game_event,
+      finished=True,
+    )
+    best_participant = await sync_to_async(GameEventCharacterFactory)(
+      game_event=game_event,
+      finished=True,
+    )
+    await LapSectionTime.objects.acreate(
+      game_event_character=participant,
+      lap=1,
+      section_index=0,
+      total_time_seconds=2,
+      rank=1,
+    )
+    await LapSectionTime.objects.acreate(
+      game_event_character=participant,
+      lap=1,
+      section_index=1,
+      total_time_seconds=4,
+      rank=1,
+    )
+    await LapSectionTime.objects.acreate(
+      game_event_character=best_participant,
+      lap=1,
+      section_index=0,
+      total_time_seconds=2,
+      rank=1,
+    )
+    await LapSectionTime.objects.acreate(
+      game_event_character=best_participant,
+      lap=1,
+      section_index=1,
+      total_time_seconds=3,
+      rank=1,
+    )
+
+    response = await self.client.get(
+      f"/{participant.id}/lap_section_times/",
+      query_params={'compare': best_participant.id}
+    )
     data = response.json()
     self.assertEqual(len(data), 2)
 

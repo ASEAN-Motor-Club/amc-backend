@@ -1,11 +1,12 @@
 import asyncio
 import aiohttp
 import json
+from typing import Optional
 from pydantic import AwareDatetime
 from datetime import timedelta
 from ninja_extra.security.session import AsyncSessionAuth
 from django.core.cache import cache
-from django.db.models import Count, Q, F, Window, Prefetch, Max
+from django.db.models import Count, Q, F, Window, Prefetch, Max, Subquery, OuterRef
 from django.db.models.functions import Ntile
 from django.utils import timezone
 from ninja import Router
@@ -18,11 +19,11 @@ from .schema import (
   LeaderboardsRestockDepotCharacterSchema,
   TeamSchema,
   ScheduledEventSchema,
-  PatchTeamSchema,
   ParticipantSchema,
   PersonalStandingSchema,
   TeamStandingSchema,
   DeliveryPointSchema,
+  LapSectionTimeSchema,
 )
 from django.conf import settings
 from amc.models import (
@@ -33,9 +34,9 @@ from amc.models import (
   Team,
   ScheduledEvent,
   GameEventCharacter,
-  Championship,
   ChampionshipPoint,
   DeliveryPoint,
+  LapSectionTime,
 )
 from amc.utils import lowercase_first_char_in_keys
 
@@ -279,6 +280,47 @@ async def list_scheduled_event_results(request, id):
   scheduled_event = await ScheduledEvent.objects.select_related('race_setup').aget(id=id)
 
   qs = GameEventCharacter.objects.results_for_scheduled_event(scheduled_event)
+  return [
+    participant
+    async for participant in qs
+  ]
+
+@players_router.get('/{player_id}/results/', response=list[ParticipantSchema])
+async def list_player_results(request, player_id, route_hash: Optional[str]=None, scheduled_event_id: Optional[int]=None):
+  qs = GameEventCharacter.objects.select_related(
+    'character',
+    'character__player',
+    'championship_point',
+    'championship_point__team',
+  ).filter(
+    character__player__unique_id=int(player_id),
+  ).order_by('-game_event__start_time')
+
+  if route_hash is not None:
+    qs = qs.filter(game_event__race_setup__hash=route_hash)
+
+  if scheduled_event_id is not None:
+    qs = qs.filter(game_event__scheduled_event=scheduled_event_id)
+
+  return [
+    participant
+    async for participant in qs
+  ]
+
+results_router = Router()
+
+@results_router.get('/{participant_id}/lap_section_times/', response=list[LapSectionTimeSchema])
+async def list_player_results_times(request, participant_id):
+  qs = (LapSectionTime.objects
+    .select_related( 'game_event_character')
+    .annotate_deltas()
+    .annotate_net_time()
+    .filter(
+      game_event_character=int(participant_id),
+    )
+    .order_by('lap', 'section_index')
+  )
+
   return [
     participant
     async for participant in qs

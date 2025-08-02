@@ -11,6 +11,7 @@ from ..models import (
   GameEventCharacter,
   ChampionshipPoint,
   DeliveryPoint,
+  LapSectionTime,
 )
 
 
@@ -95,6 +96,19 @@ class TeamSchema(ModelSchema):
       'text_color',
     ]
 
+class SimpleTeamSchema(ModelSchema):
+  class Meta:
+    model = Team
+    fields = [
+      'id',
+      'name',
+      'tag',
+      'description',
+      'logo',
+      'bg_color',
+      'text_color',
+    ]
+
 class PatchTeamSchema(ModelSchema):
   class Meta:
     model = Team
@@ -121,7 +135,7 @@ class ScheduledEventSchema(ModelSchema):
     ]
 
 class ChampionshipPointSchema(ModelSchema):
-  team: Optional[TeamSchema] = None
+  team: Optional[SimpleTeamSchema] = None
 
   class Meta:
     model = ChampionshipPoint
@@ -138,6 +152,7 @@ class ParticipantSchema(ModelSchema):
   class Meta:
     model = GameEventCharacter
     fields = [
+      'id',
       'finished',
       'net_time',
       'laps',
@@ -146,18 +161,36 @@ class ParticipantSchema(ModelSchema):
       'last_section_total_time_seconds',
     ]
 
+class LapSectionTimeSchema(ModelSchema):
+  net_time: Optional[float] = None
+  section_duration: Optional[float] = None
+
+  class Meta:
+    model = LapSectionTime
+    fields = [
+      'id',
+      'lap',
+      'section_index',
+      'total_time_seconds',
+    ]
+
 class PersonalStandingSchema(Schema):
   total_points: int
-  player_id: int
+  player_id: str
   character_name: str
   team_id: Optional[int]
   team_name: Optional[str]
+
+  class Config(Schema.Config):
+    coerce_numbers_to_str = True
+
 
 class TeamStandingSchema(Schema):
   total_points: int
   team_id: int = Field(None, alias="team__id")
   team_tag: str = Field(None, alias="team__tag")
   team_name: str = Field(None, alias="team__name")
+
 
 class DeliveryPointSchema(ModelSchema):
   coord: PositionSchema
