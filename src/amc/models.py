@@ -2,8 +2,8 @@ from datetime import timedelta
 from deepdiff import DeepHash
 from django.contrib import admin
 from django.contrib.gis.db import models
-from django.db.models import Q, F, Sum, Max, Window
-from django.db.models.functions import RowNumber
+from django.db.models import Q, F, Sum, Max, Min, Window
+from django.db.models.functions import RowNumber, Lag
 from django.contrib.postgres.fields import ArrayField
 from django.utils import timezone
 from django.utils.translation import gettext_lazy as _
@@ -413,11 +413,37 @@ class ChampionshipPoint(models.Model):
   time_trial_points_by_position = [10, 8, 6, 5, 4, 3, 2, 1]
 
   @classmethod
-  def get_event_points_for_position(self, position: int):
+  def get_event_points_for_position(self, position: int, time_trial: bool=False):
     try:
+      if time_trial:
+        return self.time_trial_points_by_position[position]
       return self.event_points_by_position[position]
     except IndexError:
       return 0
+
+  @classmethod
+  def get_time_trial_points_for_position(self, position: int):
+    try:
+      return self.time_trial_points_by_position[position]
+    except IndexError:
+      return 0
+
+class LapSectionTimeQuerySet(models.QuerySet):
+  def annotate_net_time(self):
+    return self.annotate(
+      net_time=F('total_time_seconds') - F('game_event_character__first_section_total_time_seconds')
+    )
+
+  def annotate_deltas(self):
+    return self.annotate(
+      section_duration=F('total_time_seconds') - Window(
+        expression=Lag('total_time_seconds'),
+        partition_by=[F('game_event_character')],
+        order_by=[F('lap').asc(), F('section_index').asc()]
+      )
+    )
+
+
 
 @final
 class LapSectionTime(models.Model):
@@ -426,6 +452,7 @@ class LapSectionTime(models.Model):
   lap = models.IntegerField()
   rank = models.IntegerField()
   total_time_seconds = models.FloatField()
+  objects = models.Manager.from_queryset(LapSectionTimeQuerySet)()
 
   class Meta:
     constraints = [

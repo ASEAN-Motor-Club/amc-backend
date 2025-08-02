@@ -219,7 +219,8 @@ class GameEventCharacterAdmin(admin.ModelAdmin):
         expression=RowNumber(),
         partition_by=[F('character')],
         order_by=[F('net_time').asc()]
-      )
+      ),
+      time_trial=F('game_event__scheduled_event__time_trial')
     ).filter(
       p_rank=1
     ).order_by('net_time')
@@ -228,7 +229,7 @@ class GameEventCharacterAdmin(admin.ModelAdmin):
         championship=championship,
         participant=participant,
         team=participant.character.player.teams.last(),
-        points=ChampionshipPoint.get_event_points_for_position(i)
+        points=ChampionshipPoint.get_event_points_for_position(i, time_trial=participant.time_trial)
       )
       for i, participant in enumerate(participants)
     ]
@@ -262,8 +263,8 @@ class ChampionshipAdmin(admin.ModelAdmin):
 
 @admin.register(ChampionshipPoint)
 class ChampionshipPointAdmin(admin.ModelAdmin):
-  list_display = ['championship', 'participant__character', 'team', 'points']
-  list_select_related = ['championship', 'participant__character', 'team']
+  list_display = ['championship', 'participant__character', 'participant__game_event__scheduled_event__name', 'team', 'points']
+  list_select_related = ['championship', 'participant__character', 'team', 'participant__game_event__scheduled_event']
   search_fields = ['championship__name']
 
 @admin.register(ScheduledEvent)
