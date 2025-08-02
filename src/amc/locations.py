@@ -8,15 +8,17 @@ point_of_interests = [
     Point(**{"z": -20696.78, "y": 150230.13, "x": 1025.73}),
     300,
     """\
-[READ THE RULES]
-Corporations are NOT ALLOWED - if you are planning to use AI drivers.
-Too many corporation AI vehicles have caused traffic jams and other mishaps.
+<Title>Corporation Rules</>
+<Warning>Corporations are NOT ALLOWED</> - if you are planning to use AI drivers.
+Having too many AI vehicles on the server have caused traffic jams and other mishaps.
+Unlicensed corporations will be closed down!
 
-You may ONLY start a corporation for the following purposes:
+<Bold>You may ONLY start a corporation for the following purposes:</>
 - Spawning Campy's around the map
 - Renting out vehicles for other players
+- Showcasing liveries for car shows
 
-For any other purposes, please contact the admins on the discord.
+For any other purposes, <Highlight>please contact the admins on the discord</>.
 """
   ),
 ]

@@ -169,28 +169,21 @@ HELP_TEXT = """\
 >>>> www.aseanmotorclub.com <<<<
 Visit the website & Join the Discord!
 
-::::: AVAILABLE COMMANDS :::::
+<Title>Available Commands</>
 
-/bot [your question]
-Ask the bot anything related to the game. It understands most of the basic information about the game.
+<Highlight>/bot [your question]</> - Ask the bot anything related to the game. It understands most of the basic information about the game.
 
-/song_request [name of song and artist]
-Queue up a song on our radio station. Visit aseanmotorclub.com/radio to tune in.
+<Highlight>/song_request [name of song and artist]</> - Queue up a song on our radio station. Visit <Focus>aseanmotorclub.com/radio</> to tune in.
 
+<Title>Event Commands</>
 
-::::: EVENT COMMANDS :::::
+<Highlight>/events</> - List current and upcoming scheduled events
 
-/events
-List current and upcoming scheduled events
+<Highlight>/countdown</> - Want to do an impromptu race? Use this command to initiate a 5 second countdown.
 
-/countdown
-Want to do an impromptu race? Use this command to initiate a 5 second countdown.
+<Highlight>/setup_event</> - (Event Server only) Creates an event based on the currently active scheduled event.
 
-/setup_event
-(Event Server only) Creates an event based on the currently active scheduled event.
-
-/results
-See the results of active events
+<Highlight>/results</> - See the results of active events
 """
 
 ADMINS = [("Admin", os.environ.get('ADMIN_EMAIL'))]

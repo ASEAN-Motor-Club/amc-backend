@@ -251,11 +251,12 @@ async def process_log_event(event: LogEvent, http_client=None, http_client_mod=N
         try:
           event_setup = await setup_event(timestamp, player_id, http_client_mod)
           if event_setup:
-            asyncio.create_task(show_popup(http_client_mod, "Event is setup!\n\nPlease join it and start the race.\n\nYour times will be recorded automatically.", player_id=str(player_id)))
+            asyncio.create_task(show_popup(http_client_mod, "<Event>Event is setup!</>\n\nPress \"i\" to open the Event menu and start the race.\n\nYour times will be recorded automatically.\n\nGood luck!", player_id=str(player_id)))
           else:
             asyncio.create_task(show_popup(http_client_mod, "There does not seem to be an active event. Please first create an event.", player_id=str(player_id)))
         except Exception as e:
           asyncio.create_task(show_popup(http_client_mod, f"Failed to setup event: {e}", player_id=str(player_id)))
+          raise e
 
         await BotInvocationLog.objects.acreate(
           timestamp=timestamp,
@@ -284,10 +285,10 @@ async def process_log_event(event: LogEvent, http_client=None, http_client_mod=N
       if command_match := re.match(r"/events", message):
         events_str = '\n\n'.join([
           f"""\
-## {event.name}
-{format_in_local_tz(event.start_time)}
+<Title>{event.name}</>
+<Secondary>{format_in_local_tz(event.start_time)}</>
 {event.description}"""
-          async for event in ScheduledEvent.objects.filter(end_time__gte=timezone.now())
+          async for event in ScheduledEvent.objects.filter(end_time__gte=timezone.now()).order_by('start_time')
         ])
         asyncio.create_task(
           show_popup(http_client_mod, f"[EVENTS]\n\n{events_str}", player_id=str(player_id))
