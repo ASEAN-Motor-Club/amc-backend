@@ -1,7 +1,13 @@
 import re
+from django.db.models import StdDev
+from discord import app_commands
 import discord
+import hashlib
+import hmac
+from random import Random
 from discord.ext import commands
 from django.conf import settings
+from amc.models import GameEventCharacter
 
 from amc.models import (
   ScheduledEvent,
@@ -11,6 +17,46 @@ from amc.models import (
   ChampionshipPoint,
 )
 
+def generate_deterministic_penalty(
+  seed_string: str, 
+  min_penalty: float, 
+  max_penalty: float
+) -> float:
+  """
+  Generates a deterministic, pseudo-random float penalty based on an input string.
+  """
+
+  if not settings.SECRET_KEY:
+      raise ValueError("Django SECRET_KEY is not configured.")
+      
+  if min_penalty > max_penalty:
+      raise ValueError("min_penalty cannot be greater than max_penalty.")
+
+  # 1. Get the secret key and the input string as bytes.
+  # HMAC works with bytes, so we encode them.
+  key = bytes(settings.SECRET_KEY, 'utf-8')
+  msg = bytes(seed_string, 'utf-8')
+
+  # 2. Create a keyed hash (HMAC) using the secret key.
+  # This is more secure than a simple hash as it involves the secret key.
+  # The result is a unique and unpredictable (without the key) byte string.
+  hmac_digest = hmac.new(key, msg, hashlib.sha256).digest()
+
+  # 3. Convert the resulting hash bytes to an integer.
+  # This integer will be the seed for our random number generator.
+  # 'big' means the most significant byte is at the beginning of the byte array.
+  seed_integer = int.from_bytes(hmac_digest, 'big')
+
+  # 4. Create a local Random instance seeded with our integer.
+  # Using a local instance prevents this function from interfering with
+  # other parts of your Django application that might rely on the global
+  # random state (e.g., for generating CSRF tokens).
+  random_instance = Random(seed_integer)
+
+  # 5. Generate and return a uniform float value in the desired range.
+  penalty = random_instance.uniform(min_penalty, max_penalty)
+  
+  return penalty
 
 class EventsCog(commands.Cog):
   def __init__(self, bot, teams_channel_id=settings.DISCORD_TEAMS_CHANNEL_ID):
@@ -174,4 +220,21 @@ class EventsCog(commands.Cog):
             # In case the message was deleted, send a new one
             last_embed_message = await channel.send(embed=embed)
 
+  @app_commands.command(name='calculate_stddev', description='Get the standard deviation of race results')
+  async def calculate_stddev(self, interaction, scheduled_event_id: int):
+    aggregates = await (GameEventCharacter.objects
+      .filter(game_event__scheduled_event=scheduled_event_id, finished=True)
+      .aaggregate(stddev=StdDev('net_time'))
+    )
+    stddev = aggregates['stddev']
+    await interaction.response.send_message(f"Standard Deviation: {stddev} seconds")
+
+  @app_commands.command(name='calculate_event_penalty', description='Deterministically calculate a penalty based on a range')
+  async def calculate_event_penalty(self, interaction, scheduled_event_id: int, seed: str):
+    aggregates = await (GameEventCharacter.objects
+      .filter(game_event__scheduled_event=scheduled_event_id, finished=True)
+      .aaggregate(stddev=StdDev('net_time'))
+    )
+    stddev = aggregates['stddev']
+    await interaction.response.send_message(generate_deterministic_penalty(f"{seed}:{scheduled_event_id}", stddev*0.5, stddev*1.5))
 
