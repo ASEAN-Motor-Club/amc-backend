@@ -247,9 +247,29 @@ async def process_log_event(event: LogEvent, http_client=None, http_client_mod=N
           asyncio.create_task(show_popup(http_client_mod, "No active events", player_id=str(player_id)))
           return
         asyncio.create_task(show_scheduled_event_results_popup(http_client_mod, active_event, player_id=str(player_id)))
-      if command_match := re.match(r"/setup_event", message):
+      if command_match := re.match(r"/setup_event\s*(?P<event_id>\d*)", message):
         try:
-          event_setup = await setup_event(timestamp, player_id, http_client_mod)
+          if event_id := command_match.group('event_id'):
+            scheduled_event = await (ScheduledEvent.objects
+              .select_related('race_setup')
+              .filter(
+                race_setup__isnull=False
+              )
+              .aget(pk=int(event_id))
+            )
+          else:
+            scheduled_event = await (ScheduledEvent.objects
+              .filter_active_at(timestamp)
+              .select_related('race_setup')
+              .filter(
+                race_setup__isnull=False
+              )
+              .afirst()
+            )
+            if not scheduled_event:
+              asyncio.create_task(show_popup(http_client_mod, "There does not seem to be an active event. Please first create an event.", player_id=str(player_id)))
+              return
+          event_setup = await setup_event(timestamp, player_id, scheduled_event, http_client_mod)
           if event_setup:
             asyncio.create_task(show_popup(http_client_mod, "<Event>Event is setup!</>\n\nPress \"i\" to open the Event menu and start the race.\n\nYour times will be recorded automatically.\n\nGood luck!", player_id=str(player_id)))
           else:

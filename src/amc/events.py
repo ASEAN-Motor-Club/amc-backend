@@ -12,22 +12,9 @@ from amc.models import (
   GameEventCharacter,
   LapSectionTime,
   RaceSetup,
-  ScheduledEvent,
 )
 
-async def setup_event(timestamp, player_id, http_client_mod):
-  scheduled_event = await (ScheduledEvent.objects
-    .filter_active_at(timestamp)
-    .select_related('race_setup')
-    .filter(
-      race_setup__isnull=False
-    )
-    .afirst()
-  )
-
-  if scheduled_event is None:
-    raise Exception('There are currently no active events')
-
+async def setup_event(timestamp, player_id, scheduled_event, http_client_mod):
   async with http_client_mod.get('/events') as resp:
     events = (await resp.json()).get('data', [])
     for event in events:
