@@ -236,5 +236,10 @@ class EventsCog(commands.Cog):
       .aaggregate(stddev=StdDev('net_time'))
     )
     stddev = aggregates['stddev']
-    await interaction.response.send_message(generate_deterministic_penalty(f"{seed}:{scheduled_event_id}", stddev*0.5, stddev*1.5))
+    penalty = generate_deterministic_penalty(
+      f"{seed}:{interaction.user.id}{scheduled_event_id}",
+      stddev*0.5,
+      stddev*1.5
+    )
+    await interaction.response.send_message(f"Penalty: {penalty}")
 
