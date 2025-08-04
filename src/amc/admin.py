@@ -206,7 +206,7 @@ class GameEventCharacterAdmin(admin.ModelAdmin):
   list_display = ['id', 'rank', 'character', 'net_time', 'game_event', 'game_event__scheduled_event', 'game_event__last_updated']
   inlines = [LapSectionTimeInlineAdmin]
   readonly_fields = ['character']
-  search_fields = ['game_event__id', 'game_event__scheduled_event__name']
+  search_fields = ['game_event__id', 'game_event__scheduled_event__name', 'character__name', 'game_event__race_setup__hash']
   list_filter = ['finished']
   actions = ['award_event_points']
 
