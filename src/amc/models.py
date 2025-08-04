@@ -2,8 +2,8 @@ from datetime import timedelta
 from deepdiff import DeepHash
 from django.contrib import admin
 from django.contrib.gis.db import models
-from django.db.models import Q, F, Sum, Max, Min, Window
-from django.db.models.functions import RowNumber, Lag
+from django.db.models import Q, F, Sum, Max, Window
+from django.db.models.functions import RowNumber, Lead
 from django.contrib.postgres.fields import ArrayField
 from django.utils import timezone
 from django.utils.translation import gettext_lazy as _
@@ -436,11 +436,11 @@ class LapSectionTimeQuerySet(models.QuerySet):
 
   def annotate_deltas(self):
     return self.annotate(
-      section_duration=F('total_time_seconds') - Window(
-        expression=Lag('total_time_seconds'),
+      section_duration=Window(
+        expression=Lead('total_time_seconds'),
         partition_by=[F('game_event_character')],
         order_by=[F('lap').asc(), F('section_index').asc()]
-      )
+      ),
     )
 
 
@@ -645,5 +645,11 @@ class DeliveryPoint(models.Model):
   data = models.JSONField(null=True, blank=True)
   last_updated = models.DateTimeField(editable=False, auto_now=True)
 
+
+@final
+class CharacterAFKReminder(models.Model):
+  character = models.ForeignKey(Character, on_delete=models.CASCADE, related_name='afk_reminders')
+  destination = models.PointField(srid=0, dim=3)
+  created_at = models.DateTimeField(editable=False, auto_now_add=True)
 
 
