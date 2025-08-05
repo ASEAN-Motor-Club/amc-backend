@@ -237,7 +237,7 @@ class EventsCog(commands.Cog):
     )
     stddev = aggregates['stddev']
     penalty = generate_deterministic_penalty(
-      f"{seed}:{interaction.user.id}{scheduled_event_id}",
+      f"{seed}:{interaction.user.id}:{scheduled_event_id}",
       stddev*0.5,
       stddev*1.5
     )
