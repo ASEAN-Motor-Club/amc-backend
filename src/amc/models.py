@@ -338,8 +338,9 @@ class GameEventCharacter(models.Model):
   section_index = models.IntegerField(default=-1)
   first_section_total_time_seconds = models.FloatField(null=True, blank=True)
   last_section_total_time_seconds = models.FloatField(null=True, blank=True)
+  penalty_seconds = models.FloatField(default=0)
   net_time = models.GeneratedField(
-    expression=F('last_section_total_time_seconds') - F('first_section_total_time_seconds'),
+    expression=F('last_section_total_time_seconds') - F('first_section_total_time_seconds') + F('penalty_seconds'),
     output_field=models.FloatField(null=True, blank=True),
     db_persist=True,
   )
@@ -357,7 +358,7 @@ class GameEventCharacter(models.Model):
   objects = models.Manager.from_queryset(ParticipantQuerySet)()
 
   class Meta:
-    ordering = ['disqualified', '-finished', 'laps', 'section_index', 'net_time']
+    ordering = ['disqualified', '-finished', '-laps', '-section_index', 'net_time']
     constraints = [
       models.UniqueConstraint(
         fields=["character", "game_event"], name="unique_character_game_event"

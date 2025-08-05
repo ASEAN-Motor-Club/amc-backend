@@ -203,12 +203,14 @@ class GameEventAdmin(admin.ModelAdmin):
 
 @admin.register(GameEventCharacter)
 class GameEventCharacterAdmin(admin.ModelAdmin):
-  list_display = ['id', 'rank', 'character', 'net_time', 'game_event', 'game_event__scheduled_event', 'game_event__last_updated']
+  list_display = ['id', 'rank', 'character', 'finished', 'net_time', 'game_event', 'game_event__scheduled_event', 'game_event__last_updated']
+  list_select_related = ['character', 'character__player', 'game_event', 'game_event__scheduled_event']
   inlines = [LapSectionTimeInlineAdmin]
   readonly_fields = ['character']
   search_fields = ['game_event__id', 'game_event__scheduled_event__name', 'character__name', 'game_event__race_setup__hash']
-  list_filter = ['finished']
+  list_filter = ['finished', 'game_event__scheduled_event']
   actions = ['award_event_points']
+  ordering = ['-game_event__last_updated', 'net_time']
 
   @admin.action(description="Award event points")
   def award_event_points(self, request, queryset):
