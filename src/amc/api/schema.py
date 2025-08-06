@@ -204,3 +204,9 @@ class DeliveryPointSchema(ModelSchema):
       'data',
       'last_updated',
     ]
+
+class WebhookPayloadSchema(Schema):
+  data: dict
+  hook: str
+  timestamp: int
+

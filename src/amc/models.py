@@ -654,3 +654,13 @@ class CharacterAFKReminder(models.Model):
   created_at = models.DateTimeField(editable=False, auto_now_add=True)
 
 
+@final
+class ServerCargoArrivedLog(models.Model):
+  timestamp = models.DateTimeField()
+  player = models.ForeignKey(Player, on_delete=models.SET_NULL, null=True, related_name='delivered_cargos')
+  cargo_key = models.CharField(max_length=200, db_index=True)
+  payment = models.PositiveBigIntegerField()
+  weight = models.FloatField(null=True, blank=True)
+  damage = models.FloatField(null=True, blank=True)
+
+

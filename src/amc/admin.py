@@ -25,6 +25,7 @@ from .models import (
   ChampionshipPoint,
   Team,
   DeliveryPoint,
+  ServerCargoArrivedLog,
 )
 
 class CharacterInlineAdmin(admin.TabularInline):
@@ -300,4 +301,11 @@ class PlayerMailMessageAdmin(admin.ModelAdmin):
 class DeliveryPointAdmin(admin.ModelAdmin):
   list_display = ['guid', 'name', 'coord', 'last_updated']
   search_fields = ['name', 'guid']
+
+@admin.register(ServerCargoArrivedLog)
+class ServerCargoArrivedLogAdmin(admin.ModelAdmin):
+  list_display = ['id', 'timestamp', 'player', 'cargo_key', 'payment']
+  list_select_related = ['player']
+  search_fields = ['player__unique_id', 'cargo_key']
+  autocomplete_fields = ['player']
 

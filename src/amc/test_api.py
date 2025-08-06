@@ -1,3 +1,4 @@
+import time
 from datetime import timedelta
 from urllib.parse import quote
 from django.utils import timezone
@@ -14,6 +15,7 @@ from amc.api.routes import (
   scheduled_events_router,
   championships_router,
   results_router,
+  webhook_router,
 )
 from amc.factories import (
   PlayerFactory,
@@ -29,6 +31,7 @@ from amc.models import (
   PlayerRestockDepotLog,
   CharacterLocation,
   LapSectionTime,
+  ServerCargoArrivedLog,
 )
 
 class PlayersAPITest(TestCase):
@@ -320,6 +323,7 @@ class ResultsAPITestCase(TestCase):
     )
     data = response.json()
     self.assertEqual(len(data), 2)
+    print(data)
 
 class ChampionshipAPITest(TestCase):
   def setUp(self):
@@ -355,4 +359,41 @@ class ChampionshipAPITest(TestCase):
     response = await self.client.get(f"/{championship.id}/team_standings/")
     data = response.json()
     self.assertEqual(len(data), 1)
+
+
+class WebhookAPITest(TestCase):
+  def setUp(self):
+    self.client = TestAsyncClient(webhook_router)
+
+  async def test_cargo_arrived(self):
+    player = await sync_to_async(PlayerFactory)()
+    response = await self.client.post('/', json={
+      'hook': "/Script/MotorTown.MotorTownPlayerController:ServerCargoArrived",
+      'timestamp': int(time.time() * 1000),
+      'data': {
+        'Cargos': [
+          {
+            'Net_CargoKey': 'oranges',
+            'Net_Payment': {
+              'BaseValue': 10_000,
+              'ShadowedValue': 10_000,
+            },
+            'Net_Weight': 100.0,
+            'Net_Damage': 0.0,
+          }
+        ],
+        'PlayerId': str(player.unique_id),
+      }
+    })
+    self.assertEqual(response.status_code, 200)
+    self.assertEqual(
+      await ServerCargoArrivedLog.objects.acount(),
+      1
+    )
+    delivery = await ServerCargoArrivedLog.objects.select_related('player').afirst()
+    self.assertEqual(delivery.payment, 10_000)
+    self.assertEqual(delivery.cargo_key, 'oranges')
+    self.assertEqual(delivery.weight, 100.0)
+    self.assertEqual(delivery.damage, 0.0)
+    self.assertEqual(delivery.player, player)
 

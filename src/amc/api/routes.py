@@ -3,10 +3,11 @@ import aiohttp
 import json
 from typing import Optional
 from pydantic import AwareDatetime
-from datetime import timedelta
+from datetime import timedelta, datetime
+from zoneinfo import ZoneInfo
 from ninja_extra.security.session import AsyncSessionAuth
 from django.core.cache import cache
-from django.db.models import Count, Q, F, Window, Prefetch, Max, Subquery, OuterRef
+from django.db.models import Count, Q, F, Window, Prefetch, Max
 from django.db.models.functions import Ntile
 from django.utils import timezone
 from ninja import Router
@@ -24,6 +25,7 @@ from .schema import (
   TeamStandingSchema,
   DeliveryPointSchema,
   LapSectionTimeSchema,
+  WebhookPayloadSchema,
 )
 from django.conf import settings
 from amc.models import (
@@ -37,6 +39,7 @@ from amc.models import (
   ChampionshipPoint,
   DeliveryPoint,
   LapSectionTime,
+  ServerCargoArrivedLog,
 )
 from amc.utils import lowercase_first_char_in_keys
 
@@ -354,4 +357,25 @@ async def list_deliverypoints(request):
 async def get_deliverypoint(request, guid):
   return await DeliveryPoint.objects.aget(guid=guid)
 
+
+webhook_router = Router()
+
+@webhook_router.post('/')
+async def webhook(request, payload: WebhookPayloadSchema):
+  match payload.hook:
+    case "/Script/MotorTown.MotorTownPlayerController:ServerCargoArrived":
+      player_id = payload.data['PlayerId']
+      player = await Player.objects.aget(unique_id=player_id)
+      logs = [
+        ServerCargoArrivedLog(
+          timestamp=datetime.utcfromtimestamp(payload.timestamp / 1000),
+          player=player,
+          cargo_key=cargo['Net_CargoKey'],
+          payment=cargo['Net_Payment']['BaseValue'],
+          weight=cargo['Net_Weight'],
+          damage=cargo['Net_Damage'],
+        )
+        for cargo in payload.data['Cargos']
+      ]
+      await ServerCargoArrivedLog.objects.abulk_create(logs)
 
