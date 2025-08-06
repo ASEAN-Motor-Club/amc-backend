@@ -374,8 +374,6 @@ class ChampionshipPointQuerySet(models.QuerySet):
       total_points=Sum('points'),
       player_id=F('participant__character__player__unique_id'),
       character_name=F('participant__character__name'),
-      team_id=F('team__id'),
-      team_name=F('team__name'),
     ).order_by('-total_points')
 
   def team_standings(request, championship_id):

@@ -178,8 +178,6 @@ class PersonalStandingSchema(Schema):
   total_points: int
   player_id: str
   character_name: str
-  team_id: Optional[int]
-  team_name: Optional[str]
 
   class Config(Schema.Config):
     coerce_numbers_to_str = True
