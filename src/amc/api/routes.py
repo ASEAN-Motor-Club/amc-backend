@@ -362,51 +362,52 @@ async def get_deliverypoint(request, guid):
 webhook_router = Router()
 
 @webhook_router.post('/')
-async def webhook(request, payload: WebhookPayloadSchema):
-  match payload.hook:
-    case "/Script/MotorTown.MotorTownPlayerController:ServerCargoArrived":
-      player_id = payload.data['PlayerId']
-      player = await Player.objects.aget(unique_id=player_id)
-      logs = [
-        ServerCargoArrivedLog(
-          timestamp=datetime.utcfromtimestamp(payload.timestamp / 1000),
-          player=player,
-          cargo_key=cargo['Net_CargoKey'],
-          payment=cargo['Net_Payment']['BaseValue'],
-          weight=cargo['Net_Weight'],
-          damage=cargo['Net_Damage'],
-        )
-        for cargo in payload.data['Cargos']
-      ]
-      await ServerCargoArrivedLog.objects.abulk_create(logs)
+async def webhook(request, payload: list[WebhookPayloadSchema]):
+  for event in payload:
+    match event.hook:
+      case "/Script/MotorTown.MotorTownPlayerController:ServerCargoArrived":
+        player_id = event.data['PlayerId']
+        player = await Player.objects.aget(unique_id=player_id)
+        logs = [
+          ServerCargoArrivedLog(
+            timestamp=datetime.utcfromtimestamp(event.timestamp / 1000),
+            player=player,
+            cargo_key=cargo['Net_CargoKey'],
+            payment=cargo['Net_Payment']['BaseValue'],
+            weight=cargo['Net_Weight'],
+            damage=cargo['Net_Damage'],
+          )
+          for cargo in event.data['Cargos']
+        ]
+        await ServerCargoArrivedLog.objects.abulk_create(logs)
 
-    case "/Script/MotorTown.MotorTownPlayerController:ServerSignContract":
-      player_id = payload.data['PlayerId']
-      player = await Player.objects.aget(unique_id=player_id)
-      contract = payload.data['Contract']
-      await ServerSignContractLog.objects.acreate(
-        timestamp=datetime.utcfromtimestamp(payload.timestamp / 1000),
-        player=player,
-        cargo_key=contract['Item'],
-        amount=contract['Amount'],
-        payment=contract['CompletionPayment']['BaseValue'],
-        cost=contract['Cost']['BaseValue'],
-      )
-
-    case "/Script/MotorTown.MotorTownPlayerController:ServerContractCargoDelivered":
-      player_id = payload.data['PlayerId']
-      player = await Player.objects.aget(unique_id=player_id)
-      contract = payload.data['Contract']
-      try:
-        latest_contract = await ServerSignContractLog.objects.filter(
+      case "/Script/MotorTown.MotorTownPlayerController:ServerSignContract":
+        player_id = event.data['PlayerId']
+        player = await Player.objects.aget(unique_id=player_id)
+        contract = event.data['Contract']
+        await ServerSignContractLog.objects.acreate(
+          timestamp=datetime.utcfromtimestamp(event.timestamp / 1000),
           player=player,
           cargo_key=contract['Item'],
           amount=contract['Amount'],
           payment=contract['CompletionPayment']['BaseValue'],
           cost=contract['Cost']['BaseValue'],
-        ).alatest('timestamp')
-        latest_contract.delivered = True
-        await latest_contract.asave(updated_fields=['delivered'])
-      except ServerSignContractLog.DoesNotExist:
-        pass
+        )
+
+      case "/Script/MotorTown.MotorTownPlayerController:ServerContractCargoDelivered":
+        player_id = event.data['PlayerId']
+        player = await Player.objects.aget(unique_id=player_id)
+        contract = event.data['Contract']
+        try:
+          latest_contract = await ServerSignContractLog.objects.filter(
+            player=player,
+            cargo_key=contract['Item'],
+            amount=contract['Amount'],
+            payment=contract['CompletionPayment']['BaseValue'],
+            cost=contract['Cost']['BaseValue'],
+          ).alatest('timestamp')
+          latest_contract.delivered = True
+          await latest_contract.asave(updated_fields=['delivered'])
+        except ServerSignContractLog.DoesNotExist:
+          pass
 
