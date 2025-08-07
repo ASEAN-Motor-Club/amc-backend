@@ -40,6 +40,7 @@ from amc.models import (
   DeliveryPoint,
   LapSectionTime,
   ServerCargoArrivedLog,
+  ServerSignContractLog,
 )
 from amc.utils import lowercase_first_char_in_keys
 
@@ -378,4 +379,34 @@ async def webhook(request, payload: WebhookPayloadSchema):
         for cargo in payload.data['Cargos']
       ]
       await ServerCargoArrivedLog.objects.abulk_create(logs)
+
+    case "/Script/MotorTown.MotorTownPlayerController:ServerSignContract":
+      player_id = payload.data['PlayerId']
+      player = await Player.objects.aget(unique_id=player_id)
+      contract = payload.data['Contract']
+      await ServerSignContractLog.objects.acreate(
+        timestamp=datetime.utcfromtimestamp(payload.timestamp / 1000),
+        player=player,
+        cargo_key=contract['Item'],
+        amount=contract['Amount'],
+        payment=contract['CompletionPayment']['BaseValue'],
+        cost=contract['Cost']['BaseValue'],
+      )
+
+    case "/Script/MotorTown.MotorTownPlayerController:ServerContractCargoDelivered":
+      player_id = payload.data['PlayerId']
+      player = await Player.objects.aget(unique_id=player_id)
+      contract = payload.data['Contract']
+      try:
+        latest_contract = await ServerSignContractLog.objects.filter(
+          player=player,
+          cargo_key=contract['Item'],
+          amount=contract['Amount'],
+          payment=contract['CompletionPayment']['BaseValue'],
+          cost=contract['Cost']['BaseValue'],
+        ).alatest('timestamp')
+        latest_contract.delivered = True
+        await latest_contract.asave(updated_fields=['delivered'])
+      except ServerSignContractLog.DoesNotExist:
+        pass
 

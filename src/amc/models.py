@@ -662,3 +662,14 @@ class ServerCargoArrivedLog(models.Model):
   damage = models.FloatField(null=True, blank=True)
 
 
+@final
+class ServerSignContractLog(models.Model):
+  timestamp = models.DateTimeField()
+  player = models.ForeignKey(Player, on_delete=models.SET_NULL, null=True, related_name='contracts_signed')
+  cargo_key = models.CharField(max_length=200, db_index=True)
+  amount = models.FloatField()
+  cost = models.PositiveIntegerField()
+  payment = models.PositiveIntegerField()
+  delivered = models.BooleanField(default=False)
+
+

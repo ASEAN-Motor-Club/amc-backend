@@ -32,6 +32,7 @@ from amc.models import (
   CharacterLocation,
   LapSectionTime,
   ServerCargoArrivedLog,
+  ServerSignContractLog,
 )
 
 class PlayersAPITest(TestCase):
@@ -396,4 +397,36 @@ class WebhookAPITest(TestCase):
     self.assertEqual(delivery.weight, 100.0)
     self.assertEqual(delivery.damage, 0.0)
     self.assertEqual(delivery.player, player)
+
+  async def test_sign_contract(self):
+    player = await sync_to_async(PlayerFactory)()
+    response = await self.client.post('/', json={
+      'hook': "/Script/MotorTown.MotorTownPlayerController:ServerSignContract",
+      'timestamp': int(time.time() * 1000),
+      'data': {
+        'Contract': {
+          'Item': 'oranges',
+          'Amount': 5.0,
+          'Cost': {
+            'BaseValue': 10_000,
+            'ShadowedValue': 10_000,
+          },
+          'CompletionPayment': {
+            'BaseValue': 100_000,
+            'ShadowedValue': 100_000,
+          },
+        },
+        'PlayerId': str(player.unique_id),
+      }
+    })
+    self.assertEqual(response.status_code, 200)
+    self.assertEqual(
+      await ServerSignContractLog.objects.acount(),
+      1
+    )
+    delivery = await ServerSignContractLog.objects.select_related('player').afirst()
+    self.assertEqual(delivery.cargo_key, 'oranges')
+    self.assertEqual(delivery.amount, 5.0)
+    self.assertEqual(delivery.cost, 10_000)
+    self.assertEqual(delivery.payment, 100_000)
 

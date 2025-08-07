@@ -26,6 +26,7 @@ from .models import (
   Team,
   DeliveryPoint,
   ServerCargoArrivedLog,
+  ServerSignContractLog,
 )
 
 class CharacterInlineAdmin(admin.TabularInline):
@@ -305,6 +306,13 @@ class DeliveryPointAdmin(admin.ModelAdmin):
 @admin.register(ServerCargoArrivedLog)
 class ServerCargoArrivedLogAdmin(admin.ModelAdmin):
   list_display = ['id', 'timestamp', 'player', 'cargo_key', 'payment']
+  list_select_related = ['player']
+  search_fields = ['player__unique_id', 'cargo_key']
+  autocomplete_fields = ['player']
+
+@admin.register(ServerSignContractLog)
+class ServerSignContractLogAdmin(admin.ModelAdmin):
+  list_display = ['id', 'timestamp', 'player', 'cargo_key', 'amount', 'cost', 'payment']
   list_select_related = ['player']
   search_fields = ['player__unique_id', 'cargo_key']
   autocomplete_fields = ['player']
