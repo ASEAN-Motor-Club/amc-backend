@@ -175,6 +175,8 @@ Visit the website & Join the Discord!
 
 <Highlight>/song_request [name of song and artist]</> - Queue up a song on our radio station. Visit <Focus>aseanmotorclub.com/radio</> to tune in.
 
+<Highlight>/subsidies</> - List all the subsidised (bonus paid) jobs on the server.
+
 <Title>Event Commands</>
 
 <Highlight>/events</> - List current and upcoming scheduled events
@@ -185,5 +187,18 @@ Visit the website & Join the Discord!
 
 <Highlight>/results</> - See the results of active events
 """
+
+WELCOME_TEXT = """\
+<Title>Welcome to the server, new player!</>
+
+Welcome to the most unique server in all of MotorTown.
+
+Things to check out as a newcommer:
+
+1. Use the <Highlight>/help</> to see the available server commands.
+2. Use <Highlight>/subsidies</> to see jobs with <Bold>bonus pay</>.
+3. We host many regular events! Use <Highlight>/events</> to see what's going on.
+"""
+
 
 ADMINS = [("Admin", os.environ.get('ADMIN_EMAIL'))]

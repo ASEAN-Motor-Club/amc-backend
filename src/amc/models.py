@@ -660,6 +660,7 @@ class ServerCargoArrivedLog(models.Model):
   payment = models.PositiveBigIntegerField()
   weight = models.FloatField(null=True, blank=True)
   damage = models.FloatField(null=True, blank=True)
+  data = models.JSONField(null=True, blank=True)
 
 
 @final

@@ -39,7 +39,7 @@ from amc.models import (
   GameEvent,
 )
 from amc.game_server import announce
-from amc.mod_server import show_popup
+from amc.mod_server import show_popup, transfer_money
 from amc.auth import verify_player
 from amc.mailbox import send_player_messages
 from amc.events import (
@@ -52,13 +52,13 @@ from amc.utils import format_in_local_tz
 
 def get_welcome_message(last_login, player_name):
   if not last_login:
-    return f"Welcome {player_name}! Use /help to see the available commands on this server. Join the discord at aseanmotorclub.com. Have fun!"
+    return f"Welcome {player_name}! Use /help to see the available commands on this server. Join the discord at aseanmotorclub.com. Have fun!", True
   sec_since_login = (timezone.now() - last_login).seconds
   if sec_since_login > (3600 * 24 * 7):
-    return f"Long time no see! Welcome back {player_name}"
+    return f"Long time no see! Welcome back {player_name}", False
   if sec_since_login > 3600:
-    return f"Welcome back {player_name}!"
-  return None
+    return f"Welcome back {player_name}!", False
+  return None, False
 
 
 async def aget_or_create_character(player_name, player_id):
@@ -218,6 +218,23 @@ async def process_log_event(event: LogEvent, http_client=None, http_client_mod=N
           character=character, 
           prompt="help",
         )
+      if command_match := re.match(r"/subsidies", message):
+        subsidies_text = """<Title>ASEAN Server Subsidies</>
+<Bold>Burger, Pizza, Gift Box, Live Fish</>
+<Money>500%</> (Must be on time)
+
+<Bold>12ft Oak Log</>
+<Money>300%</> (Must be undamaged)
+
+<Bold>Depot Restocking</>
+<Money>10,000</> coins
+"""
+        asyncio.create_task(show_popup(http_client_mod, subsidies_text, player_id=str(player_id)))
+        await BotInvocationLog.objects.acreate(
+          timestamp=timestamp,
+          character=character, 
+          prompt="subsidies",
+        )
       if command_match := re.match(r"/staggered_start (?P<delay>\d+)", message):
         active_event = await (GameEvent.objects
           .filter(
@@ -371,7 +388,11 @@ async def process_log_event(event: LogEvent, http_client=None, http_client_mod=N
       if ctx.get('startup_time') and timestamp > ctx.get('startup_time'):
         try:
           last_login = character.last_login if not character_created else None
-          welcome_message = get_welcome_message(last_login, player_name)
+          welcome_message, is_new_player = get_welcome_message(last_login, player_name)
+          if is_new_player:
+            asyncio.create_task(
+              show_popup(http_client_mod, settings.WELCOME_TEXT, player_id=str(player_id))
+            )
           if welcome_message:
             asyncio.create_task(
               announce(welcome_message, http_client, delay=5)
@@ -424,7 +445,7 @@ async def process_log_event(event: LogEvent, http_client=None, http_client_mod=N
         pass
 
     case PlayerRestockedDepotLogEvent(timestamp, player_name, depot_name):
-      character = await Character.objects.aget(
+      character = await Character.objects.select_related('player').aget(
         name=player_name,
       )
       await PlayerRestockDepotLog.objects.acreate(
@@ -436,6 +457,14 @@ async def process_log_event(event: LogEvent, http_client=None, http_client_mod=N
         forward_message = (
           settings.DISCORD_GAME_CHAT_CHANNEL_ID,
           f"**📦 Player Restocked Depot:** {player_name} (Depot: {depot_name})"
+        )
+        asyncio.create_task(
+          transfer_money(
+            http_client_mod,
+            10_000,
+            "ASEAN Depot Restock Subsidy",
+            character.player.unique_id,
+          )
         )
 
     case PlayerCreatedCompanyLogEvent(timestamp, player_name, company_name):
