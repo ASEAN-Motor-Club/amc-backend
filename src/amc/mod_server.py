@@ -10,4 +10,7 @@ async def transfer_money(session, amount, message, player_id):
     'Amount': amount,
     'Message': message,
   }
-  await session.post(f'/players/{player_id}/money', json=transfer)
+  async with session.post(f'/players/{player_id}/money', json=transfer) as resp:
+    if resp.status != 200:
+      raise Exception('Failed to transfer money')
+

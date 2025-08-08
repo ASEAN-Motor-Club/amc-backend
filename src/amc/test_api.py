@@ -368,7 +368,7 @@ class WebhookAPITest(TestCase):
 
   async def test_cargo_arrived(self):
     player = await sync_to_async(PlayerFactory)()
-    response = await self.client.post('/', json={
+    response = await self.client.post('/', json=[{
       'hook': "/Script/MotorTown.MotorTownPlayerController:ServerCargoArrived",
       'timestamp': int(time.time() * 1000),
       'data': {
@@ -385,7 +385,7 @@ class WebhookAPITest(TestCase):
         ],
         'PlayerId': str(player.unique_id),
       }
-    })
+    }])
     self.assertEqual(response.status_code, 200)
     self.assertEqual(
       await ServerCargoArrivedLog.objects.acount(),
@@ -400,7 +400,7 @@ class WebhookAPITest(TestCase):
 
   async def test_sign_contract(self):
     player = await sync_to_async(PlayerFactory)()
-    response = await self.client.post('/', json={
+    response = await self.client.post('/', json=[{
       'hook': "/Script/MotorTown.MotorTownPlayerController:ServerSignContract",
       'timestamp': int(time.time() * 1000),
       'data': {
@@ -418,7 +418,7 @@ class WebhookAPITest(TestCase):
         },
         'PlayerId': str(player.unique_id),
       }
-    })
+    }])
     self.assertEqual(response.status_code, 200)
     self.assertEqual(
       await ServerSignContractLog.objects.acount(),

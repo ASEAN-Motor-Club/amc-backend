@@ -48,6 +48,7 @@ from amc.events import (
   staggered_start,
 )
 from amc.utils import format_in_local_tz
+from amc_finance.services import register_player_deposit, register_player_withdrawal, get_player_bank_balance
 
 
 def get_welcome_message(last_login, player_name):
@@ -354,6 +355,29 @@ async def process_log_event(event: LogEvent, http_client=None, http_client_mod=N
           character=character, 
           song=command_match.group('song'),
         )
+      elif command_match := re.match(r"/bank", message):
+        balance = await get_player_bank_balance(character)
+        asyncio.create_task(
+          show_popup(http_client_mod, f"<Title>Your Bank Account</>\n\n<Bold>Balance:</> <Money>{balance}</>\n\nUse /deposit [amount] and /withdraw [amount] to deposit and withdraw to/from your account respectively.", player_id=str(player_id))
+        )
+      elif command_match := re.match(r"/deposit (?P<amount>\d+)", message):
+        amount = int(command_match.group('amount'))
+        try:
+          await register_player_deposit(amount, character, player)
+          await transfer_money(http_client_mod, -amount, 'Bank Deposit', player_id)
+        except Exception as e:
+          asyncio.create_task(
+            show_popup(http_client_mod, f"<Title>Deposit failed</>\n\n{e}", player_id=str(player_id))
+          )
+      elif command_match := re.match(r"/withdraw (?P<amount>\d+)", message):
+        amount = int(command_match.group('amount'))
+        try:
+          await register_player_withdrawal(amount, character, player)
+          await transfer_money(http_client_mod, amount, 'Bank Withdrawal', player_id)
+        except Exception as e:
+          asyncio.create_task(
+            show_popup(http_client_mod, f"<Title>Withdrawal failed</>\n\n{e}", player_id=str(player_id))
+          )
       if discord_client and ctx.get('startup_time') and timestamp > ctx.get('startup_time'):
         forward_message = (
           settings.DISCORD_GAME_CHAT_CHANNEL_ID,
