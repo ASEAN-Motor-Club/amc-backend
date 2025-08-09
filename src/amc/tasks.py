@@ -469,9 +469,9 @@ async def process_log_event(event: LogEvent, http_client=None, http_client_mod=N
         pass
 
     case PlayerRestockedDepotLogEvent(timestamp, player_name, depot_name):
-      character = await Character.objects.select_related('player').aget(
+      character = await Character.objects.select_related('player').filter(
         name=player_name,
-      )
+      ).alatest('status_logs__timespan__startswith')
       await PlayerRestockDepotLog.objects.acreate(
         timestamp=timestamp,
         character=character,
