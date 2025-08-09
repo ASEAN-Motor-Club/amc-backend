@@ -278,6 +278,42 @@ class ScheduledEventAdmin(admin.ModelAdmin):
   inlines = [GameEventInlineAdmin]
   search_fields = ['name', 'race_setup__hash', 'race_setup__name']
   autocomplete_fields = ['race_setup']
+  actions = ['award_points']
+
+  @admin.action(description="Award points")
+  def award_points(self, request, queryset):
+    for scheduled_event in queryset:
+      championship = scheduled_event.championship
+      # TODO: Create custom ParticipantQuerySet
+      participants = (GameEventCharacter.objects
+        .filter_by_scheduled_event(scheduled_event)
+        .filter(finished=True).filter(
+          finished=True,
+          disqualified=False,
+          wrong_engine=False,
+          wrong_vehicle=False,
+        )
+        .annotate(
+          p_rank=Window(
+            expression=RowNumber(),
+            partition_by=[F('character')],
+            order_by=[F('net_time').asc()]
+          ),
+        )
+        .filter(p_rank=1)
+        .order_by('net_time')
+      )
+      cps = [
+        ChampionshipPoint(
+          championship=championship,
+          participant=participant,
+          team=participant.character.player.teams.last(),
+          points=ChampionshipPoint.get_event_points_for_position(i, time_trial=scheduled_event.time_trial),
+        )
+        for i, participant in enumerate(participants)
+      ]
+      ChampionshipPoint.objects.bulk_create(cps)
+
 
 @admin.register(RaceSetup)
 class RaceSetupAdmin(admin.ModelAdmin):
