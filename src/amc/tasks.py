@@ -222,10 +222,10 @@ async def process_log_event(event: LogEvent, http_client=None, http_client_mod=N
       if command_match := re.match(r"/subsidies", message):
         subsidies_text = """<Title>ASEAN Server Subsidies</>
 <Bold>Burger, Pizza, Gift Box, Live Fish</>
-<Money>500%</> (Must be on time)
+<Money>300%</> (Must be on time)
 
 <Bold>12ft Oak Log</>
-<Money>300%</> (Must be undamaged)
+<Money>250%</> (Reduces with damage)
 
 <Bold>Depot Restocking</>
 <Money>10,000</> coins

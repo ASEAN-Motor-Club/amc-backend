@@ -396,16 +396,16 @@ async def webhook(request, payload: list[WebhookPayloadSchema]):
           match cargo['Net_CargoKey']:
             case 'Burger_01_Signature' | 'Pizza_01_Premium' | 'GiftBox_01' | 'LiveFish_01':
               if cargo['Net_TimeLeftSeconds'] > 0:
-                subsidy_factor = 5.0
-            case 'Log_Oak_12ft':
                 subsidy_factor = 3.0
+            case 'Log_Oak_12ft':
+              subsidy_factor = 2.5 * (1.0 - cargo['Net_Damage'])
             case _:
               pass
           if subsidy_factor != 0:
             cargo_subsidy = int(cargo['Net_Payment']['BaseValue'] * subsidy_factor)
             subsidy += cargo_subsidy
             cargo_name = cargo_names.get(cargo['Net_CargoKey'], cargo['Net_CargoKey'])
-            popup_message += f"\n{cargo_name} - <Money>{cargo_subsidy}</> ({int(subsidy_factor * 100)}%)"
+            popup_message += f"\n{cargo_name} - <Money>{cargo_subsidy}</> ({int(subsidy_factor * 100):,}%)"
 
         if subsidy != 0:
           session = request.state["aiohttp_client"]
