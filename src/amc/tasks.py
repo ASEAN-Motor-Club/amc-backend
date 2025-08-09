@@ -47,8 +47,13 @@ from amc.events import (
   show_scheduled_event_results_popup,
   staggered_start,
 )
-from amc.utils import format_in_local_tz
-from amc_finance.services import register_player_deposit, register_player_withdrawal, get_player_bank_balance
+from amc.utils import format_in_local_tz, format_timedelta
+from amc_finance.services import (
+  register_player_deposit,
+  register_player_withdrawal,
+  get_player_bank_balance,
+  player_donation,
+)
 
 
 def get_welcome_message(last_login, player_name):
@@ -325,6 +330,7 @@ async def process_log_event(event: LogEvent, http_client=None, http_client_mod=N
           f"""\
 <Title>{event.name}</>
 <Secondary>{format_in_local_tz(event.start_time)}</>
+<Secondary>{format_timedelta(event.start_time - timezone.now())} from now</>
 {event.description}"""
           async for event in ScheduledEvent.objects.filter(end_time__gte=timezone.now()).order_by('start_time')
         ])
@@ -358,8 +364,17 @@ async def process_log_event(event: LogEvent, http_client=None, http_client_mod=N
       elif command_match := re.match(r"/bank", message):
         balance = await get_player_bank_balance(character)
         asyncio.create_task(
-          show_popup(http_client_mod, f"<Title>Your Bank Account</>\n\n<Bold>Balance:</> <Money>{balance}</>\n\nUse /deposit [amount] and /withdraw [amount] to deposit and withdraw to/from your account respectively.", player_id=str(player_id))
+          show_popup(http_client_mod, f"<Title>Your Bank Account</>\n\n<Bold>Balance:</> <Money>{balance:,}</>\n\nUse /deposit [amount] and /withdraw [amount] to deposit and withdraw to/from your account respectively.", player_id=str(player_id))
         )
+      elif command_match := re.match(r"/donate (?P<amount>\d+)", message):
+        amount = int(command_match.group('amount'))
+        try:
+          await player_donation(amount, character)
+          await transfer_money(http_client_mod, -amount, 'Donation', player_id)
+        except Exception as e:
+          asyncio.create_task(
+            show_popup(http_client_mod, f"<Title>Donation failed</>\n\n{e}", player_id=str(player_id))
+          )
       elif command_match := re.match(r"/deposit (?P<amount>\d+)", message):
         amount = int(command_match.group('amount'))
         try:

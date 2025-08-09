@@ -15,6 +15,16 @@ async def get_player_bank_balance(character):
   )
   return account.balance
 
+async def get_treasury_fund_balance(character):
+  treasury_fund, _ = await Account.objects.aget_or_create(
+    account_type=Account.AccountType.ASSET,
+    book=Account.Book.GOVERNMENT,
+    character=None,
+    defaults={
+      'name': 'Treasury Fund',
+    }
+  )
+  return treasury_fund.balance
 
 async def register_player_deposit(amount, character, player):
   account, _ = await Account.objects.aget_or_create(
@@ -96,6 +106,42 @@ async def register_player_withdrawal(amount, character, player):
     ]
   )
 
+
+async def player_donation(amount, character):
+  treasury_fund, _ = await Account.objects.aget_or_create(
+    account_type=Account.AccountType.ASSET,
+    book=Account.Book.GOVERNMENT,
+    character=None,
+    defaults={
+      'name': 'Treasury Fund',
+    }
+  )
+  treasury_revenue, _ = await Account.objects.aget_or_create(
+    account_type=Account.AccountType.REVENUE,
+    book=Account.Book.GOVERNMENT,
+    character=None,
+    defaults={
+      'name': 'Treasury Revenue',
+    }
+  )
+
+  await sync_to_async(create_journal_entry, thread_sensitive=True)(
+    timezone.now(),
+    "Player Donation",
+    character,
+    [
+      {
+        'account': treasury_revenue,
+        'debit': 0,
+        'credit': amount,
+      },
+      {
+        'account': treasury_fund,
+        'debit': amount,
+        'credit': 0,
+      },
+    ]
+  )
 
 async def send_fund_to_player(amount, character, reason):
   account, _ = await Account.objects.aget_or_create(
