@@ -32,8 +32,8 @@ class Account(models.Model):
   balance = models.DecimalField(max_digits=12, decimal_places=2, default=0.00)
 
   def __str__(self):
-    if self.player:
-      return f"{self.name} ({self.player.unique_id})"
+    if self.character:
+      return f"{self.name} ({self.character.name})"
     return f"{self.name} (Internal)"
 
 

@@ -6,6 +6,7 @@ from amc.game_server import announce
 from amc_cogs.moderation import ModerationCog
 from amc_cogs.auth import AuthenticationCog
 from amc_cogs.events import EventsCog
+from amc_cogs.economy import EconomyCog
 
 class AMCDiscordBot(commands.Bot):
   def __init__(self, *args, **kwargs):
@@ -18,6 +19,7 @@ class AMCDiscordBot(commands.Bot):
     await self.add_cog(ModerationCog(self), guild=guild)
     await self.add_cog(AuthenticationCog(self), guild=guild)
     await self.add_cog(EventsCog(self), guild=guild)
+    await self.add_cog(EconomyCog(self), guild=guild)
     await self.tree.sync(guild=guild)
 
   async def on_message(self, message):

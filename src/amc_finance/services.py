@@ -97,6 +97,80 @@ async def register_player_withdrawal(amount, character, player):
   )
 
 
+async def send_fund_to_player(amount, character, reason):
+  account, _ = await Account.objects.aget_or_create(
+    account_type=Account.AccountType.LIABILITY,
+    book=Account.Book.BANK,
+    character=character,
+    defaults={
+      'name': 'Checking Account',
+    }
+  )
+
+  bank_vault, _ = await Account.objects.aget_or_create(
+    account_type=Account.AccountType.ASSET,
+    book=Account.Book.BANK,
+    character=None,
+    defaults={
+      'name': 'Bank Vault',
+    }
+  )
+
+  treasury_fund, _ = await Account.objects.aget_or_create(
+    account_type=Account.AccountType.ASSET,
+    book=Account.Book.GOVERNMENT,
+    character=None,
+    defaults={
+      'name': 'Treasury Fund',
+    }
+  )
+
+  treasury_expenses, _ = await Account.objects.aget_or_create(
+    account_type=Account.AccountType.EXPENSE,
+    book=Account.Book.GOVERNMENT,
+    character=None,
+    defaults={
+      'name': 'Treasury Expenses',
+    }
+  )
+
+  await sync_to_async(create_journal_entry, thread_sensitive=True)(
+    timezone.now(),
+    f"Government Funding: {reason}",
+    None,
+    [
+      {
+        'account': treasury_expenses,
+        'debit': amount,
+        'credit': 0,
+      },
+      {
+        'account': treasury_fund,
+        'debit': 0,
+        'credit': amount,
+      },
+    ]
+  )
+
+  await sync_to_async(create_journal_entry, thread_sensitive=True)(
+    timezone.now(),
+    f"Government Funding: {reason}",
+    None,
+    [
+      {
+        'account': account,
+        'debit': 0,
+        'credit': amount,
+      },
+      {
+        'account': bank_vault,
+        'debit': amount,
+        'credit': 0,
+      },
+    ]
+  )
+
+
 def create_journal_entry(date, description, creator_character, entries_data):
   """
   Creates a JournalEntry and its LedgerEntries atomically,
