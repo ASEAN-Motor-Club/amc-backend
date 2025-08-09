@@ -1,7 +1,7 @@
 from django.db import models
 from datetime import timedelta
 from django.utils import timezone
-from django.db.models import Sum, OuterRef, Subquery, Value, Q
+from django.db.models import Sum, OuterRef, Subquery, Value, Q, F
 from django.db.models.functions import Coalesce
 import discord
 from discord import app_commands
@@ -9,6 +9,7 @@ from discord.ext import commands
 from django.conf import settings
 from amc.models import Character, Player, ServerCargoArrivedLog, ServerSignContractLog
 from amc_finance.services import send_fund_to_player
+from amc_finance.models import Account, LedgerEntry
 
 
 class EconomyCog(commands.Cog):
@@ -101,4 +102,36 @@ Contracts: {contracts_aggregates['total_payments']:,}
       await interaction.followup.send(f"Government funding deposited into {character_name}'s bank account.\nAmount: {amount:,}\nReason: {reason}")
     except Exception as e:
       await interaction.followup.send(f"Failed to send government funding: {e}")
+
+  @app_commands.command(name='treasury_stats', description='Display treasury info')
+  async def treasury_stats(self, interaction):
+    treasury_fund, _ = await Account.objects.aget_or_create(
+      account_type=Account.AccountType.ASSET,
+      book=Account.Book.GOVERNMENT,
+      character=None,
+      defaults={
+        'name': 'Treasury Fund',
+      }
+    )
+    donations = LedgerEntry.objects.filter(
+      account__account_type=Account.AccountType.REVENUE,
+      account__book=Account.Book.GOVERNMENT,
+      account__character=None,
+      journal_entry__creator__isnull=False,
+    ).select_related('journal_entry', 'journal_entry__creator')
+    contributors = (donations.values('journal_entry__creator')
+      .annotate(total_contribution=Sum('credit'), name=F('journal_entry__creator__name'))
+      .order_by('-total_contribution')
+    )
+    contributors_str = '\n'.join([
+      f"**{contribution['name']}:** {contribution['total_contribution']:,}"
+      async for contribution in contributors
+    ])
+    await interaction.response.send_message(f"""# Treasury
+
+**Balance:** {treasury_fund.balance:,}
+
+## Top Contributors
+{contributors_str}
+""")
 

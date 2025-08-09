@@ -53,6 +53,7 @@ from amc_finance.services import (
   register_player_withdrawal,
   get_player_bank_balance,
   player_donation,
+  send_fund_to_player_wallet,
 )
 
 
@@ -497,6 +498,8 @@ async def process_log_event(event: LogEvent, http_client=None, http_client_mod=N
           settings.DISCORD_GAME_CHAT_CHANNEL_ID,
           f"**📦 Player Restocked Depot:** {player_name} (Depot: {depot_name})"
         )
+        subsidy_amount = 10_000
+        await send_fund_to_player_wallet(subsidy_amount, character, "Depot Restock Subsidy")
         asyncio.create_task(
           transfer_money(
             http_client_mod,

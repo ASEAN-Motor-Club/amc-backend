@@ -42,7 +42,7 @@ from amc.models import (
   ServerSignContractLog,
 )
 from amc.utils import lowercase_first_char_in_keys
-from amc.mod_server import show_popup, transfer_money
+from amc.subsidies import subsidise_delivery
 
 POSITION_UPDATE_RATE = 10
 POSITION_UPDATE_SLEEP = 1.0 / POSITION_UPDATE_RATE
@@ -361,13 +361,6 @@ async def get_deliverypoint(request, guid):
 
 webhook_router = Router()
 
-cargo_names = {
-  'Burger_01_Signature': 'Signature Burger',
-  'Pizza_01_Premium': 'Premium Pizza',
-  'GiftBox_01': 'Gift Box',
-  'LiveFish_01': 'Live Fish',
-}
-
 @webhook_router.post('/')
 async def webhook(request, payload: list[WebhookPayloadSchema]):
   for event in payload:
@@ -388,36 +381,7 @@ async def webhook(request, payload: list[WebhookPayloadSchema]):
           for cargo in event.data['Cargos']
         ]
         await ServerCargoArrivedLog.objects.abulk_create(logs)
-
-        subsidy = 0
-        popup_message = "<Title>ASEAN Subsidy Receipt</>"
-        for cargo in event.data['Cargos']:
-          subsidy_factor = 0.0
-          match cargo['Net_CargoKey']:
-            case 'Burger_01_Signature' | 'Pizza_01_Premium' | 'GiftBox_01' | 'LiveFish_01':
-              if cargo['Net_TimeLeftSeconds'] > 0:
-                subsidy_factor = 3.0
-            case 'Log_Oak_12ft':
-              subsidy_factor = 2.5 * (1.0 - cargo['Net_Damage'])
-            case _:
-              pass
-          if subsidy_factor != 0:
-            cargo_subsidy = int(cargo['Net_Payment']['BaseValue'] * subsidy_factor)
-            subsidy += cargo_subsidy
-            cargo_name = cargo_names.get(cargo['Net_CargoKey'], cargo['Net_CargoKey'])
-            popup_message += f"\n{cargo_name} - <Money>{cargo_subsidy}</> ({int(subsidy_factor * 100):,}%)"
-
-        if subsidy != 0:
-          session = request.state["aiohttp_client"]
-          asyncio.create_task(
-            transfer_money(
-              session,
-              subsidy,
-              'ASEAN Subsidy' if subsidy > 0 else 'ASEAN Tax',
-              player_id
-            )
-          )
-          asyncio.create_task(show_popup(session, popup_message, player_id=player_id))
+        asyncio.create_task(subsidise_delivery(logs, request.state['aiohttp_client']))
 
       case "/Script/MotorTown.MotorTownPlayerController:ServerSignContract":
         player_id = event.data['PlayerId']
