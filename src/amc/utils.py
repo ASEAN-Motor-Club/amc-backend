@@ -60,3 +60,35 @@ def format_in_local_tz(dt_aware: datetime, zone_info="Asia/Bangkok") -> str:
 
     return f"{formatted_dt_str} {tz_str}"
 
+
+
+def format_timedelta(td):
+    """
+    Converts a timedelta object into a formatted string like "1 Day, 2 hours and 30 minutes".
+    """
+    # Extract days, and the remaining seconds
+    days = td.days
+    total_seconds = td.seconds
+    
+    # Calculate hours, minutes, and seconds
+    hours, remainder = divmod(total_seconds, 3600)
+    minutes, seconds = divmod(remainder, 60)
+    
+    # Build a list of parts of the string
+    parts = []
+    if days > 0:
+        parts.append(f"{days} Day{'s' if days > 1 else ''}")
+    if hours > 0:
+        parts.append(f"{hours} hour{'s' if hours > 1 else ''}")
+    if minutes > 0:
+        parts.append(f"{minutes} minute{'s' if minutes > 1 else ''}")
+
+    # Join the parts into a final string
+    if len(parts) == 0:
+        return "0 seconds"
+    elif len(parts) == 1:
+        return parts[0]
+    else:
+        # Join all but the last part with ", " and add " and " before the last part
+        return ', '.join(parts[:-1]) + ' and ' + parts[-1]
+
