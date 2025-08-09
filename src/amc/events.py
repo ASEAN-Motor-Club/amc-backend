@@ -451,7 +451,7 @@ async def staggered_start(http_client_game, http_client_mod, game_event, player_
     player_info
     for player_info in event['Players']
   ]
-  line_up_message = f'<Title>Staggered Start Line Up</>\n<Secondary>Delay = {delay} seconds</>\n<Announce>Please start when your name is called</>\n\n'
+  line_up_message = f'<Title>Staggered Start Line Up</>\n\nThe event will start in 30 seconds!\nYour time will only be counted when you cross the starting line\n<Secondary>Delay between participants = {delay} seconds</>\n<Announce><Bold>ONLY</> start when your name is called!!</>\n\n'
   line_up_message += '\n'.join([
     f"{idx}. {player_info['PlayerName']}"
     for idx, player_info in enumerate(participants, start=1)
@@ -462,6 +462,17 @@ async def staggered_start(http_client_game, http_client_mod, game_event, player_
       line_up_message,
       player_id=player_info['CharacterId']['UniqueNetId']
     )
+
+  await announce(
+    "The event is starting in 30 seconds!",
+    http_client_game,
+  )
+  await asyncio.sleep(30.0) # in-game countdown
+
+  await announce(
+    "The event is starting starting!",
+    http_client_game,
+  )
 
   await http_client_mod.post(f"/events/{event['EventGuid']}/state", json={
     "State": 2,

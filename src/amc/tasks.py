@@ -250,13 +250,13 @@ async def process_log_event(event: LogEvent, http_client=None, http_client_mod=N
         if not active_event:
           asyncio.create_task(show_popup(http_client_mod, "No active events", player_id=str(player_id)))
         try:
-          await staggered_start(
+          asyncio.create_task(staggered_start(
             http_client,
             http_client_mod,
             active_event,
             player_id=player_id,
             delay=float(command_match.group('delay'))
-          )
+          ))
         except Exception as e:
           asyncio.create_task(show_popup(http_client_mod, f"Failed: {e}", player_id=str(player_id)))
       if command_match := re.match(r"/results", message):
