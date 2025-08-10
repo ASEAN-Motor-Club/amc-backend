@@ -40,6 +40,7 @@ from amc.models import (
   LapSectionTime,
   ServerCargoArrivedLog,
   ServerSignContractLog,
+  ServerPassengerArrivedLog,
 )
 from amc.utils import lowercase_first_char_in_keys
 from amc.subsidies import (
@@ -433,4 +434,18 @@ async def webhook(request, payload: list[WebhookPayloadSchema]):
           await latest_contract.asave(updated_fields=['delivered'])
         except ServerSignContractLog.DoesNotExist:
           pass
+
+      case "/Script/MotorTown.MotorTownPlayerController:ServerPassengerArrived":
+        player_id = event.data['PlayerId']
+        player = await Player.objects.aget(unique_id=player_id)
+        passenger = event.data['Passenger']
+        await ServerPassengerArrivedLog.objects.acreate(
+          timestamp=datetime.utcfromtimestamp(event.timestamp / 1000),
+          player=player,
+          passenger_type=passenger['Net_PassengerType'],
+          distance=passenger['Net_Distance'],
+          payment=passenger['Net_Payment'],
+          arrived=passenger['Net_bArrived'],
+          data=passenger,
+        )
 

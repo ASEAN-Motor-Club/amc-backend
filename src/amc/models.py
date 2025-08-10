@@ -686,3 +686,21 @@ class ServerSignContractLog(models.Model):
   delivered = models.BooleanField(default=False)
 
 
+@final
+class ServerPassengerArrivedLog(models.Model):
+  class PassengerType(models.IntegerChoices):
+    Unknown = 0,
+    Hitchhiker = 1,
+    Taxi = 2,
+    Ambulance = 3,
+    Bus = 4,
+
+  timestamp = models.DateTimeField()
+  player = models.ForeignKey(Player, on_delete=models.SET_NULL, null=True, related_name='passengers_delivered')
+  passenger_type = models.IntegerField(db_index=True, choices=PassengerType)
+  distance = models.FloatField()
+  payment = models.PositiveIntegerField()
+  arrived = models.BooleanField(default=True)
+  data = models.JSONField(null=True, blank=True)
+
+
