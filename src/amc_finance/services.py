@@ -1,3 +1,4 @@
+from decimal import Decimal
 from django.utils import timezone
 from django.db import transaction
 from django.db.models import F
@@ -396,4 +397,45 @@ def create_journal_entry(date, description, creator_character, entries_data):
   return journal_entry
 
 
+INTEREST_RATE = 0.01
+async def apply_interest_to_bank_accounts(ctx, interest_rate=INTEREST_RATE):
+  bank_expense_account, _ = await Account.objects.aget_or_create(
+    account_type=Account.AccountType.EXPENSE,
+    book=Account.Book.BANK,
+    character=None,
+    defaults={
+      'name': 'Bank Expense',
+    }
+  )
+
+  accounts_qs = Account.objects.filter(
+    account_type=Account.AccountType.LIABILITY,
+    book=Account.Book.BANK,
+    character__isnull=False,
+    balance__gt=0,
+  )
+
+  async for account in accounts_qs:
+    if account.balance == 0:
+      continue
+
+    amount = account.balance * Decimal(interest_rate) / Decimal(24)
+    if amount >= Decimal(0.01):
+      await sync_to_async(create_journal_entry)(
+        timezone.now(),
+        "Interest Payment",
+        None,
+        [
+          {
+            'account': account,
+            'debit': 0,
+            'credit': amount,
+          },
+          {
+            'account': bank_expense_account,
+            'debit': amount,
+            'credit': 0,
+          },
+        ]
+      )
 

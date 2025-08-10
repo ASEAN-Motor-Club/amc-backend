@@ -13,6 +13,7 @@ from amc.locations import monitor_locations
 from amc.deliverypoints import monitor_deliverypoints
 import discord
 from amc.discord_client import bot as discord_client
+from amc_finance.services import apply_interest_to_bank_accounts
 
 REDIS_SETTINGS = RedisSettings(**settings.REDIS_SETTINGS)
 
@@ -74,6 +75,7 @@ class WorkerSettings:
         cron(monitor_locations, second=None),
         cron(send_event_embeds, second=set(range(0, 60, 10))),
         cron(monitor_deliverypoints, second=None),
+        cron(apply_interest_to_bank_accounts, hour=0, minute=0),
     ]
     on_startup = startup
     on_shutdown = shutdown
