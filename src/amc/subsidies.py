@@ -19,25 +19,25 @@ cargo_names = {
 
 def calculate_loan_repayment(payment, loan_balance, max_loan):
   loan_utilisation = loan_balance / max_loan
-  repayment_percentage = 0.1 + (0.4 * loan_utilisation)
+  repayment_percentage = Decimal(0.1) + (Decimal(0.4) * loan_utilisation)
 
-  repayment = min(loan_balance, max(100, int(payment * Decimal(repayment_percentage))))
+  repayment = min(loan_balance, max(Decimal(100), int(payment * Decimal(repayment_percentage))))
   return repayment
 
 async def repay_loan_for_profit(player, payment, session):
   try:
-    character = await player.characters.with_last_login().alatest('last_login')
+    character = await player.characters.with_last_login().filter(last_login__isnull=False).alatest('last_login')
     loan_balance = await get_player_loan_balance(character)
     if loan_balance == 0:
       return
     max_loan = get_character_max_loan(character)
-    repayment = calculate_loan_repayment(payment, loan_balance, max_loan)
+    repayment = calculate_loan_repayment(Decimal(payment), loan_balance, max_loan)
 
     await transfer_money(
       session,
-      -repayment,
+      int(-repayment),
       'ASEAN Loan Repayment',
-      player.unique_id,
+      str(player.unique_id),
     )
     await register_player_repay_loan(repayment, character)
   except Exception as e:
@@ -48,19 +48,23 @@ async def repay_loan_for_profit(player, payment, session):
 DEFAULT_SAVING_RATE = 0
 async def set_aside_player_savings(player, payment, session):
   try:
-    character = await player.characters.with_last_login().alatest('last_login')
-    saving_rate = character.saving_rate if character.saving_rate is not None else Decimal(DEFAULT_SAVING_RATE)
+    character = await player.characters.with_last_login().filter(last_login__isnull=False).alatest('last_login')
+    if character.saving_rate is not None:
+      saving_rate = character.saving_rate
+    else:
+      saving_rate = Decimal(DEFAULT_SAVING_RATE)
     if saving_rate == Decimal(0):
       return
 
-    saving = saving_rate * payment
-    await transfer_money(
-      session,
-      -saving,
-      'Earnings Deposit (Use /bank to see)',
-      player.unique_id,
-    )
-    await register_player_deposit(saving, character)
+    saving = Decimal(saving_rate) * Decimal(payment)
+    if saving > 0:
+      await transfer_money(
+        session,
+        int(-saving),
+        'Earnings Deposit (Use /bank to see)',
+        str(player.unique_id),
+      )
+      await register_player_deposit(saving, character, player)
   except Exception as e:
     asyncio.create_task(
       show_popup(session, f'Failed to deposit earnings:\n{e}', player_id=player.unique_id)

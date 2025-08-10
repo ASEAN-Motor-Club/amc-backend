@@ -394,7 +394,7 @@ async def process_log_event(event: LogEvent, http_client=None, http_client_mod=N
 <Bold>Loans:</> <Money>{loan_balance:,}</>
 <Bold>Max Available Loan:</> <Money>{max_loan:,}</>
 <Small>Max available loan depends on your driver level (currently {character.driver_level})</>
-<Bold>Earnings Saving Rate:</> <Money>{saving_rate * Decimal(100)}%</>
+<Bold>Earnings Saving Rate:</> <Money>{saving_rate * Decimal(100):.0f}%</>
 <Small>Use /set_saving_rate [percentage] to automatically set aside your earnings into your account.</>
 
 Commands:
