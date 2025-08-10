@@ -71,21 +71,30 @@ async def set_aside_player_savings(player, payment, session):
     )
 
 
+def get_subsidy_for_cargos(cargos):
+  return sum([
+    get_subsidy_for_cargo(cargo)[0]
+    for cargo in cargos
+  ])
+
+def get_subsidy_for_cargo(cargo):
+  subsidy_factor = 0.0
+  match cargo.cargo_key:
+    case 'Burger_01_Signature' | 'Pizza_01_Premium' | 'GiftBox_01' | 'LiveFish_01':
+      if cargo.data['Net_TimeLeftSeconds'] > 0:
+        subsidy_factor = 3.0
+    case 'Log_Oak_12ft':
+      subsidy_factor = 2.5 * (1.0 - cargo.damage)
+    case _:
+      pass
+  return int(cargo.payment * subsidy_factor), subsidy_factor
+
 async def subsidise_delivery(cargos, session):
   subsidy = 0
   popup_message = "<Title>ASEAN Subsidy Receipt</>"
   for cargo in cargos:
-    subsidy_factor = 0.0
-    match cargo.cargo_key:
-      case 'Burger_01_Signature' | 'Pizza_01_Premium' | 'GiftBox_01' | 'LiveFish_01':
-        if cargo.data['Net_TimeLeftSeconds'] > 0:
-          subsidy_factor = 3.0
-      case 'Log_Oak_12ft':
-        subsidy_factor = 2.5 * (1.0 - cargo.damage)
-      case _:
-        pass
-    if subsidy_factor != 0:
-      cargo_subsidy = int(cargo.payment * subsidy_factor)
+    cargo_subsidy, subsidy_factor = get_subsidy_for_cargo(cargo)
+    if cargo_subsidy != 0:
       subsidy += cargo_subsidy
       cargo_name = cargo_names.get(cargo.cargo_key, cargo.cargo_key)
       popup_message += f"\n{cargo_name} - <Money>{cargo_subsidy}</> ({int(subsidy_factor * 100):,}%)"

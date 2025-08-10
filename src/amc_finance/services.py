@@ -60,9 +60,6 @@ async def register_player_deposit(amount, character, player):
     }
   )
 
-  if amount + account.balance > 100_000:
-    raise ValueError('Unable to deposit more than 100,000. To deposit more money into your account, use /set_saving_rate [percentage] and make deliveries.')
-
   return await sync_to_async(create_journal_entry)(
     timezone.now(),
     "Player Deposit",
@@ -122,7 +119,7 @@ async def register_player_withdrawal(amount, character, player):
   )
 
 
-async def register_player_take_loan(amount, character, MAX_LOAN=0):
+async def register_player_take_loan(amount, character):
   loan_account, _ = await Account.objects.aget_or_create(
     account_type=Account.AccountType.ASSET,
     book=Account.Book.BANK,
@@ -140,8 +137,6 @@ async def register_player_take_loan(amount, character, MAX_LOAN=0):
       'name': 'Bank Vault',
     }
   )
-  if (loan_account.balance + amount) > MAX_LOAN:
-    raise ValueError(f'Max loan balance is {MAX_LOAN}')
 
   return await sync_to_async(create_journal_entry)(
     timezone.now(),

@@ -46,6 +46,7 @@ from amc.subsidies import (
   subsidise_delivery,
   repay_loan_for_profit,
   set_aside_player_savings,
+  get_subsidy_for_cargos,
 )
 
 POSITION_UPDATE_RATE = 10
@@ -385,7 +386,8 @@ async def webhook(request, payload: list[WebhookPayloadSchema]):
           for cargo in event.data['Cargos']
         ]
         await ServerCargoArrivedLog.objects.abulk_create(logs)
-        total_payment = sum([log.payment for log in logs])
+        total_subsidy = get_subsidy_for_cargos(logs)
+        total_payment = sum([log.payment for log in logs]) + total_subsidy
         asyncio.create_task(subsidise_delivery(logs, request.state['aiohttp_client']))
         asyncio.create_task(
           repay_loan_for_profit(
