@@ -42,7 +42,11 @@ from amc.models import (
   ServerSignContractLog,
 )
 from amc.utils import lowercase_first_char_in_keys
-from amc.subsidies import subsidise_delivery, repay_loan_for_profit
+from amc.subsidies import (
+  subsidise_delivery,
+  repay_loan_for_profit,
+  set_aside_player_savings,
+)
 
 POSITION_UPDATE_RATE = 10
 POSITION_UPDATE_SLEEP = 1.0 / POSITION_UPDATE_RATE
@@ -381,11 +385,19 @@ async def webhook(request, payload: list[WebhookPayloadSchema]):
           for cargo in event.data['Cargos']
         ]
         await ServerCargoArrivedLog.objects.abulk_create(logs)
+        total_payment = sum([log.payment for log in logs])
         asyncio.create_task(subsidise_delivery(logs, request.state['aiohttp_client']))
         asyncio.create_task(
           repay_loan_for_profit(
             player,
-            sum([log.payment for log in logs]),
+            total_payment,
+            request.state['aiohttp_client']
+          )
+        )
+        asyncio.create_task(
+          set_aside_player_savings(
+            player,
+            total_payment,
             request.state['aiohttp_client']
           )
         )

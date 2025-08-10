@@ -1,6 +1,7 @@
 import re
 import asyncio
 import discord
+from decimal import Decimal
 from django.utils import timezone
 from django.db import connection
 from django.db.models import Exists, OuterRef
@@ -48,6 +49,7 @@ from amc.events import (
   staggered_start,
 )
 from amc.utils import format_in_local_tz, format_timedelta
+from amc.subsidies import DEFAULT_SAVING_RATE
 from amc_finance.services import (
   register_player_deposit,
   register_player_withdrawal,
@@ -366,10 +368,23 @@ async def process_log_event(event: LogEvent, http_client=None, http_client_mod=N
           character=character, 
           song=command_match.group('song'),
         )
+      elif command_match := re.match(r"/set_saving_rate (?P<saving_rate>\d+)%?$", message):
+        try:
+          character.saving_rate = Decimal(command_match.group('saving_rate')) / Decimal(100)
+          await character.asave(update_fields=['saving_rate'])
+          asyncio.create_task(
+            show_popup(http_client_mod, f"<Title>Savings rate saved</>\n\n{command_match.group('saving_rate')}% of your earnings will automatically go into your bank account", player_id=str(player_id))
+          )
+        except Exception as e:
+          asyncio.create_task(
+            show_popup(http_client_mod, f"<Title>Set savings rate failed</>\n\n{e}", player_id=str(player_id))
+          )
+
       elif command_match := re.match(r"/bank", message):
         balance = await get_player_bank_balance(character)
         loan_balance = await get_player_loan_balance(character)
         max_loan = get_character_max_loan(character)
+        saving_rate = character.saving_rate if character.saving_rate is not None else Decimal(DEFAULT_SAVING_RATE)
         asyncio.create_task(
           show_popup(http_client_mod, f"""\
 <Title>Your Bank ASEAN Account</>
@@ -378,12 +393,15 @@ async def process_log_event(event: LogEvent, http_client=None, http_client_mod=N
 <Bold>Loans:</> <Money>{loan_balance:,}</>
 <Bold>Max Available Loan:</> <Money>{max_loan:,}</>
 <Small>Max available loan depends on your driver level (currently {character.driver_level})</>
+<Bold>Earnings Saving Rate:</> <Money>{saving_rate * Decimal(100)}%</>
+<Small>Use /set_saving_rate [percentage] to automatically set aside your earnings into your account.</>
 
 Commands:
 <Highlight>/deposit [amount]</> - Deposit into your bank account
 <Highlight>/withdraw [amount]</> - Withdraw from your bank account
 <Highlight>/loan [amount]</> - Take out a loan
 <Highlight>/repay_loan [amount]</> - Repay your loan
+<Highlight>/set_saving_rate [percentage]</> - Automatically set aside your earnings into your account
 
 How ASEAN Loan Works
 <Secondary>Our loans are interest free, and you only have to repay them when you make a profit.</>

@@ -4,6 +4,8 @@ from django.contrib import admin
 from django.contrib.gis.db import models
 from django.db.models import Q, F, Sum, Max, Window
 from django.db.models.functions import RowNumber, Lead
+from decimal import Decimal
+from django.core.validators import MinValueValidator, MaxValueValidator
 from django.contrib.postgres.fields import ArrayField
 from django.utils import timezone
 from django.utils.translation import gettext_lazy as _
@@ -113,6 +115,16 @@ class Character(models.Model):
   truck_level = models.PositiveIntegerField(null=True)
   wrecker_level = models.PositiveIntegerField(null=True)
   racer_level = models.PositiveIntegerField(null=True)
+  saving_rate = models.DecimalField(
+    max_digits=3,
+    decimal_places=2,
+    null=True,
+    blank=True,
+    validators=[
+      MinValueValidator(Decimal('0.00')),
+      MaxValueValidator(Decimal('1.00'))
+    ]
+  )
 
   objects = CharacterManager.from_queryset(CharacterQuerySet)()
 

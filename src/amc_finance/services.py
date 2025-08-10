@@ -60,7 +60,7 @@ async def register_player_deposit(amount, character, player):
   )
 
   if amount + account.balance > 100_000:
-    raise ValueError('Unable to deposit more than 100,000')
+    raise ValueError('Unable to deposit more than 100,000. To deposit more money into your account, use /set_saving_rate [percentage] and make deliveries.')
 
   return await sync_to_async(create_journal_entry)(
     timezone.now(),

@@ -6,6 +6,7 @@ from amc_finance.services import (
   get_character_max_loan,
   get_player_loan_balance,
   register_player_repay_loan,
+  register_player_deposit,
 )
 
 cargo_names = {
@@ -32,9 +33,6 @@ async def repay_loan_for_profit(player, payment, session):
     max_loan = get_character_max_loan(character)
     repayment = calculate_loan_repayment(payment, loan_balance, max_loan)
 
-    asyncio.create_task(
-      show_popup(session, f'Repayment {repayment}', player_id=player.unique_id)
-    )
     await transfer_money(
       session,
       -repayment,
@@ -45,6 +43,27 @@ async def repay_loan_for_profit(player, payment, session):
   except Exception as e:
     asyncio.create_task(
       show_popup(session, f'Repayment failed {e}', player_id=player.unique_id)
+    )
+
+DEFAULT_SAVING_RATE = 0
+async def set_aside_player_savings(player, payment, session):
+  try:
+    character = await player.characters.with_last_login().alatest('last_login')
+    saving_rate = character.saving_rate if character.saving_rate is not None else Decimal(DEFAULT_SAVING_RATE)
+    if saving_rate == Decimal(0):
+      return
+
+    saving = saving_rate * payment
+    await transfer_money(
+      session,
+      -saving,
+      'Earnings Deposit (Use /bank to see)',
+      player.unique_id,
+    )
+    await register_player_deposit(saving, character)
+  except Exception as e:
+    asyncio.create_task(
+      show_popup(session, f'Failed to deposit earnings:\n{e}', player_id=player.unique_id)
     )
 
 
