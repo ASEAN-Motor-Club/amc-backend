@@ -1,6 +1,7 @@
 import asyncio
 from decimal import Decimal
 from amc.mod_server import show_popup, transfer_money
+from amc.models import ServerPassengerArrivedLog
 from amc_finance.services import (
   send_fund_to_player_wallet,
   get_character_max_loan,
@@ -111,4 +112,21 @@ async def subsidise_delivery(cargos, session):
     asyncio.create_task(
       show_popup(session, popup_message, player_id=cargo.player.unique_id)
     )
+
+def get_passenger_subsidy(passenger):
+  match passenger.passenger_type:
+    case ServerPassengerArrivedLog.PassengerType.Taxi:
+      return 2_000 + passenger.payment * 0.5
+    case _:
+      return 0
+
+async def subsidise_passenger(passenger, subsidy, player, session):
+  character = await player.characters.with_last_login().filter(last_login__isnull=False).alatest('last_login')
+  await transfer_money(
+    session,
+    int(subsidy),
+    'ASEAN Subsidy' if subsidy > 0 else 'ASEAN Tax',
+    player.unique_id,
+  )
+  await send_fund_to_player_wallet(subsidy, character, "Passenger Subsidy")
 

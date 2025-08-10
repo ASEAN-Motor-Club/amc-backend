@@ -48,6 +48,8 @@ from amc.subsidies import (
   repay_loan_for_profit,
   set_aside_player_savings,
   get_subsidy_for_cargos,
+  get_passenger_subsidy,
+  subsidise_passenger,
 )
 
 POSITION_UPDATE_RATE = 10
@@ -439,7 +441,7 @@ async def webhook(request, payload: list[WebhookPayloadSchema]):
         player_id = event.data['PlayerId']
         player = await Player.objects.aget(unique_id=player_id)
         passenger = event.data['Passenger']
-        await ServerPassengerArrivedLog.objects.acreate(
+        log = await ServerPassengerArrivedLog.objects.acreate(
           timestamp=datetime.utcfromtimestamp(event.timestamp / 1000),
           player=player,
           passenger_type=passenger['Net_PassengerType'],
@@ -447,5 +449,22 @@ async def webhook(request, payload: list[WebhookPayloadSchema]):
           payment=passenger['Net_Payment'],
           arrived=passenger['Net_bArrived'],
           data=passenger,
+        )
+        subsidy = get_passenger_subsidy(log)
+        if subsidy != 0:
+          asyncio.create_task(subsidise_passenger(log, subsidy, player, request.state['aiohttp_client']))
+        asyncio.create_task(
+          repay_loan_for_profit(
+            player,
+            log.payment + subsidy,
+            request.state['aiohttp_client']
+          )
+        )
+        asyncio.create_task(
+          set_aside_player_savings(
+            player,
+            log.payment + subsidy,
+            request.state['aiohttp_client']
+          )
         )
 

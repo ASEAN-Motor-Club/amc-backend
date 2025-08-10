@@ -5,7 +5,13 @@ import discord
 from discord import app_commands
 from discord.ext import commands
 from django.conf import settings
-from amc.models import Character, Player, ServerCargoArrivedLog, ServerSignContractLog
+from amc.models import (
+  Character,
+  Player,
+  ServerCargoArrivedLog,
+  ServerSignContractLog,
+  ServerPassengerArrivedLog,
+)
 from amc.utils import get_timespan
 from amc_finance.services import send_fund_to_player
 from amc_finance.models import Account, LedgerEntry
@@ -32,7 +38,13 @@ class EconomyCog(commands.Cog):
     )
     contracts_aggregates = await contracts_qs.aaggregate(total_payments=Sum('payment'))
 
-    total_gdp = deliveries_aggregates['total_payments'] + contracts_aggregates['total_payments']
+    passengers_qs = ServerPassengerArrivedLog.objects.filter(
+      timestamp__gte=start_time,
+      timestamp__lt=end_time
+    )
+    passengers_aggregates = await passengers_qs.aaggregate(total_payments=Sum('payment'))
+
+    total_gdp = deliveries_aggregates['total_payments'] + contracts_aggregates['total_payments'] + passengers_aggregates['total_payments']
 
     delivery_sum_subquery = ServerCargoArrivedLog.objects.filter(
       player=OuterRef('pk'),
@@ -52,6 +64,15 @@ class EconomyCog(commands.Cog):
     ).annotate(
       total=Sum('payment')
     ).values('total')
+    passengers_sum_subquery = ServerPassengerArrivedLog.objects.filter(
+      player=OuterRef('pk'),
+      timestamp__gte=start_time,
+      timestamp__lt=end_time
+    ).values(
+      'player'
+    ).annotate(
+      total=Sum('payment')
+    ).values('total')
 
     top_players_qs = Player.objects.annotate(
       gdp_contribution=Coalesce(
@@ -59,6 +80,9 @@ class EconomyCog(commands.Cog):
         Value(0),
       ) + Coalesce(
         Subquery(contracts_sum_subquery, output_field=models.IntegerField()),
+        Value(0),
+      ) + Coalesce(
+        Subquery(passengers_sum_subquery, output_field=models.IntegerField()),
         Value(0),
       )
     ).filter(gdp_contribution__gt=0).order_by('-gdp_contribution')[:20]
@@ -91,6 +115,7 @@ class EconomyCog(commands.Cog):
 
 Deliveries: {deliveries_aggregates['total_payments']:,}
 Contracts: {contracts_aggregates['total_payments']:,}
+Passengers (Taxi/Bus/Ambulance): {passengers_aggregates['total_payments']:,}
 
 ## Top GDP Contributors
 {top_players_str}

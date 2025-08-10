@@ -240,6 +240,9 @@ async def process_log_event(event: LogEvent, http_client=None, http_client_mod=N
 
 <Bold>Depot Restocking</>
 <Money>10,000</> coins
+
+<Bold>Taxi</>
+<Money>2,000</> coins + 50% of base pay
 """
         asyncio.create_task(show_popup(http_client_mod, subsidies_text, player_id=str(player_id)))
         await BotInvocationLog.objects.acreate(
