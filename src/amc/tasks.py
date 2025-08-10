@@ -390,6 +390,7 @@ async def process_log_event(event: LogEvent, http_client=None, http_client_mod=N
 <Title>Your Bank ASEAN Account</>
 
 <Bold>Balance:</> <Money>{balance:,}</>
+<Small>Daily Interest Rate: 2.2%</>
 <Bold>Loans:</> <Money>{loan_balance:,}</>
 <Bold>Max Available Loan:</> <Money>{max_loan:,}</>
 <Small>Max available loan depends on your driver level (currently {character.driver_level})</>
@@ -397,7 +398,7 @@ async def process_log_event(event: LogEvent, http_client=None, http_client_mod=N
 <Small>Use /set_saving_rate [percentage] to automatically set aside your earnings into your account.</>
 
 Commands:
-<Highlight>/deposit [amount]</> - Deposit into your bank account
+<Highlight>/deposit [amount]</> - Deposit into your bank account (max 100,000)
 <Highlight>/withdraw [amount]</> - Withdraw from your bank account
 <Highlight>/loan [amount]</> - Take out a loan
 <Highlight>/repay_loan [amount]</> - Repay your loan
@@ -425,13 +426,28 @@ How ASEAN Loan Works
             )
       elif command_match := re.match(r"/deposit (?P<amount>\d+)", message):
         amount = int(command_match.group('amount'))
-        try:
-          await register_player_deposit(amount, character, player)
-          await transfer_money(http_client_mod, -amount, 'Bank Deposit', player_id)
-        except Exception as e:
+        balance = await get_player_bank_balance(character)
+        MAX_DEPOSIT_BALANCE = 100_000
+        if balance + Decimal(amount) > MAX_DEPOSIT_BALANCE:
           asyncio.create_task(
-            show_popup(http_client_mod, f"<Title>Deposit failed</>\n\n{e}", player_id=str(player_id))
+            show_popup(http_client_mod, f"""\
+<Title>Deposit Limit Reached</>
+
+You may only manually deposit a maximum of {MAX_DEPOSIT_BALANCE:,}.
+
+To put more money into your bank account:
+<Highlight>/set_saving_rate [percentage]</>
+Automatically saves a percentage of your earnings into your bank account.
+""", player_id=str(player_id))
           )
+        else: 
+          try:
+            await register_player_deposit(amount, character, player)
+            await transfer_money(http_client_mod, -amount, 'Bank Deposit', player_id)
+          except Exception as e:
+            asyncio.create_task(
+              show_popup(http_client_mod, f"<Title>Deposit failed</>\n\n{e}", player_id=str(player_id))
+            )
       elif command_match := re.match(r"/withdraw (?P<amount>\d+)", message):
         amount = int(command_match.group('amount'))
         try:

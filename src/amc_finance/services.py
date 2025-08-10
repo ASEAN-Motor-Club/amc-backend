@@ -397,7 +397,7 @@ def create_journal_entry(date, description, creator_character, entries_data):
   return journal_entry
 
 
-INTEREST_RATE = 0.01
+INTEREST_RATE = 0.022
 async def apply_interest_to_bank_accounts(ctx, interest_rate=INTEREST_RATE):
   bank_expense_account, _ = await Account.objects.aget_or_create(
     account_type=Account.AccountType.EXPENSE,
