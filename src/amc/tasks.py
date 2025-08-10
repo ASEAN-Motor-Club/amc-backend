@@ -51,7 +51,11 @@ from amc.utils import format_in_local_tz, format_timedelta
 from amc_finance.services import (
   register_player_deposit,
   register_player_withdrawal,
+  register_player_take_loan,
+  register_player_repay_loan,
   get_player_bank_balance,
+  get_player_loan_balance,
+  get_character_max_loan,
   player_donation,
   send_fund_to_player_wallet,
 )
@@ -364,18 +368,43 @@ async def process_log_event(event: LogEvent, http_client=None, http_client_mod=N
         )
       elif command_match := re.match(r"/bank", message):
         balance = await get_player_bank_balance(character)
+        loan_balance = await get_player_loan_balance(character)
+        max_loan = get_character_max_loan(character)
         asyncio.create_task(
-          show_popup(http_client_mod, f"<Title>Your Bank Account</>\n\n<Bold>Balance:</> <Money>{balance:,}</>\n\nUse /deposit [amount] and /withdraw [amount] to deposit and withdraw to/from your account respectively.", player_id=str(player_id))
+          show_popup(http_client_mod, f"""\
+<Title>Your Bank ASEAN Account</>
+
+<Bold>Balance:</> <Money>{balance:,}</>
+<Bold>Loans:</> <Money>{loan_balance:,}</>
+<Bold>Max Available Loan:</> <Money>{max_loan:,}</>
+<Small>Max available loan depends on your driver level (currently {character.driver_level})</>
+
+Commands:
+<Highlight>/deposit [amount]</> - Deposit into your bank account
+<Highlight>/withdraw [amount]</> - Withdraw from your bank account
+<Highlight>/loan [amount]</> - Take out a loan
+<Highlight>/repay_loan [amount]</> - Repay your loan
+
+How ASEAN Loan Works
+<Secondary>Our loans are interest free, and you only have to repay them when you make a profit.</>
+<Secondary>The repayment will range from 10% to 40% of your income, depending on the amount of loan you took.</>
+""", player_id=str(player_id))
         )
       elif command_match := re.match(r"/donate (?P<amount>\d+)", message):
+        max_donation = character.total_session_time.days * 2_000_000
         amount = int(command_match.group('amount'))
-        try:
-          await player_donation(amount, character)
-          await transfer_money(http_client_mod, -amount, 'Donation', player_id)
-        except Exception as e:
+        if amount > max_donation:
           asyncio.create_task(
-            show_popup(http_client_mod, f"<Title>Donation failed</>\n\n{e}", player_id=str(player_id))
+            show_popup(http_client_mod, f"<Title>Donation failed</>\n\nYou can donate a maximum of {max_donation:,}", player_id=str(player_id))
           )
+        else:
+          try:
+            await player_donation(amount, character)
+            await transfer_money(http_client_mod, -amount, 'Donation', player_id)
+          except Exception as e:
+            asyncio.create_task(
+              show_popup(http_client_mod, f"<Title>Donation failed</>\n\n{e}", player_id=str(player_id))
+            )
       elif command_match := re.match(r"/deposit (?P<amount>\d+)", message):
         amount = int(command_match.group('amount'))
         try:
@@ -393,6 +422,25 @@ async def process_log_event(event: LogEvent, http_client=None, http_client_mod=N
         except Exception as e:
           asyncio.create_task(
             show_popup(http_client_mod, f"<Title>Withdrawal failed</>\n\n{e}", player_id=str(player_id))
+          )
+      elif command_match := re.match(r"/loan (?P<amount>\d+)", message):
+        amount = int(command_match.group('amount'))
+        max_loan = get_character_max_loan(character)
+        try:
+          await register_player_take_loan(amount, character, max_loan)
+          await transfer_money(http_client_mod, amount, 'ASEAN Bank Loan', player_id)
+        except Exception as e:
+          asyncio.create_task(
+            show_popup(http_client_mod, f"<Title>Loan failed</>\n\n{e}", player_id=str(player_id))
+          )
+      elif command_match := re.match(r"/repay_loan (?P<amount>\d+)", message):
+        amount = int(command_match.group('amount'))
+        try:
+          await register_player_repay_loan(amount, character)
+          await transfer_money(http_client_mod, -amount, 'ASEAN Bank Loan Repayment', player_id)
+        except Exception as e:
+          asyncio.create_task(
+            show_popup(http_client_mod, f"<Title>Loan failed</>\n\n{e}", player_id=str(player_id))
           )
       if discord_client and ctx.get('startup_time') and timestamp > ctx.get('startup_time'):
         forward_message = (

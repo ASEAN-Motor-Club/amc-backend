@@ -21,6 +21,21 @@ Unlicensed corporations will be closed down!
 For any other purposes, <Highlight>please contact the admins on the discord</>.
 """
   ),
+  (
+    Point(**{"x": -220383.08, "y": 141777.71, "z": -20186.82}),
+    500,
+    """\
+<Title>Want to take out a loan?</>
+<Warning>This bank charges high interest rate!</> - many players have ended up in a debt spiral.
+
+<Bold>Use Bank ASEAN instead!</>
+- Our loans are interest free
+- Our loans have to repayment period
+- You only have to pay them back when you make a profit
+
+Use <Highlight>/bank</> to create a Bank ASEAN account today!
+"""
+  ),
 ]
 
 async def process_player(player_info, ctx):

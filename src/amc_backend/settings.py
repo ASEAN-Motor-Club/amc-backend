@@ -179,6 +179,8 @@ Visit the website & Join the Discord!
 
 <Highlight>/subsidies</> - List all the subsidised (bonus paid) jobs on the server.
 
+<Highlight>/bank</> - See your Bank ASEAN account.
+
 <Title>Event Commands</>
 
 <Highlight>/events</> - List current and upcoming scheduled events

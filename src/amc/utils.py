@@ -1,5 +1,6 @@
-from datetime import datetime
+from datetime import datetime, timedelta
 from zoneinfo import ZoneInfo
+from django.utils import timezone
 
 def lowercase_first_char_in_keys(obj):
     """
@@ -91,4 +92,34 @@ def format_timedelta(td):
     else:
         # Join all but the last part with ", " and add " and " before the last part
         return ', '.join(parts[:-1]) + ' and ' + parts[-1]
+
+def get_timespan(days_ago: int = 0, num_days: int = 1) -> tuple[datetime, datetime]:
+    """
+    Calculates a timezone-aware start and end datetime tuple.
+
+    The start_time is the beginning of a day (00:00:00) 'days_ago' from today.
+    The end_time is the beginning of the day 'num_days' after the start_time.
+    This creates a half-open interval [start_time, end_time).
+
+    Args:
+        days_ago (int): How many days in the past to start from. 
+                        0 means today, 1 means yesterday. Defaults to 0.
+        num_days (int): The duration of the timespan in days. Defaults to 1.
+
+    Returns:
+        tuple[datetime, datetime]: A tuple containing the timezone-aware 
+                                   start and end datetimes.
+    """
+    # Get the current time in the project's timezone (e.g., using ZoneInfo)
+    now = timezone.now()
+
+    # Calculate the start time by finding midnight of the target day
+    # .replace() preserves the timezone information from `now`
+    start_of_today = now.replace(hour=0, minute=0, second=0, microsecond=0)
+    start_time = start_of_today - timedelta(days=days_ago)
+
+    # Calculate the end time by adding the duration
+    end_time = start_time + timedelta(days=num_days)
+
+    return start_time, end_time
 

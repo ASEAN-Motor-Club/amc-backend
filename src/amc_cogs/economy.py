@@ -1,6 +1,4 @@
 from django.db import models
-from datetime import timedelta
-from django.utils import timezone
 from django.db.models import Sum, OuterRef, Subquery, Value, Q, F
 from django.db.models.functions import Coalesce
 import discord
@@ -8,6 +6,7 @@ from discord import app_commands
 from discord.ext import commands
 from django.conf import settings
 from amc.models import Character, Player, ServerCargoArrivedLog, ServerSignContractLog
+from amc.utils import get_timespan
 from amc_finance.services import send_fund_to_player
 from amc_finance.models import Account, LedgerEntry
 
@@ -18,13 +17,19 @@ class EconomyCog(commands.Cog):
     self.general_channel_id = general_channel_id
 
   @app_commands.command(name='calculate_gdp', description='Calculate the GDP figure')
-  async def calculate_gdp(self, interaction, days: int = 1):
+  async def calculate_gdp(self, interaction, num_days: int = 1, days_before:int=0):
     await interaction.response.defer()
-    start_time = timezone.now() - timedelta(days=days)
-    deliveries_qs = ServerCargoArrivedLog.objects.filter(timestamp__gte=start_time)
+    start_time, end_time = get_timespan(days_before, num_days)
+    deliveries_qs = ServerCargoArrivedLog.objects.filter(
+      timestamp__gte=start_time,
+      timestamp__lt=end_time
+    )
     deliveries_aggregates = await deliveries_qs.aaggregate(total_payments=Sum('payment'))
 
-    contracts_qs = ServerSignContractLog.objects.filter(timestamp__gte=start_time)
+    contracts_qs = ServerSignContractLog.objects.filter(
+      timestamp__gte=start_time,
+      timestamp__lt=end_time
+    )
     contracts_aggregates = await contracts_qs.aaggregate(total_payments=Sum('payment'))
 
     total_gdp = deliveries_aggregates['total_payments'] + contracts_aggregates['total_payments']
@@ -32,6 +37,7 @@ class EconomyCog(commands.Cog):
     delivery_sum_subquery = ServerCargoArrivedLog.objects.filter(
       player=OuterRef('pk'),
       timestamp__gte=start_time,
+      timestamp__lt=end_time
     ).values(
       'player'
     ).annotate(
@@ -40,6 +46,7 @@ class EconomyCog(commands.Cog):
     contracts_sum_subquery = ServerSignContractLog.objects.filter(
       player=OuterRef('pk'),
       timestamp__gte=start_time,
+      timestamp__lt=end_time
     ).values(
       'player'
     ).annotate(

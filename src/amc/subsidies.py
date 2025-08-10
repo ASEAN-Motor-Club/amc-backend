@@ -1,6 +1,12 @@
 import asyncio
+from decimal import Decimal
 from amc.mod_server import show_popup, transfer_money
-from amc_finance.services import send_fund_to_player_wallet
+from amc_finance.services import (
+  send_fund_to_player_wallet,
+  get_character_max_loan,
+  get_player_loan_balance,
+  register_player_repay_loan,
+)
 
 cargo_names = {
   'Burger_01_Signature': 'Signature Burger',
@@ -9,6 +15,38 @@ cargo_names = {
   'LiveFish_01': 'Live Fish',
   'Log_Oak_12ft': '12ft Oak Log',
 }
+
+def calculate_loan_repayment(payment, loan_balance, max_loan):
+  loan_utilisation = loan_balance / max_loan
+  repayment_percentage = 0.1 + (0.4 * loan_utilisation)
+
+  repayment = min(loan_balance, max(100, int(payment * Decimal(repayment_percentage))))
+  return repayment
+
+async def repay_loan_for_profit(player, payment, session):
+  try:
+    character = await player.characters.with_last_login().alatest('last_login')
+    loan_balance = await get_player_loan_balance(character)
+    if loan_balance == 0:
+      return
+    max_loan = get_character_max_loan(character)
+    repayment = calculate_loan_repayment(payment, loan_balance, max_loan)
+
+    asyncio.create_task(
+      show_popup(session, f'Repayment {repayment}', player_id=player.unique_id)
+    )
+    await transfer_money(
+      session,
+      -repayment,
+      'ASEAN Loan Repayment',
+      player.unique_id,
+    )
+    await register_player_repay_loan(repayment, character)
+  except Exception as e:
+    asyncio.create_task(
+      show_popup(session, f'Repayment failed {e}', player_id=player.unique_id)
+    )
+
 
 async def subsidise_delivery(cargos, session):
   subsidy = 0

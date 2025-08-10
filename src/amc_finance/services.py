@@ -4,6 +4,9 @@ from django.db.models import F
 from asgiref.sync import sync_to_async
 from amc_finance.models import Account, JournalEntry, LedgerEntry
 
+def get_character_max_loan(character):
+  return 10_000 + ((character.driver_level * 5_000) if character.driver_level else 0)
+
 async def get_player_bank_balance(character):
   account, _ = await Account.objects.aget_or_create(
     account_type=Account.AccountType.LIABILITY,
@@ -14,6 +17,17 @@ async def get_player_bank_balance(character):
     }
   )
   return account.balance
+
+async def get_player_loan_balance(character):
+  loan_account, _ = await Account.objects.aget_or_create(
+    account_type=Account.AccountType.ASSET,
+    book=Account.Book.BANK,
+    character=character,
+    defaults={
+      'name': f'Loan #{character.id} - {character.name}',
+    }
+  )
+  return loan_account.balance
 
 async def get_treasury_fund_balance(character):
   treasury_fund, _ = await Account.objects.aget_or_create(
@@ -100,6 +114,86 @@ async def register_player_withdrawal(amount, character, player):
       },
       {
         'account': bank_vault,
+        'debit': 0,
+        'credit': amount,
+      },
+    ]
+  )
+
+
+async def register_player_take_loan(amount, character, MAX_LOAN=0):
+  loan_account, _ = await Account.objects.aget_or_create(
+    account_type=Account.AccountType.ASSET,
+    book=Account.Book.BANK,
+    character=character,
+    defaults={
+      'name': f'Loan #{character.id} - {character.name}',
+    }
+  )
+
+  bank_vault, _ = await Account.objects.aget_or_create(
+    account_type=Account.AccountType.ASSET,
+    book=Account.Book.BANK,
+    character=None,
+    defaults={
+      'name': 'Bank Vault',
+    }
+  )
+  if (loan_account.balance + amount) > MAX_LOAN:
+    raise ValueError(f'Max loan balance is {MAX_LOAN}')
+
+  return await sync_to_async(create_journal_entry)(
+    timezone.now(),
+    "Player Loan",
+    character,
+    [
+      {
+        'account': loan_account,
+        'debit': amount,
+        'credit': 0,
+      },
+      {
+        'account': bank_vault,
+        'debit': 0,
+        'credit': amount,
+      },
+    ]
+  )
+
+
+async def register_player_repay_loan(amount, character):
+  loan_account, _ = await Account.objects.aget_or_create(
+    account_type=Account.AccountType.ASSET,
+    book=Account.Book.BANK,
+    character=character,
+    defaults={
+      'name': f'Loan #{character.id} - {character.name}',
+    }
+  )
+
+  bank_vault, _ = await Account.objects.aget_or_create(
+    account_type=Account.AccountType.ASSET,
+    book=Account.Book.BANK,
+    character=None,
+    defaults={
+      'name': 'Bank Vault',
+    }
+  )
+  if loan_account.balance < amount:
+    raise ValueError('You are repaying more than you owe')
+
+  return await sync_to_async(create_journal_entry)(
+    timezone.now(),
+    "Player Loan Repayment",
+    character,
+    [
+      {
+        'account': bank_vault,
+        'debit': amount,
+        'credit': 0,
+      },
+      {
+        'account': loan_account,
         'debit': 0,
         'credit': amount,
       },
