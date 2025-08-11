@@ -335,11 +335,15 @@ async def process_log_event(event: LogEvent, http_client=None, http_client_mod=N
           prompt=f"verify {command_match.group('signed_message')}",
         )
       if command_match := re.match(r"/events", message):
+        def get_event_start_time_in(event):
+          if event.start_time > timezone.now():
+            return f"{format_timedelta(event.start_time - timezone.now())} from now"
+          return 'In progress'
         events_str = '\n\n'.join([
           f"""\
 <Title>{event.name}</>
 <Secondary>{format_in_local_tz(event.start_time)}</>
-<Secondary>{format_timedelta(event.start_time - timezone.now())} from now</>
+<Secondary>{get_event_start_time_in(event)}</>
 {event.description}"""
           async for event in ScheduledEvent.objects.filter(end_time__gte=timezone.now()).order_by('start_time')
         ])
