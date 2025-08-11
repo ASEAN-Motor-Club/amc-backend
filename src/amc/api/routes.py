@@ -47,6 +47,7 @@ from amc.subsidies import (
   subsidise_delivery,
   repay_loan_for_profit,
   set_aside_player_savings,
+  get_subsidy_for_cargo,
   get_subsidy_for_cargos,
   get_passenger_subsidy,
   subsidise_passenger,
@@ -384,7 +385,7 @@ async def webhook(request, payload: list[WebhookPayloadSchema]):
             payment=cargo['Net_Payment']['BaseValue'],
             weight=cargo['Net_Weight'],
             damage=cargo['Net_Damage'],
-            data=cargo,
+            data=event.data,
           )
           for cargo in event.data['Cargos']
         ]
@@ -392,6 +393,37 @@ async def webhook(request, payload: list[WebhookPayloadSchema]):
         total_subsidy = get_subsidy_for_cargos(logs)
         total_payment = sum([log.payment for log in logs]) + total_subsidy
         asyncio.create_task(subsidise_delivery(logs, request.state['aiohttp_client']))
+        asyncio.create_task(
+          repay_loan_for_profit(
+            player,
+            total_payment,
+            request.state['aiohttp_client']
+          )
+        )
+        asyncio.create_task(
+          set_aside_player_savings(
+            player,
+            total_payment,
+            request.state['aiohttp_client']
+          )
+        )
+
+      case "/Script/MotorTown.MotorTownPlayerController:ServerCargoDumped":
+        player_id = event.data['PlayerId']
+        player = await Player.objects.aget(unique_id=player_id)
+        cargo = event.data['Cargo']
+        log = await ServerCargoArrivedLog.objects.acreate(
+          timestamp=datetime.utcfromtimestamp(event.timestamp / 1000),
+          player=player,
+          cargo_key=cargo['Net_CargoKey'],
+          payment=cargo['Net_Payment']['BaseValue'],
+          weight=cargo['Net_Weight'],
+          damage=cargo['Net_Damage'],
+          data=event.data,
+        )
+        total_subsidy = get_subsidy_for_cargo(log)
+        total_payment = log.payment + total_subsidy
+        asyncio.create_task(subsidise_delivery([log], request.state['aiohttp_client']))
         asyncio.create_task(
           repay_loan_for_profit(
             player,
