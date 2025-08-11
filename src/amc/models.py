@@ -67,6 +67,13 @@ class Player(models.Model):
   def verified(self):
     return self.discord_user_id is not None
 
+  async def get_latest_character(self):
+    character = await (self.characters.with_last_login()
+      .filter(last_login__isnull=False)
+      .alatest('last_login')
+    )
+    return character
+
 class CharacterQuerySet(models.QuerySet):
   def with_total_session_time(self):
     return self.annotate(
@@ -107,6 +114,7 @@ class Character(models.Model):
   player = models.ForeignKey(Player, on_delete=models.CASCADE, related_name='characters')
   guid = models.CharField(max_length=32, db_index=True, editable=False, null=True)
   name = models.CharField(max_length=200)
+  money = models.PositiveIntegerField(null=True)
   # levels
   driver_level = models.PositiveIntegerField(null=True)
   bus_level = models.PositiveIntegerField(null=True)

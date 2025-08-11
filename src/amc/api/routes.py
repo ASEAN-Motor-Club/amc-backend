@@ -536,3 +536,10 @@ async def webhook(request, payload: list[WebhookPayloadSchema]):
           )
         )
 
+      case "/Script/MotorTown.MotorTownPlayerController:ServerSetMoney":
+        player_id = event.data['PlayerId']
+        player = await Player.objects.aget(unique_id=player_id)
+        character = await player.get_latest_character()
+        character.money = event.data['Money']
+        await character.asave(update_fields=['money'])
+
