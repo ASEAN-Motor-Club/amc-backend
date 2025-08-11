@@ -678,12 +678,15 @@ class ServerCargoArrivedLog(models.Model):
 @final
 class ServerSignContractLog(models.Model):
   timestamp = models.DateTimeField()
+  guid = models.CharField(max_length=32, db_index=True, editable=False, null=True)
   player = models.ForeignKey(Player, on_delete=models.SET_NULL, null=True, related_name='contracts_signed')
   cargo_key = models.CharField(max_length=200, db_index=True)
   amount = models.FloatField()
+  finished_amount = models.FloatField(default=0)
   cost = models.PositiveIntegerField()
   payment = models.PositiveIntegerField()
   delivered = models.BooleanField(default=False)
+  data = models.JSONField(null=True, blank=True)
 
 
 @final

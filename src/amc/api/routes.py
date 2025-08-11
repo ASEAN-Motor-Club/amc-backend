@@ -424,6 +424,42 @@ async def webhook(request, payload: list[WebhookPayloadSchema]):
         player_id = event.data['PlayerId']
         player = await Player.objects.aget(unique_id=player_id)
         contract = event.data['Contract']
+        log, _created = await ServerSignContractLog.objects.aget_or_create(
+          guid=event.data['ContractGuid'],
+          defaults={
+            'timestamp': datetime.utcfromtimestamp(event.timestamp / 1000),
+            'player': player,
+            'cargo_key': contract['Item'],
+            'amount': contract['Amount'],
+            'payment': contract['CompletionPayment']['BaseValue'],
+            'cost': contract['Cost']['BaseValue'],
+            'data': event.data
+          },
+        )
+        if event.data['FinishedAmount'] == log.amount - 1:
+          if not log.delivered:
+            asyncio.create_task(
+              repay_loan_for_profit(
+                player,
+                log.payment,
+                request.state['aiohttp_client']
+              )
+            )
+            asyncio.create_task(
+              set_aside_player_savings(
+                player,
+                log.payment,
+                request.state['aiohttp_client']
+              )
+            )
+          log.delivered = True
+        log.finished_amount = F('finished_amount') + 1
+        await log.asave(update_fields=['finished_amount', 'delivered'])
+
+      case "/Script/MotorTown.MotorTownPlayerController:ServerContractCargoDelivered":
+        player_id = event.data['PlayerId']
+        player = await Player.objects.aget(unique_id=player_id)
+        contract = event.data['Contract']
         try:
           latest_contract = await ServerSignContractLog.objects.filter(
             player=player,
@@ -433,7 +469,7 @@ async def webhook(request, payload: list[WebhookPayloadSchema]):
             cost=contract['Cost']['BaseValue'],
           ).alatest('timestamp')
           latest_contract.delivered = True
-          await latest_contract.asave(updated_fields=['delivered'])
+          await latest_contract.asave(update_fields=['delivered'])
         except ServerSignContractLog.DoesNotExist:
           pass
 
