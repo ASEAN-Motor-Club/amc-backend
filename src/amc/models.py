@@ -139,6 +139,13 @@ class Character(models.Model):
   @override
   def __str__(self):
     return f"{self.name} ({self.player.unique_id})"
+  class Meta:
+    constraints = [
+      models.CheckConstraint(
+        condition=Q(saving_rate__gte=0) & Q(saving_rate__lte=1),
+        name="saving_rate_between_0_1",
+      )
+    ]
 
 
 @final

@@ -41,10 +41,12 @@ async def repay_loan_for_profit(player, payment, session):
       str(player.unique_id),
     )
     await register_player_repay_loan(repayment, character)
+    return repayment
   except Exception as e:
     asyncio.create_task(
       show_popup(session, f'Repayment failed {e}', player_id=player.unique_id)
     )
+    raise e
 
 DEFAULT_SAVING_RATE = 0
 async def set_aside_player_savings(player, payment, session):
@@ -53,7 +55,7 @@ async def set_aside_player_savings(player, payment, session):
     if character.saving_rate is not None:
       saving_rate = character.saving_rate
     else:
-      saving_rate = Decimal(DEFAULT_SAVING_RATE)
+      saving_rate = min(Decimal(1), Decimal(DEFAULT_SAVING_RATE))
     if saving_rate == Decimal(0):
       return
 
@@ -66,10 +68,12 @@ async def set_aside_player_savings(player, payment, session):
         str(player.unique_id),
       )
       await register_player_deposit(saving, character, player)
+      return saving
   except Exception as e:
     asyncio.create_task(
       show_popup(session, f'Failed to deposit earnings:\n{e}', player_id=player.unique_id)
     )
+    raise e
 
 
 def get_subsidy_for_cargos(cargos):

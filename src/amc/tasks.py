@@ -49,7 +49,7 @@ from amc.events import (
   staggered_start,
 )
 from amc.utils import format_in_local_tz, format_timedelta
-from amc.subsidies import DEFAULT_SAVING_RATE
+from amc.subsidies import DEFAULT_SAVING_RATE, set_aside_player_savings
 from amc_finance.services import (
   register_player_withdrawal,
   register_player_take_loan,
@@ -212,6 +212,8 @@ async def countdown(http_client, start=5, delay=1.0):
 
 async def process_log_event(event: LogEvent, http_client=None, http_client_mod=None, ctx = {}):
   discord_client = ctx.get('discord_client')
+  timestamp = event.timestamp
+  is_current_event = ctx.get('startup_time') and timestamp > ctx.get('startup_time')
 
   forward_message = None
 
@@ -374,12 +376,19 @@ async def process_log_event(event: LogEvent, http_client=None, http_client_mod=N
           character=character, 
           song=command_match.group('song'),
         )
+        if is_current_event:
+          asyncio.create_task(
+            show_popup(http_client_mod, "<Title>Your song is being downloaded</>\n\nThis usually takes 30-60 seconds.", player_id=str(player_id))
+          )
       elif command_match := re.match(r"/set_saving_rate (?P<saving_rate>\d+)%?$", message):
         try:
-          character.saving_rate = Decimal(command_match.group('saving_rate')) / Decimal(100)
+          character.saving_rate = min(
+            max(Decimal(command_match.group('saving_rate')) / Decimal(100), Decimal(0)),
+            Decimal(1)
+          )
           await character.asave(update_fields=['saving_rate'])
           asyncio.create_task(
-            show_popup(http_client_mod, f"<Title>Savings rate saved</>\n\n{command_match.group('saving_rate')}% of your earnings will automatically go into your bank account", player_id=str(player_id))
+            show_popup(http_client_mod, f"<Title>Savings rate saved</>\n\n{character.saving_rate*100:.0f}% of your earnings will automatically go into your bank account", player_id=str(player_id))
           )
         except Exception as e:
           asyncio.create_task(
@@ -404,26 +413,26 @@ async def process_log_event(event: LogEvent, http_client=None, http_client_mod=N
 <Small>Use /set_saving_rate [percentage] to automatically set aside your earnings into your account.</>
 
 Commands:
+<Highlight>/set_saving_rate [percentage]</> - Automatically set aside your earnings into your account
 <Highlight>/withdraw [amount]</> - Withdraw from your bank account
 <Highlight>/loan [amount]</> - Take out a loan
 <Highlight>/repay_loan [amount]</> - Repay your loan
-<Highlight>/set_saving_rate [percentage]</> - Automatically set aside your earnings into your account
 
 How to Put Money in the Bank
-<Secondary>You can only fill your bank account by saving your earnings on this server.</>
 <Secondary>Use the /set_saving_rate command to set how much you want to save. It's 0 by default.</>
+<Secondary>You can only fill your bank account by saving your earnings on this server, not through direct deposits.</>
 
-How ASEAN Loan Works
+How ASEAN Loans Works
 <Secondary>Our loans are interest free, and you only have to repay them when you make a profit.</>
 <Secondary>The repayment will range from 10% to 40% of your income, depending on the amount of loan you took.</>
 """, player_id=str(player_id))
         )
       elif command_match := re.match(r"/donate (?P<amount>\d+)", message):
-        max_donation = character.driver_level * 10_000
+        max_donation = character.driver_level * 30_000
         amount = min(int(command_match.group('amount')), max_donation)
         try:
           await player_donation(amount, character)
-          await transfer_money(http_client_mod, -amount, 'Donation', player_id)
+          await transfer_money(http_client_mod, int(-amount), 'Donation', player_id)
         except Exception as e:
           asyncio.create_task(
             show_popup(http_client_mod, f"<Title>Donation failed</>\n\n{e}", player_id=str(player_id))
@@ -432,36 +441,40 @@ How ASEAN Loan Works
         amount = int(command_match.group('amount'))
         balance = await get_player_bank_balance(character)
         amount = min(amount, balance)
-        try:
-          await register_player_withdrawal(amount, character, player)
-          await transfer_money(http_client_mod, int(amount), 'Bank Withdrawal', player_id)
-        except Exception as e:
-          asyncio.create_task(
-            show_popup(http_client_mod, f"<Title>Withdrawal failed</>\n\n{e}", player_id=str(player_id))
-          )
+        if amount > 0:
+          try:
+            await register_player_withdrawal(amount, character, player)
+            await transfer_money(http_client_mod, int(amount), 'Bank Withdrawal', player_id)
+          except Exception as e:
+            asyncio.create_task(
+              show_popup(http_client_mod, f"<Title>Withdrawal failed</>\n\n{e}", player_id=str(player_id))
+            )
       elif command_match := re.match(r"/loan (?P<amount>\d+)", message):
-        amount = min(
+        loan_balance = await get_player_loan_balance(character)
+        amount = max(min(
           int(command_match.group('amount')),
-          get_character_max_loan(character)
-        )
-        try:
-          await register_player_take_loan(amount, character)
-          await transfer_money(http_client_mod, int(amount), 'ASEAN Bank Loan', player_id)
-        except Exception as e:
-          asyncio.create_task(
-            show_popup(http_client_mod, f"<Title>Loan failed</>\n\n{e}", player_id=str(player_id))
-          )
+          get_character_max_loan(character) - loan_balance
+        ), 0)
+        if amount > 0:
+          try:
+            await register_player_take_loan(amount, character)
+            await transfer_money(http_client_mod, int(amount), 'ASEAN Bank Loan', player_id)
+          except Exception as e:
+            asyncio.create_task(
+              show_popup(http_client_mod, f"<Title>Loan failed</>\n\n{e}", player_id=str(player_id))
+            )
       elif command_match := re.match(r"/repay_loan (?P<amount>\d+)", message):
         amount = int(command_match.group('amount'))
         loan_balance = await get_player_loan_balance(character)
-        amount = min(amount, loan_balance)
-        try:
-          await register_player_repay_loan(amount, character)
-          await transfer_money(http_client_mod, int(-amount), 'ASEAN Bank Loan Repayment', player_id)
-        except Exception as e:
-          asyncio.create_task(
-            show_popup(http_client_mod, f"<Title>Loan failed</>\n\n{e}", player_id=str(player_id))
-          )
+        amount = max(min(amount, loan_balance), 0)
+        if amount > 0:
+          try:
+            await register_player_repay_loan(amount, character)
+            await transfer_money(http_client_mod, int(-amount), 'ASEAN Bank Loan Repayment', player_id)
+          except Exception as e:
+            asyncio.create_task(
+              show_popup(http_client_mod, f"<Title>Loan failed</>\n\n{e}", player_id=str(player_id))
+            )
       if discord_client and ctx.get('startup_time') and timestamp > ctx.get('startup_time'):
         forward_message = (
           settings.DISCORD_GAME_CHAT_CHANNEL_ID,
@@ -571,9 +584,16 @@ How ASEAN Loan Works
         asyncio.create_task(
           transfer_money(
             http_client_mod,
-            10_000,
+            subsidy_amount,
             "ASEAN Depot Restock Subsidy",
             character.player.unique_id,
+          )
+        )
+        asyncio.create_task(
+          set_aside_player_savings(
+            player,
+            subsidy_amount,
+            http_client_mod,
           )
         )
 

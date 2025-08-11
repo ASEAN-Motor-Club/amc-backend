@@ -370,6 +370,10 @@ async def get_deliverypoint(request, guid):
 
 webhook_router = Router()
 
+async def on_player_profit(player, total_payment, session):
+  loan_repayment = await repay_loan_for_profit(player, total_payment, session)
+  await set_aside_player_savings(player, total_payment - loan_repayment, session)
+
 @webhook_router.post('/')
 async def webhook(request, payload: list[WebhookPayloadSchema]):
   for event in payload:
@@ -394,14 +398,7 @@ async def webhook(request, payload: list[WebhookPayloadSchema]):
         total_payment = sum([log.payment for log in logs]) + total_subsidy
         asyncio.create_task(subsidise_delivery(logs, request.state['aiohttp_client']))
         asyncio.create_task(
-          repay_loan_for_profit(
-            player,
-            total_payment,
-            request.state['aiohttp_client']
-          )
-        )
-        asyncio.create_task(
-          set_aside_player_savings(
+          on_player_profit(
             player,
             total_payment,
             request.state['aiohttp_client']
@@ -425,19 +422,13 @@ async def webhook(request, payload: list[WebhookPayloadSchema]):
         total_payment = log.payment + total_subsidy
         asyncio.create_task(subsidise_delivery([log], request.state['aiohttp_client']))
         asyncio.create_task(
-          repay_loan_for_profit(
+          on_player_profit(
             player,
             total_payment,
             request.state['aiohttp_client']
           )
         )
-        asyncio.create_task(
-          set_aside_player_savings(
-            player,
-            total_payment,
-            request.state['aiohttp_client']
-          )
-        )
+
 
       case "/Script/MotorTown.MotorTownPlayerController:ServerSignContract":
         player_id = event.data['PlayerId']
@@ -471,39 +462,15 @@ async def webhook(request, payload: list[WebhookPayloadSchema]):
         if event.data['FinishedAmount'] == log.amount - 1:
           if not log.delivered:
             asyncio.create_task(
-              repay_loan_for_profit(
+              on_player_profit(
                 player,
-                log.payment,
-                request.state['aiohttp_client']
-              )
-            )
-            asyncio.create_task(
-              set_aside_player_savings(
-                player,
-                log.payment,
+                total_payment,
                 request.state['aiohttp_client']
               )
             )
           log.delivered = True
         log.finished_amount = F('finished_amount') + 1
         await log.asave(update_fields=['finished_amount', 'delivered'])
-
-      case "/Script/MotorTown.MotorTownPlayerController:ServerContractCargoDelivered":
-        player_id = event.data['PlayerId']
-        player = await Player.objects.aget(unique_id=player_id)
-        contract = event.data['Contract']
-        try:
-          latest_contract = await ServerSignContractLog.objects.filter(
-            player=player,
-            cargo_key=contract['Item'],
-            amount=contract['Amount'],
-            payment=contract['CompletionPayment']['BaseValue'],
-            cost=contract['Cost']['BaseValue'],
-          ).alatest('timestamp')
-          latest_contract.delivered = True
-          await latest_contract.asave(update_fields=['delivered'])
-        except ServerSignContractLog.DoesNotExist:
-          pass
 
       case "/Script/MotorTown.MotorTownPlayerController:ServerPassengerArrived":
         player_id = event.data['PlayerId']
@@ -521,19 +488,9 @@ async def webhook(request, payload: list[WebhookPayloadSchema]):
         subsidy = get_passenger_subsidy(log)
         if subsidy != 0:
           asyncio.create_task(subsidise_passenger(log, subsidy, player, request.state['aiohttp_client']))
+        total_payment = log.payment + subsidy,
         asyncio.create_task(
-          repay_loan_for_profit(
-            player,
-            log.payment + subsidy,
-            request.state['aiohttp_client']
-          )
-        )
-        asyncio.create_task(
-          set_aside_player_savings(
-            player,
-            log.payment + subsidy,
-            request.state['aiohttp_client']
-          )
+          on_player_profit(player, total_payment, request.state['aiohttp_client'])
         )
 
       case "/Script/MotorTown.MotorTownPlayerController:ServerSetMoney":
