@@ -1,3 +1,4 @@
+from decimal import Decimal
 from django.db import models
 from django.db.models import Sum, OuterRef, Subquery, Value, Q, F
 from django.db.models.functions import Coalesce
@@ -15,6 +16,12 @@ from amc.models import (
 from amc.utils import get_timespan
 from amc_finance.services import send_fund_to_player
 from amc_finance.models import Account, LedgerEntry
+from amc_finance.services import (
+  get_player_bank_balance,
+  get_player_loan_balance,
+  get_character_max_loan,
+)
+from amc.subsidies import DEFAULT_SAVING_RATE
 
 
 class EconomyCog(commands.Cog):
@@ -115,7 +122,7 @@ class EconomyCog(commands.Cog):
 
 Deliveries: {deliveries_aggregates['total_payments']:,}
 Contracts: {contracts_aggregates['total_payments']:,}
-Passengers (Taxi/Bus/Ambulance): {passengers_aggregates['total_payments']:,}
+Passengers (Taxi/Ambulance): {passengers_aggregates['total_payments']:,}
 
 ## Top GDP Contributors
 {top_players_str}
@@ -167,3 +174,35 @@ Passengers (Taxi/Bus/Ambulance): {passengers_aggregates['total_payments']:,}
 {contributors_str}
 """)
 
+  @app_commands.command(name='bank_account', description='Display your bank account')
+  async def bank_account(self, interaction):
+    try:
+      player = await Player.objects.aget(discord_user_id=interaction.user.id)
+    except Player.DoesNotExist:
+      await interaction.response.send_message('You first need to be verified. Use /verify', ephemeral=True)
+      return
+    character = await player.characters.with_last_login().filter(last_login__isnull=False).alatest('last_login')
+    balance = await get_player_bank_balance(character)
+    loan_balance = await get_player_loan_balance(character)
+    max_loan = get_character_max_loan(character)
+    saving_rate = character.saving_rate if character.saving_rate is not None else Decimal(DEFAULT_SAVING_RATE)
+    await interaction.response.send_message(f"""\
+# Your Bank ASEAN Account
+
+**Owner:** {character.name}
+**Balance:** `{balance:,}`
+-# Daily Interest Rate: `2.2%`
+**Loans:** `{loan_balance:,}`
+**Max Available Loan:** `{max_loan:,}`
+-# Max available loan depends on your driver level (currently {character.driver_level})
+**Earnings Saving Rate:** `{saving_rate * Decimal(100):.0f}%`
+
+### How to Put Money in the Bank
+You can only fill your bank account by saving your earnings on this server.
+Use the /set_saving_rate in the gameto set how much you want to save. It's 0 by default.
+Once you withdraw your balance, you will not be able to deposit them back in.
+
+### How ASEAN Loan Works
+Our loans are interest free, and you only have to repay them when you make a profit.
+The repayment will range from 10% to 40% of your income, depending on the amount of loan you took.
+""", ephemeral=True)
