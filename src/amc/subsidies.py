@@ -30,7 +30,7 @@ async def repay_loan_for_profit(player, payment, session):
     character = await player.characters.with_last_login().filter(last_login__isnull=False).alatest('last_login')
     loan_balance = await get_player_loan_balance(character)
     if loan_balance == 0:
-      return
+      return 0
     max_loan = get_character_max_loan(character)
     repayment = calculate_loan_repayment(Decimal(payment), loan_balance, max_loan)
 
@@ -41,7 +41,7 @@ async def repay_loan_for_profit(player, payment, session):
       str(player.unique_id),
     )
     await register_player_repay_loan(repayment, character)
-    return repayment
+    return int(repayment)
   except Exception as e:
     asyncio.create_task(
       show_popup(session, f'Repayment failed {e}', player_id=player.unique_id)
@@ -57,7 +57,7 @@ async def set_aside_player_savings(player, payment, session):
     else:
       saving_rate = min(Decimal(1), Decimal(DEFAULT_SAVING_RATE))
     if saving_rate == Decimal(0):
-      return
+      return 0
 
     saving = Decimal(saving_rate) * Decimal(payment)
     if saving > 0:
@@ -68,7 +68,7 @@ async def set_aside_player_savings(player, payment, session):
         str(player.unique_id),
       )
       await register_player_deposit(saving, character, player)
-      return saving
+      return int(saving)
   except Exception as e:
     asyncio.create_task(
       show_popup(session, f'Failed to deposit earnings:\n{e}', player_id=player.unique_id)
@@ -93,8 +93,8 @@ def get_subsidy_for_cargo(cargo):
     case 'Log_Oak_12ft':
       subsidy_factor = 2.5 * (1.0 - cargo.damage)
     case _:
-      pass
-  return int(cargo.payment * subsidy_factor), subsidy_factor
+      subsidy_factor = 0.0
+  return int(int(cargo.payment) * subsidy_factor), subsidy_factor
 
 async def subsidise_delivery(cargos, session):
   subsidy = 0

@@ -1,4 +1,5 @@
 from decimal import Decimal
+from django.utils import timezone
 from django.db import models
 from django.db.models import Sum, OuterRef, Subquery, Value, Q, F
 from django.db.models.functions import Coalesce
@@ -37,19 +38,19 @@ class EconomyCog(commands.Cog):
       timestamp__gte=start_time,
       timestamp__lt=end_time
     )
-    deliveries_aggregates = await deliveries_qs.aaggregate(total_payments=Sum('payment'))
+    deliveries_aggregates = await deliveries_qs.aaggregate(total_payments=Sum('payment', default=0))
 
     contracts_qs = ServerSignContractLog.objects.filter(
       timestamp__gte=start_time,
       timestamp__lt=end_time
     )
-    contracts_aggregates = await contracts_qs.aaggregate(total_payments=Sum('payment'))
+    contracts_aggregates = await contracts_qs.aaggregate(total_payments=Sum('payment', default=0))
 
     passengers_qs = ServerPassengerArrivedLog.objects.filter(
       timestamp__gte=start_time,
       timestamp__lt=end_time
     )
-    passengers_aggregates = await passengers_qs.aaggregate(total_payments=Sum('payment'))
+    passengers_aggregates = await passengers_qs.aaggregate(total_payments=Sum('payment', default=0))
 
     total_gdp = deliveries_aggregates['total_payments'] + contracts_aggregates['total_payments'] + passengers_aggregates['total_payments']
 
@@ -144,6 +145,7 @@ Passengers (Taxi/Ambulance): {passengers_aggregates['total_payments']:,}
 
   @app_commands.command(name='treasury_stats', description='Display treasury info')
   async def treasury_stats(self, interaction):
+    today = timezone.now().date()
     treasury_fund, _ = await Account.objects.aget_or_create(
       account_type=Account.AccountType.ASSET,
       book=Account.Book.GOVERNMENT,
@@ -152,13 +154,18 @@ Passengers (Taxi/Ambulance): {passengers_aggregates['total_payments']:,}
         'name': 'Treasury Fund',
       }
     )
-    donations = LedgerEntry.objects.filter(
-      account__account_type=Account.AccountType.REVENUE,
-      account__book=Account.Book.GOVERNMENT,
-      account__character=None,
-      journal_entry__creator__isnull=False,
-    ).select_related('journal_entry', 'journal_entry__creator')
-    contributors = (donations.values('journal_entry__creator')
+    bank_assets_aggregate = await Account.objects.filter(
+      account_type=Account.AccountType.ASSET,
+      book=Account.Book.BANK,
+    ).aaggregate(total_assets=Sum('balance', default=0))
+
+    subsidies_agg = await (LedgerEntry.objects.filter_subsidies()
+      .filter(journal_entry__created_at__date=today)
+      .aaggregate(total_subsidies=Sum('debit', default=0))
+    )
+    contributors = (LedgerEntry.objects.filter_donations()
+      .select_related('journal_entry', 'journal_entry__creator')
+      .values('journal_entry__creator')
       .annotate(total_contribution=Sum('credit'), name=F('journal_entry__creator__name'))
       .order_by('-total_contribution')
     )
@@ -166,11 +173,18 @@ Passengers (Taxi/Ambulance): {passengers_aggregates['total_payments']:,}
       f"**{contribution['name']}:** {contribution['total_contribution']:,}"
       async for contribution in contributors
     ])
-    await interaction.response.send_message(f"""# Treasury
+    await interaction.response.send_message(f"""\
+# Treasury Report ({today.strftime('%A, %-d %B %Y')})
 
 **Balance:** {treasury_fund.balance:,}
 
-## Top Contributors
+## Subsidies
+**Total Subsidies Disbursed:** {subsidies_agg['total_subsidies']:,}
+
+## Bank of ASEAN
+**Total Assets**: {bank_assets_aggregate['total_assets']}
+
+## Top Donors
 {contributors_str}
 """)
 

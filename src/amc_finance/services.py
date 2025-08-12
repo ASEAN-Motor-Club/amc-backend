@@ -1,7 +1,7 @@
 from decimal import Decimal
 from django.utils import timezone
 from django.db import transaction
-from django.db.models import F
+from django.db.models import F, Sum
 from asgiref.sync import sync_to_async
 from amc_finance.models import Account, JournalEntry, LedgerEntry
 
@@ -40,6 +40,14 @@ async def get_treasury_fund_balance(character):
     }
   )
   return treasury_fund.balance
+
+async def get_character_total_donations(character, start_time):
+  aggregates = await (LedgerEntry.objects
+    .filter_character_donations(character)
+    .filter(journal_entry__created_at__gte=start_time)
+    .aaggregate(total_donations=Sum('credit', default=0))
+  )
+  return aggregates['total_donations']
 
 async def register_player_deposit(amount, character, player):
   account, _ = await Account.objects.aget_or_create(
@@ -118,8 +126,10 @@ async def register_player_withdrawal(amount, character, player):
     ]
   )
 
-
+LOAN_INTEREST_RATE = 0.1
 async def register_player_take_loan(amount, character):
+  principal = Decimal(amount) * Decimal(1 + LOAN_INTEREST_RATE)
+
   loan_account, _ = await Account.objects.aget_or_create(
     account_type=Account.AccountType.ASSET,
     book=Account.Book.BANK,
@@ -138,15 +148,29 @@ async def register_player_take_loan(amount, character):
     }
   )
 
-  return await sync_to_async(create_journal_entry)(
+  bank_revenue, _ = await Account.objects.aget_or_create(
+    account_type=Account.AccountType.REVENUE,
+    book=Account.Book.BANK,
+    character=None,
+    defaults={
+      'name': 'Bank Revenue',
+    }
+  )
+
+  await sync_to_async(create_journal_entry)(
     timezone.now(),
     "Player Loan",
     character,
     [
       {
         'account': loan_account,
-        'debit': amount,
+        'debit': principal,
         'credit': 0,
+      },
+      {
+        'account': bank_revenue,
+        'debit': 0,
+        'credit': principal - amount,
       },
       {
         'account': bank_vault,
@@ -155,6 +179,7 @@ async def register_player_take_loan(amount, character):
       },
     ]
   )
+  return principal, principal - amount
 
 
 async def register_player_repay_loan(amount, character):

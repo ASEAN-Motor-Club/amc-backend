@@ -182,7 +182,7 @@ async def process_event(event):
   return game_event, transition
 
 def format_time(total_seconds: float) -> str:
-  if total_seconds is None:
+  if total_seconds is None or total_seconds < 0:
     return "-"
   """Converts seconds (float) into MM:SS.sss format.
 

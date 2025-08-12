@@ -62,6 +62,25 @@ class JournalEntry(models.Model):
   def __str__(self):
     return f"{self.date} - {self.description}"
 
+class LedgerEntriesQuerySet(models.QuerySet):
+  def filter_donations(self):
+    return self.filter(
+      account__account_type=Account.AccountType.REVENUE,
+      account__book=Account.Book.GOVERNMENT,
+      account__character=None,
+      journal_entry__creator__isnull=False,
+    )
+
+  def filter_subsidies(self):
+    return self.filter(
+      account__account_type=Account.AccountType.EXPENSE,
+      account__book=Account.Book.GOVERNMENT,
+      account__character=None,
+      journal_entry__creator__isnull=False,
+    )
+
+  def filter_character_donations(self, character):
+    return self.filter_donations().filter(journal_entry__creator=character)
 
 class LedgerEntry(models.Model):
   """
@@ -72,6 +91,7 @@ class LedgerEntry(models.Model):
   account = models.ForeignKey(Account, on_delete=models.PROTECT, related_name='entries')
   debit = models.DecimalField(max_digits=12, decimal_places=2, default=0.00)
   credit = models.DecimalField(max_digits=12, decimal_places=2, default=0.00)
+  objects = models.Manager.from_queryset(LedgerEntriesQuerySet)()
 
   class Meta:
     # Ensures that an entry is either a debit or a credit, but not both.

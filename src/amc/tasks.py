@@ -2,10 +2,12 @@ import re
 import asyncio
 import discord
 from decimal import Decimal
+from datetime import timedelta
 from django.utils import timezone
 from django.db import connection
 from django.db.models import Exists, OuterRef
 from django.conf import settings
+from django.core.signing import Signer
 from asgiref.sync import sync_to_async
 from amc.models import ServerLog
 from amc.server_logs import (
@@ -57,6 +59,7 @@ from amc_finance.services import (
   get_player_bank_balance,
   get_player_loan_balance,
   get_character_max_loan,
+  get_character_total_donations,
   player_donation,
   send_fund_to_player_wallet,
 )
@@ -336,7 +339,7 @@ async def process_log_event(event: LogEvent, http_client=None, http_client_mod=N
           character=character, 
           prompt=f"verify {command_match.group('signed_message')}",
         )
-      if command_match := re.match(r"/events", message):
+      if command_match := re.match(r"/events?", message):
         def get_event_start_time_in(event):
           if event.start_time > timezone.now():
             return f"{format_timedelta(event.start_time - timezone.now())} from now"
@@ -405,7 +408,7 @@ async def process_log_event(event: LogEvent, http_client=None, http_client_mod=N
 <Title>Your Bank ASEAN Account</>
 
 <Bold>Balance:</> <Money>{balance:,}</>
-<Small>Daily Interest Rate: 2.2%</>
+<Small>Daily Interest Rate: 2.2%. Compounds every IRL hour.</>
 <Bold>Loans:</> <Money>{loan_balance:,}</>
 <Bold>Max Available Loan:</> <Money>{max_loan:,}</>
 <Small>Max available loan depends on your driver level (currently {character.driver_level})</>
@@ -423,20 +426,54 @@ How to Put Money in the Bank
 <Secondary>You can only fill your bank account by saving your earnings on this server, not through direct deposits.</>
 
 How ASEAN Loans Works
-<Secondary>Our loans are interest free, and you only have to repay them when you make a profit.</>
+<Secondary>Our loans have a flat one-off 10% fee, and you only have to repay them when you make a profit.</>
 <Secondary>The repayment will range from 10% to 40% of your income, depending on the amount of loan you took.</>
 """, player_id=str(player_id))
         )
-      elif command_match := re.match(r"/donate (?P<amount>\d+)", message):
-        max_donation = character.driver_level * 30_000
-        amount = min(int(command_match.group('amount')), max_donation)
-        try:
-          await player_donation(amount, character)
-          await transfer_money(http_client_mod, int(-amount), 'Donation', player_id)
-        except Exception as e:
+      elif command_match := re.match(r"/donate\s+(?P<amount>[\d,]+)\s*(?P<verification_code>\S*)", message):
+        max_donation = character.driver_level * 25_000
+        total_donations = await get_character_total_donations(
+          character,
+          timezone.now() - timedelta(days=30)
+        )
+        amount = int(command_match.group('amount').replace(',', ''))
+        signer = Signer()
+        signed_obj = signer.sign((amount, character.id))
+        verification_code = signed_obj[-4:]
+
+        input_verification_code = command_match.group('verification_code')
+        if not input_verification_code:
           asyncio.create_task(
-            show_popup(http_client_mod, f"<Title>Donation failed</>\n\n{e}", player_id=str(player_id))
+            show_popup(http_client_mod, f"""\
+<Title>Donation</>
+
+~~ Thank you so much for your intention to donate ~~
+
+To prevent any mishap, please read the following:
+- Donations are <Bold>non-refundable</>
+- You may donate a maximum of {max_donation:,} per 30 days (irl)
+- You have donated {total_donations:,} in the last 30 days (irl)
+
+If you wish to proceed, type the command again followed by the verification code:
+<Highlight>/donate {command_match.group('amount')} {verification_code}</>""", player_id=str(player_id))
           )
+        elif input_verification_code != verification_code:
+          asyncio.create_task(
+            show_popup(http_client_mod, f"""\
+<Title>Donation</>
+
+Sorry, the verification code did not match, please try again:
+<Highlight>/donate {command_match.group('amount')} {verification_code}</>""", player_id=str(player_id))
+          )
+        else:
+          try:
+            amount = max(0, min(amount, max_donation - int(total_donations)))
+            await player_donation(amount, character)
+            await transfer_money(http_client_mod, int(-amount), 'Donation', player_id)
+          except Exception as e:
+            asyncio.create_task(
+              show_popup(http_client_mod, f"<Title>Donation failed</>\n\n{e}", player_id=str(player_id))
+            )
       elif command_match := re.match(r"/withdraw (?P<amount>\d+)", message):
         amount = int(command_match.group('amount'))
         balance = await get_player_bank_balance(character)
@@ -457,8 +494,24 @@ How ASEAN Loans Works
         ), 0)
         if amount > 0:
           try:
-            await register_player_take_loan(amount, character)
+            repay_amount, loan_fee = await register_player_take_loan(amount, character)
             await transfer_money(http_client_mod, int(amount), 'ASEAN Bank Loan', player_id)
+            asyncio.create_task(
+              show_popup(http_client_mod, f"""\
+<Title>Loan Approved</>
+
+Loan Approved!
+
+Congratulations, your loan application was successful. Here is a summary of your new loan:
+
+<Bold>Loan Amount Deposited:</> <Money>{amount:,}</>
+
+<Bold>One-Time Loan Fee:</> <Money>{int(loan_fee):,}</>
+
+<Bold>Total Balance to Repay:</> <Money>{int(repay_amount):,}</>
+
+The loan amount has been deposited into your wallet. You can view your loan details and repayment schedule at any time from your account dashboard (<Highlight>/bank</>).""", player_id=str(player_id))
+            )
           except Exception as e:
             asyncio.create_task(
               show_popup(http_client_mod, f"<Title>Loan failed</>\n\n{e}", player_id=str(player_id))
@@ -591,7 +644,7 @@ How ASEAN Loans Works
         )
         asyncio.create_task(
           set_aside_player_savings(
-            player,
+            character.player,
             subsidy_amount,
             http_client_mod,
           )
