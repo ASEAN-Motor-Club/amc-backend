@@ -435,32 +435,41 @@ async def webhook(request, payload: list[WebhookPayloadSchema]):
         case "/Script/MotorTown.MotorTownPlayerController:ServerSignContract":
           player_id = event.data['PlayerId']
           player = await Player.objects.aget(unique_id=player_id)
-          contract = event.data['Contract']
-          await ServerSignContractLog.objects.acreate(
-            timestamp=datetime.utcfromtimestamp(event.timestamp / 1000),
-            player=player,
-            cargo_key=contract['Item'],
-            amount=contract['Amount'],
-            payment=contract['CompletionPayment']['BaseValue'],
-            cost=contract['Cost']['BaseValue'],
-          )
+          contract = event.data.get('Contract')
+          if contract:
+            await ServerSignContractLog.objects.acreate(
+              timestamp=datetime.utcfromtimestamp(event.timestamp / 1000),
+              player=player,
+              cargo_key=contract['Item'],
+              amount=contract['Amount'],
+              payment=contract['CompletionPayment']['BaseValue'],
+              cost=contract['Cost']['BaseValue'],
+            )
 
         case "/Script/MotorTown.MotorTownPlayerController:ServerContractCargoDelivered":
           player_id = event.data['PlayerId']
           player = await Player.objects.aget(unique_id=player_id)
-          contract = event.data['Contract']
-          log, _created = await ServerSignContractLog.objects.aget_or_create(
-            guid=event.data['ContractGuid'],
-            defaults={
-              'timestamp': datetime.utcfromtimestamp(event.timestamp / 1000),
-              'player': player,
-              'cargo_key': contract['Item'],
-              'amount': contract['Amount'],
-              'payment': contract['CompletionPayment']['BaseValue'],
-              'cost': contract['Cost']['BaseValue'],
-              'data': event.data
-            },
-          )
+          contract = event.data.get('Contract')
+          if contract:
+            log, _created = await ServerSignContractLog.objects.aget_or_create(
+              guid=event.data['ContractGuid'],
+              defaults={
+                'timestamp': datetime.utcfromtimestamp(event.timestamp / 1000),
+                'player': player,
+                'cargo_key': contract['Item'],
+                'amount': contract['Amount'],
+                'payment': contract['CompletionPayment']['BaseValue'],
+                'cost': contract['Cost']['BaseValue'],
+                'data': event.data
+              },
+            )
+          else:
+            try:
+              log = await ServerSignContractLog.objects.aget(
+                guid=event.data['ContractGuid'],
+              )
+            except ServerSignContractLog.DoesNotExist:
+              return
           if event.data['FinishedAmount'] == log.amount - 1:
             if not log.delivered:
               asyncio.create_task(
