@@ -161,7 +161,7 @@ Passengers (Taxi/Ambulance): {passengers_aggregates['total_payments']:,}
 
     subsidies_agg = await (LedgerEntry.objects.filter_subsidies()
       .filter(journal_entry__created_at__date=today)
-      .aaggregate(total_subsidies=Sum('debit', default=0))
+      .aaggregate(total_subsidies=Sum('credit', default=0))
     )
     contributors = (LedgerEntry.objects.filter_donations()
       .select_related('journal_entry', 'journal_entry__creator')
@@ -205,7 +205,7 @@ Passengers (Taxi/Ambulance): {passengers_aggregates['total_payments']:,}
 
 **Owner:** {character.name}
 **Balance:** `{balance:,}`
--# Daily Interest Rate: `2.2%`
+-# Daily Interest Rate: `2.2%` (offline), `4.4%` (online) 
 **Loans:** `{loan_balance:,}`
 **Max Available Loan:** `{max_loan:,}`
 -# Max available loan depends on your driver level (currently {character.driver_level})

@@ -1,5 +1,7 @@
 import asyncio
 import discord
+from datetime import timedelta
+from django.utils import timezone
 from urllib.parse import quote
 from django.conf import settings
 from django.db.models import F, Prefetch, Exists, OuterRef, Window
@@ -399,7 +401,7 @@ async def send_event_embeds(ctx):
     expired_discord_message_ids = list(set([
       discord_message_id
       async for discord_message_id in (GameEvent.objects
-        .filter(discord_message_id__isnull=False)
+        .filter(discord_message_id__isnull=False, last_updated__gte=timezone.now() - timedelta(days=7))
         .exclude(Exists(
           GameEventCharacter.objects.filter(
             game_event=OuterRef('pk'),
@@ -415,10 +417,10 @@ async def send_event_embeds(ctx):
       expired_discord_messages = [discord.Object(id=str(mId)) for mId in mIds]
       if expired_discord_messages:
         try:
-          await channel.delete_messages(expired_discord_messages)
           await GameEvent.objects.filter(discord_message_id__in=mIds).aupdate(discord_message_id=None)
+          await channel.delete_messages(expired_discord_messages)
         except Exception as e:
-          print(f'Failed to delete: {e}', flush=True)
+          print(f'Failed to delete {mIds}: {e}', flush=True)
 
     async def delete_unattached_embeds():
       to_delete = []

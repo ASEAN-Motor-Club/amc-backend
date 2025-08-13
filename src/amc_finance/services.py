@@ -49,6 +49,9 @@ async def get_character_total_donations(character, start_time):
   )
   return aggregates['total_donations']
 
+async def get_character_total_interest(character, start_time):
+  pass
+
 async def register_player_deposit(amount, character, player):
   account, _ = await Account.objects.aget_or_create(
     account_type=Account.AccountType.LIABILITY,
@@ -418,7 +421,18 @@ def create_journal_entry(date, description, creator_character, entries_data):
 
 
 INTEREST_RATE = 0.022
-async def apply_interest_to_bank_accounts(ctx, interest_rate=INTEREST_RATE):
+ONLINE_INTEREST_MULTIPLIER = 2.0
+
+async def apply_interest_to_bank_accounts(ctx, interest_rate=INTEREST_RATE, online_interest_multiplier=ONLINE_INTEREST_MULTIPLIER):
+  players_online = []
+  if http_client_mod := ctx.get('http_client_mod'):
+    async with http_client_mod.get('/players') as resp:
+      players = (await resp.json()).get('data', [])
+      players_online = ([
+        (player['UniqueID'], player['PlayerName'])
+        for player in players
+      ])
+
   bank_expense_account, _ = await Account.objects.aget_or_create(
     account_type=Account.AccountType.EXPENSE,
     book=Account.Book.BANK,
@@ -428,7 +442,7 @@ async def apply_interest_to_bank_accounts(ctx, interest_rate=INTEREST_RATE):
     }
   )
 
-  accounts_qs = Account.objects.filter(
+  accounts_qs = Account.objects.select_related('character', 'character__player').filter(
     account_type=Account.AccountType.LIABILITY,
     book=Account.Book.BANK,
     character__isnull=False,
@@ -439,7 +453,12 @@ async def apply_interest_to_bank_accounts(ctx, interest_rate=INTEREST_RATE):
     if account.balance == 0:
       continue
 
-    amount = account.balance * Decimal(interest_rate) / Decimal(24)
+    character_interest_rate = interest_rate
+    character = account.character
+    if (character.player.unique_id, character.name) in players_online:
+      character_interest_rate = online_interest_multiplier * character_interest_rate
+
+    amount = account.balance * Decimal(character_interest_rate) / Decimal(24)
     if amount >= Decimal(0.01):
       await sync_to_async(create_journal_entry)(
         timezone.now(),

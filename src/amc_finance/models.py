@@ -79,6 +79,15 @@ class LedgerEntriesQuerySet(models.QuerySet):
       journal_entry__creator__isnull=False,
     )
 
+  def filter_interest_payments(self):
+    return self.filter(
+      account__account_type=Account.AccountType.LIABILITY,
+      account__book=Account.Book.BANK,
+      account__character__isnull=False,
+      journal_entry__creator__isnull=False,
+      journal_entry__description="Interest Payment",
+    )
+
   def filter_character_donations(self, character):
     return self.filter_donations().filter(journal_entry__creator=character)
 

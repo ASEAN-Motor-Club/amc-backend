@@ -408,7 +408,7 @@ async def process_log_event(event: LogEvent, http_client=None, http_client_mod=N
 <Title>Your Bank ASEAN Account</>
 
 <Bold>Balance:</> <Money>{balance:,}</>
-<Small>Daily Interest Rate: 2.2%. Compounds every IRL hour.</>
+<Small>Daily Interest Rate: 2.2% (offline), 4.4% (online).</>
 <Bold>Loans:</> <Money>{loan_balance:,}</>
 <Bold>Max Available Loan:</> <Money>{max_loan:,}</>
 <Small>Max available loan depends on your driver level (currently {character.driver_level})</>
