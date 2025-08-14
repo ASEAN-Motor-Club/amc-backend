@@ -74,7 +74,7 @@ class WorkerSettings:
         cron(monitor_events, second=None),
         cron(monitor_locations, second=None),
         cron(send_event_embeds, second=set(range(0, 60, 10))),
-        cron(monitor_deliverypoints, second=None),
+        # cron(monitor_deliverypoints, second=None),
         cron(apply_interest_to_bank_accounts, hour=None, minute=0, second=0),
     ]
     on_startup = startup
