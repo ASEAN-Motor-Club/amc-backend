@@ -722,3 +722,11 @@ class ServerPassengerArrivedLog(models.Model):
   data = models.JSONField(null=True, blank=True)
 
 
+@final
+class ServerTowRequestArrivedLog(models.Model):
+  timestamp = models.DateTimeField()
+  player = models.ForeignKey(Player, on_delete=models.SET_NULL, null=True, related_name='tow_requests_delivered')
+  payment = models.PositiveIntegerField()
+  data = models.JSONField(null=True, blank=True)
+
+

@@ -41,6 +41,7 @@ from amc.models import (
   ServerCargoArrivedLog,
   ServerSignContractLog,
   ServerPassengerArrivedLog,
+  ServerTowRequestArrivedLog,
 )
 from amc.utils import lowercase_first_char_in_keys
 from amc.subsidies import (
@@ -51,6 +52,7 @@ from amc.subsidies import (
   get_subsidy_for_cargos,
   get_passenger_subsidy,
   subsidise_passenger,
+  subsidise_player,
 )
 from amc.mod_server import show_popup
 
@@ -496,6 +498,25 @@ async def webhook(request, payload: list[WebhookPayloadSchema]):
           if subsidy != 0:
             asyncio.create_task(subsidise_passenger(log, subsidy, player, request.state['aiohttp_client']))
           total_payment = log.payment + subsidy
+          asyncio.create_task(
+            on_player_profit(player, total_payment, request.state['aiohttp_client'])
+          )
+
+        case "/Script/MotorTown.MotorTownPlayerController:ServerTowRequestArrived":
+          player_id = event.data['PlayerId']
+          player = await Player.objects.aget(unique_id=player_id)
+          tow_request = event.data['TowRequest']
+          payment = tow_request['Net_Payment']
+          await ServerTowRequestArrivedLog.objects.acreate(
+            timestamp=datetime.utcfromtimestamp(event.timestamp / 1000),
+            player=player,
+            payment=payment,
+            data=tow_request,
+          )
+          subsidy = 5_000
+          if subsidy != 0:
+            asyncio.create_task(subsidise_player(subsidy, player, request.state['aiohttp_client']))
+          total_payment = payment + subsidy
           asyncio.create_task(
             on_player_profit(player, total_payment, request.state['aiohttp_client'])
           )

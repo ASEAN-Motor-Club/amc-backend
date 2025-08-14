@@ -246,6 +246,9 @@ async def process_log_event(event: LogEvent, http_client=None, http_client_mod=N
 <Bold>Depot Restocking</>
 <Money>10,000</> coins
 
+<Bold>Towing/Wrecker Jobs</>
+<Money>5,000</> coins
+
 <Bold>Taxi</>
 <Money>2,000</> coins + 50% of base pay
 """

@@ -136,3 +136,14 @@ async def subsidise_passenger(passenger, subsidy, player, session):
   )
   await send_fund_to_player_wallet(subsidy, character, "Passenger Subsidy")
 
+async def subsidise_player(subsidy, player, session):
+  character = await player.characters.with_last_login().filter(last_login__isnull=False).alatest('last_login')
+  message = 'ASEAN Subsidy' if subsidy > 0 else 'ASEAN Tax'
+  await transfer_money(
+    session,
+    int(subsidy),
+    message,
+    player.unique_id,
+  )
+  await send_fund_to_player_wallet(subsidy, character, message)
+
