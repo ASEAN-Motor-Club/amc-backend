@@ -1,8 +1,10 @@
+from datetime import timedelta
 from decimal import Decimal
 from django.utils import timezone
 from django.db import transaction
 from django.db.models import F, Sum
 from asgiref.sync import sync_to_async
+from amc.models import CharacterLocation
 from amc_finance.models import Account, JournalEntry, LedgerEntry
 
 def get_character_max_loan(character):
@@ -423,15 +425,8 @@ def create_journal_entry(date, description, creator_character, entries_data):
 INTEREST_RATE = 0.022
 ONLINE_INTEREST_MULTIPLIER = 2.0
 
-async def apply_interest_to_bank_accounts(ctx, interest_rate=INTEREST_RATE, online_interest_multiplier=ONLINE_INTEREST_MULTIPLIER):
-  players_online = []
-  if http_client_mod := ctx.get('http_client_mod'):
-    async with http_client_mod.get('/players') as resp:
-      players = (await resp.json()).get('data', [])
-      players_online = ([
-        (player['UniqueID'], player['PlayerName'])
-        for player in players
-      ])
+async def apply_interest_to_bank_accounts(ctx, interest_rate=INTEREST_RATE, online_interest_multiplier=ONLINE_INTEREST_MULTIPLIER, compounding_hours=1):
+  now = timezone.now()
 
   bank_expense_account, _ = await Account.objects.aget_or_create(
     account_type=Account.AccountType.EXPENSE,
@@ -455,10 +450,11 @@ async def apply_interest_to_bank_accounts(ctx, interest_rate=INTEREST_RATE, onli
 
     character_interest_rate = interest_rate
     character = account.character
-    if (character.player.unique_id, character.name) in players_online:
+    character_online = await CharacterLocation.objects.filter(character=character, timestamp__gte=now - timedelta(hours=compounding_hours)).aexists()
+    if character_online:
       character_interest_rate = online_interest_multiplier * character_interest_rate
 
-    amount = account.balance * Decimal(character_interest_rate) / Decimal(24)
+    amount = account.balance * Decimal(character_interest_rate) / Decimal(24 / compounding_hours)
     if amount >= Decimal(0.01):
       await sync_to_async(create_journal_entry)(
         timezone.now(),
