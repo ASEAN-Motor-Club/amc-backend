@@ -420,7 +420,7 @@ async def webhook(request, payload: list[WebhookPayloadSchema]):
             damage=cargo['Net_Damage'],
             data=event.data,
           )
-          total_subsidy = get_subsidy_for_cargo(log)
+          total_subsidy, _ = get_subsidy_for_cargo(log)
           total_payment = log.payment + total_subsidy
           asyncio.create_task(subsidise_delivery([log], request.state['aiohttp_client']))
           asyncio.create_task(
