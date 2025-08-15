@@ -20,6 +20,6 @@ class JournalEntryAdmin(admin.ModelAdmin):
 class LedgerEntryAdmin(admin.ModelAdmin):
   list_display = ['id', 'journal_entry', 'account', 'debit', 'credit']
   list_select_related = ['journal_entry', 'account']
-  search_fields = ['journal_entry__description', 'account__name']
+  search_fields = ['journal_entry__description', 'account__name', 'account__character__name']
   autocomplete_fields = ['journal_entry', 'account']
 
