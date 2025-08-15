@@ -37,9 +37,7 @@ async def get_treasury_fund_balance(character):
     account_type=Account.AccountType.ASSET,
     book=Account.Book.GOVERNMENT,
     character=None,
-    defaults={
-      'name': 'Treasury Fund',
-    }
+    name='Treasury Fund',
   )
   return treasury_fund.balance
 
@@ -232,9 +230,7 @@ async def player_donation(amount, character):
     account_type=Account.AccountType.ASSET,
     book=Account.Book.GOVERNMENT,
     character=None,
-    defaults={
-      'name': 'Treasury Fund',
-    }
+    name='Treasury Fund',
   )
   treasury_revenue, _ = await Account.objects.aget_or_create(
     account_type=Account.AccountType.REVENUE,
@@ -268,9 +264,7 @@ async def send_fund_to_player_wallet(amount, character, description):
     account_type=Account.AccountType.ASSET,
     book=Account.Book.GOVERNMENT,
     character=None,
-    defaults={
-      'name': 'Treasury Fund',
-    }
+    name='Treasury Fund',
   )
   treasury_expenses, _ = await Account.objects.aget_or_create(
     account_type=Account.AccountType.EXPENSE,
@@ -323,9 +317,7 @@ async def send_fund_to_player(amount, character, reason):
     account_type=Account.AccountType.ASSET,
     book=Account.Book.GOVERNMENT,
     character=None,
-    defaults={
-      'name': 'Treasury Fund',
-    }
+    name='Treasury Fund',
   )
 
   treasury_expenses, _ = await Account.objects.aget_or_create(
@@ -473,4 +465,71 @@ async def apply_interest_to_bank_accounts(ctx, interest_rate=INTEREST_RATE, onli
           },
         ]
       )
+
+
+async def make_treasury_bank_deposit(amount, description):
+  treasury_fund, _ = await Account.objects.aget_or_create(
+    account_type=Account.AccountType.ASSET,
+    book=Account.Book.GOVERNMENT,
+    character=None,
+    name='Treasury Fund',
+  )
+  treasury_fund_in_bank, _ = await Account.objects.aget_or_create(
+    account_type=Account.AccountType.ASSET,
+    book=Account.Book.GOVERNMENT,
+    character=None,
+    name='Treasury Fund (in Bank)',
+  )
+  bank_vault, _ = await Account.objects.aget_or_create(
+    account_type=Account.AccountType.ASSET,
+    book=Account.Book.BANK,
+    character=None,
+    defaults={
+      'name': 'Bank Vault',
+    }
+  )
+  bank_treasury_account, _ = await Account.objects.aget_or_create(
+    account_type=Account.AccountType.LIABILITY,
+    book=Account.Book.BANK,
+    character=None,
+    defaults={
+      'name': 'Treasury Bank Account',
+    }
+  )
+
+  await sync_to_async(create_journal_entry)(
+    timezone.now(),
+    description,
+    None,
+    [
+      {
+        'account': treasury_fund_in_bank,
+        'debit': amount,
+        'credit': 0,
+      },
+      {
+        'account': treasury_fund,
+        'debit': 0,
+        'credit': amount,
+      },
+    ]
+  )
+  await sync_to_async(create_journal_entry)(
+    timezone.now(),
+    description,
+    None,
+    [
+      {
+        'account': bank_vault,
+        'debit': amount,
+        'credit': 0,
+      },
+      {
+        'account': bank_treasury_account,
+        'debit': 0,
+        'credit': amount,
+      },
+    ]
+  )
+
 

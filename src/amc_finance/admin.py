@@ -7,6 +7,7 @@ class AccountAdmin(admin.ModelAdmin):
   list_select_related = ['character']
   search_fields = ['character__name', 'name']
   autocomplete_fields = ['character']
+  list_filter = ['account_type', 'book']
 
 @admin.register(JournalEntry)
 class JournalEntryAdmin(admin.ModelAdmin):

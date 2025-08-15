@@ -21,6 +21,7 @@ from amc_finance.services import (
   get_player_bank_balance,
   get_player_loan_balance,
   get_character_max_loan,
+  make_treasury_bank_deposit,
 )
 from amc.subsidies import DEFAULT_SAVING_RATE
 
@@ -120,6 +121,7 @@ class EconomyCog(commands.Cog):
     ])
     await interaction.followup.send(f"""
 # Total GDP: {total_gdp:,}
+-# {start_time} - {end_time}
 
 Deliveries: {deliveries_aggregates['total_payments']:,}
 Contracts: {contracts_aggregates['total_payments']:,}
@@ -150,14 +152,22 @@ Passengers (Taxi/Ambulance): {passengers_aggregates['total_payments']:,}
       account_type=Account.AccountType.ASSET,
       book=Account.Book.GOVERNMENT,
       character=None,
-      defaults={
-        'name': 'Treasury Fund',
-      }
+      name='Treasury Fund',
+    )
+    treasury_fund_in_bank, _ = await Account.objects.aget_or_create(
+      account_type=Account.AccountType.ASSET,
+      book=Account.Book.GOVERNMENT,
+      character=None,
+      name='Treasury Fund (in Bank)',
     )
     bank_assets_aggregate = await Account.objects.filter(
       account_type=Account.AccountType.ASSET,
       book=Account.Book.BANK,
-    ).aaggregate(total_assets=Sum('balance', default=0))
+    ).aaggregate(
+      total_assets=Sum('balance', default=0),
+      total_loans=Sum('balance', default=0, filter=Q(character__isnull=False)),
+      total_vault=Sum('balance', default=0, filter=Q(character__isnull=True)),
+    )
 
     subsidies_agg = await (LedgerEntry.objects.filter_subsidies()
       .filter(journal_entry__date=today)
@@ -176,13 +186,17 @@ Passengers (Taxi/Ambulance): {passengers_aggregates['total_payments']:,}
     await interaction.response.send_message(f"""\
 # Treasury Report ({today.strftime('%A, %-d %B %Y')})
 
-**Balance:** {treasury_fund.balance:,}
+**Balance (vault):** {treasury_fund.balance:,}
+**Balance (deposited in bank):** {treasury_fund_in_bank.balance:,}
 
 ## Subsidies
 **Total Subsidies Disbursed:** {subsidies_agg['total_subsidies']:,}
 
 ## Bank of ASEAN
-**Total Assets**: {bank_assets_aggregate['total_assets']}
+**Total Assets**: {bank_assets_aggregate['total_assets']:,}
+-# Including loans
+**Loans**: {bank_assets_aggregate['total_loans']:,}
+**Vault**: {bank_assets_aggregate['total_vault']:,}
 
 ## Top Donors
 {contributors_str}
@@ -220,3 +234,26 @@ Once you withdraw your balance, you will not be able to deposit them back in.
 Our loans are interest free, and you only have to repay them when you make a profit.
 The repayment will range from 10% to 40% of your income, depending on the amount of loan you took.
 """, ephemeral=True)
+
+  @app_commands.command(name='treasury_bank_deposit', description='Display your bank account')
+  @app_commands.checks.has_permissions(administrator=True)
+  async def treasury_bank_deposit(self, interaction, amount: int, description: str):
+    now = timezone.now()
+    await make_treasury_bank_deposit(amount, description)
+    await interaction.response.send_message(f"""\
+# GOVERNMENT TREASURY: OFFICIAL TRANSACTION RECORD
+
+**Date & Time:** {now.strftime("%d %B %Y, %I:%M %p")}
+**Action Type:** {description}
+
+### Transaction Details
+- Originating Entity: Office of the Treasury
+- Receiving Entity: aseanbank
+- Transaction Method: Treasury Direct Deposit
+- Amount: {amount:,}
+
+### Purpose & Authorization
+This transaction was authorized under Treasury Mandate 2.2a (Financial Stability).
+The purpose of this deposit is to ensure sufficient liquidity within the server's regulated financial system, promoting stability and confidence.
+This action is a standard deposit and does not represent any change in the ownership, equity, or management of the receiving institution. All funds remain the property of the Treasury. This transaction has been recorded on the public ledger for full transparency.
+""")
