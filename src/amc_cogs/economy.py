@@ -160,8 +160,8 @@ Passengers (Taxi/Ambulance): {passengers_aggregates['total_payments']:,}
     ).aaggregate(total_assets=Sum('balance', default=0))
 
     subsidies_agg = await (LedgerEntry.objects.filter_subsidies()
-      .filter(journal_entry__created_at__date=today)
-      .aaggregate(total_subsidies=Sum('credit', default=0))
+      .filter(journal_entry__date=today)
+      .aaggregate(total_subsidies=Sum('debit', default=0))
     )
     contributors = (LedgerEntry.objects.filter_donations()
       .select_related('journal_entry', 'journal_entry__creator')

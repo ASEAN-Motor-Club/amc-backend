@@ -76,7 +76,7 @@ class LedgerEntriesQuerySet(models.QuerySet):
       account__account_type=Account.AccountType.EXPENSE,
       account__book=Account.Book.GOVERNMENT,
       account__character=None,
-      journal_entry__creator__isnull=False,
+      journal_entry__creator__isnull=True,
     )
 
   def filter_interest_payments(self):
