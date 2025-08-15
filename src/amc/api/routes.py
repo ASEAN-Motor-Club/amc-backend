@@ -379,6 +379,7 @@ async def on_player_profit(player, total_payment, session):
 
 @webhook_router.post('/')
 async def webhook(request, payload: list[WebhookPayloadSchema]):
+  current_tz = timezone.get_current_timezone()
   for event in payload:
     try:
       match event.hook:
@@ -387,7 +388,7 @@ async def webhook(request, payload: list[WebhookPayloadSchema]):
           player = await Player.objects.aget(unique_id=player_id)
           logs = [
             ServerCargoArrivedLog(
-              timestamp=datetime.utcfromtimestamp(event.timestamp / 1000),
+              timestamp=datetime.fromtimestamp(event.timestamp / 1000, tz=current_tz),
               player=player,
               cargo_key=cargo['Net_CargoKey'],
               payment=cargo['Net_Payment']['BaseValue'],
@@ -414,7 +415,7 @@ async def webhook(request, payload: list[WebhookPayloadSchema]):
           player = await Player.objects.aget(unique_id=player_id)
           cargo = event.data['Cargo']
           log = await ServerCargoArrivedLog.objects.acreate(
-            timestamp=datetime.utcfromtimestamp(event.timestamp / 1000),
+            timestamp=datetime.fromtimestamp(event.timestamp / 1000, tz=current_tz),
             player=player,
             cargo_key=cargo['Net_CargoKey'],
             payment=cargo['Net_Payment']['BaseValue'],
@@ -440,7 +441,7 @@ async def webhook(request, payload: list[WebhookPayloadSchema]):
           contract = event.data.get('Contract')
           if contract:
             await ServerSignContractLog.objects.acreate(
-              timestamp=datetime.utcfromtimestamp(event.timestamp / 1000),
+              timestamp=datetime.fromtimestamp(event.timestamp / 1000, tz=current_tz),
               player=player,
               cargo_key=contract['Item'],
               amount=contract['Amount'],
@@ -456,7 +457,7 @@ async def webhook(request, payload: list[WebhookPayloadSchema]):
             log, _created = await ServerSignContractLog.objects.aget_or_create(
               guid=event.data['ContractGuid'],
               defaults={
-                'timestamp': datetime.utcfromtimestamp(event.timestamp / 1000),
+                'timestamp': datetime.fromtimestamp(event.timestamp / 1000, tz=current_tz),
                 'player': player,
                 'cargo_key': contract['Item'],
                 'amount': contract['Amount'],
@@ -486,7 +487,7 @@ async def webhook(request, payload: list[WebhookPayloadSchema]):
           player = await Player.objects.aget(unique_id=player_id)
           passenger = event.data['Passenger']
           log = await ServerPassengerArrivedLog.objects.acreate(
-            timestamp=datetime.utcfromtimestamp(event.timestamp / 1000),
+            timestamp=datetime.fromtimestamp(event.timestamp / 1000, tz=current_tz),
             player=player,
             passenger_type=passenger['Net_PassengerType'],
             distance=passenger['Net_Distance'],
@@ -508,7 +509,7 @@ async def webhook(request, payload: list[WebhookPayloadSchema]):
           tow_request = event.data['TowRequest']
           payment = tow_request['Net_Payment']
           await ServerTowRequestArrivedLog.objects.acreate(
-            timestamp=datetime.utcfromtimestamp(event.timestamp / 1000),
+            timestamp=datetime.fromtimestamp(event.timestamp / 1000, tz=current_tz),
             player=player,
             payment=payment,
             data=tow_request,
