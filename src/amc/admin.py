@@ -28,6 +28,7 @@ from .models import (
   ServerCargoArrivedLog,
   ServerSignContractLog,
   ServerPassengerArrivedLog,
+  ServerTowRequestArrivedLog,
 )
 
 class CharacterInlineAdmin(admin.TabularInline):
@@ -361,4 +362,11 @@ class ServerPassengerArrivedLogAdmin(admin.ModelAdmin):
   search_fields = ['player__unique_id']
   autocomplete_fields = ['player']
   list_filter = ['passenger_type']
+
+@admin.register(ServerTowRequestArrivedLog)
+class ServerTowRequestArrivedLogAdmin(admin.ModelAdmin):
+  list_display = ['id', 'timestamp', 'player', 'payment']
+  list_select_related = ['player']
+  search_fields = ['player__unique_id']
+  autocomplete_fields = ['player']
 
