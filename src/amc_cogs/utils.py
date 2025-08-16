@@ -7,17 +7,11 @@ def create_player_autocomplete(session):
     interaction: discord.Interaction,
     current: str
   ):
-    response = await get_players(session)
-    data = await response.json()
-    players = data['data'].values()
-    players = [
-      (player['name'], player['unique_id'])
-      for player in players
-    ]
+    players = await get_players(session)
 
     return [
       app_commands.Choice(name=f"{player_name} ({player_id})", value=player_id)
-      for player_name, player_id in players
+      for player_id, player_name in players
       if current.lower() in player_name.lower() or current in str(player_id)
     ][:25]  # Discord max choices: 25
 

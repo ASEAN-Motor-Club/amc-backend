@@ -14,7 +14,6 @@ async def transfer_money(session, amount, message, player_id):
     if resp.status != 200:
       raise Exception('Failed to transfer money')
 
-
 async def join_player_to_event(session, event_guid, player_id):
   data = {
     'PlayerId': player_id,
@@ -39,4 +38,11 @@ async def get_events(session):
     data = await resp.json()
     return data['data']
 
+async def send_message_as_player(session, message, player_id):
+  data = {
+    'Message': message,
+  }
+  async with session.post(f'/players/{player_id}/chat', json=data) as resp:
+    if resp.status != 204:
+      raise Exception('Failed to send message')
 

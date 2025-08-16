@@ -6,7 +6,13 @@ import urllib
 async def get_players(session, password=''):
     params = {'password': password}
     params_str = urllib.parse.urlencode(params, quote_via=urllib.parse.quote)
-    return await session.get(URL(f"/player/list?{params_str}", encoded=True))
+    async with session.get(URL(f"/player/list?{params_str}", encoded=True)) as resp:
+      data = await resp.json()
+      players = [
+        (player['unique_id'], player['name'])
+        for player in data['data'].values()
+      ]
+      return players
 
 
 async def announcement_request(message, session, password=''):
