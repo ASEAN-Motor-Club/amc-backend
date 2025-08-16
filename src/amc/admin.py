@@ -29,6 +29,7 @@ from .models import (
   ServerSignContractLog,
   ServerPassengerArrivedLog,
   ServerTowRequestArrivedLog,
+  TeleportPoint,
 )
 
 class CharacterInlineAdmin(admin.TabularInline):
@@ -369,4 +370,11 @@ class ServerTowRequestArrivedLogAdmin(admin.ModelAdmin):
   list_select_related = ['player']
   search_fields = ['player__unique_id']
   autocomplete_fields = ['player']
+
+@admin.register(TeleportPoint)
+class TeleportPointAdmin(admin.ModelAdmin):
+  list_display = ['id', 'character', 'name', 'location']
+  list_select_related = ['character']
+  search_fields = ['character__name', 'name', 'character__player__unique_id']
+  autocomplete_fields = ['character']
 

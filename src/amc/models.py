@@ -730,3 +730,23 @@ class ServerTowRequestArrivedLog(models.Model):
   data = models.JSONField(null=True, blank=True)
 
 
+@final
+class TeleportPoint(models.Model):
+  name = models.CharField(max_length=20)
+  character = models.ForeignKey(
+    Character,
+    on_delete=models.SET_NULL,
+    related_name='teleport_points',
+    null=True,
+    blank=True,
+  )
+  location = models.PointField(srid=0, dim=3)
+
+  class Meta:
+    constraints = [
+      models.UniqueConstraint(
+        fields=['name', 'character'],
+        name='unique_character_teleport_point'
+      )
+    ]
+

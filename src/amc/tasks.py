@@ -5,7 +5,7 @@ from decimal import Decimal
 from datetime import timedelta
 from django.utils import timezone
 from django.db import connection
-from django.db.models import Exists, OuterRef
+from django.db.models import Exists, OuterRef, Q
 from django.conf import settings
 from django.core.signing import Signer
 from asgiref.sync import sync_to_async
@@ -40,9 +40,10 @@ from amc.models import (
   ScheduledEvent,
   GameEventCharacter,
   GameEvent,
+  TeleportPoint,
 )
 from amc.game_server import announce
-from amc.mod_server import show_popup, transfer_money
+from amc.mod_server import show_popup, transfer_money, teleport_player, get_player
 from amc.auth import verify_player
 from amc.mailbox import send_player_messages
 from amc.events import (
@@ -323,6 +324,31 @@ async def process_log_event(event: LogEvent, http_client=None, http_client_mod=N
           character=character, 
           prompt="/setup_event",
         )
+      if command_match := re.match(r"/teleport (?P<name>.+)", message):
+        name = command_match.group('name')
+        player_info = await get_player(http_client_mod, str(player.unique_id))
+        if not player_info or not player_info.get('bIsAdmin'):
+            asyncio.create_task(show_popup(http_client_mod, "Only admins can use this feature at the moment", player_id=str(player_id)))
+        else:
+          try:
+            teleport_point = await TeleportPoint.objects.aget(
+              Q(character=character) | Q(character__isnull=True),
+              name__iexact=name,
+            )
+            location = teleport_point.location
+            await teleport_player(http_client_mod, player.unique_id, {
+              'X': location.x, 
+              'Y': location.y, 
+              'Z': location.z,
+            })
+            await BotInvocationLog.objects.acreate(
+              timestamp=timestamp,
+              character=character, 
+              prompt=message,
+            )
+          except TeleportPoint.DoesNotExist:
+            asyncio.create_task(show_popup(http_client_mod, "Teleport point not found", player_id=str(player_id)))
+
       if command_match := re.match(r"/verify (?P<signed_message>.+)", message):
         try:
           discord_user_id = await verify_player(player, command_match.group('signed_message'))

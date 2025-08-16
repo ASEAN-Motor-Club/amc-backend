@@ -46,3 +46,20 @@ async def send_message_as_player(session, message, player_id):
     if resp.status != 204:
       raise Exception('Failed to send message')
 
+async def teleport_player(session, player_id, location):
+  data = {
+    'Location': location,
+  }
+  async with session.post(f'/players/{player_id}/teleport', json=data) as resp:
+    if resp.status != 204:
+      raise Exception('Failed to send message')
+
+async def get_player(session, player_id):
+  async with session.get(f'/players/{player_id}') as resp:
+    if resp.status != 200:
+      raise Exception('Failed to fetch player')
+    data = await resp.json()
+    if not data.get('data'):
+      return None
+    return data['data'][0]
+
