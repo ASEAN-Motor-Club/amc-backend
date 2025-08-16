@@ -8,6 +8,8 @@ from random import Random
 from discord.ext import commands
 from django.conf import settings
 from amc.models import GameEventCharacter
+from .utils import create_player_autocomplete
+from amc.mod_server import join_player_to_event, kick_player_from_event, get_events
 
 from amc.models import (
   ScheduledEvent,
@@ -63,6 +65,7 @@ class EventsCog(commands.Cog):
     self.bot = bot
     self.teams_channel_id = teams_channel_id
     self.last_embed_message = None
+    self.player_autocomplete = create_player_autocomplete(self.bot.event_http_client_game)
 
   @commands.Cog.listener()
   async def on_ready(self):
@@ -242,4 +245,33 @@ class EventsCog(commands.Cog):
       stddev*1.5
     )
     await interaction.response.send_message(f"Penalty: {penalty}")
+
+  async def player_autocomplete(self, interaction, current):
+    return await self.player_autocomplete(interaction, current)
+
+  @app_commands.command(name='join_player_to_event', description='Joins a player into an event (Event Server)')
+  @app_commands.checks.has_any_role(1395460420189421713)
+  @app_commands.autocomplete(player_id=player_autocomplete)
+  async def join_player_to_event(self, ctx, player_id: str):
+    events = await get_events(self.bot.event_http_client_mod)
+    if not events:
+      await ctx.response.send_message('No active events')
+      return
+
+    event = events[0]
+    await join_player_to_event(self.bot.event_http_client_mod, event['EventGuid'], player_id)
+    await ctx.response.send_message(f'Player {player_id} joined')
+
+  @app_commands.command(name='kick_player_from_event', description='Kicks a player from an event (Event Server)')
+  @app_commands.checks.has_any_role(1395460420189421713)
+  @app_commands.autocomplete(player_id=player_autocomplete)
+  async def kick_player_from_event(self, ctx, player_id: str):
+    events = await get_events(self.bot.event_http_client_mod)
+    if not events:
+      await ctx.response.send_message('No active events')
+      return
+
+    event = events[0]
+    await kick_player_from_event(self.bot.event_http_client_mod, event['EventGuid'], player_id)
+    await ctx.response.send_message(f'Player {player_id} kicked')
 

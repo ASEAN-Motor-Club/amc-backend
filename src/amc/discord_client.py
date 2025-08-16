@@ -15,6 +15,8 @@ class AMCDiscordBot(commands.Bot):
   async def setup_hook(self):
     self.http_client_game = aiohttp.ClientSession(base_url=settings.GAME_SERVER_API_URL)
     self.http_client_mod = aiohttp.ClientSession(base_url=settings.MOD_SERVER_API_URL)
+    self.event_http_client_game = aiohttp.ClientSession(base_url=settings.EVENT_GAME_SERVER_API_URL)
+    self.event_http_client_mod = aiohttp.ClientSession(base_url=settings.EVENT_MOD_SERVER_API_URL)
     guild = discord.Object(id=settings.DISCORD_GUILD_ID)
     await self.add_cog(ModerationCog(self), guild=guild)
     await self.add_cog(AuthenticationCog(self), guild=guild)

@@ -3,6 +3,12 @@ from yarl import URL
 import urllib
 
 
+async def get_players(session, password=''):
+    params = {'password': password}
+    params_str = urllib.parse.urlencode(params, quote_via=urllib.parse.quote)
+    return await session.get(URL(f"/player/list?{params_str}", encoded=True))
+
+
 async def announcement_request(message, session, password=''):
     params = {'password': password, 'message': message}
     params_str = urllib.parse.urlencode(params, quote_via=urllib.parse.quote)
