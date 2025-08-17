@@ -324,30 +324,35 @@ async def process_log_event(event: LogEvent, http_client=None, http_client_mod=N
           character=character, 
           prompt="/setup_event",
         )
-      if command_match := re.match(r"/teleport (?P<name>.+)", message):
+      if command_match := re.match(r"/teleport\s*(?P<name>.*)", message):
         name = command_match.group('name')
         player_info = await get_player(http_client_mod, str(player.unique_id))
         if not player_info or not player_info.get('bIsAdmin'):
-            asyncio.create_task(show_popup(http_client_mod, "Only admins can use this feature at the moment", player_id=str(player_id)))
+          asyncio.create_task(show_popup(http_client_mod, "Only admins can use this feature at the moment", player_id=str(player_id)))
         else:
-          try:
-            teleport_point = await TeleportPoint.objects.aget(
-              Q(character=character) | Q(character__isnull=True),
-              name__iexact=name,
-            )
-            location = teleport_point.location
-            await teleport_player(http_client_mod, player.unique_id, {
-              'X': location.x, 
-              'Y': location.y, 
-              'Z': location.z,
-            })
-            await BotInvocationLog.objects.acreate(
-              timestamp=timestamp,
-              character=character, 
-              prompt=message,
-            )
-          except TeleportPoint.DoesNotExist:
-            asyncio.create_task(show_popup(http_client_mod, "Teleport point not found", player_id=str(player_id)))
+          if name:
+            try:
+              teleport_point = await TeleportPoint.objects.aget(
+                Q(character=character) | Q(character__isnull=True),
+                name__iexact=name,
+              )
+              location = teleport_point.location
+              location = {
+                'X': location.x, 
+                'Y': location.y, 
+                'Z': location.z,
+              }
+            except TeleportPoint.DoesNotExist:
+              asyncio.create_task(show_popup(http_client_mod, "Teleport point not found", player_id=str(player_id)))
+              return
+          else:
+            location = player_info['CustomDestinationAbsoluteLocation']
+          await teleport_player(http_client_mod, player.unique_id, location)
+          await BotInvocationLog.objects.acreate(
+            timestamp=timestamp,
+            character=character, 
+            prompt=message,
+          )
 
       if command_match := re.match(r"/verify (?P<signed_message>.+)", message):
         try:

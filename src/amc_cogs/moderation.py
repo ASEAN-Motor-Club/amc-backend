@@ -1,9 +1,10 @@
 from discord import app_commands
 from discord.ext import commands
 from django.db.models import Q
+from django.contrib.gis.geos import Point
 from .utils import create_player_autocomplete
 from amc.models import Player, CharacterLocation, TeleportPoint
-from amc.mod_server import show_popup, teleport_player
+from amc.mod_server import show_popup, teleport_player, get_player
 
 class ModerationCog(commands.Cog):
   def __init__(self, bot):
@@ -28,8 +29,14 @@ class ModerationCog(commands.Cog):
     try:
       player = await Player.objects.aget(discord_user_id=ctx.user.id)
       character = await player.get_latest_character()
-      latest_location = await CharacterLocation.objects.filter(character=character).alatest('timestamp')
-      location = latest_location.location
+      player_info_main = await get_player(self.bot.http_client_mod, str(player.unique_id))
+      player_info_event = await get_player(self.bot.event_http_client_mod, str(player.unique_id))
+      player_info = player_info_main or player_info_event
+      if not player_info:
+        await ctx.response.send_message('You don\'t seem to be logged in')
+        return
+      location = player_info.get('CustomDestinationAbsoluteLocation')
+      location = Point(location['X'], location['Y'], location['Z'])
       await TeleportPoint.objects.acreate(
         character=character,
         location=location,
@@ -102,7 +109,7 @@ class ModerationCog(commands.Cog):
         name=name,
       )
       location = teleport_point.location
-      await teleport_player(self.bot.http_client_event_mod, player.unique_id, {
+      await teleport_player(self.bot.event_http_client_mod, player.unique_id, {
         'X': location.x, 
         'Y': location.y, 
         'Z': location.z,
