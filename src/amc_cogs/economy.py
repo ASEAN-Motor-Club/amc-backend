@@ -13,6 +13,7 @@ from amc.models import (
   ServerCargoArrivedLog,
   ServerSignContractLog,
   ServerPassengerArrivedLog,
+  ServerTowRequestArrivedLog,
 )
 from amc.utils import get_timespan
 from amc_finance.services import send_fund_to_player
@@ -53,7 +54,13 @@ class EconomyCog(commands.Cog):
     )
     passengers_aggregates = await passengers_qs.aaggregate(total_payments=Sum('payment', default=0))
 
-    total_gdp = deliveries_aggregates['total_payments'] + contracts_aggregates['total_payments'] + passengers_aggregates['total_payments']
+    tow_requests_qs = ServerTowRequestArrivedLog.objects.filter(
+      timestamp__gte=start_time,
+      timestamp__lt=end_time
+    )
+    tow_requests_aggregates = await tow_requests_qs.aaggregate(total_payments=Sum('payment', default=0))
+
+    total_gdp = deliveries_aggregates['total_payments'] + contracts_aggregates['total_payments'] + passengers_aggregates['total_payments'] + tow_requests_aggregates['total_payments']
 
     delivery_sum_subquery = ServerCargoArrivedLog.objects.filter(
       player=OuterRef('pk'),
@@ -82,6 +89,15 @@ class EconomyCog(commands.Cog):
     ).annotate(
       total=Sum('payment')
     ).values('total')
+    tow_requests_sum_subquery = ServerTowRequestArrivedLog.objects.filter(
+      player=OuterRef('pk'),
+      timestamp__gte=start_time,
+      timestamp__lt=end_time
+    ).values(
+      'player'
+    ).annotate(
+      total=Sum('payment')
+    ).values('total')
 
     top_players_qs = Player.objects.annotate(
       gdp_contribution=Coalesce(
@@ -92,6 +108,9 @@ class EconomyCog(commands.Cog):
         Value(0),
       ) + Coalesce(
         Subquery(passengers_sum_subquery, output_field=models.IntegerField()),
+        Value(0),
+      ) + Coalesce(
+        Subquery(tow_requests_sum_subquery, output_field=models.IntegerField()),
         Value(0),
       )
     ).filter(gdp_contribution__gt=0).order_by('-gdp_contribution')[:20]
@@ -126,6 +145,7 @@ class EconomyCog(commands.Cog):
 Deliveries: {deliveries_aggregates['total_payments']:,}
 Contracts: {contracts_aggregates['total_payments']:,}
 Passengers (Taxi/Ambulance): {passengers_aggregates['total_payments']:,}
+Tow Requests: {tow_requests_aggregates['total_payments']:,}
 
 ## Top GDP Contributors
 {top_players_str}
@@ -227,15 +247,15 @@ Passengers (Taxi/Ambulance): {passengers_aggregates['total_payments']:,}
 
 ### How to Put Money in the Bank
 You can only fill your bank account by saving your earnings on this server.
-Use the /set_saving_rate in the gameto set how much you want to save. It's 0 by default.
+Use `/set_saving_rate` in the game to set how much you want to save. It's 0 by default.
 Once you withdraw your balance, you will not be able to deposit them back in.
 
 ### How ASEAN Loan Works
-Our loans are interest free, and you only have to repay them when you make a profit.
+Our loans have a flat one-off 10% fee, and you only have to repay them when you make a profit.
 The repayment will range from 10% to 40% of your income, depending on the amount of loan you took.
 """, ephemeral=True)
 
-  @app_commands.command(name='treasury_bank_deposit', description='Display your bank account')
+  @app_commands.command(name='treasury_liquidity_injection', description='Injects liquidity into the bank from treasury')
   @app_commands.checks.has_permissions(administrator=True)
   async def treasury_bank_deposit(self, interaction, amount: int, description: str):
     now = timezone.now()
@@ -253,7 +273,6 @@ The repayment will range from 10% to 40% of your income, depending on the amount
 - Amount: {amount:,}
 
 ### Purpose & Authorization
-This transaction was authorized under Treasury Mandate 2.2a (Financial Stability).
-The purpose of this deposit is to ensure sufficient liquidity within the server's regulated financial system, promoting stability and confidence.
-This action is a standard deposit and does not represent any change in the ownership, equity, or management of the receiving institution. All funds remain the property of the Treasury. This transaction has been recorded on the public ledger for full transparency.
+This transaction was authorized under Treasury Mandate 2.1 (Financial Mechanism and Liquidity Maintanance).
+The purpose of this transfer is to ensure sufficient liquidity within the server's regulated financial system, promoting stability and confidence.
 """)
