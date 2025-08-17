@@ -272,6 +272,7 @@ class ScheduledEvent(models.Model):
   )
   description = models.TextField(blank=True)
   time_trial = models.BooleanField(default=False)
+  staggered_start_delay = models.PositiveIntegerField(default=0, help_text="Delay between staggered start, in seconds. This can be overridden in the game")
   objects = models.Manager.from_queryset(ScheduledEventQuerySet)()
 
   @override
