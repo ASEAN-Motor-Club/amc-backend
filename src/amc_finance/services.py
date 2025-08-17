@@ -489,11 +489,11 @@ async def make_treasury_bank_deposit(amount, description):
     }
   )
   bank_treasury_account, _ = await Account.objects.aget_or_create(
-    account_type=Account.AccountType.LIABILITY,
+    account_type=Account.AccountType.EQUITY,
     book=Account.Book.BANK,
     character=None,
     defaults={
-      'name': 'Treasury Bank Account',
+      'name': 'Bank Equity',
     }
   )
 
