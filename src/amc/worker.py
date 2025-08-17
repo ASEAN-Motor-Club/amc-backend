@@ -10,6 +10,7 @@ from django.utils import timezone
 from amc.tasks import process_log_line
 from amc.events import monitor_events, send_event_embeds
 from amc.locations import monitor_locations
+from amc.webhook import monitor_webhook
 from amc.deliverypoints import monitor_deliverypoints
 import discord
 from amc.discord_client import bot as discord_client
@@ -73,6 +74,7 @@ async def monitor_event_locations(ctx):
 class WorkerSettings:
     functions = [process_log_line]
     cron_jobs = [
+        cron(monitor_webhook, second=None),
         cron(monitor_events, second=None),
         cron(monitor_locations, second=None),
         cron(monitor_event_locations, second=None),

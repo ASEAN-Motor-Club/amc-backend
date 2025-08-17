@@ -61,3 +61,8 @@ async def get_player(session, player_id):
       return None
     return data['data'][0]
 
+async def get_webhook_events(session):
+  async with session.get('/webhook') as resp:
+    data = await resp.json()
+    return data
+
