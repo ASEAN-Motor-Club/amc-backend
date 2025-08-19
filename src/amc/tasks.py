@@ -347,6 +347,7 @@ async def process_log_event(event: LogEvent, http_client=None, http_client_mod=N
               return
           else:
             location = player_info['CustomDestinationAbsoluteLocation']
+            location['Z'] += 100
           await teleport_player(http_client_mod, player.unique_id, location)
           await BotInvocationLog.objects.acreate(
             timestamp=timestamp,
