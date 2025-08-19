@@ -433,9 +433,34 @@ class ChampionshipPoint(models.Model):
   participant = models.OneToOneField(GameEventCharacter, models.CASCADE, related_name='championship_point')
   team = models.ForeignKey(Team, models.SET_NULL, null=True, blank=True)
   points = models.PositiveIntegerField(default=0, blank=True)
+  prize = models.PositiveIntegerField(default=0, blank=True)
 
   objects = models.Manager.from_queryset(ChampionshipPointQuerySet)()
 
+  event_prize_by_position = [
+    450_000,
+    270_000,
+    180_000,
+    150_000,
+    120_000,
+    90_000,
+    75_000,
+    60_000,
+    52_500,
+    52_500,
+  ]
+  time_trial_prize_by_position = [
+    150_000,
+    90_000,
+    60_000,
+    50_000,
+    40_000,
+    30_000,
+    25_000,
+    20_000,
+    17_500,
+    17_500,
+  ]
   event_points_by_position = [25, 20, 16, 13, 11, 10, 9, 8, 7, 6, 5, 4, 3, 2, 1]
   time_trial_points_by_position = [10, 8, 6, 5, 4, 3, 2, 1]
 
@@ -454,6 +479,16 @@ class ChampionshipPoint(models.Model):
       return self.time_trial_points_by_position[position]
     except IndexError:
       return 0
+
+  @classmethod
+  def get_event_prize_for_position(self, position: int, time_trial: bool=False):
+    try:
+      if time_trial:
+        return self.time_trial_prize_by_position[position]
+      return self.event_prize_by_position[position]
+    except IndexError:
+      return 0
+
 
 class LapSectionTimeQuerySet(models.QuerySet):
   def annotate_net_time(self):

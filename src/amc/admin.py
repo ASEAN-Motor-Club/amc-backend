@@ -1,3 +1,4 @@
+from asgiref.sync import async_to_sync
 from django.contrib import admin
 from django.utils import timezone
 from django.db.models import F, Count, Window
@@ -31,6 +32,8 @@ from .models import (
   ServerTowRequestArrivedLog,
   TeleportPoint,
 )
+from amc_finance.services import send_fund_to_player
+
 
 class CharacterInlineAdmin(admin.TabularInline):
   model = Character
@@ -203,7 +206,7 @@ class LapSectionTimeInlineAdmin(admin.TabularInline):
 
 @admin.register(GameEvent)
 class GameEventAdmin(admin.ModelAdmin):
-  list_display = ['guid', 'name', 'start_time', 'scheduled_event']
+  list_display = ['guid', 'name', 'start_time', 'scheduled_event', 'owner']
   inlines = [GameEventCharacterInlineAdmin]
 
 @admin.register(GameEventCharacter)
@@ -214,33 +217,7 @@ class GameEventCharacterAdmin(admin.ModelAdmin):
   readonly_fields = ['character']
   search_fields = ['game_event__id', 'game_event__scheduled_event__name', 'character__name', 'game_event__race_setup__hash']
   list_filter = ['finished', 'game_event__scheduled_event']
-  actions = ['award_event_points']
   ordering = ['-game_event__last_updated', 'net_time']
-
-  @admin.action(description="Award event points")
-  def award_event_points(self, request, queryset):
-    championship = Championship.objects.last()
-    # TODO: Create custom ParticipantQuerySet
-    participants = queryset.filter(finished=True).annotate(
-      p_rank=Window(
-        expression=RowNumber(),
-        partition_by=[F('character')],
-        order_by=[F('net_time').asc()]
-      ),
-      time_trial=F('game_event__scheduled_event__time_trial')
-    ).filter(
-      p_rank=1
-    ).order_by('net_time')
-    cps = [
-      ChampionshipPoint(
-        championship=championship,
-        participant=participant,
-        team=participant.character.player.teams.last(),
-        points=ChampionshipPoint.get_event_points_for_position(i, time_trial=participant.time_trial)
-      )
-      for i, participant in enumerate(participants)
-    ]
-    ChampionshipPoint.objects.bulk_create(cps)
 
 
 class GameEventInlineAdmin(admin.TabularInline):
@@ -270,7 +247,7 @@ class ChampionshipAdmin(admin.ModelAdmin):
 
 @admin.register(ChampionshipPoint)
 class ChampionshipPointAdmin(admin.ModelAdmin):
-  list_display = ['championship', 'participant__character', 'participant__game_event__scheduled_event__name', 'team', 'points']
+  list_display = ['championship', 'participant__character', 'participant__game_event__scheduled_event__name', 'team', 'points', 'prize']
   list_select_related = ['championship', 'participant__character', 'team', 'participant__game_event__scheduled_event']
   search_fields = ['championship__name']
 
@@ -289,6 +266,7 @@ class ScheduledEventAdmin(admin.ModelAdmin):
       championship = scheduled_event.championship
       # TODO: Create custom ParticipantQuerySet
       participants = (GameEventCharacter.objects
+        .select_related('character')
         .filter_by_scheduled_event(scheduled_event)
         .filter(finished=True).filter(
           finished=True,
@@ -312,10 +290,17 @@ class ScheduledEventAdmin(admin.ModelAdmin):
           participant=participant,
           team=participant.character.player.teams.last(),
           points=ChampionshipPoint.get_event_points_for_position(i, time_trial=scheduled_event.time_trial),
+          prize=ChampionshipPoint.get_event_prize_for_position(i, time_trial=scheduled_event.time_trial),
         )
         for i, participant in enumerate(participants)
       ]
       ChampionshipPoint.objects.bulk_create(cps)
+      for i, participant in enumerate(participants):
+        async_to_sync(send_fund_to_player)(
+          ChampionshipPoint.get_event_prize_for_position(i, time_trial=scheduled_event.time_trial),
+          participant.character,
+          f"Prize money: {scheduled_event.name}"
+        )
 
 
 @admin.register(RaceSetup)
