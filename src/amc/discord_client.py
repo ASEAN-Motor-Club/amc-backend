@@ -7,6 +7,7 @@ from amc_cogs.auth import AuthenticationCog
 from amc_cogs.events import EventsCog
 from amc_cogs.economy import EconomyCog
 from amc_cogs.chat import ChatCog
+from amc_cogs.status import StatusCog
 
 class AMCDiscordBot(commands.Bot):
   def __init__(self, *args, **kwargs):
@@ -23,6 +24,7 @@ class AMCDiscordBot(commands.Bot):
     await self.add_cog(EventsCog(self), guild=guild)
     await self.add_cog(EconomyCog(self), guild=guild)
     await self.add_cog(ChatCog(self), guild=guild)
+    await self.add_cog(StatusCog(self), guild=guild)
     await self.tree.sync(guild=guild)
 
 
