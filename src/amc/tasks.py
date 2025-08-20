@@ -586,6 +586,8 @@ The loan amount has been deposited into your wallet. You can view your loan deta
         vehicle_name=vehicle_name,
         action=action,
       )
+      if action == PlayerVehicleLog.Action.BOUGHT and vehicle_name == 'Vulcan':
+        await player_donation(2_250_000, character)
       if discord_client and ctx.get('startup_time') and timestamp > ctx.get('startup_time'):
         forward_message = (
           settings.DISCORD_VEHICLE_LOGS_CHANNEL_ID,
