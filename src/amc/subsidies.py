@@ -22,7 +22,7 @@ def calculate_loan_repayment(payment, loan_balance, max_loan):
   loan_utilisation = loan_balance / max_loan
   repayment_percentage = Decimal(0.1) + (Decimal(0.4) * loan_utilisation)
 
-  repayment = min(loan_balance, max(Decimal(100), int(payment * Decimal(repayment_percentage))))
+  repayment = min(loan_balance, max(Decimal(1), int(payment * Decimal(repayment_percentage))))
   return repayment
 
 async def repay_loan_for_profit(player, payment, session):
