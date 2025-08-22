@@ -3,7 +3,8 @@ from deepdiff import DeepHash
 from django.contrib import admin
 from django.contrib.gis.db import models
 from django.db.models import Q, F, Sum, Max, Window
-from django.db.models.functions import RowNumber, Lead
+from django.db.models.functions import RowNumber, Lead, Lag
+from django.contrib.gis.db.models.functions import Distance
 from decimal import Decimal
 from django.core.validators import MinValueValidator, MaxValueValidator
 from django.contrib.postgres.fields import ArrayField
@@ -675,11 +676,22 @@ class PlayerVehicleLog(models.Model):
       )
     ]
 
+class CharacterLocationManager(models.Manager):
+  def filter_character_activity(self, character, start_time, end_time):
+    return self.filter(character=character, timestamp__gte=start_time, timestamp__lt=end_time).annotate(
+      prev_location=Window(
+        expression=Lag('location'),
+        partition_by=[F('character')],
+        order_by=[F('timestamp').asc()]
+      )
+    )
+
 @final
 class CharacterLocation(models.Model):
   timestamp = models.DateTimeField(db_index=True, auto_now_add=True)
   character = models.ForeignKey(Character, on_delete=models.CASCADE, related_name='locations')
   location = models.PointField(srid=0, dim=3)
+  objects = CharacterLocationManager() 
 
   class Meta:
     constraints = [
@@ -688,6 +700,25 @@ class CharacterLocation(models.Model):
         name='unique_character_location'
       )
     ]
+
+  @classmethod
+  async def get_character_activity(self, character, start_time, end_time, afk_treshold=1000, teleport_treshold=10000):
+    qs = self.objects.filter_character_activity(character, start_time, end_time)
+    if not await qs.aexists():
+      return (False, False)
+
+    total_dis = 0
+    async for cl in qs:
+      if cl.prev_location is None:
+        continue
+      dis = cl.prev_location.distance(cl.location)
+      if dis > teleport_treshold:
+        continue
+      total_dis += dis
+      if total_dis > afk_treshold:
+        return (True, True)
+    return (True, False)
+
 
 @final
 class PlayerMailMessage(models.Model):

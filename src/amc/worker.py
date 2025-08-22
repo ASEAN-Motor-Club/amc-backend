@@ -11,6 +11,7 @@ from amc.tasks import process_log_line
 from amc.events import monitor_events, send_event_embeds
 from amc.locations import monitor_locations
 from amc.webhook import monitor_webhook
+from amc.ubi import handout_ubi, TASK_FREQUENCY as UBI_TASK_FREQUENCY
 from amc.deliverypoints import monitor_deliverypoints
 import discord
 from amc.discord_client import bot as discord_client
@@ -79,6 +80,7 @@ class WorkerSettings:
         cron(monitor_locations, second=None),
         cron(monitor_event_locations, second=None),
         cron(send_event_embeds, second=set(range(0, 60, 10))),
+        cron(handout_ubi, minute=set(range(0, 60, UBI_TASK_FREQUENCY)), second=37),
         # cron(monitor_deliverypoints, second=None),
         cron(apply_interest_to_bank_accounts, hour=None, minute=0, second=0),
     ]
