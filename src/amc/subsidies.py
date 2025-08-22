@@ -96,45 +96,12 @@ def get_subsidy_for_cargo(cargo):
       subsidy_factor = 0.0
   return int(int(cargo.payment) * subsidy_factor), subsidy_factor
 
-async def subsidise_delivery(cargos, session):
-  subsidy = 0
-  popup_message = "<Title>ASEAN Subsidy Receipt</>"
-  for cargo in cargos:
-    cargo_subsidy, subsidy_factor = get_subsidy_for_cargo(cargo)
-    if cargo_subsidy != 0:
-      subsidy += cargo_subsidy
-      cargo_name = cargo_names.get(cargo.cargo_key, cargo.cargo_key)
-      popup_message += f"\n{cargo_name} - <Money>{cargo_subsidy}</> ({int(subsidy_factor * 100):,}%)"
-
-  if subsidy != 0:
-    character = await cargo.player.characters.with_last_login().filter(last_login__isnull=False).alatest('last_login')
-    await transfer_money(
-      session,
-      subsidy,
-      'ASEAN Subsidy' if subsidy > 0 else 'ASEAN Tax',
-      cargo.player.unique_id,
-    )
-    await send_fund_to_player_wallet(subsidy, character, "Delivery Subsidy")
-    asyncio.create_task(
-      show_popup(session, popup_message, player_id=cargo.player.unique_id)
-    )
-
 def get_passenger_subsidy(passenger):
   match passenger.passenger_type:
     case ServerPassengerArrivedLog.PassengerType.Taxi:
       return 2_000 + passenger.payment * 0.5
     case _:
       return 0
-
-async def subsidise_passenger(passenger, subsidy, player, session):
-  character = await player.characters.with_last_login().filter(last_login__isnull=False).alatest('last_login')
-  await transfer_money(
-    session,
-    int(subsidy),
-    'ASEAN Subsidy' if subsidy > 0 else 'ASEAN Tax',
-    player.unique_id,
-  )
-  await send_fund_to_player_wallet(subsidy, character, "Passenger Subsidy")
 
 async def subsidise_player(subsidy, player, session):
   character = await player.characters.with_last_login().filter(last_login__isnull=False).alatest('last_login')

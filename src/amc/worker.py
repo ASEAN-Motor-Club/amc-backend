@@ -74,7 +74,7 @@ async def monitor_event_locations(ctx):
 class WorkerSettings:
     functions = [process_log_line]
     cron_jobs = [
-        cron(monitor_webhook, second=None),
+        cron(monitor_webhook, second=set(range(0, 60, 4))),
         cron(monitor_events, second=None),
         cron(monitor_locations, second=None),
         cron(monitor_event_locations, second=None),

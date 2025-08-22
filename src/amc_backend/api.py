@@ -12,5 +12,4 @@ api.add_router('/scheduled_events/', 'amc.api.routes.scheduled_events_router')
 api.add_router('/results/', 'amc.api.routes.results_router')
 api.add_router('/championships/', 'amc.api.routes.championships_router')
 api.add_router('/deliverypoints/', 'amc.api.routes.deliverypoints_router')
-api.add_router('/webhook/', 'amc.api.routes.webhook_router')
 

@@ -248,10 +248,11 @@ async def process_log_event(event: LogEvent, http_client=None, http_client_mod=N
 <Money>10,000</> coins
 
 <Bold>Towing/Wrecker Jobs</>
-<Money>5,000</> coins
+<Money>2,000 + 50%</> - Normal
+<Money>2,000 + 100%</> - Flipped
 
-<Bold>Taxi</>
-<Money>2,000</> coins + 50% of base pay
+<Bold>Taxi & Ambulance</>
+<Money>2,000 + 50%</>
 """
         asyncio.create_task(show_popup(http_client_mod, subsidies_text, player_id=str(player_id)))
         await BotInvocationLog.objects.acreate(
@@ -466,10 +467,10 @@ How ASEAN Loans Works
 """, player_id=str(player_id))
         )
       elif command_match := re.match(r"/donate\s+(?P<amount>[\d,]+)\s*(?P<verification_code>\S*)", message):
-        max_donation = character.driver_level * 25_000
+        max_donation = character.driver_level * 15_000 + character.truck_level * 15_000
         total_donations = await get_character_total_donations(
           character,
-          timezone.now() - timedelta(days=30)
+          timezone.now() - timedelta(days=7)
         )
         amount = int(command_match.group('amount').replace(',', ''))
         signer = Signer()
@@ -486,8 +487,9 @@ How ASEAN Loans Works
 
 To prevent any mishap, please read the following:
 - Donations are <Bold>non-refundable</>
-- You may donate a maximum of {max_donation:,} per 30 days (irl)
-- You have donated {total_donations:,} in the last 30 days (irl)
+- Please do not donate more than your wallet balance! You will end up with negative balance.
+- You may donate a maximum of {max_donation:,} per 7 days (irl)
+- You have donated {total_donations:,} in the last 7 days (irl)
 
 If you wish to proceed, type the command again followed by the verification code:
 <Highlight>/donate {command_match.group('amount')} {verification_code}</>""", player_id=str(player_id))
