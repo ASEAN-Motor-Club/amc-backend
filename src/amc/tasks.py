@@ -241,6 +241,9 @@ async def process_log_event(event: LogEvent, http_client=None, http_client_mod=N
 <Bold>Burger, Pizza, Gift Box, Live Fish</>
 <Money>300%</> (Must be on time)
 
+<Bold>Airline Meal Pallets</>
+<Money>200%</> (Must be on time)
+
 <Bold>12ft Oak Log</>
 <Money>250%</> (Reduces with damage)
 

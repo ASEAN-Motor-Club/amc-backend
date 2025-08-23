@@ -90,6 +90,9 @@ def get_subsidy_for_cargo(cargo):
     case 'Burger_01_Signature' | 'Pizza_01_Premium':
       if cargo.data.get('Net_TimeLeftSeconds', 0) > 0:
         subsidy_factor = 3.0
+    case 'AirlineMealPallet':
+      if cargo.data.get('Net_TimeLeftSeconds', 0) > 0:
+        subsidy_factor = 2.0
     case 'Log_Oak_12ft':
       subsidy_factor = 2.5 * (1.0 - cargo.damage)
     case _:
