@@ -504,7 +504,7 @@ Sorry, the verification code did not match, please try again:
           )
         else:
           try:
-            amount = max(0, min(amount, max_donation - int(total_donations)))
+            amount = max(10_000, min(amount, max_donation - int(total_donations)))
             await player_donation(amount, character)
             await transfer_money(http_client_mod, int(-amount), 'Donation', player_id)
           except Exception as e:
