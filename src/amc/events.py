@@ -238,14 +238,14 @@ async def show_results_popup(http_client, participants, player_id=None):
     await show_popup(http_client, message, player_id=player_id)
     return
 
-  await asyncio.gather(*[
-    show_popup(
+
+  for participant in participants:
+    await show_popup(
       http_client,
       message,
       player_id=participant.character.player.unique_id
     )
-    for participant in participants
-  ])
+    await asyncio.sleep(0.5)
 
 
 async def show_scheduled_event_results_popup(http_client, scheduled_event, player_id=None):
