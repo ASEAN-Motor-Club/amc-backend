@@ -196,6 +196,8 @@ Visit the website & Join the Discord!
 
 <Highlight>/bank</> - See your Bank ASEAN account.
 
+<Highlight>/toggle_ubi</> - Toggle your Universal Basic Income
+
 <Title>Event Commands</>
 
 <Highlight>/events</> - List current and upcoming scheduled events
