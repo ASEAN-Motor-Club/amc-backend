@@ -1,3 +1,4 @@
+import math
 import asyncio
 import discord
 from datetime import timedelta
@@ -6,7 +7,7 @@ from urllib.parse import quote
 from django.conf import settings
 from django.db.models import F, Prefetch, Exists, OuterRef, Window
 from django.db.models.functions import RowNumber
-from amc.mod_server import show_popup
+from amc.mod_server import show_popup, teleport_player
 from amc.game_server import announce
 from amc.models import (
   Character,
@@ -494,5 +495,127 @@ async def staggered_start(http_client_game, http_client_mod, game_event, player_
         "<Large>GO!!!</>",
         player_id=player_info['CharacterId']['UniqueNetId']
       )
+    )
+
+def _rotate_vector_by_quaternion(vector, quat):
+    """
+    Rotates a 3D vector by a quaternion.
+
+    Args:
+        vector (dict): The vector to rotate {'x': float, 'y': float, 'z': float}.
+        quat (dict): The quaternion for rotation {'w': float, 'x': float, 'y': float, 'z': float}.
+
+    Returns:
+        dict: The rotated vector.
+    """
+    # Normalize the quaternion to be safe
+    q_mag = math.sqrt(quat['W']**2 + quat['X']**2 + quat['Y']**2 + quat['Z']**2)
+    if q_mag == 0:
+      return vector # Avoid division by zero
+    qw, qx, qy, qz = quat['W']/q_mag, quat['X']/q_mag, quat['Y']/q_mag, quat['Z']/q_mag
+    
+    # Hamilton product: q * v * q_conjugate
+    # First, q * v
+    w_res = -qx * vector['X'] - qy * vector['Y'] - qz * vector['Z']
+    x_res =  qw * vector['X'] + qy * vector['Z'] - qz * vector['Y']
+    y_res =  qw * vector['Y'] - qx * vector['Z'] + qz * vector['X']
+    z_res =  qw * vector['Z'] + qx * vector['Y'] - qy * vector['X']
+
+    # Then, (q * v) * q_conjugate
+    final_x = w_res * -qx + x_res * qw + y_res * -qz - z_res * -qy
+    final_y = w_res * -qy - x_res * -qz + y_res * qw + z_res * -qx
+    final_z = w_res * -qz + x_res * -qy - y_res * -qx + z_res * qw
+    
+    return {'X': final_x, 'Y': final_y, 'Z': final_z}
+
+
+async def auto_starting_grid(http_client_mod, game_event):
+  async with http_client_mod.get(f'/events/{game_event.guid}') as resp:
+    events = (await resp.json()).get('data', [])
+
+  if not events:
+    raise Exception('Event not found')
+  event = events[0]
+
+  if event['State'] != 1:
+    raise Exception('Event is not in Ready state')
+
+  participants = [
+    player_info
+    for player_info in event['Players']
+  ]
+
+  config = {
+    'lateral_spacing': game_event.race_setup.lateral_spacing,
+    'longitudinal_spacing': game_event.race_setup.longitudinal_spacing,
+    'initial_offset': game_event.race_setup.initial_offset,
+    'pole_side': "right" if game_event.race_setup.pole_side_right else "left",
+    'reverse_starting_direction': game_event.race_setup.reverse_starting_direction,
+  }
+  starting_point = game_event.race_setup.waypoints[0]
+  start_pos = starting_point['Location']
+  start_quat = starting_point['Rotation']
+  lateral_spacing = config.get('lateral_spacing', 600)
+  longitudinal_spacing = config.get('longitudinal_spacing', 1000)
+  initial_offset = config.get('initial_offset', 1000)
+  pole_side = config.get('pole_side', 'right')
+
+  # --- 2. Vector Calculations from Quaternion ---
+  # Define base vectors in a standard coordinate system (e.g., X-Forward, Y-Left, Z-Up)
+  base_forward = {'X': -1, 'Y': 0, 'Z': 0}
+  base_right = {'X': 0, 'Y': -1, 'Z': 0} # Negative Y is right if positive Y is left
+
+  # Rotate these base vectors by the start line's quaternion to get world-space directions
+  forward_vec = _rotate_vector_by_quaternion(base_forward, start_quat)
+  right_vec = _rotate_vector_by_quaternion(base_right, start_quat)
+  
+  # For the output, calculate the effective yaw from the new forward vector
+  yaw_deg = math.degrees(math.atan2(forward_vec['Y'], forward_vec['X']))
+  if config.get('reverse_starting_direction', False):
+    yaw_deg += 180
+
+  pole_side_multiplier = 1 if pole_side == 'right' else -1
+
+  for i, player_info in enumerate(participants):
+    row = i // 2
+    side = 1 if i % 2 == 0 else -1
+
+    # a) Longitudinal offset (how far back from the line)
+    total_longitudinal_offset = initial_offset + (row * longitudinal_spacing)
+    longitudinal_displacement = {
+      'X': -total_longitudinal_offset * forward_vec['X'],
+      'Y': -total_longitudinal_offset * forward_vec['Y'],
+      'Z': -total_longitudinal_offset * forward_vec['Z']
+    }
+
+    # b) Lateral offset (how far to the side of the line)
+    total_lateral_offset = side * pole_side_multiplier * (lateral_spacing / 2)
+    lateral_displacement = {
+      'X': total_lateral_offset * right_vec['X'],
+      'Y': total_lateral_offset * right_vec['Y'],
+      'Z': total_lateral_offset * right_vec['Z'] # Account for roll
+    }
+
+    # --- 4. Final Position Calculation ---
+    final_x = start_pos['X'] + longitudinal_displacement['X'] + lateral_displacement['X']
+    final_y = start_pos['Y'] + longitudinal_displacement['Y'] + lateral_displacement['Y']
+    final_z = start_pos['Z'] + longitudinal_displacement['Z'] + lateral_displacement['Z']
+
+    player_location = {
+      'X': final_x,
+      'Y': final_y,
+      'Z': final_z + 50,
+    }
+    player_rotation = {
+      'Roll': 0,
+      'Pitch': 0,
+      'Yaw': yaw_deg
+    }
+    await asyncio.sleep(0.2)
+    await teleport_player(
+      http_client_mod,
+      player_info['CharacterId']['UniqueNetId'],
+      player_location,
+      player_rotation
     )
 

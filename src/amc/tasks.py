@@ -43,13 +43,16 @@ from amc.models import (
   TeleportPoint,
 )
 from amc.game_server import announce
-from amc.mod_server import show_popup, transfer_money, teleport_player, get_player
+from amc.mod_server import (
+  show_popup, transfer_money, teleport_player, get_player,
+)
 from amc.auth import verify_player
 from amc.mailbox import send_player_messages
 from amc.events import (
   setup_event,
   show_scheduled_event_results_popup,
   staggered_start,
+  auto_starting_grid,
 )
 from amc.utils import format_in_local_tz, format_timedelta
 from amc.subsidies import DEFAULT_SAVING_RATE, set_aside_player_savings
@@ -263,7 +266,8 @@ async def process_log_event(event: LogEvent, http_client=None, http_client_mod=N
           character=character, 
           prompt="subsidies",
         )
-      if command_match := re.match(r"/staggered_start (?P<delay>\d+)", message):
+
+      if command_match := re.match(r"/staggered_start\s*(?P<delay>\d+)$", message):
         active_event = await (GameEvent.objects
           .filter(
             Exists(GameEventCharacter.objects.filter(
@@ -286,6 +290,28 @@ async def process_log_event(event: LogEvent, http_client=None, http_client_mod=N
           ))
         except Exception as e:
           asyncio.create_task(show_popup(http_client_mod, f"Failed: {e}", player_id=str(player_id)))
+
+      if command_match := re.match(r"/auto_grid$", message):
+        active_event = await (GameEvent.objects
+          .filter(
+            Exists(GameEventCharacter.objects.filter(
+              game_event=OuterRef('pk'),
+              character=character
+            ))
+          )
+          .select_related('race_setup')
+          .alatest('last_updated')
+        )
+        if not active_event:
+          asyncio.create_task(show_popup(http_client_mod, "No active events", player_id=str(player_id)))
+        try:
+          asyncio.create_task(auto_starting_grid(
+            http_client_mod,
+            active_event,
+          ))
+        except Exception as e:
+          asyncio.create_task(show_popup(http_client_mod, f"Failed: {e}", player_id=str(player_id)))
+
       if command_match := re.match(r"/results", message):
         active_event = await ScheduledEvent.objects.filter_active_at(timestamp).select_related('race_setup').afirst()
         if not active_event:

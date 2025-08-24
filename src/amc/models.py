@@ -195,6 +195,11 @@ class RaceSetup(models.Model):
   config = models.JSONField(null=True, blank=True)
   hash = models.CharField(max_length=200, unique=True)
   name = models.CharField(max_length=200, null=True)
+  lateral_spacing = models.IntegerField(default=600, help_text='Horizonal spacing between starting grid')
+  longitudinal_spacing = models.IntegerField(default=1000, help_text='Vertical spacing between starting grid')
+  initial_offset = models.IntegerField(default=1000, help_text='Gap between starting line and first row')
+  pole_side_right = models.BooleanField(default=True, help_text='If true, the first position is on the right side')
+  reverse_starting_direction = models.BooleanField(default=False, help_text='If true, the starting grid will be on the opposite side of the starting line')
 
   @staticmethod
   def calculate_hash(race_setup):
