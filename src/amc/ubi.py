@@ -10,8 +10,8 @@ from amc.mod_server import transfer_money
 from amc_finance.services import send_fund_to_player_wallet
 
 TASK_FREQUENCY = 20 # minutes
-ACTIVE_GRANT_AMOUNT = 20_000 / (60 / TASK_FREQUENCY)
-AFK_GRANT_AMOUNT = 5_000 / (60 / TASK_FREQUENCY)
+ACTIVE_GRANT_AMOUNT = 18_000 / (60 / TASK_FREQUENCY)
+AFK_GRANT_AMOUNT = 6_000 / (60 / TASK_FREQUENCY)
 MAX_LEVEL = 400
 
 async def handout_ubi(ctx):
