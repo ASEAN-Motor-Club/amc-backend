@@ -4,7 +4,6 @@ from django.contrib import admin
 from django.contrib.gis.db import models
 from django.db.models import Q, F, Sum, Max, Window
 from django.db.models.functions import RowNumber, Lead, Lag
-from django.contrib.gis.db.models.functions import Distance
 from decimal import Decimal
 from django.core.validators import MinValueValidator, MaxValueValidator
 from django.contrib.postgres.fields import ArrayField
@@ -134,6 +133,8 @@ class Character(models.Model):
       MaxValueValidator(Decimal('1.00'))
     ]
   )
+  reject_ubi = models.BooleanField(default=False)
+  ubi_multiplier = models.FloatField(default=1.0)
 
   objects = CharacterManager.from_queryset(CharacterQuerySet)()
 

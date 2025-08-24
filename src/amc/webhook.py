@@ -112,7 +112,7 @@ async def process_event(event, player):
           payment=cargo['Net_Payment']['BaseValue'],
           weight=cargo['Net_Weight'],
           damage=cargo['Net_Damage'],
-          data=event['data'],
+          data=cargo,
         )
         for cargo in event['data']['Cargos']
       ]
@@ -158,7 +158,7 @@ async def process_event(event, player):
             'amount': contract['Amount'],
             'payment': contract['CompletionPayment']['BaseValue'],
             'cost': contract['Cost']['BaseValue'],
-            'data': event['data']
+            'data': contract
           },
         )
       else:

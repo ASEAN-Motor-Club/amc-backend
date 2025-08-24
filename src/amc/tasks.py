@@ -437,6 +437,22 @@ async def process_log_event(event: LogEvent, http_client=None, http_client_mod=N
             show_popup(http_client_mod, f"<Title>Set savings rate failed</>\n\n{e}", player_id=str(player_id))
           )
 
+      elif command_match := re.match(r"/toggle_ubi$", message):
+        try:
+          character.reject_ubi = not character.reject_ubi
+          await character.asave(update_fields=['reject_ubi'])
+          if character.reject_ubi:
+            message = "You will no longer receive a universal basic income"
+          else:
+            message = "You will start to receive a universal basic income"
+          asyncio.create_task(
+            show_popup(http_client_mod, message, player_id=str(player_id))
+          )
+        except Exception as e:
+          asyncio.create_task(
+            show_popup(http_client_mod, f"<Title>Toggle UBI failed</>\n\n{e}", player_id=str(player_id))
+          )
+
       elif command_match := re.match(r"/bank", message):
         balance = await get_player_bank_balance(character)
         loan_balance = await get_player_loan_balance(character)
