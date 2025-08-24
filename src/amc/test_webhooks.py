@@ -1,9 +1,11 @@
 import time
 from django.test import TestCase
+from django.contrib.gis.geos import Point
 from asgiref.sync import sync_to_async
 from amc.factories import PlayerFactory
 from amc.webhook import process_events, process_event
 from amc.models import (
+  DeliveryPoint,
   ServerCargoArrivedLog,
   ServerPassengerArrivedLog,
   ServerTowRequestArrivedLog,
@@ -12,6 +14,18 @@ from amc.models import (
 class ProcessEventTests(TestCase):
   async def test_process_event(self):
     player = await sync_to_async(PlayerFactory)()
+    mine = await DeliveryPoint.objects.acreate(
+      guid="1",
+      name="mine",
+      type="mine",
+      coord=Point(0,0,0),
+    )
+    factory = await DeliveryPoint.objects.acreate(
+      guid="2",
+      name="factory",
+      type="factory",
+      coord=Point(1000,1000,0),
+    )
     event = {
       'hook': "/Script/MotorTown.MotorTownPlayerController:ServerCargoArrived",
       'timestamp': int(time.time() * 1000),
@@ -25,6 +39,8 @@ class ProcessEventTests(TestCase):
             },
             'Net_Weight': 100.0,
             'Net_Damage': 0.0,
+            'Net_SenderAbsoluteLocation': {'X': 0, 'Y': 0, 'Z': 0},
+            'Net_DestinationLocation': {'X': 1000, 'Y': 1000, 'Z': 0},
           }
         ],
         'PlayerId': str(player.unique_id),
@@ -35,13 +51,15 @@ class ProcessEventTests(TestCase):
       await ServerCargoArrivedLog.objects.acount(),
       1
     )
-    delivery = await ServerCargoArrivedLog.objects.select_related('player').afirst()
+    delivery = await ServerCargoArrivedLog.objects.select_related('player', 'sender_point', 'destination_point').afirst()
     self.assertEqual(delivery.payment, 10_000)
     self.assertEqual(payment, 10_000)
     self.assertEqual(delivery.cargo_key, 'oranges')
     self.assertEqual(delivery.weight, 100.0)
     self.assertEqual(delivery.damage, 0.0)
     self.assertEqual(delivery.player, player)
+    self.assertEqual(delivery.sender_point, mine)
+    self.assertEqual(delivery.destination_point, factory)
 
   async def test_taxi(self):
     player = await sync_to_async(PlayerFactory)()
@@ -54,6 +72,8 @@ class ProcessEventTests(TestCase):
           'Net_Payment': 10_000,
           'Net_bArrived': True,
           'Net_Distance': 10_000,
+          'Net_SenderAbsoluteLocation': {'X': 0, 'Y': 0, 'Z': 0},
+          'Net_DestinationLocation': {'X': 1000, 'Y': 1000, 'Z': 0},
         },
         'PlayerId': str(player.unique_id),
       }
@@ -89,8 +109,8 @@ class ProcessEventTests(TestCase):
     )
     log = await ServerTowRequestArrivedLog.objects.select_related('player').afirst()
     self.assertEqual(log.payment, 10_000)
-    self.assertEqual(payment, 27_000)
-    self.assertEqual(subsidy, 17_000)
+    self.assertEqual(payment, 22_000)
+    self.assertEqual(subsidy, 12_000)
     self.assertEqual(log.player, player)
 
 class ProcessEventsTests(TestCase):
@@ -110,6 +130,8 @@ class ProcessEventsTests(TestCase):
             },
             'Net_Weight': 100.0,
             'Net_Damage': 0.0,
+            'Net_SenderAbsoluteLocation': {'X': 0, 'Y': 0, 'Z': 0},
+            'Net_DestinationLocation': {'X': 1000, 'Y': 1000, 'Z': 0},
           }
         ],
         'PlayerId': str(player1.unique_id),
@@ -127,6 +149,8 @@ class ProcessEventsTests(TestCase):
             },
             'Net_Weight': 100.0,
             'Net_Damage': 0.0,
+            'Net_SenderAbsoluteLocation': {'X': 0, 'Y': 0, 'Z': 0},
+            'Net_DestinationLocation': {'X': 1000, 'Y': 1000, 'Z': 0},
           }
         ],
         'PlayerId': str(player1.unique_id),
@@ -144,6 +168,8 @@ class ProcessEventsTests(TestCase):
             },
             'Net_Weight': 100.0,
             'Net_Damage': 0.0,
+            'Net_SenderAbsoluteLocation': {'X': 0, 'Y': 0, 'Z': 0},
+            'Net_DestinationLocation': {'X': 1000, 'Y': 1000, 'Z': 0},
           }
         ],
         'PlayerId': str(player2.unique_id),

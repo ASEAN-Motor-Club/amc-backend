@@ -755,6 +755,8 @@ class ServerCargoArrivedLog(models.Model):
   payment = models.PositiveBigIntegerField()
   weight = models.FloatField(null=True, blank=True)
   damage = models.FloatField(null=True, blank=True)
+  sender_point = models.ForeignKey('DeliveryPoint', models.SET_NULL, null=True, blank=True, related_name='deliveries_out')
+  destination_point = models.ForeignKey('DeliveryPoint', models.SET_NULL, null=True, blank=True, related_name='deliveries_in')
   data = models.JSONField(null=True, blank=True)
 
 

@@ -2,6 +2,7 @@ import asyncio
 import itertools
 from datetime import datetime
 from django.utils import timezone
+from django.contrib.gis.geos import Point
 from django.db.models import F
 from amc.mod_server import get_webhook_events, show_popup
 from amc.subsidies import (
@@ -18,6 +19,7 @@ from amc.models import (
   ServerSignContractLog,
   ServerPassengerArrivedLog,
   ServerTowRequestArrivedLog,
+  DeliveryPoint,
 )
 
 
@@ -96,6 +98,33 @@ async def process_events(events, http_client_mod=None):
         on_player_profit(player, total_payment, http_client_mod)
       )
 
+async def process_cargo_log(cargo, player, timestamp):
+  sender_coord_raw = cargo['Net_SenderAbsoluteLocation']
+  sender_coord = Point(
+    sender_coord_raw['X'],
+    sender_coord_raw['Y'],
+    sender_coord_raw['Z'],
+  ).buffer(1)
+  destination_coord_raw = cargo['Net_DestinationLocation']
+  destination_coord = Point(
+    destination_coord_raw['X'],
+    destination_coord_raw['Y'],
+    destination_coord_raw['Z'],
+  ).buffer(1)
+  sender = await DeliveryPoint.objects.filter(coord__coveredby=sender_coord).afirst()
+  destination = await DeliveryPoint.objects.filter(coord__coveredby=destination_coord).afirst()
+  return ServerCargoArrivedLog(
+    timestamp=timestamp,
+    player=player,
+    cargo_key=cargo['Net_CargoKey'],
+    payment=cargo['Net_Payment']['BaseValue'],
+    weight=cargo['Net_Weight'],
+    damage=cargo['Net_Damage'],
+    sender_point=sender,
+    destination_point=destination,
+    data=cargo,
+  )
+
 async def process_event(event, player):
   total_payment = 0
   subsidy = 0
@@ -104,18 +133,10 @@ async def process_event(event, player):
 
   match event['hook']:
     case "/Script/MotorTown.MotorTownPlayerController:ServerCargoArrived":
-      logs = [
-        ServerCargoArrivedLog(
-          timestamp=timestamp,
-          player=player,
-          cargo_key=cargo['Net_CargoKey'],
-          payment=cargo['Net_Payment']['BaseValue'],
-          weight=cargo['Net_Weight'],
-          damage=cargo['Net_Damage'],
-          data=cargo,
-        )
+      logs = await asyncio.gather(*[
+        process_cargo_log(cargo, player, timestamp)
         for cargo in event['data']['Cargos']
-      ]
+      ])
       await ServerCargoArrivedLog.objects.abulk_create(logs)
       subsidy = get_subsidy_for_cargos(logs)
       total_payment += sum([log.payment for log in logs]) + subsidy
