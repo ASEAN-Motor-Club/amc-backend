@@ -191,6 +191,7 @@ class EventsCog(commands.Cog):
     team_standings_str = '\n'.join([
       f"{str(rank).rjust(2)}. {s['team__tag'].ljust(6)} {s['team__name'].ljust(30)} {str(s['total_points']).rjust(3)}"
       for rank, s in enumerate(team_standings, start=1)
+      if s['total_points'] > 0
     ])
     embed.add_field(
       name="Team Standings",
@@ -200,6 +201,7 @@ class EventsCog(commands.Cog):
     personal_standings_str = '\n'.join([
       f"{str(rank).rjust(2)}. {s['character_name'].ljust(16)} {str(s['total_points']).rjust(3)}"
       for rank, s in enumerate(personal_standings, start=1)
+      if s['total_points'] > 0
     ])
     embed.add_field(
       name="Personal Standings",
