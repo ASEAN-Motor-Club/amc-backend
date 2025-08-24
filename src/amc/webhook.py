@@ -23,9 +23,16 @@ from amc.models import (
 )
 
 
-async def on_player_profit(player, total_payment, session):
-  loan_repayment = await repay_loan_for_profit(player, total_payment, session)
-  await set_aside_player_savings(player, total_payment - loan_repayment, session)
+async def on_player_profits(player_profits, session):
+  for player, total_subsidy, total_payment in player_profits:
+    if total_subsidy != 0:
+      await subsidise_player(total_subsidy, player, session)
+      await asyncio.sleep(0.2)
+    loan_repayment = await repay_loan_for_profit(player, total_payment, session)
+    savings = total_payment - loan_repayment
+    if savings > 0:
+      await set_aside_player_savings(player, savings, session)
+      await asyncio.sleep(0.2)
 
 
 async def monitor_webhook(ctx):
@@ -69,6 +76,7 @@ async def process_events(events, http_client_mod=None):
   sorted_player_events = sorted(aggregated_events, key=key_by_player)
   grouped_player_events = itertools.groupby(sorted_player_events, key=key_by_player)
 
+  player_profits = []
   for player_id, es in grouped_player_events:
     try:
       player = await Player.objects.aget(unique_id=player_id)
@@ -89,14 +97,12 @@ async def process_events(events, http_client_mod=None):
         )
         raise e
 
-    if total_subsidy != 0 and http_client_mod:
-      asyncio.create_task(
-        subsidise_player(total_subsidy, player, http_client_mod)
-      )
-    if total_payment != 0 and http_client_mod:
-      asyncio.create_task(
-        on_player_profit(player, total_payment, http_client_mod)
-      )
+    player_profits.append((player, total_subsidy, total_payment))
+
+  if http_client_mod:
+    asyncio.create_task(
+      on_player_profits(player_profits, http_client_mod)
+    )
 
 async def process_cargo_log(cargo, player, timestamp):
   sender_coord_raw = cargo['Net_SenderAbsoluteLocation']
