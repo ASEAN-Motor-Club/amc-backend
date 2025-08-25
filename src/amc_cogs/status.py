@@ -23,9 +23,6 @@ class StatusCog(commands.Cog):
     """
     client = self.bot
 
-    if not client.is_ready():
-      await client.wait_until_ready()
-
     channel = client.get_channel(self.status_channel_id)
     if channel is None:
       print("Channel not found.")
@@ -55,4 +52,8 @@ class StatusCog(commands.Cog):
         await self.last_embed_message.edit(embed=embed)
       except discord.NotFound:
         self.last_embed_message = await channel.send(embed=embed)
+
+  @update_status_embed.before_loop
+  async def before_update_status_embed(self):
+    await self.bot.wait_until_ready()
 
