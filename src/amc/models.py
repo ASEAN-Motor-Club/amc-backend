@@ -744,6 +744,9 @@ class DeliveryPoint(models.Model):
   data = models.JSONField(null=True, blank=True)
   last_updated = models.DateTimeField(editable=False, auto_now=True)
 
+  def __str__(self):
+    return self.name
+
 
 @final
 class CharacterAFKReminder(models.Model):

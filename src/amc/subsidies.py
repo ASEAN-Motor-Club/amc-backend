@@ -85,7 +85,7 @@ def get_subsidy_for_cargos(cargos):
 def get_subsidy_for_cargo(cargo):
   subsidy_factor = 0.0
   match cargo.cargo_key:
-    case 'GiftBox_01' | 'LiveFish_01':
+    case 'LiveFish_01':
       subsidy_factor = 3.0
     case 'Burger_01_Signature' | 'Pizza_01_Premium':
       if cargo.data.get('Net_TimeLeftSeconds', 0) > 0:
@@ -95,13 +95,22 @@ def get_subsidy_for_cargo(cargo):
         subsidy_factor = 2.0
     case 'Log_Oak_12ft':
       subsidy_factor = 2.5 * (1.0 - cargo.damage)
+    case 'WoodPlank_14ft_5t' | 'Fuel':
+      try:
+        match cargo.destination_point.name:
+          case 'Gwangjin Iron Ore Mine' | 'Gwangjin Coal' | 'Migeum Oak 1' | 'Migeum Oak 2' | 'Migeum Oak 3':
+            subsidy_factor = 2.5
+          case _:
+            pass
+      except Exception:
+        pass
     case _:
       subsidy_factor = 0.0
   return int(int(cargo.payment) * subsidy_factor), subsidy_factor
 
 def get_passenger_subsidy(passenger):
   match passenger.passenger_type:
-    case ServerPassengerArrivedLog.PassengerType.Taxi:
+    case ServerPassengerArrivedLog.PassengerType.Taxi | ServerPassengerArrivedLog.PassengerType.Ambulance:
       return 2_000 + passenger.payment * 0.5
     case _:
       return 0

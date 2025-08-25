@@ -241,24 +241,20 @@ async def process_log_event(event: LogEvent, http_client=None, http_client_mod=N
         )
       if command_match := re.match(r"/subsidies", message):
         subsidies_text = """<Title>ASEAN Server Subsidies</>
-<Bold>Burger, Pizza, Gift Box, Live Fish</>
-<Money>300%</> (Must be on time)
 
-<Bold>Airline Meal Pallets</>
-<Money>200%</> (Must be on time)
+<Bold>Depot Restocking</> <Money>10,000</> coins
 
-<Bold>12ft Oak Log</>
-<Money>250%</> (Reduces with damage)
-
-<Bold>Depot Restocking</>
-<Money>10,000</> coins
+<Bold>Burger, Pizza, Live Fish</> <Money>300%</> (Must be on time)
+<Bold>Airline Meal Pallets</> - <Money>200%</> (Must be on time)
+<Bold>12ft Oak Log</> <Money>250%</> (Reduces with damage)
+<Bold>Planks & Fuel</> <Money>250%</>
+<Secondary>ONLY to Gwangjin Coal/Iron mines, Migeum Oak 1/2/3</Secondary>
 
 <Bold>Towing/Wrecker Jobs</>
 <Money>2,000 + 50%</> - Normal
 <Money>2,000 + 100%</> - Flipped
 
-<Bold>Taxi & Ambulance</>
-<Money>2,000 + 50%</>
+<Bold>Taxi & Ambulance</> <Money>2,000 + 50%</>
 """
         asyncio.create_task(show_popup(http_client_mod, subsidies_text, player_id=str(player_id)))
         await BotInvocationLog.objects.acreate(
@@ -354,7 +350,7 @@ async def process_log_event(event: LogEvent, http_client=None, http_client_mod=N
           character=character, 
           prompt="/setup_event",
         )
-      if command_match := re.match(r"/teleport\s*(?P<name>.*)", message):
+      if command_match := re.match(r"/(teleport|tp)\s*(?P<name>.*)", message):
         name = command_match.group('name')
         player_info = await get_player(http_client_mod, str(player.unique_id))
         if not player_info or not player_info.get('bIsAdmin'):
