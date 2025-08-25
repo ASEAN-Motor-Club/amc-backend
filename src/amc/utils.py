@@ -1,3 +1,4 @@
+import asyncio
 from datetime import datetime, timedelta
 from zoneinfo import ZoneInfo
 from django.utils import timezone
@@ -122,4 +123,8 @@ def get_timespan(days_ago: int = 0, num_days: int = 1) -> tuple[datetime, dateti
     end_time = start_time + timedelta(days=num_days)
 
     return start_time, end_time
+
+async def delay(coro, seconds):
+  await asyncio.sleep(seconds)
+  await coro
 

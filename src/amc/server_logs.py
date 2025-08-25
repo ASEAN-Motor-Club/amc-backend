@@ -105,6 +105,11 @@ class AnnouncementLogEvent(BaseLogEvent):
   message: str
 
 @dataclass(frozen=True)
+class ServerStartedLogEvent(BaseLogEvent):
+  """Represents a player logging out."""
+  version: str
+
+@dataclass(frozen=True)
 class SecurityAlertLogEvent(BaseLogEvent):
   """Represents a player logging out."""
   player_name: str
@@ -279,6 +284,12 @@ def parse_log_content(timestamp, content):
       player_name=pattern_match.group('player_name'),
       player_id=int(pattern_match.group('player_id')),
       message=pattern_match.group('message'),
+    )
+
+  if pattern_match := re.match(r"DedicatedServer is started. version: (?P<version>.+)", content):
+    return ServerStartedLogEvent(
+      timestamp=timestamp,
+      version=pattern_match.group('version'),
     )
 
   return UnknownLogEntry(

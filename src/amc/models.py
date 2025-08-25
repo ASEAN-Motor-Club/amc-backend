@@ -21,6 +21,7 @@ from amc.server_logs import (
   PlayerBoughtVehicleLogEvent,
   PlayerSoldVehicleLogEvent,
 )
+from amc.mod_server import spawn_dealership
 
 User = get_user_model()
 
@@ -828,3 +829,18 @@ class TeleportPoint(models.Model):
       )
     ]
 
+@final
+class VehicleDealership(models.Model):
+  vehicle_key = models.CharField(max_length=100, null=True)
+  location = models.PointField(srid=0, dim=3)
+  yaw = models.FloatField()
+  spawn_on_restart = models.BooleanField(default=True)
+  notes = models.TextField(blank=True)
+
+  async def spawn(self, http_client_mod):
+    await spawn_dealership(
+      http_client_mod,
+      self.vehicle_key,
+      {'X': self.location.x, 'Y': self.location.y, 'Z': self.location.z},
+      self.yaw
+    )

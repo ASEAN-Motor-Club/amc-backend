@@ -1,6 +1,8 @@
+import aiohttp
 from asgiref.sync import async_to_sync
 from django.contrib import admin
 from django.utils import timezone
+from django.conf import settings
 from django.db.models import F, Count, Window
 from django.db.models.functions import RowNumber
 from django.contrib.postgres.aggregates import ArrayAgg
@@ -31,6 +33,7 @@ from .models import (
   ServerPassengerArrivedLog,
   ServerTowRequestArrivedLog,
   TeleportPoint,
+  VehicleDealership
 )
 from amc_finance.services import send_fund_to_player
 
@@ -362,4 +365,19 @@ class TeleportPointAdmin(admin.ModelAdmin):
   list_select_related = ['character']
   search_fields = ['character__name', 'name', 'character__player__unique_id']
   autocomplete_fields = ['character']
+
+@admin.register(VehicleDealership)
+class VehicleDealershipAdmin(admin.ModelAdmin):
+  list_display = ['id', 'vehicle_key', 'location', 'spawn_on_restart', 'notes']
+  search_fields = ['vehicle_key', 'notes']
+
+  actions = ['spawn']
+
+  @admin.action(description="Spawn Dealerships")
+  def spawn(self, request, queryset):
+    async def spawn_dealerships():
+      http_client_mod = aiohttp.ClientSession(base_url=settings.MOD_SERVER_API_URL)
+      async for vd in queryset:
+        await vd.spawn(http_client_mod)
+    async_to_sync(spawn_dealerships)()
 

@@ -25,6 +25,7 @@ from amc.server_logs import (
   CompanyRemovedLogEvent,
   AnnouncementLogEvent,
   SecurityAlertLogEvent,
+  ServerStartedLogEvent,
   UnknownLogEntry,
 )
 from amc.models import (
@@ -41,6 +42,7 @@ from amc.models import (
   GameEventCharacter,
   GameEvent,
   TeleportPoint,
+  VehicleDealership,
 )
 from amc.game_server import announce
 from amc.mod_server import (
@@ -54,7 +56,7 @@ from amc.events import (
   staggered_start,
   auto_starting_grid,
 )
-from amc.utils import format_in_local_tz, format_timedelta
+from amc.utils import format_in_local_tz, format_timedelta, delay
 from amc.subsidies import DEFAULT_SAVING_RATE, set_aside_player_savings
 from amc_finance.services import (
   register_player_withdrawal,
@@ -754,6 +756,14 @@ The loan amount has been deposited into your wallet. You can view your loan deta
           raise ValueError('Unknown level type')
       await Character.objects.filter(name=player_name, player__unique_id=player_id).aupdate(
         **{field_name: level_value}
+      )
+
+    case ServerStartedLogEvent(timestamp, _version):
+      async def spawn_dealerships():
+        async for vd in VehicleDealership.objects.filter(spawn_on_restart=True):
+          await vd.spawn(http_client_mod)
+      asyncio.create_task(
+        delay(spawn_dealerships(), 60)
       )
 
     case UnknownLogEntry():
