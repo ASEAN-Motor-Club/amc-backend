@@ -96,14 +96,25 @@ def get_subsidy_for_cargo(cargo):
     case 'Log_Oak_12ft':
       subsidy_factor = 2.5 * (1.0 - cargo.damage)
     case 'WoodPlank_14ft_5t' | 'Fuel':
-      try:
-        match cargo.destination_point.name:
-          case 'Gwangjin Iron Ore Mine' | 'Gwangjin Coal' | 'Migeum Oak 1' | 'Migeum Oak 2' | 'Migeum Oak 3':
-            subsidy_factor = 2.5
-          case _:
-            pass
-      except Exception:
-        pass
+      sender_name = None
+      destination_name = None
+      if cargo.sender_point:
+        sender_name = cargo.sender_point.name
+      if cargo.destination_point:
+        destination_name = cargo.destination_point.name
+      match sender_name:
+        case 'Gwangjin Plank Storage':
+          match destination_name:
+            case 'Gwangjin Iron Ore Mine' | 'Gwangjin Coal' | 'Migeum Oak 1' | 'Migeum Oak 2' | 'Migeum Oak 3':
+              subsidy_factor = 2.5
+        case 'Gwangjin Fuel Storage':
+          match destination_name:
+            case 'Gwangjin Iron Ore Mine' | 'Gwangjin Coal':
+              subsidy_factor = 1.5
+        case 'Migeum Log Warehouse':
+          match destination_name:
+            case 'Migeum Oak 1' | 'Migeum Oak 2' | 'Migeum Oak 3':
+              subsidy_factor = 1.5
     case _:
       subsidy_factor = 0.0
   return int(int(cargo.payment) * subsidy_factor), subsidy_factor

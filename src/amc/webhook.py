@@ -204,21 +204,35 @@ async def process_event(event, player):
 
     case "/Script/MotorTown.MotorTownPlayerController:ServerPassengerArrived":
       passenger = event['data']['Passenger']
-      log = await ServerPassengerArrivedLog.objects.acreate(
+      flag = passenger.get('Net_PassengerFlags', 0)
+
+      base_payment = passenger['Net_Payment']
+      log = ServerPassengerArrivedLog(
         timestamp=timestamp,
         player=player,
         passenger_type=passenger['Net_PassengerType'],
         distance=passenger['Net_Distance'],
-        payment=passenger['Net_Payment'],
+        payment=base_payment,
         arrived=passenger['Net_bArrived'],
+        comfort=bool(flag & 1),
+        urgent=bool(flag & 2),
+        limo=bool(flag & 4),
+        offroad=bool(flag & 8),
+        comfort_rating=passenger['Net_LCComfortSatisfaction'],
+        urgent_rating=passenger['Net_TimeLimitPoint'],
         data=passenger,
       )
-      match log.passenger_type:
-        case ServerPassengerArrivedLog.PassengerType.Taxi | ServerPassengerArrivedLog.PassengerType.Ambulance:
-          subsidy = get_passenger_subsidy(log)
-          total_payment += log.payment + subsidy
-        case _:
-          pass
+      if log.comfort:
+        bonus_per_star = 0.2
+        if log.limo:
+          bonus_per_star = bonus_per_star * 1.3
+        log.payment += base_payment * log.comfort_rating * bonus_per_star 
+      if log.urgent:
+        log.payment += base_payment * log.urgent_rating * 0.3
+      await log.asave()
+
+      subsidy = get_passenger_subsidy(log)
+      total_payment += log.payment + subsidy
 
     case "/Script/MotorTown.MotorTownPlayerController:ServerTowRequestArrived":
       tow_request = event['data']['TowRequest']

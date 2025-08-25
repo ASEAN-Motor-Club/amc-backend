@@ -246,17 +246,20 @@ async def process_log_event(event: LogEvent, http_client=None, http_client_mod=N
 
 <Bold>Depot Restocking</> <Money>10,000</> coins
 
-<Bold>Burger, Pizza, Live Fish</> <Money>300%</> (Must be on time)
+<Bold>Burger, Pizza, Live Fish</> - <Money>300%</> (Must be on time)
 <Bold>Airline Meal Pallets</> - <Money>200%</> (Must be on time)
-<Bold>12ft Oak Log</> <Money>250%</> (Reduces with damage)
-<Bold>Planks & Fuel</> <Money>250%</>
-<Secondary>ONLY to Gwangjin Coal/Iron mines, Migeum Oak 1/2/3</Secondary>
+<Bold>12ft Oak Log</> - <Money>250%</> (Reduces with damage)
+<Bold>Planks</> - <Money>250%</>
+<Secondary>ONLY from Gwangjin Plank Storage to Gwangjin Coal/Iron mines, Migeum Oak 1/2/3</>
+<Bold>Fuel</> - <Money>150%</>
+<Secondary>ONLY from Migeum Log Warehouse to Migeum Oak 1/2/3</>
+<Secondary>ONLY from Gwangjin Fuel Storage to Gwangjin Coal/Iron mines</>
 
 <Bold>Towing/Wrecker Jobs</>
-<Money>2,000 + 50%</> - Normal
-<Money>2,000 + 100%</> - Flipped
+Normal - <Money>2,000 + 50%</>
+Flipped - <Money>2,000 + 100%</>
 
-<Bold>Taxi & Ambulance</> <Money>2,000 + 50%</>
+<Bold>Taxi & Ambulance</> - <Money>2,000 + 50%</>
 """
         asyncio.create_task(show_popup(http_client_mod, subsidies_text, player_id=str(player_id)))
         await BotInvocationLog.objects.acreate(

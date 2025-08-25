@@ -798,6 +798,12 @@ class ServerPassengerArrivedLog(models.Model):
   distance = models.FloatField()
   payment = models.PositiveIntegerField()
   arrived = models.BooleanField(default=True)
+  comfort = models.BooleanField(null=True)
+  urgent = models.BooleanField(null=True)
+  limo = models.BooleanField(null=True)
+  offroad = models.BooleanField(null=True)
+  comfort_rating = models.IntegerField(null=True)
+  urgent_rating = models.IntegerField(null=True)
   data = models.JSONField(null=True, blank=True)
 
 
