@@ -8,7 +8,7 @@ from amc.models import CharacterLocation
 from amc_finance.models import Account, JournalEntry, LedgerEntry
 
 def get_character_max_loan(character):
-  return 10_000 + ((character.driver_level * 5_000) if character.driver_level else 0)
+  return 10_000 + ((character.driver_level * 3_000) if character.driver_level else 0) + ((character.driver_level * 3_000) if character.truck_level else 0)
 
 async def get_player_bank_balance(character):
   account, _ = await Account.objects.aget_or_create(
@@ -129,9 +129,26 @@ async def register_player_withdrawal(amount, character, player):
     ]
   )
 
-LOAN_INTEREST_RATE = 0.1
+LOAN_INTEREST_RATES = [0.1, 0.2, 0.3]
+
+def calc_loan_fee(amount, character):
+  max_loan = get_character_max_loan(character)
+  threshold = 0
+  fee = 0
+  for i, interest_rate in enumerate(LOAN_INTEREST_RATES, start=1):
+    prev_threshold = threshold
+    threshold += max_loan / 2 ** i
+    amount_under_threshold = min(max(0, amount - prev_threshold), threshold - prev_threshold)
+    if amount_under_threshold > 0:
+      fee += amount_under_threshold * interest_rate
+
+  if amount > threshold:
+    fee += (amount - threshold) * (interest_rate)
+  return int(fee)
+
 async def register_player_take_loan(amount, character):
-  principal = Decimal(amount) * Decimal(1 + LOAN_INTEREST_RATE)
+  fee = calc_loan_fee(amount, character)
+  principal = Decimal(amount) + Decimal(fee)
 
   loan_account, _ = await Account.objects.aget_or_create(
     account_type=Account.AccountType.ASSET,
@@ -182,7 +199,7 @@ async def register_player_take_loan(amount, character):
       },
     ]
   )
-  return principal, principal - amount
+  return principal, fee
 
 
 async def register_player_repay_loan(amount, character):

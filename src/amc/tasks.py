@@ -65,6 +65,7 @@ from amc_finance.services import (
   get_player_bank_balance,
   get_player_loan_balance,
   get_character_max_loan,
+  calc_loan_fee,
   get_character_total_donations,
   player_donation,
   send_fund_to_player_wallet,
@@ -569,13 +570,47 @@ Sorry, the verification code did not match, please try again:
             asyncio.create_task(
               show_popup(http_client_mod, f"<Title>Withdrawal failed</>\n\n{e}", player_id=str(player_id))
             )
-      elif command_match := re.match(r"/loan (?P<amount>\d+)", message):
+      elif command_match := re.match(r"/loan\s*(?P<amount>[\d,]+)\s*(?P<verification_code>\S*)", message):
         loan_balance = await get_player_loan_balance(character)
+        max_loan = get_character_max_loan(character)
         amount = max(min(
-          int(command_match.group('amount')),
-          get_character_max_loan(character) - loan_balance
+          int(command_match.group('amount').replace(',', '')),
+          max_loan - loan_balance
         ), 0)
-        if amount > 0:
+        fee = calc_loan_fee(amount, character)
+
+        signer = Signer()
+        signed_obj = signer.sign((amount, character.id))
+        verification_code = signed_obj[-4:]
+
+        input_verification_code = command_match.group('verification_code')
+        if not input_verification_code:
+          asyncio.create_task(
+            show_popup(http_client_mod, f"""\
+<Title>Taking out a loan</>
+
+Based on your driving and trucking level, the fee for your loan would be:
+<Money>{fee:,}</>
+
+The total amount you will need to repay is:
+<Money>{fee + amount:,}</>
+<Secondary>A proportion of your earnings will be automatically deducted to repay this loan.</>
+
+You will receive:
+<Money>{amount:,}</>
+
+If you wish to proceed, type the command again followed by the verification code:
+<Highlight>/loan {command_match.group('amount')} {verification_code}</>""", player_id=str(player_id))
+          )
+        elif input_verification_code != verification_code:
+          asyncio.create_task(
+            show_popup(http_client_mod, f"""\
+<Title>Taking out a loan</>
+
+Sorry, the verification code did not match, please try again:
+<Highlight>/loan {command_match.group('amount')} {verification_code}</>""", player_id=str(player_id))
+          )
+        elif amount > 0:
           try:
             repay_amount, loan_fee = await register_player_take_loan(amount, character)
             await transfer_money(http_client_mod, int(amount), 'ASEAN Bank Loan', player_id)
@@ -818,4 +853,3 @@ async def process_log_line(ctx, line):
   await server_log.asave(update_fields=['event_processed'])
 
   return {'status': 'created', 'timestamp': event.timestamp}
-
