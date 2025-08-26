@@ -1,7 +1,7 @@
 import asyncio
 from django.contrib.gis.geos import Point
 from amc.models import Character, CharacterLocation
-from amc.mod_server import show_popup
+from amc.mod_server import show_popup, teleport_player
 
 point_of_interests = [
   (
@@ -38,6 +38,31 @@ Use <Highlight>/bank</> to create a Bank ASEAN account today!
   ),
 ]
 
+portals = [
+  # Meehoi house
+  (
+    Point(**{"x": 69664.27, "y": 651361.93, "z": -8214.26}),
+    150,
+    Point(**{"x": 68205.77, "y": 651084.19, "z": -7000.43}),
+  ),
+  (
+    Point(**{"x": 68119.18, "y": 650502.15, "z": -6909.83}),
+    120,
+    Point(**{"x": 67912.23, "y": 650236.37, "z": -8512.19}),
+  ),
+
+  # Rooftop Bar
+  (
+    Point(**{ "x": -67173.12, "y": 150561.7, "z": -20646.4 } ),
+    150,
+    Point(**{ "x": -66531.100038674, "y": 150471.72884842, "z": -19706.865 } ),
+  ),
+  (
+    Point(**{ "x": -66733.74, "y": 150411.51, "z": -19703.15 } ),
+    120,
+    Point(**{ "x": -67245.74, "y": 150831.6, "z": -20646.85 } ),
+  ),
+]
 async def process_player(player_info, ctx):
   character, player, *_  = await Character.objects.aget_or_create_character_player(
     player_info['PlayerName'],
@@ -66,9 +91,23 @@ async def process_player(player_info, ctx):
       is_inside = distance_to_new <= target_radius_meters
 
       if was_outside and is_inside and ctx.get('http_client_mod') is not None:
-        asyncio.create_task(
-          show_popup(ctx['http_client_mod'], message, player_id=player.unique_id)
+        await show_popup(ctx['http_client_mod'], message, player_id=player.unique_id)
+        await asyncio.sleep(0.1)
+
+    for (source_point, source_radius_meters, target_point) in portals:
+      distance_to_new = new_location_point.distance(source_point)
+      distance_to_old = last_character_location.location.distance(source_point)
+
+      was_outside = distance_to_old > source_radius_meters
+      is_inside = distance_to_new <= source_radius_meters
+
+      if was_outside and is_inside and ctx.get('http_client_mod') is not None:
+        await teleport_player(
+          ctx['http_client_mod'],
+          str(player.unique_id),
+          {'X': target_point.x, 'Y': target_point.y, 'Z': target_point.z},
         )
+        await asyncio.sleep(0.1)
 
   await CharacterLocation.objects.acreate(
     character=character,
