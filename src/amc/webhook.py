@@ -25,14 +25,17 @@ from amc.models import (
 
 async def on_player_profits(player_profits, session):
   for player, total_subsidy, total_payment in player_profits:
-    if total_subsidy != 0:
-      await subsidise_player(total_subsidy, player, session)
-      await asyncio.sleep(0.2)
-    loan_repayment = await repay_loan_for_profit(player, total_payment, session)
-    savings = total_payment - loan_repayment
-    if savings > 0:
-      await set_aside_player_savings(player, savings, session)
-      await asyncio.sleep(0.2)
+    await on_player_profit(player, total_subsidy, total_payment, session)
+    await asyncio.sleep(0.2)
+
+async def on_player_profit(player, total_subsidy, total_payment, session):
+  if total_subsidy != 0:
+    await subsidise_player(total_subsidy, player, session)
+    await asyncio.sleep(0.2)
+  loan_repayment = await repay_loan_for_profit(player, total_payment, session)
+  savings = total_payment - loan_repayment
+  if savings > 0:
+    await set_aside_player_savings(player, savings, session)
 
 
 async def monitor_webhook(ctx):

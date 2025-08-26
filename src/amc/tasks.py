@@ -57,7 +57,7 @@ from amc.events import (
   auto_starting_grid,
 )
 from amc.utils import format_in_local_tz, format_timedelta, delay
-from amc.subsidies import DEFAULT_SAVING_RATE, set_aside_player_savings
+from amc.subsidies import DEFAULT_SAVING_RATE
 from amc_finance.services import (
   register_player_withdrawal,
   register_player_take_loan,
@@ -68,8 +68,8 @@ from amc_finance.services import (
   calc_loan_fee,
   get_character_total_donations,
   player_donation,
-  send_fund_to_player_wallet,
 )
+from amc.webhook import on_player_profit
 
 
 def get_welcome_message(last_login, player_name):
@@ -753,21 +753,11 @@ The loan amount has been deposited into your wallet. You can view your loan deta
           f"**📦 Player Restocked Depot:** {player_name} (Depot: {depot_name})"
         )
         subsidy_amount = 10_000
-        await send_fund_to_player_wallet(subsidy_amount, character, "Depot Restock Subsidy")
-        asyncio.create_task(
-          transfer_money(
-            http_client_mod,
-            subsidy_amount,
-            "ASEAN Depot Restock Subsidy",
-            character.player.unique_id,
-          )
-        )
-        asyncio.create_task(
-          set_aside_player_savings(
-            character.player,
-            subsidy_amount,
-            http_client_mod,
-          )
+        await on_player_profit(
+          player,
+          subsidy_amount,
+          subsidy_amount,
+          http_client_mod
         )
 
     case PlayerCreatedCompanyLogEvent(timestamp, player_name, company_name):
@@ -853,3 +843,4 @@ async def process_log_line(ctx, line):
   await server_log.asave(update_fields=['event_processed'])
 
   return {'status': 'created', 'timestamp': event.timestamp}
+
