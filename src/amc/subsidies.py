@@ -85,9 +85,7 @@ def get_subsidy_for_cargos(cargos):
 def get_subsidy_for_cargo(cargo):
   subsidy_factor = 0.0
   match cargo.cargo_key:
-    case 'LiveFish_01':
-      subsidy_factor = 3.0
-    case 'Burger_01_Signature' | 'Pizza_01_Premium':
+    case 'Burger_01_Signature' | 'Pizza_01_Premium' | 'LiveFish_01':
       if cargo.data.get('Net_TimeLeftSeconds', 0) > 0:
         subsidy_factor = 3.0
     case 'AirlineMealPallet':
