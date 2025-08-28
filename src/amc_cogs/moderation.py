@@ -109,7 +109,7 @@ class ModerationCog(commands.Cog):
         name=name,
       )
       location = teleport_point.location
-      await teleport_player(self.bot.event_http_client_mod, player.unique_id, {
+      await teleport_player(self.bot.event_http_client_mod, str(player.unique_id), {
         'X': location.x, 
         'Y': location.y, 
         'Z': location.z,
@@ -118,7 +118,7 @@ class ModerationCog(commands.Cog):
     except Player.DoesNotExist:
       await ctx.response.send_message('Please /verify yourself first')
     except Exception as e:
-      await ctx.response.send_message(f'Failed to create new teleport point: {e}')
+      await ctx.response.send_message(f'Failed to teleport: {e}')
 
   @app_commands.command(name='teleport_to_player', description='Teleport to a player')
   @app_commands.checks.has_any_role(1395460420189421713)
