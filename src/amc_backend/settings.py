@@ -188,6 +188,9 @@ Visit the website & Join the Discord!
 
 <Title>Available Commands</>
 
+<Highlight>/teleport</> - See a list of teleport points.
+<Secondary>Shorthand: /tp</>
+
 <Highlight>/bot [your question]</> - Ask the bot anything related to the game. It understands most of the basic information about the game.
 
 <Highlight>/song_request [name of song and artist]</> - Queue up a song on our radio station. Visit <Focus>aseanmotorclub.com/radio</> to tune in.

@@ -359,8 +359,12 @@ Flipped - <Money>2,000 + 100%</>
       if command_match := re.match(r"/(teleport|tp)\s*(?P<name>.*)", message):
         name = command_match.group('name')
         player_info = await get_player(http_client_mod, str(player.unique_id))
-        if not player_info or not player_info.get('bIsAdmin'):
-          asyncio.create_task(show_popup(http_client_mod, "Only admins can use this feature at the moment", player_id=str(player_id)))
+        if (not player_info or not player_info.get('bIsAdmin')) and not name:
+          tp_points = TeleportPoint.objects.filter(character__isnull=True).order_by('name')
+          tp_points_names = [tp.name async for tp in tp_points]
+          asyncio.create_task(
+            show_popup(http_client_mod, f"<Title>Teleport</>\nUsage: <Highlight>/tp [location]</>\nChoose from one of the following locations:\n\n{'\n'.join(tp_points_names)}", player_id=str(player_id))
+          )
         else:
           if name:
             try:
@@ -380,7 +384,12 @@ Flipped - <Money>2,000 + 100%</>
           else:
             location = player_info['CustomDestinationAbsoluteLocation']
             location['Z'] += 100
-          await teleport_player(http_client_mod, player.unique_id, location)
+          await teleport_player(
+              http_client_mod,
+              player.unique_id,
+              location,
+              no_vehicles=not player_info.get('bIsAdmin')
+            )
           await BotInvocationLog.objects.acreate(
             timestamp=timestamp,
             character=character, 
