@@ -1,13 +1,24 @@
 import discord
+from datetime import time as dt_time, timedelta, timezone as dt_timezone
+from django.utils import timezone
+from django.db.models import Count, Q
+from discord import app_commands
 from discord.ext import tasks, commands
 from django.conf import settings
 from amc.game_server import get_players
+from amc.models import Character
 
 
 class StatusCog(commands.Cog):
-  def __init__(self, bot, status_channel_id=settings.DISCORD_STATUS_CHANNEL_ID):
+  def __init__(
+    self,
+    bot,
+    status_channel_id=settings.DISCORD_STATUS_CHANNEL_ID,
+    general_channel_id=settings.DISCORD_GENERAL_CHANNEL_ID,
+  ):
     self.bot = bot
     self.status_channel_id = status_channel_id
+    self.general_channel_id = general_channel_id
     self.last_embed_message = None
 
   async def cog_load(self):
@@ -56,4 +67,49 @@ class StatusCog(commands.Cog):
   @update_status_embed.before_loop
   async def before_update_status_embed(self):
     await self.bot.wait_until_ready()
+
+  @tasks.loop(time=dt_time(hour=2, minute=0, tzinfo=dt_timezone.utc))
+  async def daily_top_restockers_task(self):
+    top_restockers_str = await self.daily_top_restockers()
+    client = self.bot
+    general_channel = client.get_channel(self.general_channel_id)
+    await general_channel.send(f"""\
+## Top 3 Depot Restockers
+Last 24 hours
+
+{top_restockers_str}
+
+Thank you for your service!""")
+
+
+  @daily_top_restockers_task.before_loop
+  async def before_daily_top_restockers(self):
+    await self.bot.wait_until_ready()
+
+  @app_commands.command(name='list_top_depot_restockers', description='Get the list of top depot restockers')
+  async def daily_top_restockers_cmd(self, interaction, days: int=1, top_n: int=3):
+    top_restockers_str = await self.daily_top_restockers(days=days, top_n=top_n)
+    await interaction.response.send_message(f"""\
+## Top 3 Depot Restockers
+Last 24 hours
+
+{top_restockers_str}
+
+Thank you for your service!""")
+
+  async def daily_top_restockers(self, days=1, top_n=3):
+    now = timezone.now()
+
+    qs = Character.objects.annotate(
+      depots_restocked=Count(
+        'restock_depot_logs',
+        distinct=True,
+        filter=Q(restock_depot_logs__timestamp__gte=now - timedelta(days=days))
+      ),
+    ).filter(depots_restocked__gt=0).order_by('-depots_restocked')[:top_n]
+    top_restockers_str = '\n'.join([
+      f"@{character.name} - {character.depots_restocked}"
+      async for character in qs
+    ])
+    return top_restockers_str
 

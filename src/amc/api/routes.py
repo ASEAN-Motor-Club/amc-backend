@@ -3,7 +3,7 @@ import aiohttp
 import json
 from typing import Optional
 from pydantic import AwareDatetime
-from datetime import timedelta, datetime
+from datetime import timedelta
 from ninja_extra.security.session import AsyncSessionAuth
 from django.core.cache import cache
 from django.db.models import Count, Q, F, Window, Prefetch, Max
@@ -24,7 +24,6 @@ from .schema import (
   TeamStandingSchema,
   DeliveryPointSchema,
   LapSectionTimeSchema,
-  WebhookPayloadSchema,
 )
 from django.conf import settings
 from amc.models import (
@@ -38,21 +37,8 @@ from amc.models import (
   ChampionshipPoint,
   DeliveryPoint,
   LapSectionTime,
-  ServerCargoArrivedLog,
-  ServerSignContractLog,
-  ServerPassengerArrivedLog,
-  ServerTowRequestArrivedLog,
 )
 from amc.utils import lowercase_first_char_in_keys
-from amc.subsidies import (
-  repay_loan_for_profit,
-  set_aside_player_savings,
-  get_subsidy_for_cargo,
-  get_subsidy_for_cargos,
-  get_passenger_subsidy,
-  subsidise_player,
-)
-from amc.mod_server import show_popup
 
 POSITION_UPDATE_RATE = 10
 POSITION_UPDATE_SLEEP = 1.0 / POSITION_UPDATE_RATE
@@ -208,7 +194,10 @@ async def streaming_player_positions(request):
 stats_router = Router()
 
 @stats_router.get('/depots_restocked_leaderboard/', response=list[LeaderboardsRestockDepotCharacterSchema])
-async def depots_restocked_leaderboard(request, limit=10, now=timezone.now(), days=7):
+async def depots_restocked_leaderboard(request, limit=10, now: AwareDatetime=None, days=7):
+  if now is None:
+    now = timezone.now()
+
   qs = Character.objects.annotate(
     depots_restocked=Count(
       'restock_depot_logs',
