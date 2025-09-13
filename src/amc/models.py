@@ -489,13 +489,13 @@ class ChampionshipPoint(models.Model):
       return 0
 
   @classmethod
-  def get_event_prize_for_position(self, position: int, time_trial: bool=False):
+  def get_event_prize_for_position(self, position: int, time_trial: bool=False, base_pay=50_000):
     try:
       if time_trial:
-        return self.time_trial_prize_by_position[position]
-      return self.event_prize_by_position[position]
+        return self.time_trial_prize_by_position[position] + base_pay
+      return self.event_prize_by_position[position] + base_pay
     except IndexError:
-      return 0
+      return base_pay
 
 
 class LapSectionTimeQuerySet(models.QuerySet):

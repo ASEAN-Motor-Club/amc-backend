@@ -15,6 +15,7 @@ from amc.models import (
   GameEventCharacter,
   LapSectionTime,
   RaceSetup,
+  ScheduledEvent,
 )
 
 async def setup_event(timestamp, player_id, scheduled_event, http_client_mod):
@@ -109,6 +110,14 @@ async def process_event(event):
       discord_message_id = existing_event.discord_message_id
     except GameEvent.DoesNotExist:
       discord_message_id = None
+
+    scheduled_event = await ScheduledEvent.objects.filter(
+      race_setup=race_setup,
+      start_time__lte=timezone.now(),
+      end_time__gte=timezone.now(),
+      time_trial=True # only auto-associate time trials
+    ).afirst()
+
     game_event = await GameEvent.objects.acreate(
       guid=event['EventGuid'],
       name=event['EventName'],
@@ -116,6 +125,7 @@ async def process_event(event):
       race_setup=race_setup,
       discord_message_id=discord_message_id,
       owner=owner,
+      scheduled_event=scheduled_event,
     )
 
   async def process_player(player_info):
@@ -293,6 +303,10 @@ def create_event_embed(game_event):
   )
 
   embed.add_field(name="🔀 Route", value=str(race_setup), inline=False)
+
+  if game_event.scheduled_event is not None:
+    embed.add_field(name="🕒 Results", value=f"https://www.aseanmotorclub.com/championship?event={game_event.scheduled_event.id}", inline=False)
+
   if race_setup.vehicles:
     embed.add_field(name="Vehicles", value=', '.join(race_setup.vehicles), inline=False)
   if race_setup.engines:
@@ -377,7 +391,7 @@ async def send_event_embeds(ctx):
     events = (await resp.json()).get('data', [])
     event_guids = [event['EventGuid'] for event in events]
     qs = (GameEvent.objects
-      .select_related('race_setup')
+      .select_related('race_setup', 'scheduled_event')
       .prefetch_related(
         Prefetch('participants', queryset=GameEventCharacter.objects.select_related('character'))
       )

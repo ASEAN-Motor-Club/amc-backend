@@ -252,16 +252,29 @@ class ChampionshipAdmin(admin.ModelAdmin):
 class ChampionshipPointAdmin(admin.ModelAdmin):
   list_display = ['championship', 'participant__character', 'participant__game_event__scheduled_event__name', 'team', 'points', 'prize']
   list_select_related = ['championship', 'participant__character', 'team', 'participant__game_event__scheduled_event']
-  search_fields = ['championship__name']
+  search_fields = ['championship__name', 'participant__character__name', 'team__name']
 
 @admin.register(ScheduledEvent)
 class ScheduledEventAdmin(admin.ModelAdmin):
-  list_display = ['name', 'race_setup', 'start_time', 'discord_event_id']
+  list_display = ['name', 'race_setup', 'start_time', 'discord_event_id', 'championship', 'time_trial']
   list_select_related = ['race_setup']
   inlines = [GameEventInlineAdmin]
   search_fields = ['name', 'race_setup__hash', 'race_setup__name']
   autocomplete_fields = ['race_setup']
-  actions = ['award_points']
+  actions = ['award_points', 'assign_to_game_events']
+
+  @admin.action(description="Assign to game events")
+  def assign_to_game_events(self, request, queryset):
+    for scheduled_event in queryset:
+      assert scheduled_event.time_trial, "Time trials only"
+      GameEvent.objects.filter(
+        race_setup=scheduled_event.race_setup,
+        start_time__gte=scheduled_event.start_time,
+        start_time__lte=scheduled_event.end_time,
+      ).update(
+        scheduled_event=scheduled_event
+      )
+
 
   @admin.action(description="Award points")
   def award_points(self, request, queryset):
