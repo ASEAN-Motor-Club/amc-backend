@@ -531,7 +531,7 @@ How ASEAN Loans Works
         amount = int(command_match.group('amount').replace(',', ''))
         signer = Signer()
         signed_obj = signer.sign((amount, character.id))
-        verification_code = signed_obj[-4:]
+        verification_code = signed_obj.replace('-', '').replace('_', '')[-4:]
 
         input_verification_code = command_match.group('verification_code')
         if not input_verification_code:
@@ -548,15 +548,15 @@ To prevent any mishap, please read the following:
 - You have donated {total_donations:,} in the last 7 days (irl)
 
 If you wish to proceed, type the command again followed by the verification code:
-<Highlight>/donate {command_match.group('amount')} {verification_code}</>""", player_id=str(player_id))
+<Highlight>/donate {command_match.group('amount')} {verification_code.upper()}</>""", player_id=str(player_id))
           )
-        elif input_verification_code != verification_code:
+        elif input_verification_code.lower() != verification_code.lower():
           asyncio.create_task(
             show_popup(http_client_mod, f"""\
 <Title>Donation</>
 
 Sorry, the verification code did not match, please try again:
-<Highlight>/donate {command_match.group('amount')} {verification_code}</>""", player_id=str(player_id))
+<Highlight>/donate {command_match.group('amount')} {verification_code.upper()}</>""", player_id=str(player_id))
           )
         else:
           try:
@@ -590,7 +590,7 @@ Sorry, the verification code did not match, please try again:
 
         signer = Signer()
         signed_obj = signer.sign((amount, character.id))
-        verification_code = signed_obj[-4:]
+        verification_code = signed_obj.replace('-', '').replace('_', '')[-4:]
 
         input_verification_code = command_match.group('verification_code')
         if not input_verification_code:
@@ -609,15 +609,15 @@ You will receive:
 <Money>{amount:,}</>
 
 If you wish to proceed, type the command again followed by the verification code:
-<Highlight>/loan {command_match.group('amount')} {verification_code}</>""", player_id=str(player_id))
+<Highlight>/loan {command_match.group('amount')} {verification_code.upper()}</>""", player_id=str(player_id))
           )
-        elif input_verification_code != verification_code:
+        elif input_verification_code.lower() != verification_code.lower():
           asyncio.create_task(
             show_popup(http_client_mod, f"""\
 <Title>Taking out a loan</>
 
 Sorry, the verification code did not match, please try again:
-<Highlight>/loan {command_match.group('amount')} {verification_code}</>""", player_id=str(player_id))
+<Highlight>/loan {command_match.group('amount')} {verification_code.upper()}</>""", player_id=str(player_id))
           )
         elif amount > 0:
           try:
