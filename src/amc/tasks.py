@@ -220,7 +220,7 @@ async def countdown(http_client, start=5, delay=1.0):
     await asyncio.sleep(delay)
     await announce(str(i) if i > 0 else 'GO!!', http_client, clear_banner=False)
 
-async def process_log_event(event: LogEvent, http_client=None, http_client_mod=None, ctx = {}):
+async def process_log_event(event: LogEvent, http_client=None, http_client_mod=None, ctx = {}, hostname=''):
   discord_client = ctx.get('discord_client')
   timestamp = event.timestamp
   is_current_event = ctx.get('startup_time') and timestamp > ctx.get('startup_time')
@@ -846,7 +846,9 @@ async def process_log_line(ctx, line):
       http_client = ctx.get('http_client')
       http_client_mod = ctx.get('http_client_mod')
 
-  await process_log_event(event, http_client=http_client, http_client_mod=http_client_mod, ctx=ctx)
+  await process_log_event(
+    event, http_client=http_client, http_client_mod=http_client_mod, ctx=ctx, hostname=log.hostname
+  )
 
   server_log.event_processed = True
   await server_log.asave(update_fields=['event_processed'])
