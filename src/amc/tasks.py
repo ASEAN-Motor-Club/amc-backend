@@ -383,7 +383,7 @@ Flipped - <Money>2,000 + 100%</>
               return
           else:
             location = player_info['CustomDestinationAbsoluteLocation']
-            location['Z'] += 100
+            location['Z'] += 150
           await teleport_player(
               http_client_mod,
               player.unique_id,
