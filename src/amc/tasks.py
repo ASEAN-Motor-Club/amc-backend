@@ -44,7 +44,7 @@ from amc.models import (
   TeleportPoint,
   VehicleDealership,
 )
-from amc.game_server import announce
+from amc.game_server import announce, get_players
 from amc.mod_server import (
   show_popup, transfer_money, teleport_player, get_player,
 )
@@ -748,8 +748,19 @@ The loan amount has been deposited into your wallet. You can view your loan deta
         pass
 
     case PlayerRestockedDepotLogEvent(timestamp, player_name, depot_name):
+      # TODO: skip if no client
+      players = await get_players(http_client)
+      player_id = None
+      for p_id, p_name in players:
+        if player_name == p_name:
+          player_id = p_id
+          break
+      if player_id is None:
+        raise Exception('Player not found')
+
       character = await Character.objects.select_related('player').filter(
         name=player_name,
+        player__unique_id=int(player_id)
       ).alatest('status_logs__timespan__startswith')
       await PlayerRestockDepotLog.objects.acreate(
         timestamp=timestamp,
@@ -763,7 +774,7 @@ The loan amount has been deposited into your wallet. You can view your loan deta
         )
         subsidy_amount = 10_000
         await on_player_profit(
-          player,
+          character.player,
           subsidy_amount,
           subsidy_amount,
           http_client_mod
