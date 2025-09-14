@@ -256,6 +256,12 @@ async def process_log_event(event: LogEvent, http_client=None, http_client_mod=N
 <Bold>Fuel</> - <Money>150%</>
 <Secondary>ONLY from Migeum Log Warehouse to Migeum Oak 1/2/3</>
 <Secondary>ONLY from Gwangjin Fuel Storage to Gwangjin Coal/Iron mines</>
+<Bold>Water Bottle Pallets</> - <Money>200-300%</>
+<Secondary>To Gwangjin and Ara Supermarket - 300%</>
+<Secondary>To other Supermarkets - 200%</>
+<Bold>Meat Boxes</> - <Money>200%</>
+<Secondary>ONLY to Supermarkets</>
+<Bold>Trash</> - <Money>200%</>
 
 <Bold>Towing/Wrecker Jobs</>
 Normal - <Money>2,000 + 50%</>

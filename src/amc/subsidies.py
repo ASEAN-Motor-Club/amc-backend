@@ -11,6 +11,8 @@ from amc_finance.services import (
 )
 
 cargo_names = {
+  'MeatBox': 'Meat Box',
+  'BottlePallete': 'Water Bottle Pallete',
   'Burger_01_Signature': 'Signature Burger',
   'Pizza_01_Premium': 'Premium Pizza',
   'GiftBox_01': 'Gift Box',
@@ -113,6 +115,28 @@ def get_subsidy_for_cargo(cargo):
           match destination_name:
             case 'Migeum Oak 1' | 'Migeum Oak 2' | 'Migeum Oak 3':
               subsidy_factor = 1.5
+    case 'BottlePallete':
+      destination_name = None
+      if cargo.destination_point:
+        destination_name = cargo.destination_point.name
+      match destination_name:
+        case 'Gwangjin Supermarket' | 'Ara Supermarket':
+          subsidy_factor = 3.0
+        case _:
+          if 'Supermarket' in destination_name:
+            subsidy_factor = 2.0
+          else:
+            subsidy_factor = 0.0
+    case 'MeatBox':
+      destination_name = None
+      if cargo.destination_point:
+        destination_name = cargo.destination_point.name
+        if 'Supermarket' in destination_name:
+          subsidy_factor = 2.0
+        else:
+          subsidy_factor = 0.0
+    case 'TrashBag' | 'Trash_Big':
+      subsidy_factor = 2.0
     case _:
       subsidy_factor = 0.0
   return int(int(cargo.payment) * subsidy_factor), subsidy_factor
