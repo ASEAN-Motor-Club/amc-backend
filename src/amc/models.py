@@ -850,3 +850,11 @@ class VehicleDealership(models.Model):
       {'X': self.location.x, 'Y': self.location.y, 'Z': self.location.z},
       self.yaw
     )
+
+
+@final
+class Thank(models.Model):
+  sender_character = models.ForeignKey(Character, on_delete=models.CASCADE, related_name='thanks_given')
+  recipient_character = models.ForeignKey(Character, on_delete=models.CASCADE, related_name='thanks_received')
+  timestamp = models.DateTimeField()
+

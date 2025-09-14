@@ -43,6 +43,7 @@ from amc.models import (
   GameEvent,
   TeleportPoint,
   VehicleDealership,
+  Thank,
 )
 from amc.game_server import announce, get_players
 from amc.mod_server import (
@@ -655,6 +656,46 @@ The loan amount has been deposited into your wallet. You can view your loan deta
             asyncio.create_task(
               show_popup(http_client_mod, f"<Title>Loan failed</>\n\n{e}", player_id=str(player_id))
             )
+
+      elif command_match := re.match(r"^/thank\s+(?P<player_name>\S+)$", message):
+        player_name = command_match.group('player_name')
+        players = await get_players(http_client)
+        thanked_player_id = None
+        for p_id, p_name in players:
+          if player_name == p_name:
+            thanked_player_id = p_id
+            break
+        if thanked_player_id is None:
+          asyncio.create_task(
+            show_popup(http_client_mod, "<Title>Player not found</>\n\nPlease make sure you typed the name correctly.", player_id=str(player_id))
+          )
+          raise Exception('Player not found')
+
+        thanked_character = await Character.objects.select_related('player').filter(
+          name=player_name,
+          player__unique_id=int(thanked_player_id)
+        ).alatest('status_logs__timespan__startswith')
+
+        already_thanked = await Thank.objects.filter(
+          sender_character=character,
+          recipient_character=thanked_character,
+          timestamp__gte=timestamp - timedelta(hours=1),
+        ).aexists()
+
+        if already_thanked:
+          asyncio.create_task(
+            show_popup(http_client_mod, "You have already thanked this player.\n\nYou may only thank a player once per hour.", player_id=str(player_id))
+          )
+        else:
+          await Thank.objects.acreate(
+            sender_character=character,
+            recipient_character=thanked_character,
+            timestamp=timestamp,
+          )
+          asyncio.create_task(
+            show_popup(http_client_mod, "<Title>Thank sent</>", player_id=str(player_id))
+          )
+
       if discord_client and ctx.get('startup_time') and timestamp > ctx.get('startup_time'):
         forward_message = (
           settings.DISCORD_GAME_CHAT_CHANNEL_ID,
