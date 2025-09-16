@@ -1,5 +1,6 @@
 import asyncio
 from decimal import Decimal
+from django.contrib.gis.geos import Point
 from amc.mod_server import show_popup, transfer_money
 from amc.models import ServerPassengerArrivedLog
 from amc_finance.services import (
@@ -136,7 +137,19 @@ def get_subsidy_for_cargo(cargo):
         else:
           subsidy_factor = 0.0
     case 'TrashBag' | 'Trash_Big':
-      subsidy_factor = 2.0
+      subsidy_factor = 1.0
+      if destination_location := cargo.data.get('Net_DestinationLocation'):
+        destination_location = Point(
+          destination_location['X'],
+          destination_location['Y'],
+          destination_location['Z'],
+        )
+        ara = Point(**{"x": 329486.94, "y": 1293697.78, "z": -18594.89})
+        if destination_location.distance(ara) < 1_800_00:
+          subsidy_factor = 2.0
+        gwangjin = Point(318700.36, 816972.24, -1636.26)
+        if destination_location.distance(gwangjin) < 2_000_00:
+          subsidy_factor = 2.5
     case _:
       subsidy_factor = 0.0
   return int(int(cargo.payment) * subsidy_factor), subsidy_factor
