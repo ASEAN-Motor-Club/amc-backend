@@ -248,6 +248,27 @@ class ChampionshipAdmin(admin.ModelAdmin):
   list_display = ['name']
   inlines = [ScheduledEventInlineAdmin]
   search_fields = ['name']
+  actions = ['award_prizes']
+
+  @admin.action(description="Award prizes")
+  def award_prizes(self, request, queryset):
+    for championship in queryset:
+      personal_prizes = async_to_sync(championship.calculate_personal_prizes)()
+      team_prizes = async_to_sync(championship.calculate_team_prizes)()
+
+      for character, prize in personal_prizes:
+        async_to_sync(send_fund_to_player)(
+          prize,
+          character,
+          f"Championhip Personal Prize: {championship.name}"
+        )
+
+      for character, prize in team_prizes:
+        async_to_sync(send_fund_to_player)(
+          prize,
+          character,
+          f"Championhip Team Prize: {championship.name}"
+        )
 
 @admin.register(ChampionshipPoint)
 class ChampionshipPointAdmin(admin.ModelAdmin):
@@ -400,5 +421,5 @@ class DeliveryJobAdmin(admin.ModelAdmin):
   list_display = ['id', 'cargo_key', 'quantity_requested', 'quantity_fulfilled', 'requested_at']
   ordering = ['-requested_at']
   search_fields = ['cargo_key']
-  autocomplete_fields = ['cargo_key', 'source_points', 'destination_points']
+  autocomplete_fields = ['source_points', 'destination_points']
 

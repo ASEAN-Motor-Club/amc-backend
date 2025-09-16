@@ -1,8 +1,9 @@
+import asyncstdlib as a
 from datetime import timedelta
 from deepdiff import DeepHash
 from django.contrib import admin
 from django.contrib.gis.db import models
-from django.db.models import Q, F, Sum, Max, Window
+from django.db.models import Q, F, Sum, Max, Window, Count
 from django.db.models.functions import RowNumber, Lead, Lag
 from decimal import Decimal
 from django.core.validators import MinValueValidator, MaxValueValidator
@@ -251,9 +252,62 @@ class Championship(models.Model):
   discord_thread_id = models.CharField(max_length=32, null=True, blank=True, unique=True)
   description = models.TextField(blank=True)
 
+  personal_prize_by_position = [
+    4_800_000,
+    2_400_000,
+    1_440_000,
+    960_000,
+    720_000,
+    480_000,
+    360_000,
+    300_000,
+    300_000,
+    240_000,
+  ]
+  team_prize_by_position = [
+    2_700_000,
+    1_500_000,
+    900_000,
+    600_000,
+    300_000,
+  ]
+
   @override
   def __str__(self):
     return self.name
+
+  async def calculate_personal_prizes(self):
+    personal_standings = ChampionshipPoint.objects.personal_standings(self.id)[:len(self.personal_prize_by_position)]
+    return [
+      (
+        await Character.objects.select_related('player').aget(pk=standing['character_id']),
+        self.personal_prize_by_position[i]
+      )
+      async for i, standing in a.builtins.enumerate(personal_standings)
+    ]
+
+  async def calculate_team_prizes(self):
+    team_standings = ChampionshipPoint.objects.team_standings(self.id)[:len(self.team_prize_by_position)]
+
+    async def calculate_team_member_prizes(standing, total_team_prize):
+      total_participations = await ChampionshipPoint.objects.filter(championship=self, team__id=standing['team__id']).acount()
+      member_contributions = ChampionshipPoint.objects.filter(championship=self, team__id=standing['team__id']).values('participant__character').annotate(
+        points=Count('id'),
+        character_id=F('participant__character__id')
+      )
+      return [
+        (
+          await Character.objects.select_related('player').aget(pk=member_contribution['character_id']),
+          total_team_prize * member_contribution['points'] / total_participations
+        )
+        async for member_contribution in member_contributions
+      ]
+
+    return [
+      character_prize
+      async for i, standing in a.builtins.enumerate(team_standings)
+      for character_prize in await calculate_team_member_prizes(standing, self.team_prize_by_position[i])
+    ]
 
 
 class ScheduledEventQuerySet(models.QuerySet):
@@ -409,6 +463,7 @@ class ChampionshipPointQuerySet(models.QuerySet):
     ).values('participant__character').annotate(
       total_points=Sum('points'),
       player_id=F('participant__character__player__unique_id'),
+      character_id=F('participant__character__id'),
       character_name=F('participant__character__name'),
     ).order_by('-total_points')
 

@@ -3,7 +3,7 @@ from django.test import TestCase
 from django.utils import timezone
 from django.contrib.gis.geos import Point
 from asgiref.sync import sync_to_async
-from amc.factories import CharacterFactory
+from amc.factories import CharacterFactory, ChampionshipFactory, ChampionshipPointFactory
 from amc.models import CharacterLocation
 
 class CharacterLocationTestCase(TestCase):
@@ -48,3 +48,31 @@ class CharacterLocationTestCase(TestCase):
     )
     self.assertTrue(is_online)
     self.assertFalse(is_active)
+
+class ChampionshipTestCase(TestCase):
+  async def test_award_personal_prizes(self):
+    championship = await sync_to_async(ChampionshipFactory)()
+    await sync_to_async(ChampionshipPointFactory)(
+      championship=championship,
+    )
+    await sync_to_async(ChampionshipPointFactory)(
+      championship=championship,
+    )
+    prizes = await championship.calculate_personal_prizes()
+    print(prizes)
+
+  async def test_award_team_prizes(self):
+    championship = await sync_to_async(ChampionshipFactory)()
+    p1 = await sync_to_async(ChampionshipPointFactory)(
+      championship=championship,
+    )
+    await sync_to_async(ChampionshipPointFactory)(
+      championship=championship,
+      team=p1.team
+    )
+    await sync_to_async(ChampionshipPointFactory)(
+      championship=championship,
+    )
+    prizes = await championship.calculate_team_prizes()
+    print(prizes)
+
