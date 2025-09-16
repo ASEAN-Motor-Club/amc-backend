@@ -254,12 +254,16 @@ async def process_log_event(event: LogEvent, http_client=None, http_client_mod=N
           title = f"{job.quantity_fulfilled}/{job.quantity_requested}x {job.get_cargo_key_display()} (Bonus: <Money>{job.bonus_multiplier*100:.0f}%</>)\n<Secondary>Expiring in {get_time_difference_string(timestamp, job.expired_at)}</>"
           source_points = list(job.source_points.all())
           if source_points:
-            title += '\nONLY from: '
+            title += '\n<Secondary>'
+            title += 'ONLY from: '
             title += ', '.join([point.name for point in source_points])
+            title += '</>'
           destination_points = list(job.destination_points.all())
           if destination_points:
-            title += '\nONLY to: '
+            title += '\n<Secondary>'
+            title += 'ONLY to: '
             title += ', '.join([point.name for point in destination_points])
+            title += '</>'
           return title
 
         jobs_str = "\n\n".join([ display_job(job) async for job in jobs ])
