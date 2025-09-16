@@ -5,7 +5,7 @@ from decimal import Decimal
 from datetime import timedelta
 from django.utils import timezone
 from django.db import connection
-from django.db.models import Exists, OuterRef, Q
+from django.db.models import Exists, OuterRef, Q, F
 from django.conf import settings
 from django.core.signing import Signer
 from asgiref.sync import sync_to_async
@@ -44,6 +44,7 @@ from amc.models import (
   TeleportPoint,
   VehicleDealership,
   Thank,
+  DeliveryJob,
 )
 from amc.game_server import announce, get_players
 from amc.mod_server import (
@@ -57,7 +58,7 @@ from amc.events import (
   staggered_start,
   auto_starting_grid,
 )
-from amc.utils import format_in_local_tz, format_timedelta, delay
+from amc.utils import format_in_local_tz, format_timedelta, delay, get_time_difference_string
 from amc.subsidies import DEFAULT_SAVING_RATE
 from amc_finance.services import (
   register_player_withdrawal,
@@ -243,6 +244,27 @@ async def process_log_event(event: LogEvent, http_client=None, http_client_mod=N
           character=character, 
           prompt="help",
         )
+      if command_match := re.match(r"/jobs", message):
+        jobs = DeliveryJob.objects.filter(
+          quantity_fulfilled__lt=F('quantity_requested'),
+          expired_at__gte=timestamp,
+        ).prefetch_related('source_points', 'destination_points')
+
+        def display_job(job):
+          title = f"{job.quantity_fulfilled}/{job.quantity_requested}x {job.get_cargo_key_display()} (Bonus: <Money>{job.bonus_multiplier*100:.0f}%</>)\n<Secondary>Expiring in {get_time_difference_string(timestamp, job.expired_at)}</>"
+          source_points = list(job.source_points.all())
+          if source_points:
+            title += '\nONLY from: '
+            title += ', '.join([point.name for point in source_points])
+          destination_points = list(job.destination_points.all())
+          if destination_points:
+            title += '\nONLY to: '
+            title += ', '.join([point.name for point in destination_points])
+          return title
+
+        jobs_str = "\n\n".join([ display_job(job) async for job in jobs ])
+        asyncio.create_task(show_popup(http_client_mod, f"<Title>Delivery Jobs</>\n\n{jobs_str}", player_id=str(player_id)))
+
       if command_match := re.match(r"/subsidies", message):
         subsidies_text = """<Title>ASEAN Server Subsidies</>
 
@@ -700,6 +722,9 @@ The loan amount has been deposited into your wallet. You can view your loan deta
           )
           asyncio.create_task(
             show_popup(http_client_mod, "<Title>Thank sent</>", player_id=str(player_id))
+          )
+          asyncio.create_task(
+            show_popup(http_client_mod, f"<Title>{character.name} thanked you</>", player_id=str(thanked_player_id))
           )
 
       if discord_client and ctx.get('startup_time') and timestamp > ctx.get('startup_time'):

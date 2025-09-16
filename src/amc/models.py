@@ -746,8 +746,10 @@ class DeliveryPoint(models.Model):
   last_updated = models.DateTimeField(editable=False, auto_now=True)
 
   def __str__(self):
-    return self.name
+    return f"{self.name} ({self.type})"
 
+  class Meta:
+    ordering = ['name']
 
 @final
 class CharacterAFKReminder(models.Model):
@@ -857,4 +859,99 @@ class Thank(models.Model):
   sender_character = models.ForeignKey(Character, on_delete=models.CASCADE, related_name='thanks_given')
   recipient_character = models.ForeignKey(Character, on_delete=models.CASCADE, related_name='thanks_received')
   timestamp = models.DateTimeField()
+
+class CargoKey(models.TextChoices):
+  SmallBox = "SmallBox", "Small Box"
+  CarrotBox = "CarrotBox", "Carrots"
+  AppleBox = "AppleBox", "Apples"
+  OrangeBox = "OrangeBox", "Oranges"
+  GlassBottleBox = "GlassBottleBox", "Glass Bottle"
+  BoxPallete_01 = "BoxPallete_01", "Box Pallete A"
+  BoxPallete_02 = "BoxPallete_02", "Box Pallete B"
+  BoxPallete_03 = "BoxPallete_03", "Box Pallet C"
+  PlasticPallete = "PlasticPallete", "Plastic"
+  PowerBox = "PowerBox", "Power Box"
+  ToyBoxes = "ToyBoxes", "Pallet of Toys"
+  BottlePallete = "BottlePallete", "Water Bottle Pallet"
+  WoodPlank_14ft_5t = "WoodPlank_14ft_5t", "WoodPlank 14ft 5t"
+  Container_30ft_5t = "Container_30ft_5t", "Container 30ft 5t"
+  Container_30ft_10t = "Container_30ft_10t", "Container 30ft 10t"
+  Container_30ft_20t = "Container_30ft_20t", "Container 30ft 20t"
+  Container_20ft_01 = "Container_20ft_01", "Container 20ft"
+  Container_40ft_01 = "Container_40ft_01", "Container 40ft"
+  Log_30ft_30t = "Log_30ft_30t", "Log 30ft 30t"
+  Log_Oak_12ft = "Log_Oak_12ft", "Oak Log 12ft"
+  Log_Oak_24ft = "Log_Oak_24ft", "Oak Log 24ft"
+  Log_20ft = "Log_20ft", "Log 20ft"
+  Sand = "Sand", "Sand"
+  FineSand = "FineSand", "Fine Sand"
+  Coal = "Coal", "Coal"
+  LimestoneRock = "LimestoneRock", "Limestone Rock"
+  Limestone = "Limestone", "Limestone"
+  QuicklimePallet = "QuicklimePallet", "Quicklime Pallet"
+  IronOre = "IronOre", "Iron Ore"
+  Concrete = "Concrete", "Concrete"
+  Fuel = "Fuel", "Fuel"
+  Oil = "Oil", "Oil"
+  CrudeOil = "CrudeOil", "Crude Oil"
+  LiveFish_01 = "LiveFish_01", "Live Fish"
+  TrashBag = "TrashBag", "Trash Bag"
+  Trash_Big = "Trash_Big", "Trash Bag"
+  Sofa_01 = "Sofa_01", "Sofa A"
+  Sofa_02 = "Sofa_02", "Sofa B"
+  Sofa_03 = "Sofa_03", "Sofa C"
+  Sofa_04 = "Sofa_04", "Sofa D"
+  Bed_01 = "Bed_01", "Bed A"
+  Bed_02 = "Bed_02", "Bed B"
+  Bed_03 = "Bed_03", "Bed C"
+  Pizza_01 = "Pizza_01", "Pizza 1 Box"
+  Pizza_02 = "Pizza_02", "Pizza 2 Box"
+  Pizza_03 = "Pizza_03", "Pizza 3 Box"
+  Pizza_04 = "Pizza_04", "Pizza 4 Box"
+  Pizza_05 = "Pizza_05", "Pizza 5 Box"
+  Pizza_01_Premium = "Pizza_01_Premium", "Premium Pizza 1 Box"
+  Burger_01 = "Burger_01", "Burger"
+  Burger_01_Signature = "Burger_01_Signature", "Signature Burger"
+  MilitarySupplyBox_01_Empty = "MilitarySupplyBox_01_Empty", "Empty Supply Box"
+  MilitarySupplyBox_01 = "MilitarySupplyBox_01", "Supply Box"
+  Rice = "Rice", "Rice"
+  OrangeBoxes = "OrangeBoxes", "Orange Pallet"
+  RicePallet = "RicePallet", "Rice Pallet"
+  PumpkinBox = "PumpkinBox", "Pumpkin Box"
+  PumpkinPallet = "PumpkinPallet", "Pumpkin Pallet"
+  CornBox = "CornBox", "Corn Box"
+  CornPallet = "CornPallet", "Corn Pallet"
+  BeanPallet = "BeanPallet", "Bean Pallet"
+  HempPallet = "HempPallet", "Hemp Pallet"
+  CabbagePallet = "CabbagePallet", "Cabbage Pallet"
+  ChilliPallet = "ChilliPallet", "Chilli Pallet"
+  PotatoPallet = "PotatoPallet", "Potato Pallet"
+  CheesePallet = "CheesePallet", "Cheese Pallet"
+  CheeseBox = "CheeseBox", "Cheese Box"
+  Milk = "Milk", "Milk"
+  MeatBox = "MeatBox", "Meat Box"
+  BreadBox = "BreadBox", "Bread Box"
+  BreadPallet = "BreadPallet", "Bread Pallet"
+  AirlineMealPallet = "AirlineMealPallet", "Airline Meal Pallet"
+  SnackBox = "SnackBox", "Snack Box"
+  GiftBox_01 = "GiftBox_01", "Gift Box"
+  FormulaSCM = "FormulaSCM", "Formula SCM"
+  PlasticPipes_6m = "PlasticPipes_6m", "Plastic Pipes 6m"
+  lHBeam_6m = "lHBeam_6m", "H-Beam 6m"
+  SteelCoil_10t = "SteelCoil_10t", "Steel Coil"
+  Cement = "Cement", "Cement"
+  Terra = "Terra", "Terra"
+  SunflowerSeed = "SunflowerSeed", "Sunflower Seed"
+
+@final
+class DeliveryJob(models.Model):
+  cargo_key = models.CharField(max_length=200, db_index=True, choices=CargoKey)
+  quantity_requested = models.PositiveIntegerField()
+  quantity_fulfilled = models.PositiveIntegerField(default=0)
+  requested_at = models.DateTimeField(auto_now_add=True)
+  expired_at = models.DateTimeField()
+  bonus_multiplier = models.FloatField()
+  source_points = models.ManyToManyField('DeliveryPoint', related_name='jobs_out')
+  destination_points = models.ManyToManyField('DeliveryPoint', related_name='jobs_in')
+  discord_message_id = models.PositiveBigIntegerField(null=True)
 

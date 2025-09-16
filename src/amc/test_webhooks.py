@@ -74,6 +74,8 @@ class ProcessEventTests(TestCase):
           'Net_Distance': 10_000,
           'Net_SenderAbsoluteLocation': {'X': 0, 'Y': 0, 'Z': 0},
           'Net_DestinationLocation': {'X': 1000, 'Y': 1000, 'Z': 0},
+          'Net_LCComfortSatisfaction': 5,
+          'Net_TimeLimitPoint': 5,
         },
         'PlayerId': str(player.unique_id),
       }

@@ -128,3 +128,30 @@ async def delay(coro, seconds):
   await asyncio.sleep(seconds)
   await coro
 
+def get_time_difference_string(start_time: datetime, end_time: datetime) -> str:
+    """
+    Calculates the difference between two datetime objects and returns it as a formatted string.
+
+    Args:
+        start_time: The starting datetime object.
+        end_time: The ending datetime object.
+
+    Returns:
+        A string formatted as "X hours, Y minutes" representing the absolute difference.
+    """
+    # Calculate the difference, which results in a timedelta object
+    # Use abs() to ensure the difference is always positive
+    time_delta = abs(end_time - start_time)
+
+    # Get the total number of seconds from the timedelta
+    total_seconds = int(time_delta.total_seconds())
+
+    # Calculate hours and minutes from the total seconds
+    # There are 3600 seconds in an hour
+    hours = total_seconds // 3600
+    
+    # The remaining seconds are used to calculate minutes
+    remaining_seconds = total_seconds % 3600
+    minutes = remaining_seconds // 60
+
+    return f"{hours} hours, {minutes} minutes"

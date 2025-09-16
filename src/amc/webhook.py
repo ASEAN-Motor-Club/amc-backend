@@ -1,9 +1,10 @@
 import asyncio
 import itertools
+from operator import attrgetter
 from datetime import datetime
 from django.utils import timezone
 from django.contrib.gis.geos import Point
-from django.db.models import F
+from django.db.models import F, Q
 from amc.mod_server import get_webhook_events, show_popup
 from amc.subsidies import (
   repay_loan_for_profit,
@@ -20,6 +21,7 @@ from amc.models import (
   ServerPassengerArrivedLog,
   ServerTowRequestArrivedLog,
   DeliveryPoint,
+  DeliveryJob,
 )
 
 
@@ -147,7 +149,31 @@ async def process_event(event, player):
         for cargo in event['data']['Cargos']
       ])
       await ServerCargoArrivedLog.objects.abulk_create(logs)
-      subsidy = get_subsidy_for_cargos(logs)
+
+      key_by_cargo = attrgetter('cargo_key')
+      logs.sort(key=key_by_cargo)
+      for cargo_key, group in itertools.groupby(logs, key=key_by_cargo):
+        group_list = list(group)
+        quantity = len(group_list)
+        payment = group_list[0].payment
+        delivery_source = group_list[0].sender_point
+        delivery_destination = group_list[0].destination_point
+        jobs_qs = DeliveryJob.objects.filter(
+          Q(source_points=delivery_source) | Q(source_points=None),
+          Q(destination_points=delivery_destination) | Q(destination_points=None),
+          cargo_key=cargo_key,
+          quantity_fulfilled__lt=F('quantity_requested'),
+          expired_at__gte=timestamp,
+        ).distinct()
+        job = await jobs_qs.afirst()
+        if not job:
+          continue
+        requested_remaining = job.quantity_requested - job.quantity_fulfilled
+        subsidy += min(requested_remaining, quantity) * job.bonus_multiplier * payment
+        job.quantity_fulfilled = F('quantity_fulfilled') + min(requested_remaining, quantity)
+        await job.asave(update_fields=['quantity_fulfilled'])
+
+      subsidy += get_subsidy_for_cargos(logs)
       total_payment += sum([log.payment for log in logs]) + subsidy
 
     case "/Script/MotorTown.MotorTownPlayerController:ServerCargoDumped":

@@ -33,7 +33,8 @@ from .models import (
   ServerPassengerArrivedLog,
   ServerTowRequestArrivedLog,
   TeleportPoint,
-  VehicleDealership
+  VehicleDealership,
+  DeliveryJob,
 )
 from amc_finance.services import send_fund_to_player
 
@@ -340,7 +341,7 @@ class PlayerMailMessageAdmin(admin.ModelAdmin):
 
 @admin.register(DeliveryPoint)
 class DeliveryPointAdmin(admin.ModelAdmin):
-  list_display = ['guid', 'name', 'coord', 'last_updated']
+  list_display = ['guid', 'name', 'type', 'coord', 'last_updated']
   search_fields = ['name', 'guid']
 
 @admin.register(ServerCargoArrivedLog)
@@ -393,4 +394,11 @@ class VehicleDealershipAdmin(admin.ModelAdmin):
       async for vd in queryset:
         await vd.spawn(http_client_mod)
     async_to_sync(spawn_dealerships)()
+
+@admin.register(DeliveryJob)
+class DeliveryJobAdmin(admin.ModelAdmin):
+  list_display = ['id', 'cargo_key', 'quantity_requested', 'quantity_fulfilled', 'requested_at']
+  ordering = ['-requested_at']
+  search_fields = ['cargo_key']
+  autocomplete_fields = ['cargo_key', 'source_points', 'destination_points']
 
