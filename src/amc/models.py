@@ -1008,5 +1008,6 @@ class DeliveryJob(models.Model):
   bonus_multiplier = models.FloatField()
   source_points = models.ManyToManyField('DeliveryPoint', related_name='jobs_out', blank=True)
   destination_points = models.ManyToManyField('DeliveryPoint', related_name='jobs_in', blank=True)
-  discord_message_id = models.PositiveBigIntegerField(null=True, blank=True)
+  discord_message_id = models.PositiveBigIntegerField(null=True, blank=True, help_text="For bot use only, leave blank")
+  description = models.TextField(blank=True, null=True)
 

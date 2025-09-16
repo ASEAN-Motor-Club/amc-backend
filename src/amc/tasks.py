@@ -264,6 +264,8 @@ async def process_log_event(event: LogEvent, http_client=None, http_client_mod=N
             title += 'ONLY to: '
             title += ', '.join([point.name for point in destination_points])
             title += '</>'
+          if job.description:
+            title += f'\n<Secondary>{job.description}</>'
           return title
 
         jobs_str = "\n\n".join([ display_job(job) async for job in jobs ])

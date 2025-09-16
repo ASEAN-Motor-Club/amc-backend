@@ -38,6 +38,9 @@ class JobsCog(commands.Cog):
         description += '\n**ONLY to**: '
         description += ', '.join([point.name for point in destination_points])
 
+    if job.description:
+        description += f'\n**Description**: {job.description}'
+
     # --- Assemble the embed ---
     embed = discord.Embed(
         title=f"Deliver: {job.get_cargo_key_display()} ({job.quantity_fulfilled}/{job.quantity_requested})",
