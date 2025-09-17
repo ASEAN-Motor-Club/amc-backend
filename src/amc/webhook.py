@@ -1,7 +1,7 @@
 import asyncio
 import itertools
 from operator import attrgetter
-from datetime import datetime
+from datetime import datetime, timedelta
 from django.utils import timezone
 from django.contrib.gis.geos import Point
 from django.db.models import F, Q
@@ -23,6 +23,7 @@ from amc.models import (
   DeliveryPoint,
   DeliveryJob,
 )
+from amc.locations import gwangjin_shortcut
 
 
 async def on_player_profits(player_profits, session):
@@ -101,6 +102,15 @@ async def process_events(events, http_client_mod=None):
           show_popup(http_client_mod, f"Webhook failed, please send to discord:\n{e}", player_id=player_id)
         )
         raise e
+
+    used_shortcut = await CharacterLocation.objects.filter(
+      character__player=player,
+      location__coveredby=gwangjin_shortcut,
+      timestamp__gte=timezone.now() - timedelta(hours=1)
+    ).aexists()
+    if used_shortcut:
+      total_payment -= total_subsidy
+      total_subsidy = 0
 
     player_profits.append((player, total_subsidy, total_payment))
 
@@ -281,4 +291,3 @@ async def process_event(event, player):
 
 
   return total_payment, subsidy
-

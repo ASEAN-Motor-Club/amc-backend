@@ -277,6 +277,8 @@ async def process_log_event(event: LogEvent, http_client=None, http_client_mod=N
 
 <Bold>Depot Restocking</> <Money>10,000</> coins
 
+<Warning>Using the Gwanjin shortcut will disqualify you from subsidies for 1 hour</>
+
 <Bold>Burger, Pizza, Live Fish</> - <Money>300%</> (Must be on time)
 <Bold>Airline Meal Pallets</> - <Money>200%</> (Must be on time)
 <Bold>12ft Oak Log</> - <Money>250%</> (Reduces with damage)

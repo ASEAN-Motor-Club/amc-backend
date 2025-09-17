@@ -3,6 +3,7 @@ from django.contrib.gis.geos import Point
 from amc.models import Character, CharacterLocation
 from amc.mod_server import show_popup, teleport_player
 
+gwangjin_shortcut = Point(359285, 892222, -3519).buffer(100_00)
 point_of_interests = [
   (
     Point(**{"z": -20696.78, "y": 150230.13, "x": 1025.73}),
