@@ -87,6 +87,13 @@ def get_subsidy_for_cargos(cargos):
 
 def get_subsidy_for_cargo(cargo):
   subsidy_factor = 0.0
+  sender_name = None
+  destination_name = None
+  if cargo.sender_point:
+    sender_name = cargo.sender_point.name
+  if cargo.destination_point:
+    destination_name = cargo.destination_point.name
+
   match cargo.cargo_key:
     case 'Burger_01_Signature' | 'Pizza_01_Premium' | 'LiveFish_01':
       if cargo.data.get('Net_TimeLeftSeconds', 0) > 0:
@@ -97,12 +104,6 @@ def get_subsidy_for_cargo(cargo):
     case 'Log_Oak_12ft':
       subsidy_factor = 2.5 * (1.0 - cargo.damage)
     case 'WoodPlank_14ft_5t' | 'Fuel':
-      sender_name = None
-      destination_name = None
-      if cargo.sender_point:
-        sender_name = cargo.sender_point.name
-      if cargo.destination_point:
-        destination_name = cargo.destination_point.name
       match sender_name:
         case 'Gwangjin Plank Storage':
           match destination_name:
@@ -117,9 +118,6 @@ def get_subsidy_for_cargo(cargo):
             case 'Migeum Oak 1' | 'Migeum Oak 2' | 'Migeum Oak 3':
               subsidy_factor = 1.5
     case 'BottlePallete':
-      destination_name = None
-      if cargo.destination_point:
-        destination_name = cargo.destination_point.name
       match destination_name:
         case 'Gwangjin Supermarket' | 'Ara Supermarket':
           subsidy_factor = 3.0
@@ -129,13 +127,10 @@ def get_subsidy_for_cargo(cargo):
           else:
             subsidy_factor = 0.0
     case 'MeatBox':
-      destination_name = None
-      if cargo.destination_point:
-        destination_name = cargo.destination_point.name
-        if 'Supermarket' in destination_name:
-          subsidy_factor = 2.0
-        else:
-          subsidy_factor = 0.0
+      if 'Supermarket' in destination_name:
+        subsidy_factor = 2.0
+      else:
+        subsidy_factor = 0.0
     case 'TrashBag' | 'Trash_Big':
       subsidy_factor = 1.0
       if destination_location := cargo.data.get('Net_DestinationLocation'):
@@ -152,6 +147,12 @@ def get_subsidy_for_cargo(cargo):
           subsidy_factor = 2.5
     case _:
       subsidy_factor = 0.0
+
+  match destination_name:
+    case 'Gwangjin Supermarket':
+      if subsidy_factor == 0.0:
+        subsidy_factor = 3.0
+
   return int(int(cargo.payment) * subsidy_factor), subsidy_factor
 
 def get_passenger_subsidy(passenger):

@@ -199,6 +199,8 @@ Visit the website & Join the Discord!
 
 <Highlight>/subsidies</> - List all the subsidised (bonus paid) jobs on the server.
 
+<Highlight>/jobs</> - List all available temporary jobs.
+
 <Highlight>/bank</> - See your Bank ASEAN account.
 
 <Highlight>/toggle_ubi</> - Toggle your Universal Basic Income

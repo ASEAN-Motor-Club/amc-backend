@@ -290,8 +290,10 @@ async def process_log_event(event: LogEvent, http_client=None, http_client_mod=N
 <Secondary>To other Supermarkets - 200%</>
 <Bold>Meat Boxes</> - <Money>200%</> <Secondary>ONLY to Supermarkets</>
 <Bold>Trash</> - <Money>100 - 250%</>
-<Secondary>Gwangjin - 250%</>
-<Secondary>Ara - 200%</>
+<Secondary>Gwangjin: 250% | Ara: 200% | Default: 100%</>
+
+<Bold>To Gwangjin Supermarket</> - <Money>300%</>
+<Secondary>Any cargo not already listed above</>
 
 <Bold>Towing/Wrecker Jobs</>
 Normal - <Money>2,000 + 50%</>
