@@ -1,6 +1,7 @@
 import re
 import asyncio
 import discord
+import random
 from decimal import Decimal
 from datetime import timedelta
 from django.utils import timezone
@@ -392,7 +393,81 @@ Flipped - <Money>2,000 + 100%</>
           character=character, 
           prompt="/setup_event",
         )
-      if command_match := re.match(r"/(teleport|tp)\s*(?P<name>.*)", message):
+      elif command_match := re.match(r"/(coords|loc)$", message):
+        player_info = await get_player(http_client_mod, str(player.unique_id))
+        if player_info:
+          location = player_info['Location']
+          asyncio.create_task(
+            announce(f"{int(float(location['X']))}, {int(float(location['Y']))}, {int(float(location['Z']))}", http_client, delay=0)
+          )
+      elif command_match := re.match(r"/(teleport|tp)\s+(?P<x>[-\d]+)\s+(?P<y>[-\d]+)\s+(?P<z>[-\d]+)$", message):
+        player_info = await get_player(http_client_mod, str(player.unique_id))
+        if player_info and player_info.get('bIsAdmin'):
+          await teleport_player(
+            http_client_mod,
+            player.unique_id,
+            {
+              'X': int(command_match.group('x')), 
+              'Y': int(command_match.group('y')), 
+              'Z': int(command_match.group('z')),
+            },
+            no_vehicles=not player_info.get('bIsAdmin')
+          )
+      elif command_match := re.match(r"/(teleport|tp)\s+(?P<player_name>\S+)\s+(?P<tp_name>\S*)", message):
+        player_name = command_match.group('player_name')
+        tp_name = command_match.group('tp_name')
+
+        players = await get_players(http_client)
+        target_player_id = None
+        for p_id, p_name in players:
+          if player_name == p_name:
+            target_player_id = p_id
+            break
+        if not target_player_id:
+          asyncio.create_task(
+            show_popup(http_client_mod, "<Title>Player not found</>", player_id=str(player_id))
+          )
+          return
+        player_info = await get_player(http_client_mod, str(player.unique_id))
+        if (not player_info or not player_info.get('bIsAdmin')):
+          asyncio.create_task(
+            show_popup(http_client_mod, "<Title>Admin-only Command</>", player_id=str(player_id))
+          )
+        else:
+          if tp_name == "impound":
+            location = {
+              'X': -289988 + random.randint(-80_00, 80_00),
+              'Y': 201790 + random.randint(-80_00, 80_00),
+              'Z': -21950,
+            }
+          else:
+            try:
+              teleport_point = await TeleportPoint.objects.aget(
+                Q(character=character) | Q(character__isnull=True),
+                name__iexact=tp_name,
+              )
+              location = teleport_point.location
+              location = {
+                'X': location.x, 
+                'Y': location.y, 
+                'Z': location.z,
+              }
+            except TeleportPoint.DoesNotExist:
+              asyncio.create_task(show_popup(http_client_mod, "Teleport point not found", player_id=str(player_id)))
+              return
+          await teleport_player(
+            http_client_mod,
+            target_player_id,
+            location,
+            no_vehicles=False
+          )
+          await BotInvocationLog.objects.acreate(
+            timestamp=timestamp,
+            character=character, 
+            prompt=message,
+          )
+
+      elif command_match := re.match(r"/(teleport|tp)\s*(?P<name>.*)", message):
         name = command_match.group('name')
         player_info = await get_player(http_client_mod, str(player.unique_id))
         if (not player_info or not player_info.get('bIsAdmin')) and not name:
