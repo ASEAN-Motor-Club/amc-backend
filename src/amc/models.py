@@ -951,7 +951,7 @@ class CargoKey(models.TextChoices):
   CrudeOil = "CrudeOil", "Crude Oil"
   LiveFish_01 = "LiveFish_01", "Live Fish"
   TrashBag = "TrashBag", "Trash Bag"
-  Trash_Big = "Trash_Big", "Trash Bag"
+  Trash_Big = "Trash_Big", "Trash Bag (Big)"
   Sofa_01 = "Sofa_01", "Sofa A"
   Sofa_02 = "Sofa_02", "Sofa B"
   Sofa_03 = "Sofa_03", "Sofa C"
