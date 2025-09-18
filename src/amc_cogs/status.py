@@ -23,6 +23,7 @@ class StatusCog(commands.Cog):
 
   async def cog_load(self):
     self.update_status_embed.start()
+    self.daily_top_restockers_task.start()
 
   async def cog_unload(self):
     self.update_status_embed.cancel()
