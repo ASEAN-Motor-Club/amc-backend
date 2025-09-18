@@ -252,7 +252,9 @@ async def process_log_event(event: LogEvent, http_client=None, http_client_mod=N
         ).prefetch_related('source_points', 'destination_points')
 
         def display_job(job):
-          title = f"{job.quantity_fulfilled}/{job.quantity_requested}x {job.get_cargo_key_display()} (Bonus: <Money>{job.bonus_multiplier*100:.0f}%</>)\n<Secondary>Expiring in {get_time_difference_string(timestamp, job.expired_at)}</>"
+          title = f"""\
+({job.quantity_fulfilled}/{job.quantity_requested}) {job.get_cargo_key_display()} - Completion: <Money>{job.completion_bonus:,}</> - Cargo Bonus: <Money>{job.bonus_multiplier*100:.0f}%</>
+<Secondary>Expiring in {get_time_difference_string(timestamp, job.expired_at)}</>"""
           source_points = list(job.source_points.all())
           if source_points:
             title += '\n<Secondary>'
@@ -270,14 +272,18 @@ async def process_log_event(event: LogEvent, http_client=None, http_client_mod=N
           return title
 
         jobs_str = "\n\n".join([ display_job(job) async for job in jobs ])
-        asyncio.create_task(show_popup(http_client_mod, f"<Title>Delivery Jobs</>\n\n{jobs_str}", player_id=str(player_id)))
+        asyncio.create_task(show_popup(http_client_mod, f"""\
+<Title>Delivery Jobs</>
+<Secondary>Complete jobs solo or with other players and share the completion bonus!</>
+
+{jobs_str}
+""", player_id=str(player_id)))
 
       if command_match := re.match(r"/subsidies", message):
         subsidies_text = """<Title>ASEAN Server Subsidies</>
+<Warning>Using the Gwangjin shortcut will disqualify you from subsidies for 1 hour</>
 
 <Bold>Depot Restocking</> <Money>10,000</> coins
-
-<Warning>Using the Gwanjin shortcut will disqualify you from subsidies for 1 hour</>
 
 <Bold>Burger, Pizza, Live Fish</> - <Money>300%</> (Must be on time)
 <Bold>Airline Meal Pallets</> - <Money>200%</> (Must be on time)
@@ -293,9 +299,6 @@ async def process_log_event(event: LogEvent, http_client=None, http_client_mod=N
 <Bold>Meat Boxes</> - <Money>200%</> <Secondary>ONLY to Supermarkets</>
 <Bold>Trash</> - <Money>100 - 250%</>
 <Secondary>Gwangjin: 250% | Ara: 200% | Default: 100%</>
-
-<Bold>To Gwangjin Supermarket</> - <Money>300%</>
-<Secondary>Any cargo not already listed above</>
 
 <Bold>Towing/Wrecker Jobs</>
 Normal - <Money>2,000 + 50%</>

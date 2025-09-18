@@ -5,6 +5,7 @@ from datetime import datetime, timedelta
 from django.utils import timezone
 from django.contrib.gis.geos import Point
 from django.db.models import F, Q
+from amc.game_server import announce
 from amc.mod_server import get_webhook_events, show_popup
 from amc.subsidies import (
   repay_loan_for_profit,
@@ -14,6 +15,7 @@ from amc.subsidies import (
   get_passenger_subsidy,
   subsidise_player,
 )
+from amc_finance.services import send_fund_to_player
 from amc.models import (
   Player,
   ServerCargoArrivedLog,
@@ -22,6 +24,7 @@ from amc.models import (
   ServerTowRequestArrivedLog,
   DeliveryPoint,
   DeliveryJob,
+  CharacterLocation,
 )
 from amc.locations import gwangjin_shortcut
 
@@ -40,14 +43,78 @@ async def on_player_profit(player, total_subsidy, total_payment, session):
   if savings > 0:
     await set_aside_player_savings(player, savings, session)
 
+async def on_delivery_job_fulfilled(job, http_client):
+    """
+    Finds all players who contributed to a job and rewards them proportionally.
+    """
+    # Define a completion bonus. Defaults to 50,000 if not set on the job model.
+    completion_bonus = getattr(job, 'completion_bonus', 50_000)
+    if completion_bonus == 0:
+        return
+
+    # Base query for logs matching the job's cargo within its active time frame.
+    # ASSUMES the DeliveryJob model has a `created_at` field.
+    log_qs = ServerCargoArrivedLog.objects.filter(
+        cargo_key=job.cargo_key,
+        timestamp__gte=job.requested_at,
+    )
+
+    # Filter by source/destination points if the job specifies them.
+    source_points = job.source_points.all()
+    if await source_points.aexists():
+        log_qs = log_qs.filter(sender_point__in=source_points)
+
+    destination_points = job.destination_points.all()
+    if await destination_points.aexists():
+        log_qs = log_qs.filter(destination_point__in=destination_points)
+    
+    # Get the exact N logs that fulfilled the job by taking the most recent ones.
+    contributing_logs = [
+        log async for log in log_qs.order_by('-timestamp')[:job.quantity_requested]
+    ]
+
+    total_deliveries = len(contributing_logs)
+    if not total_deliveries:
+        return
+
+    # Group logs by player to count each player's contribution.
+    contributing_logs.sort(key=attrgetter('player_id'))
+    player_contributions = {}
+    for player_id, group in itertools.groupby(contributing_logs, key=attrgetter('player_id')):
+        if player_id:
+            player_contributions[player_id] = len(list(group))
+
+    if not player_contributions:
+        return
+    
+    # Fetch all contributing Player objects in one query.
+    player_ids = player_contributions.keys()
+    players = {p.unique_id: p async for p in Player.objects.filter(unique_id__in=player_ids)}
+
+    # Distribute the bonus proportionally.
+    for player_id, count in player_contributions.items():
+        player_obj = players.get(player_id)
+        if not player_obj:
+            continue
+        
+        reward = int((count / total_deliveries) * completion_bonus)
+        if reward > 0:
+            character = await player_obj.get_latest_character()
+            await send_fund_to_player(reward, character, "Job Completion")
+
+    message = f"Bonus! +${completion_bonus:,} has been deposited into your bank accounts for completing the {job.get_cargo_key_display()} job."
+    asyncio.create_task(announce(message, http_client))
+
+
 
 async def monitor_webhook(ctx):
+  http_client = ctx.get('http_client')
   http_client_mod = ctx.get('http_client_mod')
   events = await get_webhook_events(http_client_mod)
-  await process_events(events, http_client_mod)
+  await process_events(events, http_client, http_client_mod)
 
 
-async def process_events(events, http_client_mod=None):
+async def process_events(events, http_client=None, http_client_mod=None):
   def key_fn(event):
     return (event['data']['PlayerId'], event['hook'])
 
@@ -94,7 +161,7 @@ async def process_events(events, http_client_mod=None):
 
     for event in es:
       try:
-        payment, subsidy = await process_event(event, player)
+        payment, subsidy = await process_event(event, player, http_client, http_client_mod)
         total_payment += payment
         total_subsidy += subsidy
       except Exception as e:
@@ -146,7 +213,7 @@ async def process_cargo_log(cargo, player, timestamp):
     data=cargo,
   )
 
-async def process_event(event, player):
+async def process_event(event, player, http_client=None, http_client_mod=None):
   total_payment = 0
   subsidy = 0
   current_tz = timezone.get_current_timezone()
@@ -182,6 +249,9 @@ async def process_event(event, player):
         subsidy += min(requested_remaining, quantity) * job.bonus_multiplier * payment
         job.quantity_fulfilled = F('quantity_fulfilled') + min(requested_remaining, quantity)
         await job.asave(update_fields=['quantity_fulfilled'])
+        await job.arefresh_from_db(fields=['quantity_fulfilled'])
+        if job.quantity_fulfilled >= job.quantity_requested:
+           await on_delivery_job_fulfilled(job, http_client)
 
       subsidy += get_subsidy_for_cargos(logs)
       total_payment += sum([log.payment for log in logs]) + subsidy
@@ -291,3 +361,4 @@ async def process_event(event, player):
 
 
   return total_payment, subsidy
+

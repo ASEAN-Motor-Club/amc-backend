@@ -151,10 +151,10 @@ def get_subsidy_for_cargo(cargo):
   match destination_name:
     case 'Gwangjin Supermarket':
       if subsidy_factor == 0.0:
-        subsidy_factor = 3.0
+        subsidy_factor = 0.0
     case 'Gwangjin Supermarket Gas Station':
       if subsidy_factor == 0.0:
-        subsidy_factor = 3.0
+        subsidy_factor = 0.0
 
   return int(int(cargo.payment) * subsidy_factor), subsidy_factor
 

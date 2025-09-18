@@ -1006,6 +1006,7 @@ class DeliveryJob(models.Model):
   requested_at = models.DateTimeField(auto_now_add=True)
   expired_at = models.DateTimeField()
   bonus_multiplier = models.FloatField()
+  completion_bonus = models.PositiveIntegerField(default=0)
   source_points = models.ManyToManyField('DeliveryPoint', related_name='jobs_out', blank=True)
   destination_points = models.ManyToManyField('DeliveryPoint', related_name='jobs_in', blank=True)
   discord_message_id = models.PositiveBigIntegerField(null=True, blank=True, help_text="For bot use only, leave blank")

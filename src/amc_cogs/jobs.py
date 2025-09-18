@@ -25,8 +25,13 @@ class JobsCog(commands.Cog):
     """Builds a Discord Embed for a single DeliveryJob object."""
 
     # --- Create the title and description (value part of the field) ---
-    description = f"**Reward**: {job.bonus_multiplier*100:.0f}%\n"
-    description += f"**Expires in**: {get_time_difference_string(timezone.now(), job.expired_at)}"
+    description = ''
+    if job.completion_bonus:
+        description += '\n**Completion Reward**: '
+        description += f"{job.completion_bonus:,}"
+    description += f"\n**Bonus multiplier**: {job.bonus_multiplier*100:.0f}%"
+
+    description += f"\n**Expires in**: {get_time_difference_string(timezone.now(), job.expired_at)}"
 
     source_points = list(job.source_points.all())
     if source_points:
