@@ -52,7 +52,7 @@ async def get_character_total_donations(character, start_time):
 async def get_character_total_interest(character, start_time):
   pass
 
-async def register_player_deposit(amount, character, player):
+async def register_player_deposit(amount, character, player, description="Player Deposit"):
   account, _ = await Account.objects.aget_or_create(
     account_type=Account.AccountType.LIABILITY,
     book=Account.Book.BANK,
@@ -73,7 +73,7 @@ async def register_player_deposit(amount, character, player):
 
   return await sync_to_async(create_journal_entry)(
     timezone.now(),
-    "Player Deposit",
+    description,
     character,
     [
       {
