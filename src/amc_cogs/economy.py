@@ -36,6 +36,11 @@ class EconomyCog(commands.Cog):
   async def calculate_gdp(self, interaction, num_days: int = 1, days_before:int=0):
     await interaction.response.defer()
     start_time, end_time = get_timespan(days_before, num_days)
+
+    subsidies_agg = await (LedgerEntry.objects.filter_subsidies()
+      .filter(journal_entry__created_at__gte=start_time, journal_entry__created_at__lte=end_time)
+      .aaggregate(total_subsidies=Sum('debit', default=0))
+    )
     deliveries_qs = ServerCargoArrivedLog.objects.filter(
       timestamp__gte=start_time,
       timestamp__lt=end_time
@@ -60,7 +65,7 @@ class EconomyCog(commands.Cog):
     )
     tow_requests_aggregates = await tow_requests_qs.aaggregate(total_payments=Sum('payment', default=0))
 
-    total_gdp = deliveries_aggregates['total_payments'] + contracts_aggregates['total_payments'] + passengers_aggregates['total_payments'] + tow_requests_aggregates['total_payments']
+    total_gdp = subsidies_agg['total_subsidies'] + deliveries_aggregates['total_payments'] + contracts_aggregates['total_payments'] + passengers_aggregates['total_payments'] + tow_requests_aggregates['total_payments']
 
     delivery_sum_subquery = ServerCargoArrivedLog.objects.filter(
       player=OuterRef('pk'),
@@ -142,6 +147,7 @@ class EconomyCog(commands.Cog):
 # Total GDP: {total_gdp:,}
 -# {start_time} - {end_time}
 
+Subsidies: {subsidies_agg['total_subsidies']:,}
 Deliveries: {deliveries_aggregates['total_payments']:,}
 Contracts: {contracts_aggregates['total_payments']:,}
 Passengers (Taxi/Ambulance): {passengers_aggregates['total_payments']:,}
