@@ -72,6 +72,7 @@ from amc_finance.services import (
   get_character_total_donations,
   player_donation,
 )
+from amc_finance.models import Account, LedgerEntry
 from amc.webhook import on_player_profit
 
 
@@ -277,6 +278,8 @@ async def process_log_event(event: LogEvent, http_client=None, http_client_mod=N
 <Secondary>Complete jobs solo or with other players and share the completion bonus!</>
 
 {jobs_str}
+
+Also check out <Highlight>/subsidies</> for subsidised deliveries. Bonuses and subsidies add up!
 """, player_id=str(player_id)))
 
       if command_match := re.match(r"/subsidies", message):
@@ -617,6 +620,14 @@ Flipped - <Money>2,000 + 100%</>
         balance = await get_player_bank_balance(character)
         loan_balance = await get_player_loan_balance(character)
         max_loan = get_character_max_loan(character)
+        transactions = LedgerEntry.objects.filter(
+          account__character=character,
+          account__book=Account.Book.BANK,
+        ).select_related('journal_entry').order_by('-journal_entry__created_at')[:10]
+        transactions_str = '\n'.join([
+          f"{tx.journal_entry.date} {tx.journal_entry.description:<25} <Money>{tx.credit - tx.debit:,}</>"
+          async for tx in transactions
+        ])
         saving_rate = character.saving_rate if character.saving_rate is not None else Decimal(DEFAULT_SAVING_RATE)
         asyncio.create_task(
           show_popup(http_client_mod, f"""\
@@ -643,6 +654,9 @@ How to Put Money in the Bank
 How ASEAN Loans Works
 <Secondary>Our loans have a flat one-off 10% fee, and you only have to repay them when you make a profit.</>
 <Secondary>The repayment will range from 10% to 80% of your income, depending on the amount of loan you took.</>
+
+<Bold>Latest Transactions</>
+{transactions_str}
 """, player_id=str(player_id))
         )
       elif command_match := re.match(r"/donate\s+(?P<amount>[\d,]+)\s*(?P<verification_code>\S*)", message):
