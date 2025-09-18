@@ -70,7 +70,7 @@ async def set_aside_player_savings(player, payment, session):
         'Earnings Deposit (Use /bank to see)',
         str(player.unique_id),
       )
-      await register_player_deposit(saving, character, player)
+      await register_player_deposit(saving, character, player, "ASEAN Subsidy")
       return int(saving)
   except Exception as e:
     asyncio.create_task(
@@ -103,6 +103,12 @@ def get_subsidy_for_cargo(cargo):
         subsidy_factor = 2.0
     case 'Log_Oak_12ft':
       subsidy_factor = 2.5 * (1.0 - cargo.damage)
+    case 'Coal' | 'Iron Ore':
+      match sender_name:
+        case 'Gwangjin Coal' | 'Gwangjin Iron Ore Mine':
+          match destination_name:
+            case 'Gwangjin Iron Ore Storage' | 'Gwangjin Coal Storage':
+              subsidy_factor = 1.5
     case 'WoodPlank_14ft_5t' | 'Fuel':
       match sender_name:
         case 'Gwangjin Plank Storage':
@@ -151,10 +157,10 @@ def get_subsidy_for_cargo(cargo):
   match destination_name:
     case 'Gwangjin Supermarket':
       if subsidy_factor == 0.0:
-        subsidy_factor = 0.0
+        subsidy_factor = 3.0
     case 'Gwangjin Supermarket Gas Station':
       if subsidy_factor == 0.0:
-        subsidy_factor = 0.0
+        subsidy_factor = 3.0
 
   return int(int(cargo.payment) * subsidy_factor), subsidy_factor
 

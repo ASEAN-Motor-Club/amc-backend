@@ -288,6 +288,8 @@ async def process_log_event(event: LogEvent, http_client=None, http_client_mod=N
 <Bold>Burger, Pizza, Live Fish</> - <Money>300%</> (Must be on time)
 <Bold>Airline Meal Pallets</> - <Money>200%</> (Must be on time)
 <Bold>12ft Oak Log</> - <Money>250%</> (Reduces with damage)
+<Bold>Coal & Iron Ore</> - <Money>150%</>
+<Secondary>ONLY from Gwangjin Coal/Iron mines to Gwangjin Storages</>
 <Bold>Planks</> - <Money>250%</>
 <Secondary>ONLY from Gwangjin Plank Storage to Gwangjin Coal/Iron mines, Migeum Oak 1/2/3</>
 <Bold>Fuel</> - <Money>150%</>
@@ -299,6 +301,9 @@ async def process_log_event(event: LogEvent, http_client=None, http_client_mod=N
 <Bold>Meat Boxes</> - <Money>200%</> <Secondary>ONLY to Supermarkets</>
 <Bold>Trash</> - <Money>100 - 250%</>
 <Secondary>Gwangjin: 250% | Ara: 200% | Default: 100%</>
+
+<Bold>To Gwangjin Supermarket</> - <Money>300%</>
+<Secondary>Any cargo not already listed above</>
 
 <Bold>Towing/Wrecker Jobs</>
 Normal - <Money>2,000 + 50%</>
