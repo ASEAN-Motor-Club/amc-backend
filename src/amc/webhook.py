@@ -11,7 +11,6 @@ from amc.subsidies import (
   repay_loan_for_profit,
   set_aside_player_savings,
   get_subsidy_for_cargo,
-  get_subsidy_for_cargos,
   get_passenger_subsidy,
   subsidise_player,
 )
@@ -106,15 +105,53 @@ async def on_delivery_job_fulfilled(job, http_client):
     asyncio.create_task(announce(message, http_client))
 
 
+async def post_discord_delivery_embed(
+  discord_client,
+  character,
+  cargo_key,
+  quantity,
+  delivery_source,
+  delivery_destination,
+  payment,
+  subsidy,
+  vehicle_key,
+):
+  jobs_cog = discord_client.get_cog('JobsCog')
+  delivery_source_name = ''
+  delivery_destination_name = ''
+  if delivery_source:
+    delivery_source_name = delivery_source.name
+  if delivery_destination:
+    delivery_destination_name = delivery_destination.name
+
+  if jobs_cog and hasattr(jobs_cog, 'post_delivery_embed'):
+    loop = asyncio.get_running_loop()
+    loop.run_in_executor(
+      None,
+      lambda: asyncio.run_coroutine_threadsafe(
+        jobs_cog.post_delivery_embed(
+          character.name,
+          cargo_key,
+          quantity,
+          delivery_source_name,
+          delivery_destination_name,
+          payment,
+          subsidy,
+          vehicle_key,
+        ),
+        discord_client.loop
+      )
+    )
 
 async def monitor_webhook(ctx):
   http_client = ctx.get('http_client')
   http_client_mod = ctx.get('http_client_mod')
+  discord_client = ctx.get('discord_client')
   events = await get_webhook_events(http_client_mod)
-  await process_events(events, http_client, http_client_mod)
+  await process_events(events, http_client, http_client_mod, discord_client)
 
 
-async def process_events(events, http_client=None, http_client_mod=None):
+async def process_events(events, http_client=None, http_client_mod=None, discord_client=None):
   def key_fn(event):
     return (event['data']['PlayerId'], event['hook'])
 
@@ -161,7 +198,7 @@ async def process_events(events, http_client=None, http_client_mod=None):
 
     for event in es:
       try:
-        payment, subsidy = await process_event(event, player, http_client, http_client_mod)
+        payment, subsidy = await process_event(event, player, http_client, http_client_mod, discord_client)
         total_payment += payment
         total_subsidy += subsidy
       except Exception as e:
@@ -186,7 +223,7 @@ async def process_events(events, http_client=None, http_client_mod=None):
       on_player_profits(player_profits, http_client_mod)
     )
 
-async def process_cargo_log(cargo, player, timestamp):
+async def process_cargo_log(cargo, player, character, timestamp):
   sender_coord_raw = cargo['Net_SenderAbsoluteLocation']
   sender_coord = Point(
     sender_coord_raw['X'],
@@ -204,6 +241,7 @@ async def process_cargo_log(cargo, player, timestamp):
   return ServerCargoArrivedLog(
     timestamp=timestamp,
     player=player,
+    character=character,
     cargo_key=cargo['Net_CargoKey'],
     payment=cargo['Net_Payment']['BaseValue'],
     weight=cargo['Net_Weight'],
@@ -213,16 +251,26 @@ async def process_cargo_log(cargo, player, timestamp):
     data=cargo,
   )
 
-async def process_event(event, player, http_client=None, http_client_mod=None):
+async def process_event(event, player, http_client=None, http_client_mod=None, discord_client=None):
   total_payment = 0
   subsidy = 0
   current_tz = timezone.get_current_timezone()
   timestamp = datetime.fromtimestamp(event['timestamp'] / 1000, tz=current_tz)
 
+  try:
+    character = await player.get_latest_character()
+  except Exception:
+    character = None
+
+  vehicle_key = ""
+  if character:
+    latest_loc = await CharacterLocation.objects.filter(character=character).alatest('timestamp')
+    vehicle_key = latest_loc.get_vehicle_key_display()
+
   match event['hook']:
     case "/Script/MotorTown.MotorTownPlayerController:ServerCargoArrived":
       logs = await asyncio.gather(*[
-        process_cargo_log(cargo, player, timestamp)
+        process_cargo_log(cargo, player, character, timestamp)
         for cargo in event['data']['Cargos']
       ])
       await ServerCargoArrivedLog.objects.abulk_create(logs)
@@ -235,6 +283,25 @@ async def process_event(event, player, http_client=None, http_client_mod=None):
         payment = group_list[0].payment
         delivery_source = group_list[0].sender_point
         delivery_destination = group_list[0].destination_point
+        cargo_subsidy = get_subsidy_for_cargo(group_list[0])[0] * quantity
+        cargo_name = group_list[0].get_cargo_key_display()
+
+        # ADDED: Call the discord embed posting function
+        if discord_client:
+          asyncio.create_task(
+            post_discord_delivery_embed(
+              discord_client,
+              character,
+              cargo_name,
+              quantity,
+              delivery_source,
+              delivery_destination,
+              payment * quantity,
+              cargo_subsidy * quantity,
+              vehicle_key,
+            )
+          )
+
         jobs_qs = DeliveryJob.objects.filter(
           Q(source_points=delivery_source) | Q(source_points=None),
           Q(destination_points=delivery_destination) | Q(destination_points=None),
@@ -243,17 +310,18 @@ async def process_event(event, player, http_client=None, http_client_mod=None):
           expired_at__gte=timestamp,
         ).distinct()
         job = await jobs_qs.afirst()
-        if not job:
-          continue
-        requested_remaining = job.quantity_requested - job.quantity_fulfilled
-        subsidy += min(requested_remaining, quantity) * job.bonus_multiplier * payment
-        job.quantity_fulfilled = F('quantity_fulfilled') + min(requested_remaining, quantity)
-        await job.asave(update_fields=['quantity_fulfilled'])
-        await job.arefresh_from_db(fields=['quantity_fulfilled'])
-        if job.quantity_fulfilled >= job.quantity_requested:
-           await on_delivery_job_fulfilled(job, http_client)
+        if job:
+          requested_remaining = job.quantity_requested - job.quantity_fulfilled
+          bonus = min(requested_remaining, quantity) * job.bonus_multiplier * payment
+          cargo_subsidy = min(cargo_subsidy, bonus)
+          job.quantity_fulfilled = F('quantity_fulfilled') + min(requested_remaining, quantity)
+          await job.asave(update_fields=['quantity_fulfilled'])
+          await job.arefresh_from_db(fields=['quantity_fulfilled'])
+          if job.quantity_fulfilled >= job.quantity_requested:
+             await on_delivery_job_fulfilled(job, http_client)
 
-      subsidy += get_subsidy_for_cargos(logs)
+        subsidy += cargo_subsidy
+
       total_payment += sum([log.payment for log in logs]) + subsidy
 
     case "/Script/MotorTown.MotorTownPlayerController:ServerCargoDumped":

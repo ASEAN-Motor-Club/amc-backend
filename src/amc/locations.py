@@ -75,6 +75,7 @@ async def process_player(player_info, ctx):
     for axis, value in player_info['Location'].items()
   }
   new_location_point = Point(**location_data)
+  vehicle_key = player_info['VehicleKey']
 
   try:
     last_character_location = await CharacterLocation.objects.filter(
@@ -112,7 +113,8 @@ async def process_player(player_info, ctx):
 
   await CharacterLocation.objects.acreate(
     character=character,
-    location=new_location_point
+    location=new_location_point,
+    vehicle_key=vehicle_key,
   )
 
 

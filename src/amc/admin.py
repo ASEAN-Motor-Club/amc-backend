@@ -376,7 +376,7 @@ class ServerCargoArrivedLogAdmin(admin.ModelAdmin):
   list_display = ['id', 'timestamp', 'player', 'cargo_key', 'payment']
   list_select_related = ['player']
   search_fields = ['player__unique_id', 'cargo_key']
-  autocomplete_fields = ['player', 'sender_point', 'destination_point']
+  autocomplete_fields = ['player', 'character', 'sender_point', 'destination_point']
 
 @admin.register(ServerSignContractLog)
 class ServerSignContractLogAdmin(admin.ModelAdmin):

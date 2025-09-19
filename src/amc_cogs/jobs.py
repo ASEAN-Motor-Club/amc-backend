@@ -15,6 +15,7 @@ class JobsCog(commands.Cog):
   def __init__(self, bot: commands.Bot):
     self.bot = bot
     self.channel_id = settings.DISCORD_JOBS_CHANNEL_ID
+    self.deliveries_channel_id = settings.DISCORD_DELIVERIES_CHANNEL_ID
     self.message_id = None
     self.update_loop.start()
 
@@ -55,6 +56,52 @@ class JobsCog(commands.Cog):
     )
     embed.set_footer(text=f"Job ID: {job.id}")
     return embed
+
+  def _build_delivery_embed(
+    self,
+    character_name,
+    cargo_key,
+    quantity,
+    source_name,
+    destination_name,
+    payment,
+    subsidy,
+    vehicle_key,
+  ) -> discord.Embed:
+    description = ''
+    description += '\n**Payment**: '
+    description += f"{payment:,}"
+    if subsidy:
+      description += f" + Subsidy {subsidy:,} (Total: {payment+subsidy:,}"
+
+    if source_name:
+        description += '\n**From**: '
+        description += source_name
+        
+    if destination_name:
+        description += '\n**To**: '
+        description += destination_name
+
+    if vehicle_key:
+        description += '\n**Vehicle**: '
+        description += vehicle_key
+
+    # --- Assemble the embed ---
+    embed = discord.Embed(
+        title=f"{character_name} delivered {quantity} {cargo_key}",
+        description=description.strip(),
+        color=discord.Color.green(),
+        timestamp=timezone.now()
+    )
+    # embed.set_footer(text=f"Job ID: {job.id}")
+    return embed
+
+  async def post_delivery_embed(self, *args):
+    deliveries_channel = self.bot.get_channel(self.deliveries_channel_id)
+    if not deliveries_channel:
+      print(f"Error: Could not find channel with ID {self.deliveries_channel_id}")
+      return
+    await deliveries_channel.send(embed=self._build_delivery_embed(*args))
 
   async def update_jobs(self):
     """
