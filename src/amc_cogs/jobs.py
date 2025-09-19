@@ -22,7 +22,7 @@ class JobsCog(commands.Cog):
   def cog_unload(self):
     self.update_loop.cancel()
 
-  def _build_job_embed(self, job) -> discord.Embed:
+  def _build_job_embed(self, job, stale=False) -> discord.Embed:
     """Builds a Discord Embed for a single DeliveryJob object."""
 
     # --- Create the title and description (value part of the field) ---
@@ -47,11 +47,17 @@ class JobsCog(commands.Cog):
     if job.description:
         description += f'\n**Description**: {job.description}'
 
+    color = discord.Color.blue()
+    if stale:
+      if job.quantity_fulfilled == job.quantity_requested:
+        color = discord.Color.green()
+      else:
+        color = discord.Color.red()
     # --- Assemble the embed ---
     embed = discord.Embed(
         title=f"Deliver: {job.get_cargo_key_display()} ({job.quantity_fulfilled}/{job.quantity_requested})",
         description=description.strip(),
-        color=discord.Color.green(),
+        color=color,
         timestamp=job.requested_at # Use job creation time for consistency
     )
     embed.set_footer(text=f"Job ID: {job.id}")
@@ -155,10 +161,11 @@ class JobsCog(commands.Cog):
     )
 
     async for job in stale_jobs:
+      embed = self._build_job_embed(job, stale=True)
       try:
         message = await channel.fetch_message(job.discord_message_id)
-        await message.delete()
-        print(f"Deleted message for stale job {job.id}")
+        await message.edit(embed=embed)
+        print(f"Updated message for stale job {job.id}")
       except discord.NotFound:
         # Message already gone, which is fine.
         pass
