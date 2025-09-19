@@ -5,6 +5,7 @@ from django.contrib.gis.geos import Point
 from .utils import create_player_autocomplete
 from amc.models import Player, CharacterLocation, TeleportPoint
 from amc.mod_server import show_popup, teleport_player, get_player
+from amc.game_server import announce
 
 class ModerationCog(commands.Cog):
   def __init__(self, bot):
@@ -13,6 +14,12 @@ class ModerationCog(commands.Cog):
 
   async def player_autocomplete(self, interaction, current):
     return await self.player_autocomplete(interaction, current)
+
+  @app_commands.command(name='announce_in_game', description='Sends an announcement')
+  @app_commands.checks.has_any_role(1395460420189421713)
+  async def announce_in_game(self, ctx, message: str):
+    await announce(message, self.bot.http_client_game)
+    await ctx.response.send_message(f'Message sent: {message}', ephemeral=True)
 
   @app_commands.command(name='send_popup', description='Sends a popup message to an in-game player')
   @app_commands.checks.has_any_role(1395460420189421713)
