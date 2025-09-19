@@ -32,6 +32,7 @@ from amc.server_logs import (
 from amc.models import (
   Player,
   Character,
+  CharacterLocation,
   PlayerStatusLog,
   PlayerChatLog,
   PlayerVehicleLog,
@@ -59,6 +60,7 @@ from amc.events import (
   staggered_start,
   auto_starting_grid,
 )
+from amc.locations import gwangjin_shortcut
 from amc.utils import format_in_local_tz, format_timedelta, delay, get_time_difference_string
 from amc.subsidies import DEFAULT_SAVING_RATE
 from amc_finance.services import (
@@ -239,6 +241,28 @@ async def process_log_event(event: LogEvent, http_client=None, http_client_mod=N
         character=character, 
         text=message,
       )
+      if command_match := re.match(r"/shortcutcheck", message):
+        in_shortcut = await CharacterLocation.objects.filter(
+          character=character,
+          location__coveredby=gwangjin_shortcut,
+          timestamp__gte=timestamp - timedelta(seconds=5),
+        ).aexists()
+        used_shortcut = await CharacterLocation.objects.filter(
+          character=character,
+          location__coveredby=gwangjin_shortcut,
+          timestamp__gte=timestamp - timedelta(hours=1),
+        ).aexists()
+        popup_message = "<Title>Gwangjin Shortcut Status</>\n"
+        if in_shortcut:
+          popup_message += "<Warning>You are inside the forbidden zone</>\n"
+        else:
+          popup_message += "<EffectGood>You are outside the forbidden zone</>\n"
+
+        if used_shortcut:
+          popup_message += "<Warning>You were detected inside the forbidden zone in the last hour</>\n"
+        else:
+          popup_message += "<EffectGood>You have not been inside the forbidden zone for the last hour</>\n"
+        asyncio.create_task(show_popup(http_client_mod, popup_message, player_id=str(player_id)))
       if command_match := re.match(r"/help", message):
         asyncio.create_task(show_popup(http_client_mod, settings.HELP_TEXT, player_id=str(player_id)))
         await BotInvocationLog.objects.acreate(
