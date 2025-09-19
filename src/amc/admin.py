@@ -27,6 +27,7 @@ from .models import (
   Championship,
   ChampionshipPoint,
   Team,
+  Delivery,
   DeliveryPoint,
   DeliveryPointStorage,
   ServerCargoArrivedLog,
@@ -428,4 +429,12 @@ class DeliveryJobAdmin(admin.ModelAdmin):
   ordering = ['-requested_at']
   search_fields = ['cargo_key']
   autocomplete_fields = ['source_points', 'destination_points']
+
+@admin.register(Delivery)
+class DeliveryAdmin(admin.ModelAdmin):
+  list_display = ['id', 'character', 'cargo_key', 'quantity', 'sender_point', 'destination_point', 'timestamp']
+  list_select_related = ['character', 'sender_point', 'destination_point']
+  ordering = ['-timestamp']
+  search_fields = ['cargo_key', 'character__name', 'sender_point__name', 'destination_point__name']
+  autocomplete_fields = ['sender_point', 'destination_point', 'character']
 
