@@ -64,7 +64,8 @@ class JobsCog(commands.Cog):
         )
 
         for name, quantity in sorted_contributors:
-          description += f'\n**{name}**: {quantity}'
+          bonus = int(job.completion_bonus * quantity / job.quantity_requested)
+          description += f'\n**{name}**: {quantity} ({bonus:,} bonus upon completion)'
 
     color = discord.Color.blue()
     if stale:
