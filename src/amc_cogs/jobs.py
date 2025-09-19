@@ -18,6 +18,8 @@ class JobsCog(commands.Cog):
     self.channel_id = settings.DISCORD_JOBS_CHANNEL_ID
     self.deliveries_channel_id = settings.DISCORD_DELIVERIES_CHANNEL_ID
     self.message_id = None
+
+  def cog_load(self):
     self.update_loop.start()
 
   def cog_unload(self):
