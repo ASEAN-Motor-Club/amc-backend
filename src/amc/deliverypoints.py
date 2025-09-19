@@ -1,6 +1,6 @@
 import asyncio
 from django.db.models import F
-from amc.models import DeliveryPoint
+from amc.models import DeliveryPoint, DeliveryPointStorage
 from amc.utils import lowercase_first_char_in_keys
 
 # The API might not be stable. To be safe we throttle the requests 
@@ -32,5 +32,23 @@ async def monitor_deliverypoints(ctx):
         ),
       }
       await dp.asave()
+      for inventory in dp.data['inputInventory']:
+        await DeliveryPointStorage.objects.aupdate_or_create(
+          delivery_point=dp,
+          kind=DeliveryPointStorage.Kind.INPUT,
+          cargo_key=inventory['cargoKey'],
+          defaults={
+            'amount': inventory['amount'],
+          }
+        )
+      for inventory in dp.data['outputInventory']:
+        await DeliveryPointStorage.objects.aupdate_or_create(
+          delivery_point=dp,
+          kind=DeliveryPointStorage.Kind.OUTPUT,
+          cargo_key=inventory['cargoKey'],
+          defaults={
+            'amount': inventory['amount'],
+          }
+        )
       await asyncio.sleep(1 / BATCH_SIZE)
 

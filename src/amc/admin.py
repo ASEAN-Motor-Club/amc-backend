@@ -28,6 +28,7 @@ from .models import (
   ChampionshipPoint,
   Team,
   DeliveryPoint,
+  DeliveryPointStorage,
   ServerCargoArrivedLog,
   ServerSignContractLog,
   ServerPassengerArrivedLog,
@@ -359,11 +360,16 @@ class PlayerMailMessageAdmin(admin.ModelAdmin):
   list_display = ['sent_at', 'to_player', 'received_at', 'content']
   autocomplete_fields = ['to_player', 'from_player']
 
+class DeliveryPointStorageInlineAdmin(admin.TabularInline):
+  model = DeliveryPointStorage
+  show_change_link = False
+  readonly_fields = ['cargo_key', 'kind']
 
 @admin.register(DeliveryPoint)
 class DeliveryPointAdmin(admin.ModelAdmin):
   list_display = ['guid', 'name', 'type', 'coord', 'last_updated']
   search_fields = ['name', 'guid']
+  inlines = [DeliveryPointStorageInlineAdmin]
 
 @admin.register(ServerCargoArrivedLog)
 class ServerCargoArrivedLogAdmin(admin.ModelAdmin):
