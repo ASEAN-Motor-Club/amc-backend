@@ -127,6 +127,42 @@
   },
   {
     "model": "amc.deliverypoint",
+    "pk": "cdb8083c4e5fab3940ab25bc8d413a24",
+    "fields": {
+      "type": "ConstructionSite_C",
+      "name": "Sado Construction Site ",
+      "coord": "Point (-319858.75 1136825.8 -16288.583)"
+    }
+  },
+  {
+    "model": "amc.deliverypoint",
+    "pk": "c9706ffb47e057140a3262bee1d6a896",
+    "fields": {
+      "type": "ConstructionSite_C",
+      "name": "Ara Construction Site ",
+      "coord": "Point (306920.44 1223239.1 -15796.308)"
+    }
+  },
+  {
+    "model": "amc.deliverypoint",
+    "pk": "8cad4d0043db2bca9bc364baf5140826",
+    "fields": {
+      "type": "ConstructionSite_C",
+      "name": "Gwangjin Construction Site ",
+      "coord": "Point (202240.72 822449.0 -486.9842)"
+    }
+  },
+  {
+    "model": "amc.deliverypoint",
+    "pk": "6b2b74e64f8c4de999dd8893cbe8773d",
+    "fields": {
+      "type": "ConstructionSite_C",
+      "name": "Sanho Construction Site ",
+      "coord": "Point (-821255.44 1515218.9 -20992.576)"
+    }
+  },
+  {
+    "model": "amc.deliverypoint",
     "pk": "c3b1c8404507f55bf517628c87bbb2b9",
     "fields": {
       "type": "ConstructionSite_C",
@@ -150,6 +186,15 @@
       "type": "ConstructionSite_C",
       "name": "Ara Construction Site ",
       "coord": "Point (359281.84 1348788.1 -19974.613)"
+    }
+  },
+  {
+    "model": "amc.deliverypoint",
+    "pk": "0f0ce05643dabcbc05af558932011bd6",
+    "fields": {
+      "type": "ConstructionSite_C",
+      "name": "Ara Construction Site ",
+      "coord": "Point (372307.3 1128079.5 -18900.0)"
     }
   },
   {
@@ -293,7 +338,7 @@
     "fields": {
       "type": "Factory_Cement_Drop_C",
       "name": "Seongsan Concrete Factory Cement Drop",
-      "coord": "Point (309235.6 -40912.977 -22000.006)"
+      "coord": "Point (308782.44 -41124.285 -22000.006)"
     }
   },
   {
@@ -320,7 +365,7 @@
     "fields": {
       "type": "Factory_Concrete_C",
       "name": "Seongsan Concrete Factory",
-      "coord": "Point (308714.56 -39664.434 -22000.006)"
+      "coord": "Point (308261.4 -39875.742 -22000.006)"
     }
   },
   {
@@ -329,7 +374,7 @@
     "fields": {
       "type": "Factory_Concrete_SandDump_C",
       "name": "Seongsan Concrete Factory Sand Drop",
-      "coord": "Point (307760.3 -38327.133 -21696.678)"
+      "coord": "Point (307307.16 -38538.44 -21696.678)"
     }
   },
   {
@@ -608,7 +653,7 @@
     "fields": {
       "type": "FuelDemand_C",
       "name": "Seongsan Concrete Factory Fuel Drop",
-      "coord": "Point (308735.56 -43111.902 -22000.787)"
+      "coord": "Point (308282.4 -43323.215 -22000.787)"
     }
   },
   {
@@ -1023,6 +1068,51 @@
       "type": "PizzaCounter_C",
       "name": "Pizza Seo-Gui-Po",
       "coord": "Point (-4864.749 155327.58 -21311.936)"
+    }
+  },
+  {
+    "model": "amc.deliverypoint",
+    "pk": "4fe251c74864660c7483ffa0910e9aef",
+    "fields": {
+      "type": "Resident_C",
+      "name": "Resident",
+      "coord": "Point (-449083.6 1056677.8 -20094.682)"
+    }
+  },
+  {
+    "model": "amc.deliverypoint",
+    "pk": "af5217a448808b839dd0a7a9b2607fc9",
+    "fields": {
+      "type": "Resident_C",
+      "name": "Resident",
+      "coord": "Point (-452218.56 1022664.3 -20105.271)"
+    }
+  },
+  {
+    "model": "amc.deliverypoint",
+    "pk": "7d9b4f5b4dceca9a6cd8ccb263beee72",
+    "fields": {
+      "type": "Resident_C",
+      "name": "Resident",
+      "coord": "Point (-529299.44 959526.56 -20002.453)"
+    }
+  },
+  {
+    "model": "amc.deliverypoint",
+    "pk": "4f90c1644d58d936a4ad01b1103ee683",
+    "fields": {
+      "type": "Resident_C",
+      "name": "Resident",
+      "coord": "Point (-537086.3 963539.75 -19999.576)"
+    }
+  },
+  {
+    "model": "amc.deliverypoint",
+    "pk": "1b056fa647248f49693e3e8bbfa370b6",
+    "fields": {
+      "type": "Resident_C",
+      "name": "Resident",
+      "coord": "Point (-559432.9 967928.2 -19997.031)"
     }
   },
   {
@@ -1544,7 +1634,223 @@
     "fields": {
       "type": "Resident_C",
       "name": "Resident",
-      "coord": "Point (-83795.56 150322.12 -21226.934)"
+      "coord": "Point (-84830.71 149475.73 -21225.326)"
+    }
+  },
+  {
+    "model": "amc.deliverypoint",
+    "pk": "3ced74a341a9abdb7d0686a8ceb540f3",
+    "fields": {
+      "type": "Resident_C",
+      "name": "Resident",
+      "coord": "Point (290739.5 859567.94 -8529.719)"
+    }
+  },
+  {
+    "model": "amc.deliverypoint",
+    "pk": "46b6472d48eff705e6bc5d8b487b0138",
+    "fields": {
+      "type": "Resident_C",
+      "name": "Resident",
+      "coord": "Point (306028.66 860377.25 -5978.564)"
+    }
+  },
+  {
+    "model": "amc.deliverypoint",
+    "pk": "105ce282495e57cf49b693ae9cf82743",
+    "fields": {
+      "type": "Resident_C",
+      "name": "Resident",
+      "coord": "Point (293444.88 856844.56 -8182.816)"
+    }
+  },
+  {
+    "model": "amc.deliverypoint",
+    "pk": "91fe5f1f415c13707f5ed193e2dea4e4",
+    "fields": {
+      "type": "Resident_C",
+      "name": "Resident",
+      "coord": "Point (289668.3 868064.7 -9127.036)"
+    }
+  },
+  {
+    "model": "amc.deliverypoint",
+    "pk": "a248367a4c7c8571f50821ba347032a3",
+    "fields": {
+      "type": "Resident_C",
+      "name": "Resident",
+      "coord": "Point (274600.0 871550.0 -9498.442)"
+    }
+  },
+  {
+    "model": "amc.deliverypoint",
+    "pk": "74926fa442a81e9e66937fa7caaa1fd9",
+    "fields": {
+      "type": "Resident_C",
+      "name": "Resident",
+      "coord": "Point (266673.7 865788.4 -7507.881)"
+    }
+  },
+  {
+    "model": "amc.deliverypoint",
+    "pk": "83e62aa540fa3585e8908bbe4aebc06b",
+    "fields": {
+      "type": "Resident_C",
+      "name": "Resident",
+      "coord": "Point (280006.22 862316.1 -8007.9326)"
+    }
+  },
+  {
+    "model": "amc.deliverypoint",
+    "pk": "0e1a07ce4d34364a6a79c7be427816da",
+    "fields": {
+      "type": "Resident_C",
+      "name": "Resident",
+      "coord": "Point (282307.5 870345.25 -9958.325)"
+    }
+  },
+  {
+    "model": "amc.deliverypoint",
+    "pk": "3803f73a47e3e2e14299e883201629fc",
+    "fields": {
+      "type": "Resident_C",
+      "name": "Resident",
+      "coord": "Point (275839.78 864527.6 -8595.426)"
+    }
+  },
+  {
+    "model": "amc.deliverypoint",
+    "pk": "acdeed3a40059ea39c300cb2ffc1cc4d",
+    "fields": {
+      "type": "Resident_C",
+      "name": "Resident",
+      "coord": "Point (288478.7 853140.94 -7962.6113)"
+    }
+  },
+  {
+    "model": "amc.deliverypoint",
+    "pk": "a3b7dac64c91d2346d2d7bb4b8eca3fd",
+    "fields": {
+      "type": "Resident_C",
+      "name": "Resident",
+      "coord": "Point (285831.8 857111.06 -8005.513)"
+    }
+  },
+  {
+    "model": "amc.deliverypoint",
+    "pk": "c9214c6347b598bb1d13e088ab99aa5e",
+    "fields": {
+      "type": "Resident_C",
+      "name": "Resident",
+      "coord": "Point (276700.0 868800.0 -9512.533)"
+    }
+  },
+  {
+    "model": "amc.deliverypoint",
+    "pk": "ac4d8c824acaa128b37e17a9ab4827ef",
+    "fields": {
+      "type": "Resident_C",
+      "name": "Resident",
+      "coord": "Point (282581.62 845970.44 -6026.437)"
+    }
+  },
+  {
+    "model": "amc.deliverypoint",
+    "pk": "16dbf2fd4e03e4f6aee223854c71ea8a",
+    "fields": {
+      "type": "Resident_C",
+      "name": "Resident",
+      "coord": "Point (272200.0 848150.0 -7000.0)"
+    }
+  },
+  {
+    "model": "amc.deliverypoint",
+    "pk": "f24beb934a7071322a576182ed8068f3",
+    "fields": {
+      "type": "Resident_C",
+      "name": "Resident",
+      "coord": "Point (264185.72 857423.4 -6500.0)"
+    }
+  },
+  {
+    "model": "amc.deliverypoint",
+    "pk": "3531140d4b3aa1755914a189e0ca7dbd",
+    "fields": {
+      "type": "Resident_C",
+      "name": "Resident",
+      "coord": "Point (269084.1 854405.8 -6984.41)"
+    }
+  },
+  {
+    "model": "amc.deliverypoint",
+    "pk": "a09fffed4f41d882ec703aa60588dfc6",
+    "fields": {
+      "type": "Resident_C",
+      "name": "Resident",
+      "coord": "Point (277980.0 854030.0 -7983.4106)"
+    }
+  },
+  {
+    "model": "amc.deliverypoint",
+    "pk": "85e3ed0547a58375aea725a9089227af",
+    "fields": {
+      "type": "Resident_C",
+      "name": "Resident",
+      "coord": "Point (270145.0 862355.0 -7065.7866)"
+    }
+  },
+  {
+    "model": "amc.deliverypoint",
+    "pk": "06d70cb845297c0e7f5294abd8296428",
+    "fields": {
+      "type": "Resident_C",
+      "name": "Resident",
+      "coord": "Point (305431.6 875581.3 -10871.932)"
+    }
+  },
+  {
+    "model": "amc.deliverypoint",
+    "pk": "4104f3cb41e885bc4db7b190a40b9f2a",
+    "fields": {
+      "type": "Resident_C",
+      "name": "Resident",
+      "coord": "Point (300880.0 889200.0 -9500.12)"
+    }
+  },
+  {
+    "model": "amc.deliverypoint",
+    "pk": "592530ac4e4b6ecdb75aa5a034d562a8",
+    "fields": {
+      "type": "Resident_C",
+      "name": "Resident",
+      "coord": "Point (264890.0 878780.0 -9000.046)"
+    }
+  },
+  {
+    "model": "amc.deliverypoint",
+    "pk": "47012db7499008fefa26d6b11fa5420c",
+    "fields": {
+      "type": "Resident_C",
+      "name": "Resident",
+      "coord": "Point (265621.06 874430.8 -8998.536)"
+    }
+  },
+  {
+    "model": "amc.deliverypoint",
+    "pk": "a44cc5c54ca03d4ceeb0339e29a8ae7e",
+    "fields": {
+      "type": "Resident_C",
+      "name": "Resident",
+      "coord": "Point (283312.8 852123.5 -7065.7866)"
+    }
+  },
+  {
+    "model": "amc.deliverypoint",
+    "pk": "4948e3b64dbec068cf9eda9609322bef",
+    "fields": {
+      "type": "Resident_C",
+      "name": "Resident",
+      "coord": "Point (271675.4 889218.44 -10872.011)"
     }
   },
   {
@@ -1553,7 +1859,7 @@
     "fields": {
       "type": "Resident_C",
       "name": "Resident",
-      "coord": "Point (-75198.9 161669.45 -21510.994)"
+      "coord": "Point (-75933.586 160891.06 -21495.934)"
     }
   },
   {
@@ -1562,7 +1868,7 @@
     "fields": {
       "type": "Resident_C",
       "name": "Resident",
-      "coord": "Point (-65626.35 169689.92 -21729.531)"
+      "coord": "Point (-66487.33 170200.36 -21766.277)"
     }
   },
   {
@@ -1580,7 +1886,7 @@
     "fields": {
       "type": "Resident_C",
       "name": "Resident",
-      "coord": "Point (-48104.438 139681.4 -19642.078)"
+      "coord": "Point (-47262.71 140383.61 -19621.893)"
     }
   },
   {
@@ -1589,7 +1895,7 @@
     "fields": {
       "type": "Resident_C",
       "name": "Resident",
-      "coord": "Point (-84491.34 168869.64 -21972.29)"
+      "coord": "Point (-86315.8 168164.17 -21979.979)"
     }
   },
   {
@@ -1657,20 +1963,11 @@
   },
   {
     "model": "amc.deliverypoint",
-    "pk": "7e2a57f04669b31adbe2a8a7b3a29ffe",
-    "fields": {
-      "type": "Resident_C",
-      "name": "Resident",
-      "coord": "Point (-49351.664 153060.02 -20986.943)"
-    }
-  },
-  {
-    "model": "amc.deliverypoint",
     "pk": "6e1ef3de4f9bfeab35297cb7e6a85a2f",
     "fields": {
       "type": "Resident_C",
       "name": "Resident",
-      "coord": "Point (-79767.82 147579.83 -20883.914)"
+      "coord": "Point (-79675.48 148420.11 -20929.773)"
     }
   },
   {
@@ -1679,7 +1976,7 @@
     "fields": {
       "type": "Resident_C",
       "name": "Resident",
-      "coord": "Point (11122.187 150723.28 -20845.0)"
+      "coord": "Point (9458.36 147255.2 -20845.0)"
     }
   },
   {
@@ -2156,7 +2453,7 @@
     "fields": {
       "type": "Resident_C",
       "name": "Resident",
-      "coord": "Point (12415.795 129383.375 -20424.506)"
+      "coord": "Point (15910.335 130839.01 -20424.506)"
     }
   },
   {
@@ -2201,7 +2498,502 @@
     "fields": {
       "type": "Resident_C",
       "name": "Resident",
-      "coord": "Point (-88995.914 162203.89 -21643.387)"
+      "coord": "Point (-87696.06 163019.56 -21656.89)"
+    }
+  },
+  {
+    "model": "amc.deliverypoint",
+    "pk": "55c311fa4371fc14a89cae841e3891dc",
+    "fields": {
+      "type": "Resident_C",
+      "name": "Resident",
+      "coord": "Point (-79849.695 166216.58 -21825.154)"
+    }
+  },
+  {
+    "model": "amc.deliverypoint",
+    "pk": "1a52cb354560abbf7bef56b2cd1297c0",
+    "fields": {
+      "type": "Resident_C",
+      "name": "Resident",
+      "coord": "Point (-91805.836 170315.95 -21876.0)"
+    }
+  },
+  {
+    "model": "amc.deliverypoint",
+    "pk": "9add2a804af2d490c995acb4c93f41a5",
+    "fields": {
+      "type": "Resident_C",
+      "name": "Resident",
+      "coord": "Point (-96609.07 168602.33 -21731.256)"
+    }
+  },
+  {
+    "model": "amc.deliverypoint",
+    "pk": "aed038d24490b15c039d7dac42700bae",
+    "fields": {
+      "type": "Resident_C",
+      "name": "Resident",
+      "coord": "Point (-96579.4 161564.16 -21428.92)"
+    }
+  },
+  {
+    "model": "amc.deliverypoint",
+    "pk": "91b95eec4aed15003356ba842385c8b9",
+    "fields": {
+      "type": "Resident_C",
+      "name": "Resident",
+      "coord": "Point (-97158.7 155207.86 -21146.9)"
+    }
+  },
+  {
+    "model": "amc.deliverypoint",
+    "pk": "4f2651384dce02b4731bdcb5a18b2bd0",
+    "fields": {
+      "type": "Resident_C",
+      "name": "Resident",
+      "coord": "Point (-86220.98 149433.05 -21119.967)"
+    }
+  },
+  {
+    "model": "amc.deliverypoint",
+    "pk": "3ef0b89245487904393b9f9283726a85",
+    "fields": {
+      "type": "Resident_C",
+      "name": "Resident",
+      "coord": "Point (-70220.26 163215.95 -21470.943)"
+    }
+  },
+  {
+    "model": "amc.deliverypoint",
+    "pk": "3d9d62ad4a645d6a3eaa18b0311155c6",
+    "fields": {
+      "type": "Resident_C",
+      "name": "Resident",
+      "coord": "Point (-66754.23 163962.33 -21513.635)"
+    }
+  },
+  {
+    "model": "amc.deliverypoint",
+    "pk": "8f8291bf4d1d779fa7d8c79f55bb4431",
+    "fields": {
+      "type": "Resident_C",
+      "name": "Resident",
+      "coord": "Point (-59947.574 165548.8 -21317.78)"
+    }
+  },
+  {
+    "model": "amc.deliverypoint",
+    "pk": "313c4b594d71a2404eac2e9248aaeb77",
+    "fields": {
+      "type": "Resident_C",
+      "name": "Resident",
+      "coord": "Point (-58705.9 163239.38 -21279.994)"
+    }
+  },
+  {
+    "model": "amc.deliverypoint",
+    "pk": "8cc02feb4eb6fe4d8db060b7a215060e",
+    "fields": {
+      "type": "Resident_C",
+      "name": "Resident",
+      "coord": "Point (-46527.7 153738.47 -20898.703)"
+    }
+  },
+  {
+    "model": "amc.deliverypoint",
+    "pk": "e61ce9b94da8d6b6df485dbc57f6889b",
+    "fields": {
+      "type": "Resident_C",
+      "name": "Resident",
+      "coord": "Point (-43105.14 148608.92 -20156.996)"
+    }
+  },
+  {
+    "model": "amc.deliverypoint",
+    "pk": "7bbaa03e4448c2abc5fba3bdc68b0460",
+    "fields": {
+      "type": "Resident_C",
+      "name": "Resident",
+      "coord": "Point (-36689.586 142102.9 -20062.535)"
+    }
+  },
+  {
+    "model": "amc.deliverypoint",
+    "pk": "0a254d894ebf5a961c62f7af8f46ecd9",
+    "fields": {
+      "type": "Resident_C",
+      "name": "Resident",
+      "coord": "Point (-36376.668 134191.16 -19870.0)"
+    }
+  },
+  {
+    "model": "amc.deliverypoint",
+    "pk": "6db8bf5b408b749f7dcf41b64c7bc7fd",
+    "fields": {
+      "type": "Resident_C",
+      "name": "Resident",
+      "coord": "Point (-41178.363 136522.94 -19620.0)"
+    }
+  },
+  {
+    "model": "amc.deliverypoint",
+    "pk": "10d266774aecf53a21deca8ab6bf954e",
+    "fields": {
+      "type": "Resident_C",
+      "name": "Resident",
+      "coord": "Point (-44338.227 136635.62 -19598.3)"
+    }
+  },
+  {
+    "model": "amc.deliverypoint",
+    "pk": "d568adfb44bfa73bf83c46afe943bca6",
+    "fields": {
+      "type": "Resident_C",
+      "name": "Resident",
+      "coord": "Point (-51483.42 136899.16 -19650.516)"
+    }
+  },
+  {
+    "model": "amc.deliverypoint",
+    "pk": "2f087bf145beb1348cff05b072827b5d",
+    "fields": {
+      "type": "Resident_C",
+      "name": "Resident",
+      "coord": "Point (-53986.832 137528.0 -19519.922)"
+    }
+  },
+  {
+    "model": "amc.deliverypoint",
+    "pk": "9b1aaa52439b7ea1eee2958828cfa502",
+    "fields": {
+      "type": "Resident_C",
+      "name": "Resident",
+      "coord": "Point (-61087.24 141480.12 -19603.756)"
+    }
+  },
+  {
+    "model": "amc.deliverypoint",
+    "pk": "c1035c2e4f75feb8123c3783e49ab7c0",
+    "fields": {
+      "type": "Resident_C",
+      "name": "Resident",
+      "coord": "Point (-58919.637 140526.56 -19452.984)"
+    }
+  },
+  {
+    "model": "amc.deliverypoint",
+    "pk": "d78bf7d341b2726696671fad36f34923",
+    "fields": {
+      "type": "Resident_C",
+      "name": "Resident",
+      "coord": "Point (-67862.67 137673.92 -19674.242)"
+    }
+  },
+  {
+    "model": "amc.deliverypoint",
+    "pk": "3935915a41f01f493cfae884b7ef1877",
+    "fields": {
+      "type": "Resident_C",
+      "name": "Resident",
+      "coord": "Point (-68734.13 142978.16 -20185.0)"
+    }
+  },
+  {
+    "model": "amc.deliverypoint",
+    "pk": "a035ac7145ea5d494b872cb173431312",
+    "fields": {
+      "type": "Resident_C",
+      "name": "Resident",
+      "coord": "Point (-1137.096 129914.016 -19992.555)"
+    }
+  },
+  {
+    "model": "amc.deliverypoint",
+    "pk": "83efc23141f00047db9ef591da509ac2",
+    "fields": {
+      "type": "Resident_C",
+      "name": "Resident",
+      "coord": "Point (-7797.0103 130882.72 -20014.68)"
+    }
+  },
+  {
+    "model": "amc.deliverypoint",
+    "pk": "cdb51aad425cda44ef689fb67e142c21",
+    "fields": {
+      "type": "Resident_C",
+      "name": "Resident",
+      "coord": "Point (-18049.742 132613.36 -20104.578)"
+    }
+  },
+  {
+    "model": "amc.deliverypoint",
+    "pk": "bca26e8344b80d864918829c6a6b2fae",
+    "fields": {
+      "type": "Resident_C",
+      "name": "Resident",
+      "coord": "Point (-18309.057 136995.92 -20103.844)"
+    }
+  },
+  {
+    "model": "amc.deliverypoint",
+    "pk": "5fec350b4ed60811abf863950b9586ed",
+    "fields": {
+      "type": "Resident_C",
+      "name": "Resident",
+      "coord": "Point (109255.016 625521.8 -8000.006)"
+    }
+  },
+  {
+    "model": "amc.deliverypoint",
+    "pk": "65abe37247777fee35353c911211f2eb",
+    "fields": {
+      "type": "Resident_C",
+      "name": "Resident",
+      "coord": "Point (93753.44 610680.1 -8000.1177)"
+    }
+  },
+  {
+    "model": "amc.deliverypoint",
+    "pk": "a16c56f740471f1ad4756584e802404c",
+    "fields": {
+      "type": "Resident_C",
+      "name": "Resident",
+      "coord": "Point (91034.445 634465.3 -8000.069)"
+    }
+  },
+  {
+    "model": "amc.deliverypoint",
+    "pk": "668ceac84835fcd9d11f78947aaf54c9",
+    "fields": {
+      "type": "Resident_C",
+      "name": "Resident",
+      "coord": "Point (110386.19 627053.56 -8000.006)"
+    }
+  },
+  {
+    "model": "amc.deliverypoint",
+    "pk": "dd653e64406eeb95000e57a0131822d8",
+    "fields": {
+      "type": "Resident_C",
+      "name": "Resident",
+      "coord": "Point (106171.39 636321.9 -8000.006)"
+    }
+  },
+  {
+    "model": "amc.deliverypoint",
+    "pk": "915c3f9243eb8fcded2da6940d85312f",
+    "fields": {
+      "type": "Resident_C",
+      "name": "Resident",
+      "coord": "Point (101655.82 635564.3 -8000.006)"
+    }
+  },
+  {
+    "model": "amc.deliverypoint",
+    "pk": "6b298306416c393229a8bab16ab869ba",
+    "fields": {
+      "type": "Resident_C",
+      "name": "Resident",
+      "coord": "Point (102342.02 641765.44 -8000.006)"
+    }
+  },
+  {
+    "model": "amc.deliverypoint",
+    "pk": "c542dc174d958e993251c3a08a53a2d6",
+    "fields": {
+      "type": "Resident_C",
+      "name": "Resident",
+      "coord": "Point (99524.17 639802.1 -8000.006)"
+    }
+  },
+  {
+    "model": "amc.deliverypoint",
+    "pk": "9ec99a324f912ee1f72d289960212e30",
+    "fields": {
+      "type": "Resident_C",
+      "name": "Resident",
+      "coord": "Point (84603.414 659949.94 -9100.066)"
+    }
+  },
+  {
+    "model": "amc.deliverypoint",
+    "pk": "c43057b047e6727268f1909a4d339ca5",
+    "fields": {
+      "type": "Resident_C",
+      "name": "Resident",
+      "coord": "Point (66123.83 635852.7 -8400.545)"
+    }
+  },
+  {
+    "model": "amc.deliverypoint",
+    "pk": "4ba4ebc84a427622cf0d949d64632c88",
+    "fields": {
+      "type": "Resident_C",
+      "name": "Resident",
+      "coord": "Point (64006.395 637113.9 -8393.748)"
+    }
+  },
+  {
+    "model": "amc.deliverypoint",
+    "pk": "5d62c05b4079bc4c109974b28f923d4c",
+    "fields": {
+      "type": "Resident_C",
+      "name": "Resident",
+      "coord": "Point (67749.914 639736.5 -8400.871)"
+    }
+  },
+  {
+    "model": "amc.deliverypoint",
+    "pk": "e2c11cbd441f7d4a1cdfdd949a2c79dd",
+    "fields": {
+      "type": "Resident_C",
+      "name": "Resident",
+      "coord": "Point (65749.09 641833.9 -8400.871)"
+    }
+  },
+  {
+    "model": "amc.deliverypoint",
+    "pk": "0ea988544566870a8f71948e170491ed",
+    "fields": {
+      "type": "Resident_C",
+      "name": "Resident",
+      "coord": "Point (63295.734 644610.06 -8388.331)"
+    }
+  },
+  {
+    "model": "amc.deliverypoint",
+    "pk": "c9ff912144550fc6e151fcb2d2a84517",
+    "fields": {
+      "type": "Resident_C",
+      "name": "Resident",
+      "coord": "Point (66736.97 646805.2 -8593.392)"
+    }
+  },
+  {
+    "model": "amc.deliverypoint",
+    "pk": "4bd546364c742e8afcaf7cb30c32d46c",
+    "fields": {
+      "type": "Resident_C",
+      "name": "Resident",
+      "coord": "Point (68850.8 645049.44 -8601.6045)"
+    }
+  },
+  {
+    "model": "amc.deliverypoint",
+    "pk": "56877dd34dd1aad950af92a0c982f3ee",
+    "fields": {
+      "type": "Resident_C",
+      "name": "Resident",
+      "coord": "Point (72082.16 642499.94 -8589.993)"
+    }
+  },
+  {
+    "model": "amc.deliverypoint",
+    "pk": "c9786df14cbe2aeaa1b4a2876672b0d0",
+    "fields": {
+      "type": "Resident_C",
+      "name": "Resident",
+      "coord": "Point (73324.17 665757.7 -9100.098)"
+    }
+  },
+  {
+    "model": "amc.deliverypoint",
+    "pk": "d1c7ab194a9d53ed2bdbe78e7fc35e82",
+    "fields": {
+      "type": "Resident_C",
+      "name": "Resident",
+      "coord": "Point (69928.664 663160.3 -9100.066)"
+    }
+  },
+  {
+    "model": "amc.deliverypoint",
+    "pk": "ffb7fd904b69937b4ee0d7a87907cc84",
+    "fields": {
+      "type": "Resident_C",
+      "name": "Resident",
+      "coord": "Point (63211.3 668624.56 -9800.106)"
+    }
+  },
+  {
+    "model": "amc.deliverypoint",
+    "pk": "a78dda38427f935dcfa157a80873bad9",
+    "fields": {
+      "type": "Resident_C",
+      "name": "Resident",
+      "coord": "Point (66172.81 671403.8 -9800.106)"
+    }
+  },
+  {
+    "model": "amc.deliverypoint",
+    "pk": "c6b709ef486896e885c084ad9607eaef",
+    "fields": {
+      "type": "Resident_C",
+      "name": "Resident",
+      "coord": "Point (67021.36 674033.56 -9800.106)"
+    }
+  },
+  {
+    "model": "amc.deliverypoint",
+    "pk": "8f4523f642f5fd21bf82069fc9e9db2d",
+    "fields": {
+      "type": "Resident_C",
+      "name": "Resident",
+      "coord": "Point (70178.27 677893.56 -9798.586)"
+    }
+  },
+  {
+    "model": "amc.deliverypoint",
+    "pk": "b82df4d449ca8b9150b1afa28dec4b13",
+    "fields": {
+      "type": "Resident_C",
+      "name": "Resident",
+      "coord": "Point (68642.52 683914.7 -9800.106)"
+    }
+  },
+  {
+    "model": "amc.deliverypoint",
+    "pk": "0a41aed94acb9bfc09b688b6c1eecac2",
+    "fields": {
+      "type": "Resident_C",
+      "name": "Resident",
+      "coord": "Point (58466.62 672471.6 -9800.106)"
+    }
+  },
+  {
+    "model": "amc.deliverypoint",
+    "pk": "21b4a7614adcb6fa777384a75b0fbe60",
+    "fields": {
+      "type": "Resident_C",
+      "name": "Resident",
+      "coord": "Point (63013.207 673705.8 -9804.767)"
+    }
+  },
+  {
+    "model": "amc.deliverypoint",
+    "pk": "02a7be1249d4064e873c19a5bec4b4dc",
+    "fields": {
+      "type": "Resident_C",
+      "name": "Resident",
+      "coord": "Point (66612.39 679531.2 -9800.106)"
+    }
+  },
+  {
+    "model": "amc.deliverypoint",
+    "pk": "4c50854349d03724db171197f3233b41",
+    "fields": {
+      "type": "Resident_C",
+      "name": "Resident",
+      "coord": "Point (62748.074 678791.94 -9774.94)"
+    }
+  },
+  {
+    "model": "amc.deliverypoint",
+    "pk": "01249bcc4108f4c972bea980e8a843b5",
+    "fields": {
+      "type": "Resident_C",
+      "name": "Resident",
+      "coord": "Point (61810.023 676528.6 -9800.106)"
     }
   },
   {
