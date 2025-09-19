@@ -353,7 +353,7 @@ async def list_deliverypoints(request):
     dp async for dp in DeliveryPoint.objects.all()
   ]
 
-@deliverypoints_router.get('/{guid}/', response=list[DeliveryPointSchema])
+@deliverypoints_router.get('/{guid}/', response=DeliveryPointSchema)
 async def get_deliverypoint(request, guid):
   return await DeliveryPoint.objects.aget(guid=guid)
 
