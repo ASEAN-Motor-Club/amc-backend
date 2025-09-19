@@ -826,6 +826,18 @@ class CharacterAFKReminder(models.Model):
 
 
 @final
+class Delivery(models.Model):
+  timestamp = models.DateTimeField()
+  character = models.ForeignKey(Character, on_delete=models.SET_NULL, null=True, related_name='deliveries')
+  cargo_key = models.CharField(max_length=200, db_index=True, choices=CargoKey)
+  quantity = models.PositiveIntegerField()
+  payment = models.PositiveBigIntegerField()
+  subsidy = models.PositiveBigIntegerField(default=0)
+  sender_point = models.ForeignKey('DeliveryPoint', models.SET_NULL, null=True, blank=True, related_name='batch_deliveries_out')
+  destination_point = models.ForeignKey('DeliveryPoint', models.SET_NULL, null=True, blank=True, related_name='batch_deliveries_in')
+  job = models.ForeignKey('DeliveryJob', models.SET_NULL, null=True, blank=True, related_name='deliveries')
+
+@final
 class ServerCargoArrivedLog(models.Model):
   timestamp = models.DateTimeField()
   player = models.ForeignKey(Player, on_delete=models.SET_NULL, null=True, related_name='delivered_cargos')

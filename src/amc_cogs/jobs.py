@@ -1,13 +1,14 @@
 import discord
 from datetime import timedelta
 from django.utils import timezone
-from django.db.models import F
+from django.db.models import F, Prefetch
 from discord import app_commands
 from discord.ext import commands, tasks
 from django.conf import settings
 from amc.models import (
   ServerCargoArrivedLog,
   DeliveryJob,
+  Delivery
 )
 from amc.utils import get_time_difference_string
 
@@ -46,6 +47,24 @@ class JobsCog(commands.Cog):
 
     if job.description:
         description += f'\n**Description**: {job.description}'
+
+    if deliveries := list(job.deliveries.all()):
+      contributors = {}
+      for delivery in deliveries:
+        if delivery.character: 
+          name = delivery.character.name
+          contributors[name] = contributors.get(name, 0) + delivery.quantity
+
+      if contributors:
+        description += '\n\n**Contributors**:'
+        sorted_contributors = sorted(
+          contributors.items(), 
+          key=lambda item: item[1], 
+          reverse=True
+        )
+
+        for name, quantity in sorted_contributors:
+          description += f'\n**{name}**: {quantity}'
 
     color = discord.Color.blue()
     if stale:
@@ -121,6 +140,8 @@ class JobsCog(commands.Cog):
 
     active_jobs = DeliveryJob.objects.prefetch_related(
         'source_points', 'destination_points'
+    ).prefetch_related(
+      Prefetch('deliveries', queryset=Delivery.objects.select_related('character'))
     ).filter(
         quantity_fulfilled__lt=F('quantity_requested'),
         expired_at__gte=timezone.now()
@@ -158,6 +179,8 @@ class JobsCog(commands.Cog):
       discord_message_id__isnull=False
     ).exclude(
       id__in=active_job_ids
+    ).prefetch_related(
+      Prefetch('deliveries', queryset=Delivery.objects.select_related('character'))
     )
 
     async for job in stale_jobs:

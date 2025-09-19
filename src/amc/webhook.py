@@ -21,6 +21,7 @@ from amc.models import (
   ServerSignContractLog,
   ServerPassengerArrivedLog,
   ServerTowRequestArrivedLog,
+  Delivery,
   DeliveryPoint,
   DeliveryJob,
   CharacterLocation,
@@ -319,6 +320,19 @@ async def process_event(event, player, http_client=None, http_client_mod=None, d
           await job.arefresh_from_db(fields=['quantity_fulfilled'])
           if job.quantity_fulfilled >= job.quantity_requested:
              await on_delivery_job_fulfilled(job, http_client)
+
+        await Delivery.objects.acreate(
+          timestamp=timestamp,
+          character=character,
+          cargo_key=cargo_key,
+          quantity=quantity,
+          payment=payment * quantity,
+          subsidy=cargo_subsidy * quantity,
+          sender_point=delivery_source,
+          destination_point=delivery_destination,
+          job=job,
+        )
+
 
         subsidy += cargo_subsidy
 
