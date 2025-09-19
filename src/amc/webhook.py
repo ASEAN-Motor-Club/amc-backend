@@ -314,7 +314,7 @@ async def process_event(event, player, http_client=None, http_client_mod=None, d
         if job:
           requested_remaining = job.quantity_requested - job.quantity_fulfilled
           bonus = min(requested_remaining, quantity) * job.bonus_multiplier * payment
-          cargo_subsidy = min(cargo_subsidy, bonus)
+          cargo_subsidy = max(cargo_subsidy, bonus)
           job.quantity_fulfilled = F('quantity_fulfilled') + min(requested_remaining, quantity)
           await job.asave(update_fields=['quantity_fulfilled'])
           await job.arefresh_from_db(fields=['quantity_fulfilled'])
