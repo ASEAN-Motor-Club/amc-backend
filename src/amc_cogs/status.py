@@ -44,7 +44,11 @@ class StatusCog(commands.Cog):
     active_players = await get_players(self.bot.http_client_game)
     count = len(active_players)
 
-    embed = discord.Embed(title="Active Players", color=discord.Color.blue())
+    embed = discord.Embed(
+      title="Active Players",
+      color=discord.Color.blue(),
+      timestamp=timezone.now(),
+    )
     embed.add_field(name="Live map", value="[Open on the website](https://www.aseanmotorclub.com/map)", inline=False)
     embed.add_field(name="Player Count", value=str(count), inline=False)
     if active_players:
