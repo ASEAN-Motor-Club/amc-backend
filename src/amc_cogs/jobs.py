@@ -19,10 +19,10 @@ class JobsCog(commands.Cog):
     self.deliveries_channel_id = settings.DISCORD_DELIVERIES_CHANNEL_ID
     self.message_id = None
 
-  def cog_load(self):
+  async def cog_load(self):
     self.update_loop.start()
 
-  def cog_unload(self):
+  async def cog_unload(self):
     self.update_loop.cancel()
 
   def _build_job_embed(self, job, stale=False) -> discord.Embed:
@@ -35,7 +35,8 @@ class JobsCog(commands.Cog):
         description += f"{job.completion_bonus:,}"
     description += f"\n**Bonus multiplier**: {job.bonus_multiplier*100:.0f}%"
 
-    description += f"\n**Expires in**: {get_time_difference_string(timezone.now(), job.expired_at)}"
+    if not stale:
+      description += f"\n**Expires in**: {get_time_difference_string(timezone.now(), job.expired_at)}"
 
     source_points = list(job.source_points.all())
     if source_points:
@@ -98,9 +99,9 @@ class JobsCog(commands.Cog):
   ) -> discord.Embed:
     description = ''
     description += '\n**Payment**: '
-    description += f"{payment:,}"
+    description += f"{payment+subsidy:,}"
     if subsidy:
-      description += f" + Subsidy {subsidy:,} (Total: {payment+subsidy:,}"
+      description += f" ({payment:,} + Subsidy {subsidy:,})"
 
     if source_name:
         description += '\n**From**: '
@@ -183,6 +184,8 @@ class JobsCog(commands.Cog):
     ).exclude(
       id__in=active_job_ids
     ).prefetch_related(
+        'source_points', 'destination_points'
+    ).prefetch_related(
       Prefetch('deliveries', queryset=Delivery.objects.select_related('character'))
     )
 
@@ -223,6 +226,13 @@ class JobsCog(commands.Cog):
       async for cargo_key in unique_cargo_keys
       if current.lower() in cargo_key.lower()
     ][:25]  # Discord max choices: 25
+
+  @app_commands.command(name='sync_jobs_channel', description='Sync the jobs channel')
+  @app_commands.checks.has_any_role(settings.DISCORD_ADMIN_ROLE_ID)
+  async def sync_jobs_channel(self, interaction):
+    await interaction.response.defer()
+    await self.update_jobs()
+    await interaction.followup.send('Synced', ephemeral=True)
 
   @app_commands.command(name='post_delivery_job', description='Post a delivery job')
   @app_commands.checks.has_any_role(settings.DISCORD_ADMIN_ROLE_ID)
