@@ -11,6 +11,7 @@ async def get_players(session, password=''):
       players = [
         (player['unique_id'], player['name'])
         for player in data['data'].values()
+        if player is not None
       ]
       return players
 
