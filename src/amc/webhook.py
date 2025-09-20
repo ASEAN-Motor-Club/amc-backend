@@ -32,12 +32,12 @@ from amc.locations import gwangjin_shortcut
 async def on_player_profits(player_profits, session):
   for player, total_subsidy, total_payment in player_profits:
     await on_player_profit(player, total_subsidy, total_payment, session)
-    await asyncio.sleep(0.2)
+    await asyncio.sleep(0.5)
 
 async def on_player_profit(player, total_subsidy, total_payment, session):
   if total_subsidy != 0:
     await subsidise_player(total_subsidy, player, session)
-    await asyncio.sleep(0.2)
+    await asyncio.sleep(0.5)
   loan_repayment = await repay_loan_for_profit(player, total_payment, session)
   savings = total_payment - loan_repayment
   if savings > 0:
@@ -287,22 +287,6 @@ async def process_event(event, player, http_client=None, http_client_mod=None, d
         cargo_subsidy = get_subsidy_for_cargo(group_list[0])[0] * quantity
         cargo_name = group_list[0].get_cargo_key_display()
 
-        # ADDED: Call the discord embed posting function
-        if discord_client:
-          asyncio.create_task(
-            post_discord_delivery_embed(
-              discord_client,
-              character,
-              cargo_name,
-              quantity,
-              delivery_source,
-              delivery_destination,
-              payment * quantity,
-              cargo_subsidy * quantity,
-              vehicle_key,
-            )
-          )
-
         jobs_qs = DeliveryJob.objects.filter(
           Q(source_points=delivery_source) | Q(source_points=None),
           Q(destination_points=delivery_destination) | Q(destination_points=None),
@@ -321,13 +305,29 @@ async def process_event(event, player, http_client=None, http_client_mod=None, d
           if job.quantity_fulfilled >= job.quantity_requested:
              await on_delivery_job_fulfilled(job, http_client)
 
+        # ADDED: Call the discord embed posting function
+        if discord_client:
+          asyncio.create_task(
+            post_discord_delivery_embed(
+              discord_client,
+              character,
+              cargo_name,
+              quantity,
+              delivery_source,
+              delivery_destination,
+              payment * quantity,
+              cargo_subsidy,
+              vehicle_key,
+            )
+          )
+
         await Delivery.objects.acreate(
           timestamp=timestamp,
           character=character,
           cargo_key=cargo_key,
           quantity=quantity,
           payment=payment * quantity,
-          subsidy=cargo_subsidy * quantity,
+          subsidy=cargo_subsidy,
           sender_point=delivery_source,
           destination_point=delivery_destination,
           job=job,
