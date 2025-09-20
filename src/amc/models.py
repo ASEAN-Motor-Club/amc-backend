@@ -954,3 +954,6 @@ class DeliveryJob(models.Model):
   discord_message_id = models.PositiveBigIntegerField(null=True, blank=True, help_text="For bot use only, leave blank")
   description = models.TextField(blank=True, null=True)
 
+  def __str__(self):
+    return f"{self.quantity_requested}x {self.get_cargo_key_display()} ({self.id})"
+
