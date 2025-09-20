@@ -62,7 +62,7 @@ from amc.events import (
 )
 from amc.locations import gwangjin_shortcut
 from amc.utils import format_in_local_tz, format_timedelta, delay, get_time_difference_string
-from amc.subsidies import DEFAULT_SAVING_RATE
+from amc.subsidies import DEFAULT_SAVING_RATE, SUBSIDIES_TEXT
 from amc_finance.services import (
   register_player_withdrawal,
   register_player_take_loan,
@@ -303,42 +303,15 @@ async def process_log_event(event: LogEvent, http_client=None, http_client_mod=N
 
 {jobs_str}
 
-Also check out <Highlight>/subsidies</> for subsidised deliveries. Bonuses and subsidies add up!
+
+<Title>Subsidies</>
+<Secondary>These jobs are always subsidised on the server.</>
+
+{SUBSIDIES_TEXT}
 """, player_id=str(player_id)))
 
       if command_match := re.match(r"/subsidies", message):
-        subsidies_text = """<Title>ASEAN Server Subsidies</>
-<Warning>Using the Gwangjin shortcut will disqualify you from subsidies for 1 hour</>
-
-<Bold>Depot Restocking</> <Money>10,000</> coins
-
-<Bold>Burger, Pizza, Live Fish</> - <Money>300%</> (Must be on time)
-<Bold>Airline Meal Pallets</> - <Money>200%</> (Must be on time)
-<Bold>12ft Oak Log</> - <Money>250%</> (Reduces with damage)
-<Bold>Coal & Iron Ore</> - <Money>150%</>
-<Secondary>ONLY from Gwangjin Coal/Iron mines to Gwangjin Storages</>
-<Bold>Planks</> - <Money>250%</>
-<Secondary>ONLY from Gwangjin Plank Storage to Gwangjin Coal/Iron mines, Migeum Oak 1/2/3</>
-<Bold>Fuel</> - <Money>150%</>
-<Secondary>ONLY from Migeum Log Warehouse to Migeum Oak 1/2/3</>
-<Secondary>ONLY from Gwangjin Fuel Storage to Gwangjin Coal/Iron mines</>
-<Bold>Water Bottle Pallets</> - <Money>200 - 300%</>
-<Secondary>To Gwangjin and Ara Supermarket - 300%</>
-<Secondary>To other Supermarkets - 200%</>
-<Bold>Meat Boxes</> - <Money>200%</> <Secondary>ONLY to Supermarkets</>
-<Bold>Trash</> - <Money>100 - 250%</>
-<Secondary>Gwangjin: 250% | Ara: 200% | Default: 100%</>
-
-<Bold>To Gwangjin Supermarket</> - <Money>300%</>
-<Secondary>Any cargo not already listed above</>
-
-<Bold>Towing/Wrecker Jobs</>
-Normal - <Money>2,000 + 50%</>
-Flipped - <Money>2,000 + 100%</>
-
-<Bold>Taxi & Ambulance</> - <Money>2,000 + 50%</>
-"""
-        asyncio.create_task(show_popup(http_client_mod, subsidies_text, player_id=str(player_id)))
+        asyncio.create_task(show_popup(http_client_mod, SUBSIDIES_TEXT, player_id=str(player_id)))
         await BotInvocationLog.objects.acreate(
           timestamp=timestamp,
           character=character, 

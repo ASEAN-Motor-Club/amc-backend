@@ -11,7 +11,39 @@ from amc_finance.services import (
   register_player_deposit,
 )
 
+SUBSIDIES_TEXT = """<Title>ASEAN Server Subsidies</>
+<Warning>Using the Gwangjin shortcut will disqualify you from subsidies for 1 hour</>
+
+<Bold>Depot Restocking</> <Money>10,000</> coins
+
+<Bold>Burger, Pizza, Live Fish</> - <Money>300%</> (Must be on time)
+<Bold>Airline Meal Pallets</> - <Money>200%</> (Must be on time)
+<Bold>12ft Oak Log</> - <Money>250%</> (Reduces with damage)
+<Bold>Coal & Iron Ore</> - <Money>150%</>
+<Secondary>ONLY from Gwangjin Coal/Iron mines to Gwangjin Storages</>
+<Bold>Planks</> - <Money>250%</>
+<Secondary>ONLY from Gwangjin Plank Storage to Gwangjin Coal/Iron mines, Migeum Oak 1/2/3</>
+<Bold>Fuel</> - <Money>150%</>
+<Secondary>ONLY from Migeum Log Warehouse to Migeum Oak 1/2/3</>
+<Secondary>ONLY from Gwangjin Fuel Storage to Gwangjin Coal/Iron mines</>
+<Bold>Water Bottle Pallets</> - <Money>200 - 300%</>
+<Secondary>To Gwangjin and Ara Supermarket - 300%</>
+<Secondary>To other Supermarkets - 200%</>
+<Bold>Meat Boxes</> - <Money>200%</> <Secondary>ONLY to Supermarkets</>
+<Bold>Trash</> - <Money>100 - 250%</>
+<Secondary>Gwangjin: 250% | Ara: 200% | Default: 100%</>
+
+<Bold>To Gwangjin Supermarket</> - <Money>300%</>
+<Secondary>Any cargo not already listed above</>
+
+<Bold>Towing/Wrecker Jobs</>
+Normal - <Money>2,000 + 50%</>
+Flipped - <Money>2,000 + 100%</>
+
+<Bold>Taxi & Ambulance</> - <Money>2,000 + 50%</>
+"""
 cargo_names = {
+
   'MeatBox': 'Meat Box',
   'BottlePallete': 'Water Bottle Pallete',
   'Burger_01_Signature': 'Signature Burger',
