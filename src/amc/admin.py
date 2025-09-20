@@ -433,8 +433,8 @@ class DeliveryJobAdmin(admin.ModelAdmin):
 @admin.register(Delivery)
 class DeliveryAdmin(admin.ModelAdmin):
   list_display = ['id', 'character', 'cargo_key', 'quantity', 'sender_point', 'destination_point', 'timestamp']
-  list_select_related = ['character', 'sender_point', 'destination_point']
+  list_select_related = ['character', 'character__player', 'sender_point', 'destination_point', 'job']
   ordering = ['-timestamp']
   search_fields = ['cargo_key', 'character__name', 'sender_point__name', 'destination_point__name']
-  autocomplete_fields = ['sender_point', 'destination_point', 'character']
+  autocomplete_fields = ['sender_point', 'destination_point', 'character', 'job']
 
