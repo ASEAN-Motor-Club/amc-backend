@@ -459,9 +459,23 @@ async def apply_interest_to_bank_accounts(ctx, interest_rate=INTEREST_RATE, onli
 
     character_interest_rate = interest_rate
     character = account.character
-    character_online = await CharacterLocation.objects.filter(character=character, timestamp__gte=now - timedelta(hours=compounding_hours)).aexists()
-    if character_online:
+
+    try:
+      last_online = await CharacterLocation.objects.filter(character=character).alatest('timestamp')
+      time_since_last_online = timezone.now() - last_online.timestamp
+    except CharacterLocation.DoesNotExist:
+      time_since_last_online = timedelta(days=365)
+
+    if time_since_last_online <= timedelta(hours=1):
       character_interest_rate = online_interest_multiplier * character_interest_rate
+    elif time_since_last_online <= timedelta(days=7):
+      character_interest_rate = character_interest_rate 
+    elif time_since_last_online <= timedelta(days=14):
+      character_interest_rate = character_interest_rate / 2
+    elif time_since_last_online <= timedelta(days=30):
+      character_interest_rate = character_interest_rate / 4
+    else:
+      character_interest_rate = character_interest_rate / 8
 
     amount = account.balance * Decimal(character_interest_rate) / Decimal(24 / compounding_hours)
     if amount >= Decimal(0.01):
