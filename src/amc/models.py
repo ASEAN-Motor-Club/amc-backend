@@ -46,10 +46,12 @@ class PlayerQuerySet(models.QuerySet):
 @final
 class Player(models.Model):
   unique_id = models.PositiveBigIntegerField(primary_key=True)
-  discord_user_id = models.PositiveBigIntegerField(unique=True, null=True)
-  discord_name = models.CharField(max_length=200, null=True)
-  user = models.OneToOneField(User, models.SET_NULL, related_name='player', null=True)
+  discord_user_id = models.PositiveBigIntegerField(unique=True, null=True, blank=True)
+  discord_name = models.CharField(max_length=200, null=True, blank=True)
+  user = models.OneToOneField(User, models.SET_NULL, related_name='player', null=True, blank=True)
   adminstrator = models.BooleanField(default=False)
+  social_score = models.IntegerField(default=0)
+  notes = models.TextField(blank=True)
 
   objects = models.Manager.from_queryset(PlayerQuerySet)()
 
