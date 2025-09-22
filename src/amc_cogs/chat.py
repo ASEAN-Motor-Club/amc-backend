@@ -22,5 +22,9 @@ class ChatCog(commands.Cog):
       except Player.DoesNotExist:
         pass
 
-      await announce(f"{message.author.display_name}: {message.content}", self.bot.http_client_game)
+      await announce(
+        f"{message.author.display_name}: {message.content}",
+        self.bot.http_client_game,
+        color="FFFFFF",
+      )
 
