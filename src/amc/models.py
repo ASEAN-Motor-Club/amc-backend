@@ -943,14 +943,20 @@ class Thank(models.Model):
   timestamp = models.DateTimeField()
 
 @final
+class Cargo(models.Model):
+  key = models.CharField(max_length=200, primary_key=True)
+  label = models.CharField(max_length=200)
+
+@final
 class DeliveryJob(models.Model):
-  cargo_key = models.CharField(max_length=200, db_index=True, choices=CargoKey)
+  cargo_key = models.CharField(max_length=200, db_index=True, choices=CargoKey, null=True, blank=True)
   quantity_requested = models.PositiveIntegerField()
   quantity_fulfilled = models.PositiveIntegerField(default=0)
   requested_at = models.DateTimeField(auto_now_add=True)
   expired_at = models.DateTimeField()
   bonus_multiplier = models.FloatField()
   completion_bonus = models.PositiveIntegerField(default=0)
+  cargos = models.ManyToManyField('Cargo', related_name='jobs', blank=True, help_text="Use either Cargo Key or this field for multiple cargo types")
   source_points = models.ManyToManyField('DeliveryPoint', related_name='jobs_out', blank=True)
   destination_points = models.ManyToManyField('DeliveryPoint', related_name='jobs_in', blank=True)
   discord_message_id = models.PositiveBigIntegerField(null=True, blank=True, help_text="For bot use only, leave blank")

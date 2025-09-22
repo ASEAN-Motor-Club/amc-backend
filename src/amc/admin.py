@@ -37,6 +37,7 @@ from .models import (
   TeleportPoint,
   VehicleDealership,
   DeliveryJob,
+  Cargo,
 )
 from amc_finance.services import send_fund_to_player
 
@@ -423,12 +424,17 @@ class VehicleDealershipAdmin(admin.ModelAdmin):
         await vd.spawn(http_client_mod)
     async_to_sync(spawn_dealerships)()
 
+@admin.register(Cargo)
+class CargoAdmin(admin.ModelAdmin):
+  list_display = ['key', 'label']
+  search_fields = ['label']
+
 @admin.register(DeliveryJob)
 class DeliveryJobAdmin(admin.ModelAdmin):
   list_display = ['id', 'cargo_key', 'quantity_requested', 'quantity_fulfilled', 'bonus_multiplier', 'completion_bonus', 'requested_at']
   ordering = ['-requested_at']
   search_fields = ['cargo_key']
-  autocomplete_fields = ['source_points', 'destination_points']
+  autocomplete_fields = ['source_points', 'destination_points', 'cargos']
 
 @admin.register(Delivery)
 class DeliveryAdmin(admin.ModelAdmin):

@@ -290,7 +290,7 @@ async def process_event(event, player, http_client=None, http_client_mod=None, d
         jobs_qs = DeliveryJob.objects.filter(
           Q(source_points=delivery_source) | Q(source_points=None),
           Q(destination_points=delivery_destination) | Q(destination_points=None),
-          cargo_key=cargo_key,
+          Q(cargo_key=cargo_key) | Q(cargos__key=cargo_key),
           quantity_fulfilled__lt=F('quantity_requested'),
           expired_at__gte=timestamp,
         ).distinct()

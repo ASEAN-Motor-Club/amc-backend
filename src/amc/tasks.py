@@ -274,11 +274,18 @@ async def process_log_event(event: LogEvent, http_client=None, http_client_mod=N
         jobs = DeliveryJob.objects.filter(
           quantity_fulfilled__lt=F('quantity_requested'),
           expired_at__gte=timestamp,
-        ).prefetch_related('source_points', 'destination_points')
+        ).prefetch_related('source_points', 'destination_points', 'cargos')
 
         def display_job(job):
+          if job.cargo_key:
+            cargo_key = job.get_cargo_key_display()
+          else:
+            cargo_key = '/'.join([
+              cargo.label
+              for cargo in job.cargos.all()
+            ])
           title = f"""\
-({job.quantity_fulfilled}/{job.quantity_requested}) {job.get_cargo_key_display()} - Completion: <Money>{job.completion_bonus:,}</> - Cargo Bonus: <Money>{job.bonus_multiplier*100:.0f}%</>
+({job.quantity_fulfilled}/{job.quantity_requested}) {cargo_key} - Completion: <Money>{job.completion_bonus:,}</> - Cargo Bonus: <Money>{job.bonus_multiplier*100:.0f}%</>
 <Secondary>Expiring in {get_time_difference_string(timestamp, job.expired_at)}</>"""
           source_points = list(job.source_points.all())
           if source_points:

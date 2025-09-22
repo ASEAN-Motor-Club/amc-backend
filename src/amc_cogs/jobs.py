@@ -76,9 +76,17 @@ class JobsCog(commands.Cog):
         color = discord.Color.green()
       else:
         color = discord.Color.red()
+
+    if job.cargo_key:
+      cargo_key = job.get_cargo_key_display()
+    else:
+      cargo_key = '/'.join([
+        cargo.label
+        for cargo in job.cargos.all()
+      ])
     # --- Assemble the embed ---
     embed = discord.Embed(
-        title=f"Deliver: {job.get_cargo_key_display()} ({job.quantity_fulfilled}/{job.quantity_requested})",
+        title=f"Deliver: {cargo_key} ({job.quantity_fulfilled}/{job.quantity_requested})",
         description=description.strip(),
         color=color,
         timestamp=job.requested_at # Use job creation time for consistency
@@ -143,7 +151,7 @@ class JobsCog(commands.Cog):
         return
 
     active_jobs = DeliveryJob.objects.prefetch_related(
-        'source_points', 'destination_points'
+        'source_points', 'destination_points', 'cargos',
     ).prefetch_related(
       Prefetch('deliveries', queryset=Delivery.objects.select_related('character'))
     ).filter(
@@ -184,7 +192,7 @@ class JobsCog(commands.Cog):
     ).exclude(
       id__in=active_job_ids
     ).prefetch_related(
-        'source_points', 'destination_points'
+        'source_points', 'destination_points', 'cargos',
     ).prefetch_related(
       Prefetch('deliveries', queryset=Delivery.objects.select_related('character'))
     )
