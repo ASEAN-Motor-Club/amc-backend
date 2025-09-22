@@ -609,11 +609,11 @@ async def process_log_event(event: LogEvent, http_client=None, http_client_mod=N
           character.reject_ubi = not character.reject_ubi
           await character.asave(update_fields=['reject_ubi'])
           if character.reject_ubi:
-            message = "You will no longer receive a universal basic income"
+            popup_message = "You will no longer receive a universal basic income"
           else:
-            message = "You will start to receive a universal basic income"
+            popup_message = "You will start to receive a universal basic income"
           asyncio.create_task(
-            show_popup(http_client_mod, message, player_id=str(player_id))
+            show_popup(http_client_mod, popup_message, player_id=str(player_id))
           )
         except Exception as e:
           asyncio.create_task(
@@ -832,7 +832,7 @@ The loan amount has been deposited into your wallet. You can view your loan deta
             recipient_character=thanked_character,
             timestamp=timestamp,
           )
-          await Player.objects.filter(character=thanked_character).aupdate(social_score=F('social_score')+1)
+          await Player.objects.filter(characters=thanked_character).aupdate(social_score=F('social_score')+1)
           asyncio.create_task(
             show_popup(http_client_mod, "<Title>Thank sent</>", player_id=str(player_id))
           )
