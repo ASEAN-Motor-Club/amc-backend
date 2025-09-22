@@ -604,9 +604,12 @@ class Vehicle(models.Model):
 @final
 class Company(models.Model):
   name = models.CharField(max_length=200)
+  description = models.CharField(max_length=250, blank=True)
   owner = models.ForeignKey(Character, on_delete=models.CASCADE)
   is_corp = models.BooleanField()
-  first_seen_at = models.DateTimeField()
+  first_seen_at = models.DateTimeField(blank=True)
+  money = models.IntegerField(null=True, blank=True)
+  
 
   class Meta:
     verbose_name = _('Company')

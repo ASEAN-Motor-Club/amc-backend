@@ -50,3 +50,7 @@ async def announce(message: str, session, password='', clear_banner=True, type="
 
 async def get_deliverypoints(session, password=''):
   return await game_api_request(session, "/delivery/sites")
+
+async def get_world(session, password=''):
+  return await game_api_request(session, "https://server.aseanmotorclub.com/api/world/")
+
