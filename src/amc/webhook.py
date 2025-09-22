@@ -92,6 +92,7 @@ async def on_delivery_job_fulfilled(job, http_client):
     players = {p.unique_id: p async for p in Player.objects.filter(unique_id__in=player_ids)}
 
     # Distribute the bonus proportionally.
+    contributors_names = []
     for player_id, count in player_contributions.items():
         player_obj = players.get(player_id)
         if not player_obj:
@@ -101,8 +102,10 @@ async def on_delivery_job_fulfilled(job, http_client):
         if reward > 0:
             character = await player_obj.get_latest_character()
             await send_fund_to_player(reward, character, "Job Completion")
+            contributors_names.append(f"{character.name} ({count})")
 
-    message = f"Bonus! +${completion_bonus:,} has been deposited into your bank accounts for completing the {job.get_cargo_key_display()} job."
+    contributors_str = ', '.join(contributors_names)
+    message = f"Job Completed! +${completion_bonus:,} has been deposited into your bank accounts. Thanks to: {contributors_str}"
     asyncio.create_task(announce(message, http_client))
 
 
@@ -303,7 +306,9 @@ async def process_event(event, player, http_client=None, http_client_mod=None, d
           await job.asave(update_fields=['quantity_fulfilled'])
           await job.arefresh_from_db(fields=['quantity_fulfilled'])
           if job.quantity_fulfilled >= job.quantity_requested:
-             await on_delivery_job_fulfilled(job, http_client)
+            asyncio.create_task(
+              on_delivery_job_fulfilled(job, http_client)
+            )
 
         # ADDED: Call the discord embed posting function
         if discord_client:
