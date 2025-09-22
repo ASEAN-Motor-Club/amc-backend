@@ -46,3 +46,7 @@ async def announce(message: str, session, password='', clear_banner=True, type="
   except Exception as e:
     print(f"Error sending message: {e}")
     raise e
+
+
+async def get_deliverypoints(session, password=''):
+  return await game_api_request(session, "/delivery/sites")

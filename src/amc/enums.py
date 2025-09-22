@@ -13,7 +13,7 @@ class CargoKey(models.TextChoices):
   BoxPallete_03 = "BoxPallete_03", "Box Pallet C"
   PlasticPallete = "PlasticPallete", "Plastic Pallet"
   PowerBox = "PowerBox", "Power Box"
-  ToyBoxes = "ToyBoxes", "Pallet of Toys"
+  ToyBoxes = "ToyBoxes", "Toy Pallete"
   BottlePallete = "BottlePallete", "Water Bottle Pallet"
   WoodPlank_14ft_5t = "WoodPlank_14ft_5t", "WoodPlank 14ft 5t"
   Container_30ft_5t = "Container_30ft_5t", "Container 30ft 5t"

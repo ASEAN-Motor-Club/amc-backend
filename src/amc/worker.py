@@ -76,13 +76,13 @@ class WorkerSettings:
     functions = [process_log_line]
     cron_jobs = [
         cron(monitor_webhook, second=set(range(0, 60, 4))),
-        cron(monitor_events, second=None),
         cron(monitor_locations, second=None),
-        cron(monitor_event_locations, second=None),
-        cron(send_event_embeds, second=set(range(0, 60, 10))),
         cron(handout_ubi, minute=set(range(0, 60, UBI_TASK_FREQUENCY)), second=37),
-        # cron(monitor_deliverypoints, second=None),
         cron(apply_interest_to_bank_accounts, hour=None, minute=0, second=0),
+        # cron(monitor_events, second=None),
+        # cron(send_event_embeds, second=set(range(0, 60, 10))),
+        # cron(monitor_event_locations, second=None),
+        cron(monitor_deliverypoints, second=set(range(0, 60, 7))),
     ]
     on_startup = startup
     on_shutdown = shutdown
