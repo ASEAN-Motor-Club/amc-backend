@@ -11,6 +11,7 @@ from amc.models import (
   Delivery
 )
 from amc.utils import get_time_difference_string
+from amc.webhook import on_delivery_job_fulfilled
 
 class JobsCog(commands.Cog):
   def __init__(self, bot: commands.Bot):
@@ -260,3 +261,10 @@ class JobsCog(commands.Cog):
   async def update_jobs_embeds(self, interaction):
     active_job_ids = await self.update_jobs()
     await interaction.response.send_message(f"Updated {str(active_job_ids)}", ephemeral=True)
+
+  @app_commands.command(name='finish_job', description='Manually finish a job')
+  @app_commands.checks.has_any_role(settings.DISCORD_ADMIN_ROLE_ID)
+  async def finish_job(self, interaction, job_id: int):
+    job = await DeliveryJob.objects.aget(pk=job_id)
+    await on_delivery_job_fulfilled(job, self.bot.http_client_game)
+    await interaction.response.send_message(f"Finished {str(job_id)}", ephemeral=True)

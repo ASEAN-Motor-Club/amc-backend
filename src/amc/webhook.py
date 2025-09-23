@@ -24,6 +24,7 @@ from amc.models import (
   Delivery,
   DeliveryPoint,
   DeliveryJob,
+  Character,
   CharacterLocation,
 )
 from amc.locations import gwangjin_shortcut
@@ -54,55 +55,41 @@ async def on_delivery_job_fulfilled(job, http_client):
 
     # Base query for logs matching the job's cargo within its active time frame.
     # ASSUMES the DeliveryJob model has a `created_at` field.
-    log_qs = ServerCargoArrivedLog.objects.filter(
-        cargo_key=job.cargo_key,
-        timestamp__gte=job.requested_at,
-    )
+    log_qs = Delivery.objects.filter(job=job)
 
-    # Filter by source/destination points if the job specifies them.
-    source_points = job.source_points.all()
-    if await source_points.aexists():
-        log_qs = log_qs.filter(sender_point__in=source_points)
-
-    destination_points = job.destination_points.all()
-    if await destination_points.aexists():
-        log_qs = log_qs.filter(destination_point__in=destination_points)
-    
     # Get the exact N logs that fulfilled the job by taking the most recent ones.
-    contributing_logs = [
-        log async for log in log_qs.order_by('-timestamp')[:job.quantity_requested]
-    ]
+    contributing_logs = list([log async for log in log_qs])
 
-    total_deliveries = len(contributing_logs)
+    total_deliveries = job.quantity_fulfilled
     if not total_deliveries:
         return
 
     # Group logs by player to count each player's contribution.
-    contributing_logs.sort(key=attrgetter('player_id'))
-    player_contributions = {}
-    for player_id, group in itertools.groupby(contributing_logs, key=attrgetter('player_id')):
-        if player_id:
-            player_contributions[player_id] = len(list(group))
+    contributing_logs.sort(key=attrgetter('character_id'))
+    character_contributions = {}
+    for character_id, group in itertools.groupby(contributing_logs, key=attrgetter('character_id')):
+        if character_id:
+            character_contributions[character_id] = sum([delivery.quantity for delivery in list(group)])
 
-    if not player_contributions:
+    if not character_contributions:
+        print('No character_contributions')
         return
     
     # Fetch all contributing Player objects in one query.
-    player_ids = player_contributions.keys()
-    players = {p.unique_id: p async for p in Player.objects.filter(unique_id__in=player_ids)}
+    character_ids = character_contributions.keys()
+    characters = {c.id: c async for c in Character.objects.filter(id__in=character_ids)}
 
     # Distribute the bonus proportionally.
     contributors_names = []
-    for player_id, count in player_contributions.items():
-        player_obj = players.get(player_id)
-        if not player_obj:
+    for character_id, count in character_contributions.items():
+        character_obj = characters.get(character_id)
+        if not character_obj:
             continue
         
         reward = int((count / total_deliveries) * completion_bonus)
         if reward > 0:
-            character = await player_obj.get_latest_character()
-            await send_fund_to_player(reward, character, "Job Completion")
-            contributors_names.append(f"{character.name} ({count})")
+            await send_fund_to_player(reward, character_obj, "Job Completion")
+            contributors_names.append(f"{character_obj.name} ({count})")
 
     contributors_str = ', '.join(contributors_names)
     message = f"Job Completed! +${completion_bonus:,} has been deposited into your bank accounts. Thanks to: {contributors_str}"
@@ -305,10 +292,20 @@ async def process_event(event, player, http_client=None, http_client_mod=None, d
           job.quantity_fulfilled = F('quantity_fulfilled') + min(requested_remaining, quantity)
           await job.asave(update_fields=['quantity_fulfilled'])
           await job.arefresh_from_db(fields=['quantity_fulfilled'])
-          if job.quantity_fulfilled >= job.quantity_requested:
-            asyncio.create_task(
-              on_delivery_job_fulfilled(job, http_client)
-            )
+
+        await Delivery.objects.acreate(
+          timestamp=timestamp,
+          character=character,
+          cargo_key=cargo_key,
+          quantity=quantity,
+          payment=payment * quantity,
+          subsidy=cargo_subsidy,
+          sender_point=delivery_source,
+          destination_point=delivery_destination,
+          job=job,
+        )
+        if job and job.quantity_fulfilled >= job.quantity_requested:
+          asyncio.create_task(on_delivery_job_fulfilled(job, http_client))
 
         # ADDED: Call the discord embed posting function
         if discord_client:
@@ -325,18 +322,6 @@ async def process_event(event, player, http_client=None, http_client_mod=None, d
               vehicle_key,
             )
           )
-
-        await Delivery.objects.acreate(
-          timestamp=timestamp,
-          character=character,
-          cargo_key=cargo_key,
-          quantity=quantity,
-          payment=payment * quantity,
-          subsidy=cargo_subsidy,
-          sender_point=delivery_source,
-          destination_point=delivery_destination,
-          job=job,
-        )
 
 
         subsidy += cargo_subsidy
