@@ -431,10 +431,11 @@ class CargoAdmin(admin.ModelAdmin):
 
 @admin.register(DeliveryJob)
 class DeliveryJobAdmin(admin.ModelAdmin):
-  list_display = ['id', 'cargo_key', 'quantity_requested', 'quantity_fulfilled', 'bonus_multiplier', 'completion_bonus', 'requested_at']
+  list_display = ['id', 'name', 'quantity_requested', 'quantity_fulfilled', 'bonus_multiplier', 'completion_bonus', 'requested_at', 'template']
   ordering = ['-requested_at']
   search_fields = ['cargo_key']
   autocomplete_fields = ['source_points', 'destination_points', 'cargos']
+  save_as = True
 
 @admin.register(Delivery)
 class DeliveryAdmin(admin.ModelAdmin):

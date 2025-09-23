@@ -953,6 +953,7 @@ class Cargo(models.Model):
 
 @final
 class DeliveryJob(models.Model):
+  name = models.CharField(max_length=200, null=True, help_text="Give the job a name so it can be identified")
   cargo_key = models.CharField(max_length=200, db_index=True, choices=CargoKey, null=True, blank=True)
   quantity_requested = models.PositiveIntegerField()
   quantity_fulfilled = models.PositiveIntegerField(default=0)
@@ -965,6 +966,7 @@ class DeliveryJob(models.Model):
   destination_points = models.ManyToManyField('DeliveryPoint', related_name='jobs_in', blank=True)
   discord_message_id = models.PositiveBigIntegerField(null=True, blank=True, help_text="For bot use only, leave blank")
   description = models.TextField(blank=True, null=True)
+  template = models.BooleanField(default=False, help_text="If true this will be used to create future jobs")
 
   def __str__(self):
     return f"{self.quantity_requested}x {self.get_cargo_key_display()} ({self.id})"
