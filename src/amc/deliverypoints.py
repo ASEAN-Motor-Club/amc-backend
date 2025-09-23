@@ -1,4 +1,4 @@
-from amc.models import DeliveryPoint, DeliveryPointStorage
+from amc.models import DeliveryPoint, DeliveryPointStorage, Cargo
 from amc.game_server import get_deliverypoints
 from amc.enums import CargoKey
 
@@ -19,6 +19,8 @@ async def monitor_deliverypoints(ctx):
   dps_info = await get_deliverypoints(session)
   dps_data = dps_info.get('data', {})
 
+  cargo_by_key = {cargo.key: cargo async for cargo in Cargo.objects.all()}
+
   for dp_info in dps_data.values():
     try:
       dp = await DeliveryPoint.objects.aget(guid=dp_info['guid'].lower())
@@ -38,6 +40,7 @@ async def monitor_deliverypoints(ctx):
         kind=DeliveryPointStorage.Kind.INPUT,
         cargo_key=inventory['cargoKey'],
         defaults={
+          'cargo': cargo_by_key.get(inventory['cargoKey']),
           'amount': inventory['amount'],
         }
       )

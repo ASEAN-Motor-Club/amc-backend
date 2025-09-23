@@ -821,6 +821,7 @@ class DeliveryPointStorage(models.Model):
   delivery_point = models.ForeignKey(DeliveryPoint, models.CASCADE, related_name="storages")
   kind = models.CharField(max_length=2, choices=Kind)
   cargo_key = models.CharField(max_length=200, db_index=True, choices=CargoKey)
+  cargo = models.ForeignKey('Cargo', models.CASCADE, related_name='storages', null=True)
   amount = models.PositiveIntegerField()
 
 @final
