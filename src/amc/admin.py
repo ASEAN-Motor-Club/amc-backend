@@ -1,10 +1,13 @@
 import aiohttp
+from datetime import timedelta
 from asgiref.sync import async_to_sync
 from django.contrib import admin
 from django.utils import timezone
 from django.conf import settings
 from django.db.models import F, Count, Window
 from django.db.models.functions import RowNumber
+from django.contrib import messages
+from django.utils.translation import ngettext
 from django.contrib.postgres.aggregates import ArrayAgg
 from .models import (
   Player,
@@ -436,6 +439,37 @@ class DeliveryJobAdmin(admin.ModelAdmin):
   search_fields = ['cargo_key']
   autocomplete_fields = ['source_points', 'destination_points', 'cargos']
   save_as = True
+  actions = ['create_job_from_template']
+
+  @admin.action(description="Create job from template")
+  def create_job_from_template(self, request, queryset):
+    created = 0
+    for job in queryset.prefetch_related('cargos', 'source_points', 'destination_points').filter(template=True):
+      new_job = DeliveryJob.objects.create(
+        name=job.name,
+        cargo_key=job.cargo_key,
+        quantity_requested=job.quantity_requested,
+        expired_at=timezone.now() + timedelta(hours=5),
+        bonus_multiplier=job.bonus_multiplier,
+        completion_bonus=job.completion_bonus,
+        description=job.description,
+      )
+      new_job.cargos.add(*job.cargos.all())
+      new_job.source_points.add(*job.source_points.all())
+      new_job.destination_points.add(*job.destination_points.all())
+      created += 1
+
+    self.message_user(
+      request,
+      ngettext(
+        "%d jobs was successfully created.",
+        "%d jobs were successfully created.",
+        created,
+      )
+      % created,
+      messages.SUCCESS,
+    )
+
 
 @admin.register(Delivery)
 class DeliveryAdmin(admin.ModelAdmin):
