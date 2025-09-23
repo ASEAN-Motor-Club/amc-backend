@@ -968,3 +968,31 @@ class DeliveryJob(models.Model):
   def __str__(self):
     return f"{self.quantity_requested}x {self.get_cargo_key_display()} ({self.id})"
 
+@final
+class Ticket(models.Model):
+  class Infringement(models.TextChoices):
+    CLUTERRING = "cluterring", "Cluterring"
+    GRIEFING = "griefing", "Griefing"
+    TROLLING = "trolling", "Trolling"
+    OTHER = "other", "Other"
+
+  character = models.ForeignKey(Character, on_delete=models.CASCADE, related_name='tickets')
+  infringement = models.CharField(max_length=200, choices=Infringement)
+  notes = models.TextField(blank=True)
+  created_at = models.DateTimeField(editable=False, auto_now_add=True)
+
+  @classmethod
+  def get_social_score_deduction(self, infringement):
+    match infringement:
+      case self.Infringement.CLUTERRING:
+        social_score_deduction = 3
+      case self.Infringement.GRIEFING:
+        social_score_deduction = 7
+      case self.Infringement.TROLLING:
+        social_score_deduction = 10
+      case self.Infringement.OTHER:
+        social_score_deduction = 1
+      case _:
+        social_score_deduction = 3
+    return social_score_deduction
+

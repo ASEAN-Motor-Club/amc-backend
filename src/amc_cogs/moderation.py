@@ -3,8 +3,8 @@ from discord.ext import commands
 from django.db.models import Q
 from django.contrib.gis.geos import Point
 from .utils import create_player_autocomplete
-from amc.models import Player, CharacterLocation, TeleportPoint
-from amc.mod_server import show_popup, teleport_player, get_player
+from amc.models import Player, CharacterLocation, TeleportPoint, Ticket
+from amc.mod_server import show_popup, teleport_player, get_player, transfer_money
 from amc.game_server import announce
 
 class ModerationCog(commands.Cog):
@@ -23,6 +23,7 @@ class ModerationCog(commands.Cog):
 
   @app_commands.command(name='send_popup', description='Sends a popup message to an in-game player')
   @app_commands.checks.has_any_role(1395460420189421713)
+  @app_commands.autocomplete(player_id=player_autocomplete)
   async def send_popup(self, ctx, player_id: str, message: str):
     player = await Player.objects.aget(
       Q(unique_id=player_id) | Q(discord_user_id=player_id)
@@ -149,4 +150,28 @@ class ModerationCog(commands.Cog):
       await ctx.response.send_message('Please /verify yourself first')
     except Exception as e:
       await ctx.response.send_message(f'Failed to teleport: {e}')
+
+  async def infringement_autocomplete(self, interaction, current):
+    return [
+      app_commands.Choice(name=label, value=key)
+      for key, label in Ticket.Infringement.choices
+      if current.lower() in label.lower()
+    ]
+
+  @app_commands.command(name='admin_ticket', description='Sends a ticket to a player')
+  @app_commands.checks.has_any_role(1395460420189421713)
+  @app_commands.autocomplete(player_id=player_autocomplete, infringement=infringement_autocomplete)
+  async def ticket(self, ctx, player_id: str, infringement: str, message: str):
+    player = await Player.objects.aget(
+      Q(unique_id=player_id) | Q(discord_user_id=player_id)
+    )
+    await ctx.response.send_message('This feature is not complete')
+
+  @app_commands.command(name='transfer_money', description='Transfer money')
+  @app_commands.checks.has_any_role(1395460420189421713)
+  @app_commands.autocomplete(player_id=player_autocomplete)
+  async def transfer_money_cmd(self, ctx, player_id: str, amount: int, message: str):
+    await transfer_money(self.bot.http_client_mod, amount, message, player_id)
+    await ctx.response.send_message('Transfered')
+
 
