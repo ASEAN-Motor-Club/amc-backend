@@ -21,6 +21,7 @@ dependencies = [
     "django-ninja-extra>=0.30.1",
     "cryptography>=45.0.5",
     "asyncstdlib>=3.13.1",
+    "matplotlib>=3.10.6",
 ]
 [project.scripts]
 amc-manage = "manage:main"

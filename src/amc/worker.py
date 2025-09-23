@@ -13,6 +13,7 @@ from amc.locations import monitor_locations
 from amc.webhook import monitor_webhook
 from amc.ubi import handout_ubi, TASK_FREQUENCY as UBI_TASK_FREQUENCY
 from amc.deliverypoints import monitor_deliverypoints
+from amc.status import monitor_server_status
 from amc.companies import monitor_corporations
 import discord
 from amc.discord_client import bot as discord_client
@@ -85,6 +86,7 @@ class WorkerSettings:
         # cron(monitor_event_locations, second=None),
         cron(monitor_deliverypoints, second=set(range(0, 60, 7))),
         cron(monitor_corporations, second=23),
+        cron(monitor_server_status, second=None),
     ]
     on_startup = startup
     on_shutdown = shutdown

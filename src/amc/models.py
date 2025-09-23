@@ -999,3 +999,8 @@ class Ticket(models.Model):
         social_score_deduction = 3
     return social_score_deduction
 
+@final
+class ServerStatus(models.Model):
+  timestamp = models.DateTimeField(auto_now_add=True)
+  fps = models.PositiveIntegerField()
+
