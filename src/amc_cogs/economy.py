@@ -402,7 +402,7 @@ The purpose of this transfer is to ensure sufficient liquidity within the server
       'journal_entry__creator__player'
     ).annotate(total=Sum('credit', default=0)).values('total')
 
-    progressive_case = get_progressive_donation_case(settings.DONATION_EXPECTATION_BRACKETS)
+    progressive_case = get_progressive_donation_case(DONATION_EXPECTATION_BRACKETS)
 
     # Main Query to get player stats
     player_stats_qs = Player.objects.annotate(
