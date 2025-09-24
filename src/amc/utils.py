@@ -116,7 +116,7 @@ def get_timespan(days_ago: int = 0, num_days: int = 1) -> tuple[datetime, dateti
 
     # Calculate the start time by finding midnight of the target day
     # .replace() preserves the timezone information from `now`
-    start_of_today = now.replace(hour=0, minute=0, second=0, microsecond=0)
+    start_of_today = now.replace(hour=0, minute=0, second=0, microsecond=0) + timedelta(days=1)
     start_time = start_of_today - timedelta(days=days_ago)
 
     # Calculate the end time by adding the duration

@@ -39,6 +39,7 @@ class StatusCog(commands.Cog):
     ax.plot(self.data_points, color='cyan', marker='o')
     ax.set_title("Live Server FPS", color='white')
     ax.set_ylabel("fps", color='white')
+    ax.set_ylim(0, 65)
     ax.set_xlabel("Time (Updates)", color='white')
     ax.grid(True, linestyle='--', alpha=0.6)
     
@@ -50,7 +51,7 @@ class StatusCog(commands.Cog):
 
     return buffer
 
-  @tasks.loop(seconds=2)
+  @tasks.loop(seconds=10)
   async def update_status_embed(self):
     """
     Fetch the latest active players and update the embed message in the channel.
