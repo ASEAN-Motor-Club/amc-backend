@@ -1,0 +1,754 @@
+[
+  {
+    "model": "amc.cargo",
+    "pk": "SmallBox",
+    "fields": {
+      "key": "SmallBox",
+      "label": "Small Box"
+    }
+  },
+  {
+    "model": "amc.cargo",
+    "pk": "CarrotBox",
+    "fields": {
+      "key": "CarrotBox",
+      "label": "Carrots"
+    }
+  },
+  {
+    "model": "amc.cargo",
+    "pk": "AppleBox",
+    "fields": {
+      "key": "AppleBox",
+      "label": "Apples"
+    }
+  },
+  {
+    "model": "amc.cargo",
+    "pk": "OrangeBox",
+    "fields": {
+      "key": "OrangeBox",
+      "label": "Oranges"
+    }
+  },
+  {
+    "model": "amc.cargo",
+    "pk": "GlassBottleBox",
+    "fields": {
+      "key": "GlassBottleBox",
+      "label": "Glass Bottle"
+    }
+  },
+  {
+    "model": "amc.cargo",
+    "pk": "BoxPallete_01",
+    "fields": {
+      "key": "BoxPallete_01",
+      "label": "Box Pallet A"
+    }
+  },
+  {
+    "model": "amc.cargo",
+    "pk": "GroceryBox",
+    "fields": {
+      "key": "GroceryBox",
+      "label": "Grocery Box"
+    }
+  },
+  {
+    "model": "amc.cargo",
+    "pk": "GroceryBag",
+    "fields": {
+      "key": "GroceryBag",
+      "label": "Grocery Bag"
+    }
+  },
+  {
+    "model": "amc.cargo",
+    "pk": "BoxPallete_02",
+    "fields": {
+      "key": "BoxPallete_02",
+      "label": "Box Pallet B"
+    }
+  },
+  {
+    "model": "amc.cargo",
+    "pk": "BoxPallete_03",
+    "fields": {
+      "key": "BoxPallete_03",
+      "label": "Box Pallet C"
+    }
+  },
+  {
+    "model": "amc.cargo",
+    "pk": "PlasticPallete",
+    "fields": {
+      "key": "PlasticPallete",
+      "label": "Plastic Pallet"
+    }
+  },
+  {
+    "model": "amc.cargo",
+    "pk": "PowerBox",
+    "fields": {
+      "key": "PowerBox",
+      "label": "Power Box"
+    }
+  },
+  {
+    "model": "amc.cargo",
+    "pk": "ToyBoxes",
+    "fields": {
+      "key": "ToyBoxes",
+      "label": "Pallet of Toys"
+    }
+  },
+  {
+    "model": "amc.cargo",
+    "pk": "BottlePallete",
+    "fields": {
+      "key": "BottlePallete",
+      "label": "Water Bottle Pallet"
+    }
+  },
+  {
+    "model": "amc.cargo",
+    "pk": "WoodPlank_14ft_5t",
+    "fields": {
+      "key": "WoodPlank_14ft_5t",
+      "label": "WoodPlank 14ft 5t"
+    }
+  },
+  {
+    "model": "amc.cargo",
+    "pk": "Container_30ft_5t",
+    "fields": {
+      "key": "Container_30ft_5t",
+      "label": "Container 30ft 5t"
+    }
+  },
+  {
+    "model": "amc.cargo",
+    "pk": "Container_30ft_10t",
+    "fields": {
+      "key": "Container_30ft_10t",
+      "label": "Container 30ft 10t"
+    }
+  },
+  {
+    "model": "amc.cargo",
+    "pk": "Container_30ft_20t",
+    "fields": {
+      "key": "Container_30ft_20t",
+      "label": "Container 30ft 20t"
+    }
+  },
+  {
+    "model": "amc.cargo",
+    "pk": "Container_20ft_01",
+    "fields": {
+      "key": "Container_20ft_01",
+      "label": "Container 20ft"
+    }
+  },
+  {
+    "model": "amc.cargo",
+    "pk": "Container_40ft_01",
+    "fields": {
+      "key": "Container_40ft_01",
+      "label": "Container 40ft"
+    }
+  },
+  {
+    "model": "amc.cargo",
+    "pk": "Log_30ft_30t",
+    "fields": {
+      "key": "Log_30ft_30t",
+      "label": "Log 30ft 30t"
+    }
+  },
+  {
+    "model": "amc.cargo",
+    "pk": "Log_Oak_12ft",
+    "fields": {
+      "key": "Log_Oak_12ft",
+      "label": "Oak Log 12ft"
+    }
+  },
+  {
+    "model": "amc.cargo",
+    "pk": "Log_Oak_24ft",
+    "fields": {
+      "key": "Log_Oak_24ft",
+      "label": "Oak Log 24ft"
+    }
+  },
+  {
+    "model": "amc.cargo",
+    "pk": "Log_20ft",
+    "fields": {
+      "key": "Log_20ft",
+      "label": "Log 20ft"
+    }
+  },
+  {
+    "model": "amc.cargo",
+    "pk": "Sand",
+    "fields": {
+      "key": "Sand",
+      "label": "Sand"
+    }
+  },
+  {
+    "model": "amc.cargo",
+    "pk": "FineSand",
+    "fields": {
+      "key": "FineSand",
+      "label": "Fine Sand"
+    }
+  },
+  {
+    "model": "amc.cargo",
+    "pk": "Coal",
+    "fields": {
+      "key": "Coal",
+      "label": "Coal"
+    }
+  },
+  {
+    "model": "amc.cargo",
+    "pk": "LimestoneRock",
+    "fields": {
+      "key": "LimestoneRock",
+      "label": "Limestone Rock"
+    }
+  },
+  {
+    "model": "amc.cargo",
+    "pk": "Limestone",
+    "fields": {
+      "key": "Limestone",
+      "label": "Limestone"
+    }
+  },
+  {
+    "model": "amc.cargo",
+    "pk": "QuicklimePallet",
+    "fields": {
+      "key": "QuicklimePallet",
+      "label": "Quicklime Pallet"
+    }
+  },
+  {
+    "model": "amc.cargo",
+    "pk": "IronOre",
+    "fields": {
+      "key": "IronOre",
+      "label": "Iron Ore"
+    }
+  },
+  {
+    "model": "amc.cargo",
+    "pk": "Concrete",
+    "fields": {
+      "key": "Concrete",
+      "label": "Concrete"
+    }
+  },
+  {
+    "model": "amc.cargo",
+    "pk": "Fuel",
+    "fields": {
+      "key": "Fuel",
+      "label": "Fuel"
+    }
+  },
+  {
+    "model": "amc.cargo",
+    "pk": "Oil",
+    "fields": {
+      "key": "Oil",
+      "label": "Oil"
+    }
+  },
+  {
+    "model": "amc.cargo",
+    "pk": "CrudeOil",
+    "fields": {
+      "key": "CrudeOil",
+      "label": "Crude Oil"
+    }
+  },
+  {
+    "model": "amc.cargo",
+    "pk": "LiveFish_01",
+    "fields": {
+      "key": "LiveFish_01",
+      "label": "Live Fish"
+    }
+  },
+  {
+    "model": "amc.cargo",
+    "pk": "TrashBag",
+    "fields": {
+      "key": "TrashBag",
+      "label": "Trash Bag"
+    }
+  },
+  {
+    "model": "amc.cargo",
+    "pk": "Trash_Big",
+    "fields": {
+      "key": "Trash_Big",
+      "label": "Trash Bag"
+    }
+  },
+  {
+    "model": "amc.cargo",
+    "pk": "Sofa_01",
+    "fields": {
+      "key": "Sofa_01",
+      "label": "Sofa A"
+    }
+  },
+  {
+    "model": "amc.cargo",
+    "pk": "Sofa_02",
+    "fields": {
+      "key": "Sofa_02",
+      "label": "Sofa B"
+    }
+  },
+  {
+    "model": "amc.cargo",
+    "pk": "Sofa_03",
+    "fields": {
+      "key": "Sofa_03",
+      "label": "Sofa C"
+    }
+  },
+  {
+    "model": "amc.cargo",
+    "pk": "Sofa_04",
+    "fields": {
+      "key": "Sofa_04",
+      "label": "Sofa D"
+    }
+  },
+  {
+    "model": "amc.cargo",
+    "pk": "Bed_01",
+    "fields": {
+      "key": "Bed_01",
+      "label": "Bed A"
+    }
+  },
+  {
+    "model": "amc.cargo",
+    "pk": "Bed_02",
+    "fields": {
+      "key": "Bed_02",
+      "label": "Bed B"
+    }
+  },
+  {
+    "model": "amc.cargo",
+    "pk": "Bed_03",
+    "fields": {
+      "key": "Bed_03",
+      "label": "Bed C"
+    }
+  },
+  {
+    "model": "amc.cargo",
+    "pk": "Pizza_01",
+    "fields": {
+      "key": "Pizza_01",
+      "label": "Pizza 1 Box"
+    }
+  },
+  {
+    "model": "amc.cargo",
+    "pk": "Pizza_02",
+    "fields": {
+      "key": "Pizza_02",
+      "label": "Pizza 2 Box"
+    }
+  },
+  {
+    "model": "amc.cargo",
+    "pk": "Pizza_03",
+    "fields": {
+      "key": "Pizza_03",
+      "label": "Pizza 3 Box"
+    }
+  },
+  {
+    "model": "amc.cargo",
+    "pk": "Pizza_04",
+    "fields": {
+      "key": "Pizza_04",
+      "label": "Pizza 4 Box"
+    }
+  },
+  {
+    "model": "amc.cargo",
+    "pk": "Pizza_05",
+    "fields": {
+      "key": "Pizza_05",
+      "label": "Pizza 5 Box"
+    }
+  },
+  {
+    "model": "amc.cargo",
+    "pk": "Pizza_01_Premium",
+    "fields": {
+      "key": "Pizza_01_Premium",
+      "label": "Premium Pizza 1 Box"
+    }
+  },
+  {
+    "model": "amc.cargo",
+    "pk": "Burger_01",
+    "fields": {
+      "key": "Burger_01",
+      "label": "Burger"
+    }
+  },
+  {
+    "model": "amc.cargo",
+    "pk": "Burger_01_Signature",
+    "fields": {
+      "key": "Burger_01_Signature",
+      "label": "Signature Burger"
+    }
+  },
+  {
+    "model": "amc.cargo",
+    "pk": "MilitarySupplyBox_01_Empty",
+    "fields": {
+      "key": "MilitarySupplyBox_01_Empty",
+      "label": "Empty Supply Box"
+    }
+  },
+  {
+    "model": "amc.cargo",
+    "pk": "MilitarySupplyBox_01",
+    "fields": {
+      "key": "MilitarySupplyBox_01",
+      "label": "Supply Box"
+    }
+  },
+  {
+    "model": "amc.cargo",
+    "pk": "Rice",
+    "fields": {
+      "key": "Rice",
+      "label": "Rice"
+    }
+  },
+  {
+    "model": "amc.cargo",
+    "pk": "OrangeBoxes",
+    "fields": {
+      "key": "OrangeBoxes",
+      "label": "Orange Pallet"
+    }
+  },
+  {
+    "model": "amc.cargo",
+    "pk": "RicePallet",
+    "fields": {
+      "key": "RicePallet",
+      "label": "Rice Pallet"
+    }
+  },
+  {
+    "model": "amc.cargo",
+    "pk": "PumpkinBox",
+    "fields": {
+      "key": "PumpkinBox",
+      "label": "Pumpkin Box"
+    }
+  },
+  {
+    "model": "amc.cargo",
+    "pk": "PumpkinPallet",
+    "fields": {
+      "key": "PumpkinPallet",
+      "label": "Pumpkin Pallet"
+    }
+  },
+  {
+    "model": "amc.cargo",
+    "pk": "CornBox",
+    "fields": {
+      "key": "CornBox",
+      "label": "Corn Box"
+    }
+  },
+  {
+    "model": "amc.cargo",
+    "pk": "CornPallet",
+    "fields": {
+      "key": "CornPallet",
+      "label": "Corn Pallet"
+    }
+  },
+  {
+    "model": "amc.cargo",
+    "pk": "BeanPallet",
+    "fields": {
+      "key": "BeanPallet",
+      "label": "Bean Pallet"
+    }
+  },
+  {
+    "model": "amc.cargo",
+    "pk": "HempPallet",
+    "fields": {
+      "key": "HempPallet",
+      "label": "Hemp Pallet"
+    }
+  },
+  {
+    "model": "amc.cargo",
+    "pk": "CabbagePallet",
+    "fields": {
+      "key": "CabbagePallet",
+      "label": "Cabbage Pallet"
+    }
+  },
+  {
+    "model": "amc.cargo",
+    "pk": "ChilliPallet",
+    "fields": {
+      "key": "ChilliPallet",
+      "label": "Chilli Pallet"
+    }
+  },
+  {
+    "model": "amc.cargo",
+    "pk": "PotatoPallet",
+    "fields": {
+      "key": "PotatoPallet",
+      "label": "Potato Pallet"
+    }
+  },
+  {
+    "model": "amc.cargo",
+    "pk": "CheesePallet",
+    "fields": {
+      "key": "CheesePallet",
+      "label": "Cheese Pallet"
+    }
+  },
+  {
+    "model": "amc.cargo",
+    "pk": "CheeseBox",
+    "fields": {
+      "key": "CheeseBox",
+      "label": "Cheese Box"
+    }
+  },
+  {
+    "model": "amc.cargo",
+    "pk": "Milk",
+    "fields": {
+      "key": "Milk",
+      "label": "Milk"
+    }
+  },
+  {
+    "model": "amc.cargo",
+    "pk": "MeatBox",
+    "fields": {
+      "key": "MeatBox",
+      "label": "Meat Box"
+    }
+  },
+  {
+    "model": "amc.cargo",
+    "pk": "BreadBox",
+    "fields": {
+      "key": "BreadBox",
+      "label": "Bread Box"
+    }
+  },
+  {
+    "model": "amc.cargo",
+    "pk": "BreadPallet",
+    "fields": {
+      "key": "BreadPallet",
+      "label": "Bread Pallet"
+    }
+  },
+  {
+    "model": "amc.cargo",
+    "pk": "AirlineMealPallet",
+    "fields": {
+      "key": "AirlineMealPallet",
+      "label": "Airline Meal Pallet"
+    }
+  },
+  {
+    "model": "amc.cargo",
+    "pk": "SnackBox",
+    "fields": {
+      "key": "SnackBox",
+      "label": "Snack Box"
+    }
+  },
+  {
+    "model": "amc.cargo",
+    "pk": "GiftBox_01",
+    "fields": {
+      "key": "GiftBox_01",
+      "label": "Gift Box"
+    }
+  },
+  {
+    "model": "amc.cargo",
+    "pk": "FormulaSCM",
+    "fields": {
+      "key": "FormulaSCM",
+      "label": "Formula SCM"
+    }
+  },
+  {
+    "model": "amc.cargo",
+    "pk": "PlasticPipes_6m",
+    "fields": {
+      "key": "PlasticPipes_6m",
+      "label": "Plastic Pipes 6m"
+    }
+  },
+  {
+    "model": "amc.cargo",
+    "pk": "lHBeam_6m",
+    "fields": {
+      "key": "lHBeam_6m",
+      "label": "H-Beam 6m"
+    }
+  },
+  {
+    "model": "amc.cargo",
+    "pk": "SteelCoil_10t",
+    "fields": {
+      "key": "SteelCoil_10t",
+      "label": "Steel Coil"
+    }
+  },
+  {
+    "model": "amc.cargo",
+    "pk": "Cement",
+    "fields": {
+      "key": "Cement",
+      "label": "Cement"
+    }
+  },
+  {
+    "model": "amc.cargo",
+    "pk": "Terra",
+    "fields": {
+      "key": "Terra",
+      "label": "Terra"
+    }
+  },
+  {
+    "model": "amc.cargo",
+    "pk": "SunflowerSeed",
+    "fields": {
+      "key": "SunflowerSeed",
+      "label": "Sunflower Seed"
+    }
+  },
+  {
+    "model": "amc.cargo",
+    "pk": "T::Concrete",
+    "fields": {
+      "key": "T::Concrete",
+      "label": "Concrete"
+    }
+  },
+  {
+    "model": "amc.cargo",
+    "pk": "T::Container",
+    "fields": {
+      "key": "T::Container",
+      "label": "Container"
+    }
+  },
+  {
+    "model": "amc.cargo",
+    "pk": "T::FinalProduct",
+    "fields": {
+      "key": "T::FinalProduct",
+      "label": "Final Product"
+    }
+  },
+  {
+    "model": "amc.cargo",
+    "pk": "T::Food",
+    "fields": {
+      "key": "T::Food",
+      "label": "Food"
+    }
+  },
+  {
+    "model": "amc.cargo",
+    "pk": "T::Furniture",
+    "fields": {
+      "key": "T::Furniture",
+      "label": "Furniture"
+    }
+  },
+  {
+    "model": "amc.cargo",
+    "pk": "T::LargePackage",
+    "fields": {
+      "key": "T::LargePackage",
+      "label": "Pallet"
+    }
+  },
+  {
+    "model": "amc.cargo",
+    "pk": "T::Log",
+    "fields": {
+      "key": "T::Log",
+      "label": "Log"
+    }
+  },
+  {
+    "model": "amc.cargo",
+    "pk": "T::MilitarySupply",
+    "fields": {
+      "key": "T::MilitarySupply",
+      "label": "Military Supply"
+    }
+  },
+  {
+    "model": "amc.cargo",
+    "pk": "T::Sand",
+    "fields": {
+      "key": "T::Sand",
+      "label": "Sand"
+    }
+  },
+  {
+    "model": "amc.cargo",
+    "pk": "T::SmallPackage",
+    "fields": {
+      "key": "T::SmallPackage",
+      "label": "Box"
+    }
+  },
+  {
+    "model": "amc.cargo",
+    "pk": "T::Wood",
+    "fields": {
+      "key": "T::Wood",
+      "label": "Wood"
+    }
+  }
+]

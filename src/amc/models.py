@@ -823,6 +823,7 @@ class DeliveryPointStorage(models.Model):
   cargo_key = models.CharField(max_length=200, db_index=True, choices=CargoKey)
   cargo = models.ForeignKey('Cargo', models.CASCADE, related_name='storages', null=True)
   amount = models.PositiveIntegerField()
+  capacity = models.PositiveIntegerField(null=True)
 
 @final
 class CharacterAFKReminder(models.Model):
@@ -951,6 +952,17 @@ class Cargo(models.Model):
   key = models.CharField(max_length=200, primary_key=True)
   label = models.CharField(max_length=200)
 
+  def __str__(self):
+    return self.label
+
+class DeliveryJobQuerySet(models.QuerySet):
+  def filter_active(self):
+    return self.filter(
+      quantity_fulfilled__lt=F('quantity_requested'),
+      expired_at__gte=timezone.now()
+    )
+
+
 @final
 class DeliveryJob(models.Model):
   name = models.CharField(max_length=200, null=True, help_text="Give the job a name so it can be identified")
@@ -967,6 +979,8 @@ class DeliveryJob(models.Model):
   discord_message_id = models.PositiveBigIntegerField(null=True, blank=True, help_text="For bot use only, leave blank")
   description = models.TextField(blank=True, null=True)
   template = models.BooleanField(default=False, help_text="If true this will be used to create future jobs")
+
+  objects = models.Manager.from_queryset(DeliveryJobQuerySet)()
 
   def __str__(self):
     return f"{self.quantity_requested}x {self.get_cargo_key_display()} ({self.id})"
