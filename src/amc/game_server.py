@@ -25,6 +25,11 @@ async def get_players(session, password=''):
   ]
   return players
 
+async def is_player_online(player_id, session, password=''):
+  players = await get_players(session, password)
+  player_ids = {str(player_id) for player_id, player_name in players}
+  return str(player_id) in player_ids
+
 
 async def announcement_request(message, session, password='', type="message", color=None):
   params = {'message': message}

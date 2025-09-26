@@ -11,6 +11,7 @@ from django.utils.translation import ngettext
 from django.contrib.postgres.aggregates import ArrayAgg
 from .models import (
   Player,
+  Ticket,
   Character,
   Company,
   PlayerChatLog,
@@ -64,6 +65,19 @@ class CharacterInlineAdmin(admin.TabularInline):
     return qs.with_last_login().with_total_session_time()
 
 
+class TicketInlineAdmin(admin.TabularInline):
+  model = Ticket
+  exclude = ['character']
+  autocomplete_fields = ['player', 'issued_by']
+  fk_name = 'player'
+
+@admin.register(Ticket)
+class TicketAdmin(admin.ModelAdmin):
+  list_display = ['id', 'player', 'infringement', 'created_at', 'issued_by']
+  search_fields = ['player']
+  list_select_related = ['player', 'issued_by']
+  list_filter = ['infringement']
+
 class TeamPlayerInlineAdmin(admin.TabularInline):
   model = Team.players.through
   autocomplete_fields = ['player']
@@ -78,7 +92,7 @@ class PlayerAdmin(admin.ModelAdmin):
   list_display = ['unique_id', 'character_names', 'characters_count', 'discord_user_id', 'verified']
   search_fields = ['unique_id', 'characters__name', 'discord_user_id']
   autocomplete_fields = ['user']
-  inlines = [CharacterInlineAdmin, PlayerTeamInlineAdmin]
+  inlines = [CharacterInlineAdmin, PlayerTeamInlineAdmin, TicketInlineAdmin]
 
   def get_queryset(self, request):
     qs = super().get_queryset(request)

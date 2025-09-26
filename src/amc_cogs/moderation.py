@@ -1,16 +1,18 @@
+import discord
 from discord import app_commands
 from discord.ext import commands
-from django.db.models import Q
+from django.utils import timezone
+from django.db.models import Q, F
 from django.contrib.gis.geos import Point
 from .utils import create_player_autocomplete
-from amc.models import Player, CharacterLocation, TeleportPoint, Ticket
+from amc.models import Player, CharacterLocation, TeleportPoint, Ticket, PlayerMailMessage
 from amc.mod_server import show_popup, teleport_player, get_player, transfer_money
-from amc.game_server import announce
+from amc.game_server import announce, is_player_online
 
 class ModerationCog(commands.Cog):
   def __init__(self, bot):
     self.bot = bot
-    self.player_autocomplete = create_player_autocomplete(self.bot.event_http_client_game)
+    self.player_autocomplete = create_player_autocomplete(self.bot.http_client_game)
 
   async def player_autocomplete(self, interaction, current):
     return await self.player_autocomplete(interaction, current)
@@ -161,11 +163,79 @@ class ModerationCog(commands.Cog):
   @app_commands.command(name='admin_ticket', description='Sends a ticket to a player')
   @app_commands.checks.has_any_role(1395460420189421713)
   @app_commands.autocomplete(player_id=player_autocomplete, infringement=infringement_autocomplete)
-  async def ticket(self, ctx, player_id: str, infringement: str, message: str):
+  async def ticket(self, interaction, player_id: str, infringement: str, message: str):
+    try:
+      admin = await Player.objects.aget(discord_user_id=interaction.user.id)
+    except Player.DoesNotExist:
+      await interaction.response.send_message('Please /verify yourself first')
+      return
+
+    await interaction.response.defer(ephemeral=True)
+
     player = await Player.objects.aget(
       Q(unique_id=player_id) | Q(discord_user_id=player_id)
     )
-    await ctx.response.send_message('This feature is not complete')
+    character = await player.get_latest_character()
+    new_ticket = await Ticket.objects.acreate(
+      player=player,
+      infringement=infringement,
+      notes=message,
+      issued_by=admin,
+    )
+    player.social_score = F('social_score') - Ticket.get_social_score_deduction(infringement)
+    await player.asave(update_fields=['social_score'])
+
+    mail_message = f"""\
+<Bold>GOVERNMENT OF ASEAN MOTOR CLUB</>
+<Bold>DEPARTMENT OF COMMUNITY STANDARDS & PUBLIC ORDER</>
+
+<Title>OFFICIAL INFRINGEMENT NOTICE</>
+
+<Bold>Case Number:</> {new_ticket.id}
+<Bold>Date Issued:</> {new_ticket.created_at.strftime('%Y-%m-%d %H:%M:%S')}
+
+<Bold>Infringement Category:</> {new_ticket.get_infringement_display()}
+
+<Bold>Official's Notes:</>
+{message}
+
+---
+This notice was issued by Officer {interaction.user.display_name}. If you wish to appeal this ticket, please contact a member of the administration team.
+
+"""
+    dm_success = False
+    if await is_player_online(player_id, self.bot.http_client_game):
+      await show_popup(self.bot.http_client_mod, mail_message, player_id=player_id)
+      dm_success = True
+    else:
+      await PlayerMailMessage.objects.acreate(
+        to_player=player,
+        content=mail_message
+      )
+
+    embed = discord.Embed(
+      title="**OFFICIAL INFRINGEMENT NOTICE**",
+      color=discord.Color.red(),
+      timestamp=timezone.now()
+    )
+    embed.set_author(name="ASEAN Motor Club | Department of Community Standards & Public Order")
+    embed.add_field(name="Case Number", value=f"`{new_ticket.id}`", inline=True)
+    embed.add_field(name="Date Issued", value=f"`{new_ticket.created_at.strftime('%Y-%m-%d %H:%M:%S')}`", inline=True)
+    embed.add_field(name="Issued To", value=f"{character.name} (Player ID: `{player.unique_id})`", inline=False)
+    embed.add_field(name="Infringement Category", value=new_ticket.get_infringement_display(), inline=False)
+    embed.add_field(name="Official's Notes", value=f"```{message}```", inline=False)
+    embed.set_footer(text=f"Issued by: {interaction.user.display_name}")
+
+    # Send a copy to your private mod-log channel for record-keeping
+    log_channel = self.bot.get_channel(1354451955774132284) 
+    if log_channel:
+      await log_channel.send(embed=embed)
+
+    # Confirm the action to the admin who ran the command
+    if dm_success:
+      await interaction.followup.send(f"Ticket `{new_ticket.id}` issued and sent to the player via popup.", embed=embed)
+    else:
+      await interaction.followup.send(f"Ticket `{new_ticket.id}` was created and a mail has been sent.", embed=embed)
 
   @app_commands.command(name='transfer_money', description='Transfer money')
   @app_commands.checks.has_any_role(1395460420189421713)

@@ -2,19 +2,45 @@ import discord
 import re
 from discord import app_commands
 from amc.game_server import get_players
+from amc.models import Character
 
-def create_player_autocomplete(session):
+def create_player_autocomplete(session, max_num=25):
   async def player_autocomplete(
     interaction: discord.Interaction,
     current: str
   ):
     players = await get_players(session)
+    online_characters = (Character.objects
+      .filter(
+        name__icontains=current
+      )
+      .select_related('player')
+      .filter(player__unique_id__in=[int(player_id) for player_id, player_name in players])
+      .with_last_login()
+      .order_by('name', '-last_login')
+    )
+    offline_characters = (Character.objects
+      .filter(
+        name__icontains=current
+      )
+      .select_related('player')
+      .exclude(player__unique_id__in=[int(player_id) for player_id, player_name in players])
+      .with_last_login()
+      .order_by('name', '-last_login')
+    )
 
-    return [
-      app_commands.Choice(name=f"{player_name} ({player_id})", value=player_id)
-      for player_id, player_name in players
-      if current.lower() in player_name.lower() or current in str(player_id)
-    ][:25]  # Discord max choices: 25
+    online_choices = [
+      app_commands.Choice(name=f"{character.name} - {character.player.unique_id}", value=str(character.player.unique_id))
+      async for character in online_characters[:max_num]
+    ]
+    offline_choices = []
+    if len(online_choices) < max_num:
+      offline_choices = [
+        app_commands.Choice(name=f"{character.name} - {character.player.unique_id} (Offline)", value=str(character.player.unique_id))
+        async for character in offline_characters[:(max_num - len(online_choices))]
+      ]
+
+    return [ *online_choices, *offline_choices ][:max_num]
 
   return player_autocomplete
 

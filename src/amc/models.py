@@ -1019,10 +1019,12 @@ class Ticket(models.Model):
     TROLLING = "trolling", "Trolling"
     OTHER = "other", "Other"
 
-  character = models.ForeignKey(Character, on_delete=models.CASCADE, related_name='tickets')
+  character = models.ForeignKey(Character, on_delete=models.SET_NULL, null=True, blank=True, related_name='tickets')
+  player = models.ForeignKey(Player, on_delete=models.SET_NULL, null=True, blank=True, related_name='tickets')
   infringement = models.CharField(max_length=200, choices=Infringement)
   notes = models.TextField(blank=True)
   created_at = models.DateTimeField(editable=False, auto_now_add=True)
+  issued_by = models.ForeignKey(Player, on_delete=models.SET_NULL, null=True, blank=True, related_name='tickets_issued')
 
   @classmethod
   def get_social_score_deduction(self, infringement):
