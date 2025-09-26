@@ -434,12 +434,17 @@ class CargoAdmin(admin.ModelAdmin):
 
 @admin.register(DeliveryJob)
 class DeliveryJobAdmin(admin.ModelAdmin):
-  list_display = ['id', 'name', 'quantity_requested', 'quantity_fulfilled', 'bonus_multiplier', 'completion_bonus', 'requested_at', 'template']
+  list_display = ['id', 'name', 'fulfilled', 'requested_at', 'template']
   ordering = ['-requested_at']
-  search_fields = ['cargo_key']
+  search_fields = ['name', 'cargo_key']
   autocomplete_fields = ['source_points', 'destination_points', 'cargos']
   save_as = True
   actions = ['create_job_from_template']
+  list_filter = ['template']
+
+  def get_queryset(self, request):
+    qs = super().get_queryset(request)
+    return qs.annotate_active().prefetch_related('source_points', 'destination_points', 'cargos') 
 
   @admin.action(description="Create job from template")
   def create_job_from_template(self, request, queryset):

@@ -5,6 +5,7 @@ from django.contrib import admin
 from django.contrib.gis.db import models
 from django.db.models import Q, F, Sum, Max, Window, Count
 from django.db.models.functions import RowNumber, Lead, Lag
+from django.db.models.lookups import GreaterThan, GreaterThanOrEqual
 from decimal import Decimal
 from django.core.validators import MinValueValidator, MaxValueValidator
 from django.contrib.postgres.fields import ArrayField
@@ -955,12 +956,31 @@ class Cargo(models.Model):
   def __str__(self):
     return self.label
 
+
 class DeliveryJobQuerySet(models.QuerySet):
   def filter_active(self):
+    now = timezone.now()
     return self.filter(
-      quantity_fulfilled__lt=F('quantity_requested'),
-      expired_at__gte=timezone.now()
+      fulfilled=False,
+      requested_at__lte=now,
+      expired_at__gte=now
     )
+
+  def annotate_active(self):
+    now = timezone.now()
+    return self.annotate(
+      active=~F('fulfilled') &
+      GreaterThan(now, F('requested_at')) &
+      GreaterThan(F('expired_at'), now)
+    )
+
+  def filter_by_delivery(self, delivery_source, delivery_destination, cargo_key):
+    return self.filter(
+      Q(source_points=delivery_source) | Q(source_points=None),
+      Q(destination_points=delivery_destination) | Q(destination_points=None),
+      Q(cargo_key=cargo_key) | Q(cargos__key=cargo_key),
+    )
+
 
 
 @final
@@ -979,6 +999,11 @@ class DeliveryJob(models.Model):
   discord_message_id = models.PositiveBigIntegerField(null=True, blank=True, help_text="For bot use only, leave blank")
   description = models.TextField(blank=True, null=True)
   template = models.BooleanField(default=False, help_text="If true this will be used to create future jobs")
+  fulfilled = models.GeneratedField(
+    expression=GreaterThanOrEqual(F('quantity_fulfilled'), F('quantity_requested')),
+    output_field=models.BooleanField(),
+    db_persist=True,
+  )
 
   objects = models.Manager.from_queryset(DeliveryJobQuerySet)()
 

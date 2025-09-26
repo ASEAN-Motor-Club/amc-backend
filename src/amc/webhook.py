@@ -277,13 +277,12 @@ async def process_event(event, player, http_client=None, http_client_mod=None, d
         cargo_subsidy = get_subsidy_for_cargo(group_list[0])[0] * quantity
         cargo_name = group_list[0].get_cargo_key_display()
 
-        jobs_qs = DeliveryJob.objects.filter(
-          Q(source_points=delivery_source) | Q(source_points=None),
-          Q(destination_points=delivery_destination) | Q(destination_points=None),
-          Q(cargo_key=cargo_key) | Q(cargos__key=cargo_key),
-          quantity_fulfilled__lt=F('quantity_requested'),
-          expired_at__gte=timestamp,
-        ).distinct()
+        jobs_qs = (DeliveryJob.objects
+          .filter_active()
+          .filter_by_delivery(delivery_source, delivery_destination, cargo_key)
+          .distinct()
+        )
+
         job = await jobs_qs.afirst()
         if job:
           requested_remaining = job.quantity_requested - job.quantity_fulfilled

@@ -155,10 +155,7 @@ class JobsCog(commands.Cog):
         'source_points', 'destination_points', 'cargos',
     ).prefetch_related(
       Prefetch('deliveries', queryset=Delivery.objects.select_related('character'))
-    ).filter(
-        quantity_fulfilled__lt=F('quantity_requested'),
-        expired_at__gte=timezone.now()
-    )
+    ).filter_active()
     
     active_job_ids = set()
 
@@ -242,19 +239,6 @@ class JobsCog(commands.Cog):
     await interaction.response.defer()
     await self.update_jobs()
     await interaction.followup.send('Synced', ephemeral=True)
-
-  @app_commands.command(name='post_delivery_job', description='Post a delivery job')
-  @app_commands.checks.has_any_role(settings.DISCORD_ADMIN_ROLE_ID)
-  @app_commands.autocomplete(cargo=cargo_autocomplete)
-  async def post_delivery_job(self, interaction, cargo: str, quantity: int, expire_hours: int, bonus_multiplier: float):
-    await DeliveryJob.objects.acreate(
-      cargo_key=cargo,
-      quantity_requested=quantity,
-      expired_at=timezone.now() + timedelta(hours=expire_hours),
-      bonus_multiplier=bonus_multiplier,
-    )
-    await interaction.response.send_message("Job Created", ephemeral=True)
-
 
   @app_commands.command(name='update_jobs_embeds', description='Manually update jobs embeds')
   @app_commands.checks.has_any_role(settings.DISCORD_ADMIN_ROLE_ID)
