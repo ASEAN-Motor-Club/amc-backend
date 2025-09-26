@@ -990,6 +990,7 @@ class DeliveryJob(models.Model):
   quantity_requested = models.PositiveIntegerField()
   quantity_fulfilled = models.PositiveIntegerField(default=0)
   requested_at = models.DateTimeField(auto_now_add=True)
+  fulfilled_at = models.DateTimeField(null=True, blank=True, editable=False)
   expired_at = models.DateTimeField()
   bonus_multiplier = models.FloatField()
   completion_bonus = models.PositiveIntegerField(default=0)

@@ -48,17 +48,24 @@ async def on_delivery_job_fulfilled(job, http_client):
     """
     Finds all players who contributed to a job and rewards them proportionally.
     """
+
+    if job.quantity_fulfilled >= job.quantity_requested:
+      job.fulfilled_at = timezone.now()
+      await job.asave(update_fields=['fulfilled_at'])
     # Define a completion bonus. Defaults to 50,000 if not set on the job model.
     completion_bonus = getattr(job, 'completion_bonus', 50_000)
     if completion_bonus == 0:
         return
 
-    # Base query for logs matching the job's cargo within its active time frame.
-    # ASSUMES the DeliveryJob model has a `created_at` field.
-    log_qs = Delivery.objects.filter(job=job)
+    log_qs = Delivery.objects.filter(job=job).order_by('timestamp')
 
     # Get the exact N logs that fulfilled the job by taking the most recent ones.
-    contributing_logs = list([log async for log in log_qs])
+    contributing_logs = []
+    acc = job.quantity_requested
+    async for log in log_qs:
+      log.quantity = min(log.quantity, acc)
+      acc = acc - log.quantity
+      contributing_logs.append(log)
 
     total_deliveries = job.quantity_fulfilled
     if not total_deliveries:
