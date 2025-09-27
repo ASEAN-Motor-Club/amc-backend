@@ -137,7 +137,7 @@ async def monitor_jobs(ctx):
 
       quantity_requested=min(
         job.quantity_requested,
-        source_amount,
+        # source_amount,
         destination_capacity - destination_amount
       )
       new_job = await DeliveryJob.objects.acreate(
