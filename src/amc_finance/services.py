@@ -138,9 +138,9 @@ def calc_loan_fee(amount, character):
   for i, interest_rate in enumerate(LOAN_INTEREST_RATES, start=1):
     prev_threshold = threshold
     threshold += max_loan / 2 ** i
-    amount_under_threshold = min(max(0, amount - prev_threshold), threshold - prev_threshold)
+    amount_under_threshold = min(max(0, int(amount) - prev_threshold), threshold - prev_threshold)
     if amount_under_threshold > 0:
-      fee += amount_under_threshold * interest_rate
+      fee += int(amount_under_threshold) * interest_rate
 
   if amount > threshold:
     fee += (amount - threshold) * (interest_rate)
