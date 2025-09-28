@@ -1033,11 +1033,13 @@ class Ticket(models.Model):
   def get_social_score_deduction(self, infringement):
     match infringement:
       case self.Infringement.CLUTERRING:
-        social_score_deduction = 3
+        social_score_deduction = 5
       case self.Infringement.GRIEFING:
-        social_score_deduction = 7
-      case self.Infringement.TROLLING:
         social_score_deduction = 10
+      case self.Infringement.TROLLING:
+        social_score_deduction = 7
+      case self.Infringement.MISDEMEANOR:
+        social_score_deduction = 2
       case self.Infringement.OTHER:
         social_score_deduction = 1
       case _:
