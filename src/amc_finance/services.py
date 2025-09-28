@@ -7,8 +7,27 @@ from asgiref.sync import sync_to_async
 from amc.models import CharacterLocation
 from amc_finance.models import Account, JournalEntry, LedgerEntry
 
-def get_character_max_loan(character):
-  return 10_000 + ((character.driver_level * 3_000) if character.driver_level else 0) + ((character.driver_level * 3_000) if character.truck_level else 0)
+
+def get_character_max_loan(character, player=None):
+    """
+    Calculates the maximum loan amount for a character, modified by their social score.
+    """
+    SOCIAL_SCORE_LOAN_MODIFIER = 0.05
+
+    base_loan = 10_000
+    if character.driver_level:
+        base_loan += character.driver_level * 3_000
+    if character.truck_level:
+        base_loan += character.truck_level * 3_000
+    
+    max_loan = base_loan
+
+    if player and hasattr(player, 'social_score'):
+        loan_modifier = player.social_score * SOCIAL_SCORE_LOAN_MODIFIER
+        max_loan *= (1 + loan_modifier)
+        max_loan = max(0, max_loan)
+
+    return int(max_loan)
 
 async def get_player_bank_balance(character):
   account, _ = await Account.objects.aget_or_create(

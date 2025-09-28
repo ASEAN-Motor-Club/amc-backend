@@ -1033,9 +1033,10 @@ class DeliveryJob(models.Model):
 @final
 class Ticket(models.Model):
   class Infringement(models.TextChoices):
-    CLUTERRING = "cluterring", "Cluterring"
     GRIEFING = "griefing", "Griefing"
     TROLLING = "trolling", "Trolling"
+    NUISANCE = "nuisance", "Public Nuisance"
+    CLUTERRING = "cluterring", "Cluterring"
     MISDEMEANOR = "misdemeanor", "Misdemeanor"
     OTHER = "other", "Other"
 
@@ -1049,12 +1050,14 @@ class Ticket(models.Model):
   @classmethod
   def get_social_score_deduction(self, infringement):
     match infringement:
+      case self.Infringement.GRIEFING:
+        social_score_deduction = 20
+      case self.Infringement.TROLLING:
+        social_score_deduction = 15
+      case self.Infringement.NUISANCE:
+        social_score_deduction = 8
       case self.Infringement.CLUTERRING:
         social_score_deduction = 5
-      case self.Infringement.GRIEFING:
-        social_score_deduction = 10
-      case self.Infringement.TROLLING:
-        social_score_deduction = 7
       case self.Infringement.MISDEMEANOR:
         social_score_deduction = 2
       case self.Infringement.OTHER:

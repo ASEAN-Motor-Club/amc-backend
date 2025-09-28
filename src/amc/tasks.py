@@ -626,7 +626,7 @@ async def process_log_event(event: LogEvent, http_client=None, http_client_mod=N
       elif command_match := re.match(r"/bank", message):
         balance = await get_player_bank_balance(character)
         loan_balance = await get_player_loan_balance(character)
-        max_loan = get_character_max_loan(character)
+        max_loan = get_character_max_loan(character, player)
         transactions = LedgerEntry.objects.filter(
           account__character=character,
           account__book=Account.Book.BANK,
@@ -725,7 +725,7 @@ Sorry, the verification code did not match, please try again:
             )
       elif command_match := re.match(r"/loan\s*(?P<amount>[\d,]+)\s*(?P<verification_code>\S*)", message):
         loan_balance = await get_player_loan_balance(character)
-        max_loan = get_character_max_loan(character)
+        max_loan = get_character_max_loan(character, player)
         amount = max(min(
           int(command_match.group('amount').replace(',', '')),
           max_loan - loan_balance

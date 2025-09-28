@@ -231,6 +231,8 @@ This notice was issued by Officer {interaction.user.display_name}. If you wish t
     if log_channel:
       await log_channel.send(embed=embed)
 
+    await announce(f"Citation issued to {character.name} for {new_ticket.get_infringement_display()}", self.bot.http_client_game, color="FF0000")
+
     # Confirm the action to the admin who ran the command
     if dm_success:
       await interaction.followup.send(f"Ticket `{new_ticket.id}` issued and sent to the player via popup.", embed=embed)
