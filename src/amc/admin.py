@@ -450,7 +450,13 @@ class CargoAdmin(admin.ModelAdmin):
 class DeliveryJobAdmin(admin.ModelAdmin):
   list_display = ['id', 'name', 'fulfilled', 'requested_at', 'template']
   ordering = ['-requested_at']
-  search_fields = ['name', 'cargo_key', 'cargos', 'source_points', 'destination_points']
+  search_fields = [
+    'name',
+    'cargo_key',
+    'cargos__label',
+    'source_points__name',
+    'destination_points__name',
+  ]
   autocomplete_fields = ['source_points', 'destination_points', 'cargos']
   save_as = True
   actions = ['create_job_from_template']
