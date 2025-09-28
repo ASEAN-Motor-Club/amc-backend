@@ -991,7 +991,7 @@ class DeliveryJob(models.Model):
   quantity_fulfilled = models.PositiveIntegerField(default=0)
   requested_at = models.DateTimeField(auto_now_add=True)
   fulfilled_at = models.DateTimeField(null=True, blank=True, editable=False)
-  expired_at = models.DateTimeField()
+  expired_at = models.DateTimeField(null=True, blank=True, help_text="Required for non-template jobs")
   bonus_multiplier = models.FloatField()
   completion_bonus = models.PositiveIntegerField(default=0)
   cargos = models.ManyToManyField('Cargo', related_name='jobs', blank=True, help_text="Use either Cargo Key or this field for multiple cargo types")
@@ -1001,6 +1001,7 @@ class DeliveryJob(models.Model):
   description = models.TextField(blank=True, null=True)
   template = models.BooleanField(default=False, help_text="If true this will be used to create future jobs")
   job_posting_probability = models.FloatField(default=1.0, help_text="The probability at which the job is posted. Defaults to 100% (1.0)")
+  template_job_period_hours = models.FloatField(default=5.0, help_text="(For job templates only) The number of hours to complete the job")
   fulfilled = models.GeneratedField(
     expression=GreaterThanOrEqual(F('quantity_fulfilled'), F('quantity_requested')),
     output_field=models.BooleanField(),

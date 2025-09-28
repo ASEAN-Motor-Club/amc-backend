@@ -144,7 +144,7 @@ async def monitor_jobs(ctx):
         name=job.name,
         cargo_key=job.cargo_key,
         quantity_requested=quantity_requested,
-        expired_at=timezone.now() + timedelta(hours=5),
+        expired_at=timezone.now() + timedelta(hours=job.template_job_period_hours),
         bonus_multiplier=job.bonus_multiplier,
         completion_bonus=job.completion_bonus * quantity_requested / job.quantity_requested,
         description=job.description,
