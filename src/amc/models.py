@@ -3,7 +3,7 @@ from datetime import timedelta
 from deepdiff import DeepHash
 from django.contrib import admin
 from django.contrib.gis.db import models
-from django.db.models import Q, F, Sum, Max, Window, Count
+from django.db.models import Q, F, Sum, Max, Window, Count, When, Case, OuterRef, Subquery
 from django.db.models.functions import RowNumber, Lead, Lag
 from django.db.models.lookups import GreaterThan, GreaterThanOrEqual
 from decimal import Decimal
@@ -814,6 +814,21 @@ class DeliveryPoint(models.Model):
   class Meta:
     ordering = ['name']
 
+class DeliveryPointStorageQuerySet(models.QuerySet):
+  def annotate_default_capacity(self):
+    return self.annotate(
+      capacity_normalized=Case(
+        When(capacity__isnull=False, then=F('capacity')),
+        default=Subquery(
+          DeliveryPointStorage.objects.filter(
+            delivery_point=OuterRef('delivery_point'),
+            cargo=OuterRef('cargo__type'),
+            kind=OuterRef('kind'),
+          ).values('capacity')
+        )
+      )
+    )
+
 class DeliveryPointStorage(models.Model):
   class Kind(models.TextChoices):
     INPUT = "IN", "Input"
@@ -824,7 +839,8 @@ class DeliveryPointStorage(models.Model):
   cargo_key = models.CharField(max_length=200, db_index=True, choices=CargoKey)
   cargo = models.ForeignKey('Cargo', models.CASCADE, related_name='storages', null=True)
   amount = models.PositiveIntegerField()
-  capacity = models.PositiveIntegerField(null=True)
+  capacity = models.PositiveIntegerField(null=True, blank=True)
+  objects = models.Manager.from_queryset(DeliveryPointStorageQuerySet)()
 
 @final
 class CharacterAFKReminder(models.Model):
@@ -952,6 +968,7 @@ class Thank(models.Model):
 class Cargo(models.Model):
   key = models.CharField(max_length=200, primary_key=True)
   label = models.CharField(max_length=200)
+  type = models.ForeignKey('self', models.SET_NULL, null=True, blank=True, related_name='subtypes')
 
   def __str__(self):
     return self.label
@@ -978,7 +995,7 @@ class DeliveryJobQuerySet(models.QuerySet):
     return self.filter(
       Q(source_points=delivery_source) | Q(source_points=None),
       Q(destination_points=delivery_destination) | Q(destination_points=None),
-      Q(cargo_key=cargo_key) | Q(cargos__key=cargo_key),
+      Q(cargo_key=cargo_key) | Q(cargos__key=cargo_key) | Q(cargos__type__key=cargo_key),
     )
 
 

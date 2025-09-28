@@ -382,7 +382,7 @@ class PlayerMailMessageAdmin(admin.ModelAdmin):
 class DeliveryPointStorageInlineAdmin(admin.TabularInline):
   model = DeliveryPointStorage
   show_change_link = False
-  readonly_fields = ['cargo_key', 'kind']
+  readonly_fields = ['cargo_key']
 
 @admin.register(DeliveryPoint)
 class DeliveryPointAdmin(admin.ModelAdmin):
@@ -441,10 +441,16 @@ class VehicleDealershipAdmin(admin.ModelAdmin):
         await vd.spawn(http_client_mod)
     async_to_sync(spawn_dealerships)()
 
+class CargoInlineAdmin(admin.TabularInline):
+  model = Cargo
+  readonly_fields = ['key', 'label']
+
 @admin.register(Cargo)
 class CargoAdmin(admin.ModelAdmin):
-  list_display = ['key', 'label']
+  list_display = ['key', 'label', 'type']
   search_fields = ['label']
+  list_select_related = ['type']
+  inlines = [CargoInlineAdmin]
 
 @admin.register(DeliveryJob)
 class DeliveryJobAdmin(admin.ModelAdmin):
@@ -465,7 +471,6 @@ class DeliveryJobAdmin(admin.ModelAdmin):
     (None, {
       "fields": [
         'name',
-        'cargo_key',
         'cargos',
         ('quantity_requested', 'quantity_fulfilled'),
         'source_points',

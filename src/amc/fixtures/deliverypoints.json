@@ -2420,7 +2420,7 @@
     "model": "amc.deliverypoint",
     "pk": "ef9685a841030fb6ee1893b94d44a47e",
     "fields": {
-      "name": "",
+      "name": "Jeoji Plastic",
       "type": "Factory_Plastic_C",
       "coord": "SRID=0;POINT Z (-287612.97 79881.39 -19828.72)"
     }
@@ -4210,7 +4210,7 @@
     "model": "amc.deliverypoint",
     "pk": "ba907edf4acc60998411e4a0ec49a810",
     "fields": {
-      "name": "",
+      "name": "Migeum Oak 3",
       "type": "LogSupply_Oak_C",
       "coord": "SRID=0;POINT Z (234156.23 524849.56 -3125.2637)"
     }
@@ -4241,7 +4241,7 @@
     "model": "amc.deliverypoint",
     "pk": "10b6a5334caa96ac216fd7852835bac1",
     "fields": {
-      "name": "Migeum Oak",
+      "name": "Migeum Oak 2",
       "type": "LogSupply_Oak_C",
       "coord": "SRID=0;POINT Z (241633.89 558189.25 1298.4081)"
     }
@@ -4272,7 +4272,7 @@
     "model": "amc.deliverypoint",
     "pk": "3e50a7c94bcf30d0980cab93e21fa82d",
     "fields": {
-      "name": "",
+      "name": "Migeum Oak 3",
       "type": "LogSupply_Oak_C",
       "coord": "SRID=0;POINT Z (289410.44 557567.25 2292.3342)"
     }
