@@ -100,6 +100,8 @@ async def monitor_jobs(ctx):
 
   job_templates = (DeliveryJob.objects
     .filter(template=True)
+    .exclude_has_conflicting_active_job()
+    .exclude_recently_posted()
     .prefetch_related(
       Prefetch('cargos', queryset=Cargo.objects.select_related('type').all()),
       'source_points',
@@ -111,18 +113,6 @@ async def monitor_jobs(ctx):
     cargos = job.cargos.all()
     source_points = job.source_points.all()
     destination_points = job.destination_points.all()
-
-    other_active_job_exists = await DeliveryJob.objects.filter_active().filter(
-      Q(cargo_key=job.cargo_key) | Q(cargos__in=cargos),
-      Q(source_points__in=source_points) | Q(destination_points__in=destination_points),
-    ).aexists()
-    job_recently_posted = await DeliveryJob.objects.filter(
-      name=job.name,
-      expired_at__gte=timezone.now() - timedelta(hours=6),
-      template=False,
-    ).aexists()
-    if other_active_job_exists or job_recently_posted:
-      continue
 
     non_type_cargos = [c for c in cargos if 'T::' not in c.key]
     destination_storages = DeliveryPointStorage.objects.filter(
@@ -147,17 +137,25 @@ async def monitor_jobs(ctx):
     source_amount = sum([amount for amount, capacity in source_storage_capacities])
     source_capacity = sum([capacity for amount, capacity in source_storage_capacities])
 
+    quantity_requested = min(
+      job.quantity_requested,
+      destination_capacity - destination_amount
+    )
+
     if destination_capacity == 0:
       is_destination_empty = True
     else:
       is_destination_empty = (destination_amount / destination_capacity) <= 0.15
 
     if source_capacity == 0:
-      is_source_full = True
+      is_source_enough = True
     else:
-      is_source_full = (source_amount / source_capacity) >= 0.85
+      is_source_enough = source_amount >= quantity_requested
 
-    if is_destination_empty and is_source_full:
+    print(f"{job.name}: {source_amount}/{source_capacity} {destination_amount}/{destination_capacity}")
+
+    if is_destination_empty and is_source_enough:
+      print(f"{job.name} is available")
       chance = job.job_posting_probability * max(10, num_players) / 200 / (5 + num_active_jobs)
       if not source_points and not destination_points:
         chance = chance / (24 * 3)
@@ -165,11 +163,6 @@ async def monitor_jobs(ctx):
       if random.random() > chance:
         continue
 
-      quantity_requested=min(
-        job.quantity_requested,
-        # source_amount,
-        destination_capacity - destination_amount
-      )
       new_job = await DeliveryJob.objects.acreate(
         name=job.name,
         cargo_key=job.cargo_key,

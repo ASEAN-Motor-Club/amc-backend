@@ -3,7 +3,9 @@ from datetime import timedelta
 from deepdiff import DeepHash
 from django.contrib import admin
 from django.contrib.gis.db import models
-from django.db.models import Q, F, Sum, Max, Window, Count, When, Case, OuterRef, Subquery
+from django.db.models import (
+  Q, F, Sum, Max, Window, Count, When, Case, OuterRef, Subquery, Exists
+)
 from django.db.models.functions import RowNumber, Lead, Lag
 from django.db.models.lookups import GreaterThan, GreaterThanOrEqual
 from decimal import Decimal
@@ -990,6 +992,23 @@ class DeliveryJobQuerySet(models.QuerySet):
       GreaterThan(now, F('requested_at')) &
       GreaterThan(F('expired_at'), now)
     )
+
+  def exclude_has_conflicting_active_job(self):
+    return self.exclude(Exists(
+      self.model.objects.filter_active().filter(
+        Q(cargo_key=OuterRef('cargo_key')) | Q(cargos__in=OuterRef('cargos')),
+        Q(source_points__in=OuterRef('source_points')) | Q(destination_points__in=OuterRef('destination_points')),
+      )
+    ))
+
+  def exclude_recently_posted(self, hours_since=6):
+    return self.exclude(Exists(
+      self.model.objects.filter(
+        name=OuterRef('name'),
+        expired_at__gte=timezone.now() - timedelta(hours=hours_since),
+        template=False,
+      )
+    ))
 
   def filter_by_delivery(self, delivery_source, delivery_destination, cargo_key):
     return self.filter(
