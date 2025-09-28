@@ -186,7 +186,7 @@ DISCORD_VERIFIED_ROLE_ID = int(os.environ.get('DISCORD_VERIFIED_ROLE_ID', '13767
 DISCORD_ADMIN_ROLE_ID = int(os.environ.get('DISCORD_ADMIN_ROLE_ID', '1395460420189421713'))
 
 HELP_TEXT = """\
->>>> www.aseanmotorclub.com <<<<
+<Event>www.aseanmotorclub.com</>
 Visit the website & Join the Discord!
 
 <Title>Available Commands</>
@@ -198,13 +198,13 @@ Visit the website & Join the Discord!
 
 <Highlight>/song_request [name of song and artist]</> - Queue up a song on our radio station. Visit <Focus>aseanmotorclub.com/radio</> to tune in.
 
-<Highlight>/subsidies</> - List all the subsidised (bonus paid) jobs on the server.
-
-<Highlight>/jobs</> - List all available temporary jobs.
+<Highlight>/jobs</> - List available server jobs and subsidies.
 
 <Highlight>/bank</> - See your Bank ASEAN account.
 
 <Highlight>/toggle_ubi</> - Toggle your Universal Basic Income
+
+<Highlight>/credits</> - List the awesome people who made this community possible
 
 <Title>Event Commands</>
 
@@ -227,6 +227,41 @@ Things to check out as a newcommer:
 1. Use the <Highlight>/help</> to see the available server commands.
 2. Use <Highlight>/subsidies</> to see jobs with <Bold>bonus pay</>.
 3. We host many regular events! Use <Highlight>/events</> to see what's going on.
+"""
+
+CREDITS_TEXT = """\
+<Title>Credits</>
+This awesome community and server is made possible by the hard work of our members, who have dedicated their time and effort for the benefit of all.
+
+<Bold>Donators & Server Boosters</>
+Patreon: <Whisper>Dunst</> <Whisper>YOUYU</> <Whisper>dvdurL</> <Whisper>Dr.P</> <Whisper>DrPlanecraft</> <Whisper>Meehoi</>
+Discord boosts: <Whisper>Diallo128</> (from 41Shots) <Whisper>Zackson</> <Whisper>Pliyego</> <Whisper>Glitch</> <Whisper>Dunst</> <Whisper>mordecool</>
+
+<Bold>Dev</>
+<EffectGood>Meehoi</> : website (aseanmotorclub.com), track editor, map, game data extraction, wiki
+<EffectGood>freeman</> : backend, server mod, devops, discord integration, radio station, bot
+<EffectGood>Dunst</> : Radio page
+<EffectGood>drpsyk</>o: UE4SS for Motor Town
+
+<Bold>Events</>
+DOT: <EffectGood>ARID</> <EffectGood>dvdurL</> <EffectGood>Yuuka</>
+<Secondary>Management of races, traffic</>
+<EffectGood>Yuuka</>: Event creation & planning
+<EffectGood>Dunst</> <EffectGood>MeadowVick</> <EffectGood>BattleSpec</> <EffectGood>Yuuka</> : race track testers
+<EffectGood>Shumi-Mi</>: event creation
+
+<Bold>Creative</>
+<EffectGood>PanzerHao</> (PanzerHao)  : ASEAN liveries, prize cars, carshows
+<EffectGood>KatAihaken</> : liveries showcases
+<EffectGood>Ayra</> : Illustrations (site cover pic)
+<EffectGood>Pato</> : AMC Decal Pack, liveries
+
+<Bold>Admins</>
+These admins help with the day to day running of the community 
+<EffectGood>youyu</> <EffectGood>MeadowVick</> <EffectGood>dvdurL</> <EffectGood>ANKHR</> <EffectGood>BattleSpec</> 
+
+<Bold>DJ</>
+<EffectGood>BattleSpec</> : Radio ASEAN's resident DJ
 """
 
 

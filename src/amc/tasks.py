@@ -266,12 +266,19 @@ async def process_log_event(event: LogEvent, http_client=None, http_client_mod=N
         else:
           popup_message += "<EffectGood>You have not been inside the forbidden zone for the last hour</>\n"
         asyncio.create_task(show_popup(http_client_mod, popup_message, player_id=str(player_id)))
-      if command_match := re.match(r"/help", message):
+      if command_match := re.match(r"/help$", message):
         asyncio.create_task(show_popup(http_client_mod, settings.HELP_TEXT, player_id=str(player_id)))
         await BotInvocationLog.objects.acreate(
           timestamp=timestamp,
           character=character, 
           prompt="help",
+        )
+      if command_match := re.match(r"/credits?$", message):
+        asyncio.create_task(show_popup(http_client_mod, settings.CREDITS_TEXT, player_id=str(player_id)))
+        await BotInvocationLog.objects.acreate(
+          timestamp=timestamp,
+          character=character, 
+          prompt="credits",
         )
       if command_match := re.match(r"/jobs", message):
         jobs = DeliveryJob.objects.filter(
