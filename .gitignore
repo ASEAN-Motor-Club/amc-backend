@@ -6,3 +6,5 @@
 **/*.sqlite3
 *.rdb
 result
+src/amc/commands.py
+src/static/
