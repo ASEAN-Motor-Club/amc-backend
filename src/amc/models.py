@@ -1018,6 +1018,7 @@ class Ticket(models.Model):
     CLUTERRING = "cluterring", "Cluterring"
     GRIEFING = "griefing", "Griefing"
     TROLLING = "trolling", "Trolling"
+    MISDEMEANOR = "misdemeanor", "Misdemeanor"
     OTHER = "other", "Other"
 
   character = models.ForeignKey(Character, on_delete=models.SET_NULL, null=True, blank=True, related_name='tickets')
