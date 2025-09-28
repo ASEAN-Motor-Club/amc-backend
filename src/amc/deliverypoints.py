@@ -128,7 +128,7 @@ async def monitor_jobs(ctx):
       is_source_full = (source_amount / source_capacity) >= 0.85
 
     if is_destination_empty and is_source_full:
-      chance = job.job_posting_probability * max(10, num_players) / 1800 
+      chance = job.job_posting_probability * max(10, num_players) / 200 / (5 + num_active_jobs)
       if not source_points and not destination_points:
         chance = chance / (24 * 3)
 
