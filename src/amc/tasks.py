@@ -202,7 +202,10 @@ async def forward_to_discord(client, channel_id, content):
 
   channel = client.get_channel(int(channel_id))
   if channel:
-    await channel.send(content, allowed_mentions=discord.AllowedMentions.none())
+    await channel.send(
+      discord.utils.escape_mentions(content),
+      allowed_mentions=discord.AllowedMentions.none()
+    )
 
 async def add_discord_verified_role(client, discord_user_id, player_id):
   guild = client.get_guild(settings.DISCORD_GUILD_ID)
