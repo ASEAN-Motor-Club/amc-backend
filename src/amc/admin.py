@@ -450,11 +450,40 @@ class CargoAdmin(admin.ModelAdmin):
 class DeliveryJobAdmin(admin.ModelAdmin):
   list_display = ['id', 'name', 'fulfilled', 'requested_at', 'template']
   ordering = ['-requested_at']
-  search_fields = ['name', 'cargo_key']
+  search_fields = ['name', 'cargo_key', 'cargos', 'source_points', 'destination_points']
   autocomplete_fields = ['source_points', 'destination_points', 'cargos']
   save_as = True
   actions = ['create_job_from_template']
   list_filter = ['template']
+  fieldsets = [
+    (None, {
+      "fields": [
+        'name',
+        'cargo_key',
+        'cargos',
+        ('quantity_requested', 'quantity_fulfilled'),
+        'source_points',
+        'destination_points',
+        'expired_at',
+      ]
+    }),
+    ("Payout", {
+      "fields": ['bonus_multiplier', 'completion_bonus']
+    }),
+    ("Description", {
+      "fields": ['description']
+    }),
+    ("Job Template", {
+      "fields": ['template', 'job_posting_probability', 'template_job_period_hours']
+    }),
+    ("Discord integration", {
+      "fields": ['discord_message_id']
+    }),
+  ]
+
+  @admin.display(boolean=True)
+  def fulfilled(self, job):
+    return job.fulfilled
 
   def get_queryset(self, request):
     qs = super().get_queryset(request)
