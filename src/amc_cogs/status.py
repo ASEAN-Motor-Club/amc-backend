@@ -84,7 +84,13 @@ class StatusCog(commands.Cog):
     embed.add_field(name="Live map", value="[Open on the website](https://www.aseanmotorclub.com/map)", inline=False)
     embed.add_field(name="Player Count", value=str(count), inline=False)
     if active_players:
-      embed.add_field(name="Players", value="\n".join([player_name for player_id, player_name in active_players]), inline=False)
+      embed.add_field(
+        name="Players",
+        value="\n".join([
+          discord.utils.escape_markdown(player_name)
+          for player_id, player_name in active_players
+        ]),
+      inline=False)
     else:
       embed.add_field(name="Players", value="No active players", inline=False)
 
