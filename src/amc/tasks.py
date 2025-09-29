@@ -290,13 +290,14 @@ async def process_log_event(event: LogEvent, http_client=None, http_client_mod=N
           if job.cargo_key:
             cargo_key = job.get_cargo_key_display()
           else:
-            cargo_key = '/'.join([
+            cargo_key = ', '.join([
               cargo.label
               for cargo in job.cargos.all()
             ])
           title = f"""\
-({job.quantity_fulfilled}/{job.quantity_requested}) {cargo_key} - Completion: <Money>{job.completion_bonus:,}</> - Cargo Bonus: <Money>{job.bonus_multiplier*100:.0f}%</>
+({job.quantity_fulfilled}/{job.quantity_requested}) {job.name} · <EffectGood>{job.bonus_multiplier*100:.0f}%</> · <Money>{job.completion_bonus:,}</> 
 <Secondary>Expiring in {get_time_difference_string(timestamp, job.expired_at)}</>"""
+          title += f'\n<Secondary>Cargo: {cargo_key}</>'
           source_points = list(job.source_points.all())
           if source_points:
             title += '\n<Secondary>'

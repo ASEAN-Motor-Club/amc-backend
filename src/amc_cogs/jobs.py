@@ -31,6 +31,16 @@ class JobsCog(commands.Cog):
 
     # --- Create the title and description (value part of the field) ---
     description = ''
+    if job.cargo_key:
+      cargo_key = job.get_cargo_key_display()
+    else:
+      cargo_key = ', '.join([
+        cargo.label
+        for cargo in job.cargos.all()
+      ])
+
+    description += f'\n**Cargo:**: {cargo_key}'
+
     if job.completion_bonus:
         description += '\n**Completion Reward**: '
         description += f"{job.completion_bonus:,}"
@@ -78,16 +88,9 @@ class JobsCog(commands.Cog):
       else:
         color = discord.Color.red()
 
-    if job.cargo_key:
-      cargo_key = job.get_cargo_key_display()
-    else:
-      cargo_key = '/'.join([
-        cargo.label
-        for cargo in job.cargos.all()
-      ])
     # --- Assemble the embed ---
     embed = discord.Embed(
-        title=f"Deliver: {cargo_key} ({job.quantity_fulfilled}/{job.quantity_requested})",
+        title=f"{job.name} ({job.quantity_fulfilled}/{job.quantity_requested})",
         description=description.strip(),
         color=color,
         timestamp=job.requested_at # Use job creation time for consistency

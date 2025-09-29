@@ -1049,6 +1049,54 @@ class DeliveryJob(models.Model):
   def __str__(self):
     return f"{self.quantity_requested}x {self.get_cargo_key_display()} ({self.id})"
 
+  async def is_postable(self):
+    job = self
+    cargos = job.cargos.all()
+    source_points = job.source_points.all()
+    destination_points = job.destination_points.all()
+
+    non_type_cargos = [c for c in cargos if 'T::' not in c.key]
+    destination_storages = DeliveryPointStorage.objects.filter(
+      Q(cargo=job.cargo_key) | Q(cargo__in=non_type_cargos) | Q(cargo__type__in=cargos),
+      delivery_point__in=destination_points,
+    ).annotate_default_capacity()
+    source_storages = DeliveryPointStorage.objects.filter(
+      Q(cargo=job.cargo_key) | Q(cargo__in=non_type_cargos) | Q(cargo__type__in=cargos),
+      delivery_point__in=source_points,
+    ).annotate_default_capacity()
+
+    destination_storage_capacities = [
+      (storage.amount, storage.capacity_normalized or 0)
+      async for storage in destination_storages
+    ]
+    source_storage_capacities = [
+      (storage.amount, storage.capacity_normalized or 0)
+      async for storage in source_storages
+    ]
+    destination_amount = sum([amount for amount, capacity in destination_storage_capacities])
+    destination_capacity = sum([capacity for amount, capacity in destination_storage_capacities])
+    source_amount = sum([amount for amount, capacity in source_storage_capacities])
+    source_capacity = sum([capacity for amount, capacity in source_storage_capacities])
+
+    quantity_requested = min(
+      job.quantity_requested,
+      destination_capacity - destination_amount
+    )
+
+    if destination_capacity == 0:
+      is_destination_empty = True
+    else:
+      is_destination_empty = (destination_amount / destination_capacity) <= 0.15
+
+    if source_capacity == 0:
+      is_source_enough = True
+    else:
+      is_source_enough = source_amount >= quantity_requested
+
+    print(f"{job.name}: {source_amount}/{source_capacity} {destination_amount}/{destination_capacity}")
+
+    return is_destination_empty and is_source_enough
+
 @final
 class Ticket(models.Model):
   class Infringement(models.TextChoices):

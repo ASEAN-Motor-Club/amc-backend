@@ -454,7 +454,7 @@ class CargoAdmin(admin.ModelAdmin):
 
 @admin.register(DeliveryJob)
 class DeliveryJobAdmin(admin.ModelAdmin):
-  list_display = ['id', 'name', 'fulfilled', 'requested_at', 'template']
+  list_display = ['id', 'name', 'finished', 'requested_at', 'template', 'postable']
   ordering = ['-requested_at']
   search_fields = [
     'name',
@@ -493,8 +493,12 @@ class DeliveryJobAdmin(admin.ModelAdmin):
   ]
 
   @admin.display(boolean=True)
-  def fulfilled(self, job):
+  def finished(self, job):
     return job.fulfilled
+
+  @admin.display(boolean=True)
+  def postable(self, job):
+    return async_to_sync(job.is_postable)()
 
   def get_queryset(self, request):
     qs = super().get_queryset(request)
