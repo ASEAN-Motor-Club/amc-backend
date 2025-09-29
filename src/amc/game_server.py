@@ -59,3 +59,9 @@ async def get_deliverypoints(session, password=''):
 async def get_world(session, password=''):
   return await game_api_request(session, "https://server.aseanmotorclub.com/api/world/")
 
+async def kick_player(unique_id, session):
+  params = {
+    'unique_id': unique_id,
+  }
+  return await game_api_request(session, "/player/kick", method='post', params=params)
+

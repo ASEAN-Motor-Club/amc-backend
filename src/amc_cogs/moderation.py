@@ -1,3 +1,4 @@
+import asyncio
 import discord
 from discord import app_commands
 from discord.ext import commands
@@ -7,7 +8,64 @@ from django.contrib.gis.geos import Point
 from .utils import create_player_autocomplete
 from amc.models import Player, CharacterLocation, TeleportPoint, Ticket, PlayerMailMessage
 from amc.mod_server import show_popup, teleport_player, get_player, transfer_money
-from amc.game_server import announce, is_player_online
+from amc.game_server import announce, is_player_online, kick_player
+
+class VoteKickView(discord.ui.View):
+  def __init__(self, player, player_id, bot, timeout=120):
+    super().__init__(timeout=timeout)
+    self.player = player
+    self.player_id = player_id
+
+    self.votes = {"yes": set(), "no": set()}
+    self.vote_finished = asyncio.Event()
+    self.bot = bot
+
+  async def disable_buttons(self):
+    for item in self.children:
+        item.disabled = True
+    await self.message.edit(view=self)
+
+  async def on_timeout(self):
+    await self.disable_buttons()
+    self.vote_finished.set()
+
+  async def finalize_vote(self):
+    yes_count = len(self.votes["yes"])
+    no_count = len(self.votes["no"])
+
+    result = f"✅ Yes: {yes_count}\n❌ No: {no_count}\n\n"
+    if yes_count > no_count and yes_count >= 3:
+      result += f"🔨 Player **{self.player}** will be kicked!"
+      await kick_player(self.bot.http_client_game, self.player_id)
+    else:
+      result += f"😇 Player **{self.player}** is safe."
+      await announce(f'{self.player} survived the votekick', self.bot.http_client_game)
+
+    await self.message.channel.send(result)
+
+  @discord.ui.button(label="Yes", style=discord.ButtonStyle.success)
+  async def yes_button(self, interaction: discord.Interaction, button: discord.ui.Button):
+    #member = interaction.guild.get_member(interaction.user.id)
+    #if member and member.joined_at:
+    #  now = datetime.utcnow()
+    #  membership_duration = now - member.joined_at
+    #  if membership_duration < timedelta(weeks=1):
+    #    await interaction.response.send_message("You are not eligible to vote", ephemeral=True)
+    #    return
+    #else:
+    #  await interaction.response.send_message("You are not eligible to vote", ephemeral=True)
+    #  return
+
+    self.votes["no"].discard(interaction.user.id)
+    self.votes["yes"].add(interaction.user.id)
+    await interaction.response.send_message("You voted ✅ Yes", ephemeral=True)
+
+  @discord.ui.button(label="No", style=discord.ButtonStyle.danger)
+  async def no_button(self, interaction: discord.Interaction, button: discord.ui.Button):
+    self.votes["yes"].discard(interaction.user.id)
+    self.votes["no"].add(interaction.user.id)
+    await interaction.response.send_message("You voted ❌ No", ephemeral=True)
+
 
 class ModerationCog(commands.Cog):
   def __init__(self, bot):
@@ -245,5 +303,63 @@ This notice was issued by Officer {interaction.user.display_name}. If you wish t
   async def transfer_money_cmd(self, ctx, player_id: str, amount: int, message: str):
     await transfer_money(self.bot.http_client_mod, amount, message, player_id)
     await ctx.response.send_message('Transfered')
+
+  @app_commands.command(name='admin_profile_player', description='Profile a player')
+  @app_commands.checks.has_any_role(1395460420189421713)
+  @app_commands.autocomplete(player_id=player_autocomplete)
+  async def profile_player(self, ctx, player_id: str):
+    player = await Player.objects.prefetch_related('characters').aget(
+      Q(unique_id=player_id) | Q(discord_user_id=player_id)
+    )
+    def character_report(char):
+      return f"{char.name}"
+
+    resp = f"""
+# Player Report
+#
+{'\n\n'.join([character_report(c) async for c in player.characters.all()])}
+"""
+    await ctx.response.send_message(resp)
+
+  @app_commands.command(name="votekick", description="Initiate a vote to kick a player")
+  @app_commands.describe(player_id="The name of the player to kick")
+  @app_commands.autocomplete(player_id=player_autocomplete)
+  async def votekick(self, interaction: discord.Interaction, player_id: str):
+    if interaction.channel.id != 1421915330279641098:
+      await interaction.response.send_message("You can only use this command in the <#1421915330279641098> channel", ephemeral=True)
+
+    #member = interaction.guild.get_member(interaction.user.id)
+    #if member and member.joined_at:
+    #  now = datetime.utcnow()
+    #  membership_duration = now - member.joined_at
+    #  if membership_duration < timedelta(weeks=1):
+    #    await interaction.response.send_message("You are not eligible to vote. Joined less than a week ago", ephemeral=True)
+    #    return
+    #else:
+    #  await interaction.response.send_message("You are not eligible to vote. Unknown member", ephemeral=True)
+    #  return
+
+    if not (await is_player_online(player_id, self.bot.http_client_game)):
+      await interaction.response.send_message(
+          "Player not found",
+          ephemeral=True
+      )
+      return
+
+    player = await Player.objects.prefetch_related('characters').aget(
+      Q(unique_id=player_id) | Q(discord_user_id=player_id)
+    )
+    character = await player.get_latest_character()
+
+    view = VoteKickView(character.name, player_id, self.bot)
+
+    await announce(f'{interaction.user.display_name} initiated a votekick against {character.name}, vote within 120 seconds', self.bot.http_client_game)
+    await interaction.response.send_message(
+      f"🗳️ Vote to kick **{character.name}**!\nClick a button to vote. Abuse of this feature will not be tolerated. Voting ends in 120 seconds.",
+      view=view
+    )
+    view.message = await interaction.original_response()
+    await view.vote_finished.wait()
+    await view.finalize_vote()
 
 
