@@ -1014,7 +1014,12 @@ class DeliveryJobQuerySet(models.QuerySet):
     return self.filter(
       Q(source_points=delivery_source) | Q(source_points=None),
       Q(destination_points=delivery_destination) | Q(destination_points=None),
-      Q(cargo_key=cargo_key) | Q(cargos__key=cargo_key) | Q(cargos__type__key=cargo_key),
+      Q(cargo_key=cargo_key) | Q(cargos__key=cargo_key) | Q(cargos__type__key=cargo_key) | Exists(
+        Cargo.objects.filter(
+          key=cargo_key,
+          type__in=OuterRef('cargos'),
+        )
+      ),
     )
 
 

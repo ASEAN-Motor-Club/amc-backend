@@ -466,7 +466,7 @@ class DeliveryJobAdmin(admin.ModelAdmin):
   autocomplete_fields = ['source_points', 'destination_points', 'cargos']
   save_as = True
   actions = ['create_job_from_template']
-  list_filter = ['template']
+  list_filter = ['template', 'cargos']
   fieldsets = [
     (None, {
       "fields": [
