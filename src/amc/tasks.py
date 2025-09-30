@@ -46,6 +46,7 @@ from amc.models import (
   TeleportPoint,
   VehicleDealership,
   Thank,
+  Delivery,
   DeliveryJob,
 )
 from amc.game_server import announce, get_players
@@ -732,6 +733,11 @@ Sorry, the verification code did not match, please try again:
               show_popup(http_client_mod, f"<Title>Withdrawal failed</>\n\n{e}", player_id=str(player_id))
             )
       elif command_match := re.match(r"/loan\s*(?P<amount>[\d,]+)\s*(?P<verification_code>\S*)", message):
+        if not (await Delivery.objects.filter(character=character).aexists()):
+          asyncio.create_task(
+            announce("Loans are only for server residents", http_client)
+          )
+
         loan_balance = await get_player_loan_balance(character)
         max_loan = get_character_max_loan(character, player)
         amount = max(min(

@@ -16,6 +16,7 @@ from amc.models import (
   ServerPassengerArrivedLog,
   ServerTowRequestArrivedLog,
 )
+from .utils import create_player_autocomplete
 from amc.utils import get_timespan
 from amc_finance.services import send_fund_to_player
 from amc_finance.models import Account, LedgerEntry
@@ -75,6 +76,10 @@ class EconomyCog(commands.Cog):
     self.bot = bot
     self.general_channel_id = general_channel_id
     self.decrypt_save_file_channel_id = settings.DISCORD_DECRYPT_SAVE_FILE_CHANNEL_ID
+    self.player_autocomplete = create_player_autocomplete(self.bot.http_client_game)
+
+  async def player_autocomplete(self, interaction, current):
+    return await self.player_autocomplete(interaction, current)
 
   @app_commands.command(name='calculate_gdp', description='Calculate the GDP figure')
   async def calculate_gdp(self, interaction, num_days: int = 1):
@@ -203,6 +208,7 @@ Tow Requests: {tow_requests_aggregates['total_payments']:,}
 
   @app_commands.command(name='government_funding', description='Send government funding to player')
   @app_commands.checks.has_permissions(administrator=True)
+  @app_commands.autocomplete(discord_user_id=player_autocomplete)
   async def government_funding(self, interaction, discord_user_id: str, character_name: str, amount: int, reason: str):
     await interaction.response.defer()
     try:

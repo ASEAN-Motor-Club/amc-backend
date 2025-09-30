@@ -65,3 +65,13 @@ async def kick_player(unique_id, session):
   }
   return await game_api_request(session, "/player/kick", method='post', params=params)
 
+async def ban_player(session, unique_id, hours=None, reason=None):
+  params = {
+    'unique_id': unique_id,
+  }
+  if hours:
+    params['hours'] = hours
+  if reason:
+    params['reason'] = reason
+  return await game_api_request(session, "/player/ban", method='post', params=params)
+
