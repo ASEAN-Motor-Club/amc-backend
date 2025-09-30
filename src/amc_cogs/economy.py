@@ -1,3 +1,4 @@
+from io import BytesIO
 from decimal import Decimal
 from django.utils import timezone
 from django.db import models
@@ -25,6 +26,7 @@ from amc_finance.services import (
   make_treasury_bank_deposit,
 )
 from amc.subsidies import DEFAULT_SAVING_RATE
+from amc.save_file import decrypt
 
 
 DONATION_EXPECTATION_BRACKETS = [
@@ -72,6 +74,7 @@ class EconomyCog(commands.Cog):
   def __init__(self, bot, general_channel_id=settings.DISCORD_GENERAL_CHANNEL_ID):
     self.bot = bot
     self.general_channel_id = general_channel_id
+    self.decrypt_save_file_channel_id = settings.DISCORD_DECRYPT_SAVE_FILE_CHANNEL_ID
 
   @app_commands.command(name='calculate_gdp', description='Calculate the GDP figure')
   async def calculate_gdp(self, interaction, num_days: int = 1):
@@ -466,4 +469,26 @@ The purpose of this transfer is to ensure sufficient liquidity within the server
     embed.set_footer(text=f"Requested by {interaction.user.display_name}")
     
     await interaction.followup.send(embed=embed)
+
+  @commands.Cog.listener()
+  async def on_message(self, message):
+    if message.channel.id == self.decrypt_save_file_channel_id:
+      channel = message.channel
+      attachments = message.attachments
+      if not attachments:
+        await channel.send_message('You need to attach a file')
+      if len(attachments) > 1:
+        await channel.send_message('1 save file at a time please')
+
+      attachment = attachments[0]
+      attachment_bytes = await attachment.read()
+      decrypted_bytes = decrypt(attachment_bytes)
+      
+      await channel.send(
+        file=discord.File(fp=BytesIO(decrypted_bytes), filename=f"{attachment.filename}.json"),
+        reference=message,
+      )
+
+
+
 
