@@ -4,7 +4,7 @@ from operator import attrgetter
 from datetime import datetime, timedelta
 from django.utils import timezone
 from django.contrib.gis.geos import Point
-from django.db.models import F, Q
+from django.db.models import F
 from amc.game_server import announce
 from amc.mod_server import get_webhook_events, show_popup
 from amc.subsidies import (
@@ -99,8 +99,8 @@ async def on_delivery_job_fulfilled(job, http_client):
             contributors_names.append(f"{character_obj.name} ({count})")
 
     contributors_str = ', '.join(contributors_names)
-    message = f"Job Completed! +${completion_bonus:,} has been deposited into your bank accounts. Thanks to: {contributors_str}"
-    asyncio.create_task(announce(message, http_client))
+    message = f"\"{job.name}\" Completed! +${completion_bonus:,} has been deposited into your bank accounts. Thanks to: {contributors_str}"
+    asyncio.create_task(announce(message, http_client, color="90EE90"))
 
 
 async def post_discord_delivery_embed(
@@ -194,9 +194,15 @@ async def process_events(events, http_client=None, http_client_mod=None, discord
     total_payment = 0
     total_subsidy = 0
 
+    used_shortcut = await CharacterLocation.objects.filter(
+      character__player=player,
+      location__coveredby=gwangjin_shortcut,
+      timestamp__gte=timezone.now() - timedelta(hours=1)
+    ).aexists()
+
     for event in es:
       try:
-        payment, subsidy = await process_event(event, player, http_client, http_client_mod, discord_client)
+        payment, subsidy = await process_event(event, player, used_shortcut, http_client, http_client_mod, discord_client)
         total_payment += payment
         total_subsidy += subsidy
       except Exception as e:
@@ -205,11 +211,6 @@ async def process_events(events, http_client=None, http_client_mod=None, discord
         )
         raise e
 
-    used_shortcut = await CharacterLocation.objects.filter(
-      character__player=player,
-      location__coveredby=gwangjin_shortcut,
-      timestamp__gte=timezone.now() - timedelta(hours=1)
-    ).aexists()
     if used_shortcut:
       total_payment -= total_subsidy
       total_subsidy = 0
@@ -249,7 +250,7 @@ async def process_cargo_log(cargo, player, character, timestamp):
     data=cargo,
   )
 
-async def process_event(event, player, http_client=None, http_client_mod=None, discord_client=None):
+async def process_event(event, player, used_shortcut=False, http_client=None, http_client_mod=None, discord_client=None):
   total_payment = 0
   subsidy = 0
   current_tz = timezone.get_current_timezone()
@@ -291,7 +292,7 @@ async def process_event(event, player, http_client=None, http_client_mod=None, d
         )
 
         job = await jobs_qs.afirst()
-        if job:
+        if job and not used_shortcut:
           requested_remaining = job.quantity_requested - job.quantity_fulfilled
           bonus = min(requested_remaining, quantity) * job.bonus_multiplier * payment
           cargo_subsidy = max(cargo_subsidy, bonus)
