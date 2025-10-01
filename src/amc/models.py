@@ -148,7 +148,7 @@ class CharacterManager(models.Manager):
 @final
 class Character(models.Model):
   player = models.ForeignKey(Player, on_delete=models.CASCADE, related_name='characters')
-  guid = models.CharField(max_length=32, db_index=True, editable=False, null=True)
+  guid = models.CharField(max_length=32, unique=True, editable=False, null=True)
   name = models.CharField(max_length=200)
   money = models.PositiveIntegerField(null=True)
   # levels
