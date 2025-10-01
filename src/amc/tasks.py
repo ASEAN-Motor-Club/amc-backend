@@ -816,6 +816,9 @@ The loan amount has been deposited into your wallet. You can view your loan deta
 
       elif command_match := re.match(r"^/thank\s+(?P<player_name>\S+)$", message):
         player_name = command_match.group('player_name')
+        if player_name == character.name:
+          return
+
         players = await get_players(http_client)
         thanked_player_id = None
         for p_id, p_name in players:
