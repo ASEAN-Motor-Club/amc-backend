@@ -155,6 +155,10 @@
                 "/api" = {
                   proxyPass = "http://127.0.0.1:${toString cfg.port}";
                   recommendedProxySettings = true;
+                  extraConfig = ''
+                    add_header 'Access-Control-Allow-Origin' '*' always;
+                    add_header 'Access-Control-Allow-Methods' 'POST, PUT, DELETE, GET, PATCH, OPTIONS' always;
+                  '';
                 };
                 "/admin" = {
                   proxyPass = "http://127.0.0.1:${toString cfg.port}";
