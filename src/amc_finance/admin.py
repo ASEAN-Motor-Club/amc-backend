@@ -1,6 +1,12 @@
 from django.contrib import admin
 from .models import Account, JournalEntry, LedgerEntry
 
+class AccountInlineAdmin(admin.TabularInline):
+  model = Account
+
+class LedgerEntryInlineAdmin(admin.TabularInline):
+  model = LedgerEntry
+
 @admin.register(Account)
 class AccountAdmin(admin.ModelAdmin):
   list_display = ['id', 'account_type', 'book', 'name', 'character', 'balance']
@@ -15,6 +21,7 @@ class JournalEntryAdmin(admin.ModelAdmin):
   list_select_related = ['creator']
   search_fields = ['creator__name', 'description']
   autocomplete_fields = ['creator']
+  inlines = [LedgerEntryInlineAdmin]
 
 @admin.register(LedgerEntry)
 class LedgerEntryAdmin(admin.ModelAdmin):

@@ -44,6 +44,7 @@ from .models import (
   Cargo,
 )
 from amc_finance.services import send_fund_to_player
+from amc_finance.admin import AccountInlineAdmin
 
 
 class CharacterInlineAdmin(admin.TabularInline):
@@ -122,12 +123,13 @@ class PlayerStatusLogInlineAdmin(admin.TabularInline):
     if log.logout_time is not None:
       return timezone.localtime(log.logout_time)
 
+
 @admin.register(Character)
 class CharacterAdmin(admin.ModelAdmin):
   list_display = ['name', 'player__unique_id', 'last_login', 'total_session_time']
   list_select_related = ['player']
   search_fields = ['player__unique_id', 'player__discord_user_id', 'name']
-  inlines = [PlayerStatusLogInlineAdmin]
+  inlines = [AccountInlineAdmin, PlayerStatusLogInlineAdmin]
   readonly_fields = ['guid', 'player', 'last_login', 'total_session_time']
 
   @admin.display(ordering="last_login", boolean=False)
