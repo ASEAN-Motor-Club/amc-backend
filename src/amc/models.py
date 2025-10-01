@@ -1001,7 +1001,7 @@ class DeliveryJobQuerySet(models.QuerySet):
       )
     ))
 
-  def exclude_recently_posted(self, hours_since=6):
+  def exclude_recently_posted(self, hours_since=12):
     return self.exclude(Exists(
       self.model.objects.filter(
         name=OuterRef('name'),
