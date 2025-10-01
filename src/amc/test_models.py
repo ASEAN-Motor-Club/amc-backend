@@ -4,7 +4,7 @@ from django.utils import timezone
 from django.contrib.gis.geos import Point
 from asgiref.sync import sync_to_async
 from amc.factories import CharacterFactory, ChampionshipFactory, ChampionshipPointFactory
-from amc.models import CharacterLocation
+from amc.models import CharacterLocation, Character
 
 class CharacterLocationTestCase(TestCase):
   async def test_activity(self):
@@ -75,4 +75,25 @@ class ChampionshipTestCase(TestCase):
     )
     prizes = await championship.calculate_team_prizes()
     print(prizes)
+
+class CharacterMangerTestCase(TestCase):
+  async def test_change_name(self):
+    character1, *_ = await Character.objects.aget_or_create_character_player('test', 123, character_guid=234)
+    character2, *_ = await Character.objects.aget_or_create_character_player('test2', 123, character_guid=234)
+    self.assertEqual(character1.id, character2.id)
+
+  async def test_add_guid(self):
+    character1, *_ = await Character.objects.aget_or_create_character_player('test', 123)
+    character2, *_ = await Character.objects.aget_or_create_character_player('test', 123, character_guid=234)
+    self.assertEqual(character1.id, character2.id)
+
+  async def test_missing_guid(self):
+    character1, *_ = await Character.objects.aget_or_create_character_player('test', 123, character_guid=234)
+    character2, *_ = await Character.objects.aget_or_create_character_player('test', 123)
+    self.assertEqual(character1.id, character2.id)
+
+  async def test_new_alt(self):
+    character1, *_ = await Character.objects.aget_or_create_character_player('test', 123, character_guid=234)
+    character2, *_ = await Character.objects.aget_or_create_character_player('test', 123, character_guid=345)
+    self.assertNotEqual(character1.id, character2.id)
 

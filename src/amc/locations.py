@@ -65,11 +65,16 @@ portals = [
   ),
 ]
 async def process_player(player_info, ctx):
-  character, player, *_  = await Character.objects.aget_or_create_character_player(
-    player_info['PlayerName'],
-    player_info['UniqueID'],
-    character_guid=player_info['CharacterGuid'],
-  )
+  try:
+    character = await Character.objects.select_related('player').aget(
+      name=player_info['PlayerName'],
+      player__unique_id=player_info['UniqueID'],
+      guid=player_info['CharacterGuid'],
+    )
+  except Character.DoesNotExist:
+    return
+  player = character.player
+
   location_data = {
     axis.lower(): value
     for axis, value in player_info['Location'].items()

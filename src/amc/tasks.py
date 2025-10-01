@@ -90,11 +90,24 @@ def get_welcome_message(last_login, player_name):
   return None, False
 
 
-async def aget_or_create_character(player_name, player_id):
-  player, _ = await Player.objects.aget_or_create(unique_id=player_id)
-  character, character_created = await (Character.objects
-    .with_last_login()
-    .aget_or_create(player=player, name=player_name)
+async def aget_or_create_character(player_name, player_id, http_client_mod=None):
+  character_guid = None
+  if http_client_mod:
+    while True:
+      try:
+        player_info = await get_player(http_client_mod, player_id)
+        character_guid = player_info.get('CharacterGuid')
+        if character_guid != Character.INVALID_GUID:
+          break
+        await asyncio.sleep(1)
+      except Exception as e:
+        print(f"Failed to fetch player info for {player_name} ({player_id}): {e}")
+        break
+
+  character, player, character_created, player_created = await Character.objects.aget_or_create_character_player(
+    player_name,
+    player_id,
+    character_guid
   )
   return (character, player, character_created)
 
@@ -239,7 +252,7 @@ async def process_log_event(event: LogEvent, http_client=None, http_client_mod=N
 
   match event:
     case PlayerChatMessageLogEvent(timestamp, player_name, player_id, message):
-      character, player, _ = await aget_or_create_character(player_name, player_id)
+      character, player, _ = await aget_or_create_character(player_name, player_id, http_client_mod)
       await PlayerChatLog.objects.acreate(
         timestamp=timestamp,
         character=character, 
@@ -875,7 +888,7 @@ The loan amount has been deposited into your wallet. You can view your loan deta
 
     case PlayerVehicleLogEvent(timestamp, player_name, player_id, vehicle_name, vehicle_id):
       action = PlayerVehicleLog.action_for_event(event)
-      character, _, _ = await aget_or_create_character(player_name, player_id)
+      character, _, _ = await aget_or_create_character(player_name, player_id, http_client_mod)
       await PlayerVehicleLog.objects.acreate(
         timestamp=timestamp,
         character=character, 
@@ -892,10 +905,13 @@ The loan amount has been deposited into your wallet. You can view your loan deta
         )
 
     case PlayerLoginLogEvent(timestamp, player_name, player_id):
-      character, player, character_created = await aget_or_create_character(player_name, player_id)
+      character, player, character_created = await aget_or_create_character(player_name, player_id, http_client_mod)
       if ctx.get('startup_time') and timestamp > ctx.get('startup_time'):
         try:
-          last_login = character.last_login if not character_created else None
+          last_login = None
+          if not character_created:
+            latest_location = await CharacterLocation.objects.filter(character__player=player).alatest('timestamp')
+            last_login = latest_location.timestamp
           welcome_message, is_new_player = get_welcome_message(last_login, player_name)
           if is_new_player:
             asyncio.create_task(
@@ -939,7 +955,7 @@ The loan amount has been deposited into your wallet. You can view your loan deta
       await process_logout_event(character.id, timestamp)
 
     case CompanyAddedLogEvent(timestamp, company_name, is_corp, owner_name, owner_id) | CompanyRemovedLogEvent(timestamp, company_name, is_corp, owner_name, owner_id):
-      character, _, _ = await aget_or_create_character(owner_name, owner_id)
+      character, _, _ = await aget_or_create_character(owner_name, owner_id, http_client_mod)
       company, company_created = await Company.objects.aget_or_create(
         name=company_name,
         owner=character,
@@ -954,12 +970,13 @@ The loan amount has been deposited into your wallet. You can view your loan deta
 
     case PlayerRestockedDepotLogEvent(timestamp, player_name, depot_name):
       # TODO: skip if no client
-      players = await get_players(http_client)
       player_id = None
-      for p_id, p_name in players:
-        if player_name == p_name:
-          player_id = p_id
-          break
+      if http_client:
+        players = await get_players(http_client)
+        for p_id, p_name in players:
+          if player_name == p_name:
+            player_id = p_id
+            break
       if player_id is None:
         raise Exception('Player not found')
 

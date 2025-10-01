@@ -1,3 +1,4 @@
+from unittest import skip
 from datetime import datetime, timedelta
 from django.test import SimpleTestCase, TestCase
 from django.utils import timezone
@@ -531,6 +532,7 @@ class ProcessLogEventTestCase(TestCase):
       ).aexists()
     )
 
+  @skip("Requires game api")
   async def test_player_restocked_depot(self):
     event = PlayerRestockedDepotLogEvent(
       timestamp=self.server_log.timestamp,

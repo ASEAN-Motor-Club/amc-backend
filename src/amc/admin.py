@@ -128,7 +128,7 @@ class CharacterAdmin(admin.ModelAdmin):
   list_select_related = ['player']
   search_fields = ['player__unique_id', 'player__discord_user_id', 'name']
   inlines = [PlayerStatusLogInlineAdmin]
-  readonly_fields = ['player', 'last_login', 'total_session_time']
+  readonly_fields = ['guid', 'player', 'last_login', 'total_session_time']
 
   @admin.display(ordering="last_login", boolean=False)
   def last_login(self, obj):

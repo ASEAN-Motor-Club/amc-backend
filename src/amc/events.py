@@ -132,6 +132,7 @@ async def process_event(event):
     character, *_ = await Character.objects.aget_or_create_character_player(
       player_info['PlayerName'],
       int(player_info['CharacterId']['UniqueNetId']),
+      character_guid=player_info.get('CharacterGuid'),
     )
     player_finished = await GameEventCharacter.objects.filter(
       character=character,

@@ -100,22 +100,50 @@ class CharacterQuerySet(models.QuerySet):
 
 class CharacterManager(models.Manager):
   async def aget_or_create_character_player(self, player_name, player_id, character_guid=None):
+    """
+    Gets or creates a character and its associated player.
+
+    This method handles multiple identification scenarios:
+    1. Adding a GUID to a character that was previously created without one.
+    2. Changing the name of a character identified by its GUID.
+    3. Finding a character by name, even if it now has a GUID.
+    4. Creating new characters with or without a GUID.
+    """
     player, player_created = await Player.objects.aget_or_create(unique_id=player_id)
-    character, character_created = await (self.get_queryset()
-      .with_last_login()
-      .aget_or_create(
+    assert character_guid != self.model.INVALID_GUID, "Invalid character id"
+
+    if character_guid:
+      # A GUID is provided. First, attempt to "claim" a character that matches the name
+      # but currently has no GUID. This handles the 'test_add_guid' case.
+      await self.get_queryset().filter(
         player=player,
         name=player_name,
-        defaults={
-          'guid': character_guid,
-        }
-      )
-    )
-    if character_guid is not None and character.guid is None:
-      character.guid = character_guid
-      await character.asave(update_fields=['guid'])
-    return (character, player, character_created, player_created)
+        guid__isnull=True
+      ).aupdate(guid=character_guid)
 
+      # Now, use aupdate_or_create with the GUID as the definitive lookup key.
+      # This will find the character (either pre-existing or the one just updated)
+      # and update its name if it has changed, or create a new character if none exists.
+      character, character_created = await (self.get_queryset()
+        .aupdate_or_create(
+          guid=character_guid,
+          player=player,
+          defaults={'name': player_name}
+        )
+      )
+    else:
+      # No GUID provided. We look up by name.
+      # aget_or_create will find a character by name regardless of its GUID status,
+      # or create a new one with a NULL GUID if none is found.
+      character, character_created = await (self.get_queryset()
+        .aget_or_create(
+          name=player_name,
+          player=player,
+          defaults={'guid': None}
+        )
+      )
+
+    return (character, player, character_created, player_created)
 
 @final
 class Character(models.Model):
@@ -145,6 +173,8 @@ class Character(models.Model):
   ubi_multiplier = models.FloatField(default=1.0)
 
   objects = CharacterManager.from_queryset(CharacterQuerySet)()
+
+  INVALID_GUID = "00000000000000000000000000000000"
 
   @override
   def __str__(self):
