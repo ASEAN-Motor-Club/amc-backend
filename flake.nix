@@ -173,7 +173,7 @@
             };
             containers.amc-backend = {
               autoStart = true;
-              restartIfChanged = true;
+              restartIfChanged = false;
               bindMounts."/etc/ssh/ssh_host_ed25519_key".isReadOnly = true;
               config = { config, pkgs, ... }: {
                 imports = [
@@ -323,13 +323,14 @@
                 ALLOWED_HOSTS = lib.strings.concatStringsSep " " cfg.allowedHosts;
                 DJANGO_SETTINGS_MODULE = "amc_backend.settings";
               } // cfg.environment;
-              restartIfChanged = true;
+              restartIfChanged = false;
               serviceConfig = {
                 Type = "simple";
                 User = cfg.user;
                 Group = cfg.group;
                 Restart = "on-failure";
                 RestartSec = "10";
+                TimeoutStopSec = "10";
                 EnvironmentFile = cfg.environmentFile;
               };
               script = ''
@@ -348,13 +349,14 @@
                 inherit (mkPostgisDeps pkgs) GEOS_LIBRARY_PATH GDAL_LIBRARY_PATH;
                 DJANGO_SETTINGS_MODULE = "amc_backend.settings";
               } // cfg.environment;
-              restartIfChanged = true;
+              restartIfChanged = false;
               serviceConfig = {
                 Type = "simple";
                 User = cfg.user;
                 Group = cfg.group;
                 Restart = "on-failure";
                 RestartSec = "10";
+                TimeoutStopSec = "10";
                 EnvironmentFile = cfg.environmentFile;
               };
               script = ''
@@ -375,6 +377,7 @@
                 Group = cfg.group;
                 Restart = "on-failure";
                 RestartSec = "10";
+                TimeoutStopSec = "10";
               };
               script = ''
                 ${self.packages.x86_64-linux.scripts}/bin/dummy_server
