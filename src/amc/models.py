@@ -1172,4 +1172,5 @@ class Ticket(models.Model):
 class ServerStatus(models.Model):
   timestamp = models.DateTimeField(auto_now_add=True)
   fps = models.PositiveIntegerField()
+  used_memory = models.PositiveIntegerField()
 
