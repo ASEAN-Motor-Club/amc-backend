@@ -514,7 +514,11 @@ async def process_log_event(event: LogEvent, http_client=None, http_client_mod=N
       elif command_match := re.match(r"/(teleport|tp)\s*(?P<name>.*)", message):
         name = command_match.group('name')
         player_info = await get_player(http_client_mod, str(player.unique_id))
-        if (not player_info or not player_info.get('bIsAdmin')) and not name:
+        teleport_point_exists = await TeleportPoint.objects.filter(
+          Q(character=character) | Q(character__isnull=True),
+          name__iexact=name,
+        ).aexists()
+        if (not player_info or not player_info.get('bIsAdmin')) and (not name or not teleport_point_exists):
           tp_points = TeleportPoint.objects.filter(character__isnull=True).order_by('name')
           tp_points_names = [tp.name async for tp in tp_points]
           asyncio.create_task(
@@ -910,8 +914,14 @@ The loan amount has been deposited into your wallet. You can view your loan deta
         try:
           last_login = None
           if not character_created:
-            latest_location = await CharacterLocation.objects.filter(character__player=player).alatest('timestamp')
-            last_login = latest_location.timestamp
+            try:
+              latest_status = await (PlayerStatusLog.objects
+                .filter(character__player=player, timespan__endswith__isnull=False)
+                .alatest('timespan__endswith')
+              )
+              last_login = latest_status.timespan.upper
+            except PlayerStatusLog.DoesNotExist:
+              pass
           welcome_message, is_new_player = get_welcome_message(last_login, player_name)
           if is_new_player:
             asyncio.create_task(
