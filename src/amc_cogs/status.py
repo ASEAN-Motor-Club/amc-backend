@@ -22,7 +22,8 @@ class StatusCog(commands.Cog):
     self.status_channel_id = status_channel_id
     self.general_channel_id = general_channel_id
     self.last_embed_message = None
-    self.data_points = []
+    self.fps_data = []
+    self.memory_data = []
 
   async def cog_load(self):
     self.update_status_embed.start()
@@ -31,18 +32,38 @@ class StatusCog(commands.Cog):
   async def cog_unload(self):
     self.update_status_embed.cancel()
 
-  def generate_graph_image(self) -> io.BytesIO:
-    """Generates the line graph image using Matplotlib."""
-    plt.style.use('dark_background') # Use a discord-friendly style
-    fig, ax = plt.subplots()
+  def generate_graph_image(self, fps_data: list, memory_data: list) -> io.BytesIO:
+    """Generates the dual-axis line graph image using Matplotlib."""
+    plt.style.use('dark_background')
+    fig, ax1 = plt.subplots()
 
-    ax.plot(self.data_points, color='cyan', marker='o')
-    ax.set_title("Live Server FPS", color='white')
-    ax.set_ylabel("fps", color='white')
-    ax.set_ylim(0, 65)
-    ax.set_xlabel("Time (Updates)", color='white')
-    ax.grid(True, linestyle='--', alpha=0.6)
-    
+    # Plot FPS data on the primary y-axis (left)
+    color_fps = 'cyan'
+    ax1.set_xlabel("Time (Updates)", color='white')
+    ax1.set_ylabel("FPS", color=color_fps)
+    ax1.plot(fps_data, color=color_fps, marker='o', label='FPS')
+    ax1.tick_params(axis='y', labelcolor=color_fps)
+    ax1.set_ylim(0, 65)
+    ax1.grid(True, linestyle='--', alpha=0.6)
+
+    # Create a second y-axis for memory data that shares the x-axis
+    ax2 = ax1.twinx()
+    color_mem = 'lime'
+    ax2.set_ylabel("Used Memory (GB)", color=color_mem)
+    ax2.plot(memory_data, color=color_mem, marker='x', label='Memory (GB)')
+    ax2.tick_params(axis='y', labelcolor=color_mem)
+    ax2.set_ylim(0, 32)
+    # You might want to set a ylim for memory as well, e.g., ax2.set_ylim(0, 8192)
+
+    # Add a title and adjust layout
+    fig.suptitle("Live Server Status", color='white')
+    fig.tight_layout(rect=[0, 0.03, 1, 0.95]) # Adjust rect to make space for title
+
+    # Create a combined legend for both lines
+    lines, labels = ax1.get_legend_handles_labels()
+    lines2, labels2 = ax2.get_legend_handles_labels()
+    ax1.legend(lines + lines2, labels + labels2, loc='upper left')
+
     # Save the plot to a BytesIO buffer
     buffer = io.BytesIO()
     plt.savefig(buffer, format='png', transparent=True)
@@ -68,13 +89,16 @@ class StatusCog(commands.Cog):
     count = len(active_players)
 
     statuses = ServerStatus.objects.all().order_by('-timestamp')[:60]
-    self.data_points = [
-      status.fps
-      async for status in statuses
-    ][::-1]
+    # Eagerly evaluate the async generator and reverse it
+    fetched_statuses = [status async for status in statuses][::-1]
 
-    graph_buffer = self.generate_graph_image()
-    graph_file = discord.File(graph_buffer, filename="fps.png")
+    # Populate both FPS and Memory lists from the fetched data
+    self.fps_data = [status.fps for status in fetched_statuses]
+    self.memory_data = [status.used_memory / 1073741824 for status in fetched_statuses]
+
+    # Pass both data lists to the updated graph function
+    graph_buffer = self.generate_graph_image(self.fps_data, self.memory_data)
+    graph_file = discord.File(graph_buffer, filename="status_graph.png")
 
     embed = discord.Embed(
       title="Active Players",
@@ -155,4 +179,3 @@ Thank you for your service!""")
       async for character in qs
     ])
     return top_restockers_str
-
