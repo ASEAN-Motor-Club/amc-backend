@@ -137,10 +137,12 @@ async def monitor_jobs(ctx):
     source_amount = sum([amount for amount, capacity in source_storage_capacities])
     source_capacity = sum([capacity for amount, capacity in source_storage_capacities])
 
-    quantity_requested = min(
-      job.quantity_requested,
-      destination_capacity - destination_amount
-    )
+    quantity_requested = job.quantity_requested
+    if destination_capacity > 0:
+      quantity_requested = min(
+        job.quantity_requested,
+        destination_capacity - destination_amount
+      )
 
     if destination_capacity == 0:
       is_destination_empty = True
@@ -156,7 +158,7 @@ async def monitor_jobs(ctx):
 
     if is_destination_empty and is_source_enough:
       print(f"{job.name} is available")
-      chance = job.job_posting_probability * max(10, num_players) / 200 / (5 + num_active_jobs)
+      chance = job.job_posting_probability * max(10, num_players) / 300 / (5 + num_active_jobs)
       if not source_points and not destination_points:
         chance = chance / (24 * 3)
 
