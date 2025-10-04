@@ -67,7 +67,6 @@ from amc.subsidies import DEFAULT_SAVING_RATE, SUBSIDIES_TEXT
 from amc_finance.services import (
   register_player_withdrawal,
   register_player_take_loan,
-  register_player_repay_loan,
   get_player_bank_balance,
   get_player_loan_balance,
   get_character_max_loan,
@@ -819,17 +818,20 @@ The loan amount has been deposited into your wallet. You can view your loan deta
               show_popup(http_client_mod, f"<Title>Loan failed</>\n\n{e}", player_id=str(player_id))
             )
       elif command_match := re.match(r"/repay_loan (?P<amount>\d+)", message):
-        amount = int(command_match.group('amount'))
-        loan_balance = await get_player_loan_balance(character)
-        amount = max(min(amount, loan_balance), 0)
-        if amount > 0:
-          try:
-            await register_player_repay_loan(amount, character)
-            await transfer_money(http_client_mod, int(-amount), 'ASEAN Bank Loan Repayment', player_id)
-          except Exception as e:
-            asyncio.create_task(
-              show_popup(http_client_mod, f"<Title>Loan failed</>\n\n{e}", player_id=str(player_id))
-            )
+        asyncio.create_task(
+          show_popup(http_client_mod, "<Title>Command Removed</>\n\nYou will automatically repay your loan as you earn money on the server", player_id=str(player_id))
+        )
+        #amount = int(command_match.group('amount'))
+        #loan_balance = await get_player_loan_balance(character)
+        #amount = max(min(amount, loan_balance), 0)
+        #if amount > 0:
+        #  try:
+        #    await register_player_repay_loan(amount, character)
+        #    await transfer_money(http_client_mod, int(-amount), 'ASEAN Bank Loan Repayment', player_id)
+        #  except Exception as e:
+        #    asyncio.create_task(
+        #      show_popup(http_client_mod, f"<Title>Loan failed</>\n\n{e}", player_id=str(player_id))
+        #    )
 
       elif command_match := re.match(r"^/thank\s+(?P<player_name>\S+)$", message):
         player_name = command_match.group('player_name')
