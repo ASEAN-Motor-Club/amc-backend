@@ -304,7 +304,7 @@ This notice was issued by Officer {interaction.user.display_name}. If you wish t
     await transfer_money(self.bot.http_client_mod, amount, message, player_id)
     await ctx.response.send_message('Transfered')
 
-  @app_commands.command(name='ban_player', description='Ban a player')
+  @app_commands.command(name='ban_player', description='Ban a player from the server')
   @app_commands.checks.has_any_role(1395460420189421713)
   @app_commands.autocomplete(player_id=player_autocomplete)
   async def ban_player_cmd(self, ctx, player_id: str, hours: int=None, reason: str=''):
@@ -316,6 +316,23 @@ This notice was issued by Officer {interaction.user.display_name}. If you wish t
     ])
     await ban_player(self.bot.http_client_game, player_id, hours, reason)
     await ctx.response.send_message(f'Banned {player_id} (Aliases: {character_names}) for {hours} hours, due to: {reason}')
+
+  @app_commands.command(name='kick_player', description='Kick a player from the server')
+  @app_commands.checks.has_any_role(1395460420189421713)
+  @app_commands.autocomplete(player_id=player_autocomplete)
+  async def kick_player_cmd(self, interaction, player_id: str):
+    player = await Player.objects.prefetch_related('characters').aget(
+      Q(unique_id=player_id) | Q(discord_user_id=player_id)
+    )
+    character_names = ', '.join([
+      c.name for c in player.characters.all()
+    ])
+    if not (await is_player_online(player_id, self.bot.http_client_game)):
+      await interaction.response.send_message("Player not online", ephemeral=True)
+      return
+
+    await kick_player(self.bot.http_client_game, player_id)
+    await interaction.response.send_message(f'Kicked {player_id} (Aliases: {character_names})')
 
   @app_commands.command(name='admin_profile_player', description='Profile a player')
   @app_commands.checks.has_any_role(1395460420189421713)
