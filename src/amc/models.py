@@ -1071,6 +1071,7 @@ class DeliveryJob(models.Model):
   discord_message_id = models.PositiveBigIntegerField(null=True, blank=True, help_text="For bot use only, leave blank")
   description = models.TextField(blank=True, null=True)
   template = models.BooleanField(default=False, help_text="If true this will be used to create future jobs")
+  base_template = models.ForeignKey('self', models.SET_NULL, null=True, blank=True, help_text="The template this job was created from")
   job_posting_probability = models.FloatField(default=1.0, help_text="The probability at which the job is posted. Defaults to 100% (1.0)")
   template_job_period_hours = models.FloatField(default=5.0, help_text="(For job templates only) The number of hours to complete the job")
   fulfilled = models.GeneratedField(
@@ -1082,7 +1083,7 @@ class DeliveryJob(models.Model):
   objects = models.Manager.from_queryset(DeliveryJobQuerySet)()
 
   def __str__(self):
-    return f"{self.quantity_requested}x {self.get_cargo_key_display()} ({self.id})"
+    return f"{self.name} ({self.id})"
 
   async def is_postable(self):
     job = self

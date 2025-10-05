@@ -173,6 +173,7 @@ async def monitor_jobs(ctx):
         bonus_multiplier=job.bonus_multiplier,
         completion_bonus=job.completion_bonus * quantity_requested / job.quantity_requested,
         description=job.description,
+        base_template=job,
       )
       await new_job.cargos.aadd(*cargos)
       await new_job.source_points.aadd(*source_points)

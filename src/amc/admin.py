@@ -466,6 +466,7 @@ class DeliveryJobAdmin(admin.ModelAdmin):
     'destination_points__name',
   ]
   autocomplete_fields = ['source_points', 'destination_points', 'cargos']
+  readonly_fields = ['discord_message_id', 'base_template']
   save_as = True
   actions = ['create_job_from_template']
   list_filter = ['template', 'cargos']
@@ -487,7 +488,7 @@ class DeliveryJobAdmin(admin.ModelAdmin):
       "fields": ['description']
     }),
     ("Job Template", {
-      "fields": ['template', 'job_posting_probability', 'template_job_period_hours']
+      "fields": ['template', 'job_posting_probability', 'template_job_period_hours', 'base_template']
     }),
     ("Discord integration", {
       "fields": ['discord_message_id']
