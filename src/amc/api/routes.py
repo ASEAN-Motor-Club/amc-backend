@@ -40,7 +40,7 @@ from amc.models import (
 )
 from amc.utils import lowercase_first_char_in_keys
 
-POSITION_UPDATE_RATE = 10
+POSITION_UPDATE_RATE = 1
 POSITION_UPDATE_SLEEP = 1.0 / POSITION_UPDATE_RATE
 
 players_router = Router()
