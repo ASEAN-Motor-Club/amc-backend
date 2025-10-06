@@ -52,6 +52,7 @@ class Player(models.Model):
   discord_user_id = models.PositiveBigIntegerField(unique=True, null=True, blank=True)
   discord_name = models.CharField(max_length=200, null=True, blank=True)
   user = models.OneToOneField(User, models.SET_NULL, related_name='player', null=True, blank=True)
+  suspect = models.BooleanField(default=False)
   adminstrator = models.BooleanField(default=False)
   social_score = models.IntegerField(default=0)
   notes = models.TextField(blank=True)

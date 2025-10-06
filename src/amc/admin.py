@@ -1,8 +1,10 @@
 import aiohttp
+import json
 from datetime import timedelta
 from asgiref.sync import async_to_sync
 from django.contrib import admin
 from django.utils import timezone
+from django.utils.safestring import mark_safe
 from django.conf import settings
 from django.db.models import F, Count, Window
 from django.db.models.functions import RowNumber
@@ -42,6 +44,7 @@ from .models import (
   VehicleDealership,
   DeliveryJob,
   Cargo,
+  ServerStatus,
 )
 from amc_finance.services import send_fund_to_player
 from amc_finance.admin import AccountInlineAdmin
@@ -371,9 +374,20 @@ class RaceSetupAdmin(admin.ModelAdmin):
 
 @admin.register(CharacterLocation)
 class CharacterLocationAdmin(admin.ModelAdmin):
-  list_display = ['timestamp', 'character', 'location']
-  readonly_fields = ['character']
+  list_display = ['timestamp', 'character', 'location', 'map_link']
+  list_select_related = ['character', 'character__player']
+  readonly_fields = ['character', 'map_link']
   search_fields = ['character__name', 'character__player__unique_id']
+
+  @admin.display()
+  def map_link(self, character_location):
+    location = {
+      'x': character_location.location.x,
+      'y': character_location.location.y,
+      'label': character_location.character.name
+    }
+    pins_str = json.dumps([location])
+    return mark_safe(f"<a href='https://www.aseanmotorclub.com/map?pins={pins_str}&focus_index=0' target='_blank'>Open on Map</a>")
 
 @admin.register(PlayerMailMessage)
 class PlayerMailMessageAdmin(admin.ModelAdmin):
@@ -544,4 +558,8 @@ class DeliveryAdmin(admin.ModelAdmin):
   ordering = ['-timestamp']
   search_fields = ['cargo_key', 'character__name', 'sender_point__name', 'destination_point__name']
   autocomplete_fields = ['sender_point', 'destination_point', 'character', 'job']
+
+@admin.register(ServerStatus)
+class ServerStatusAdmin(admin.ModelAdmin):
+  list_display = ['timestamp', 'fps', 'used_memory']
 

@@ -7,6 +7,7 @@ from datetime import timedelta
 from django.utils import timezone
 from django.db import connection
 from django.db.models import Exists, OuterRef, Q, F
+from django.contrib.gis.geos import Point
 from django.conf import settings
 from django.core.signing import Signer
 from asgiref.sync import sync_to_async
@@ -48,6 +49,7 @@ from amc.models import (
   Thank,
   Delivery,
   DeliveryJob,
+  DeliveryPoint,
 )
 from amc.game_server import announce, get_players
 from amc.mod_server import (
@@ -91,6 +93,7 @@ def get_welcome_message(last_login, player_name):
 
 async def aget_or_create_character(player_name, player_id, http_client_mod=None):
   character_guid = None
+  player_info = None
   if http_client_mod:
     while True:
       try:
@@ -108,7 +111,7 @@ async def aget_or_create_character(player_name, player_id, http_client_mod=None)
     player_id,
     character_guid
   )
-  return (character, player, character_created)
+  return (character, player, character_created, player_info)
 
 
 async def process_login_event(character_id, timestamp):
@@ -251,7 +254,7 @@ async def process_log_event(event: LogEvent, http_client=None, http_client_mod=N
 
   match event:
     case PlayerChatMessageLogEvent(timestamp, player_name, player_id, message):
-      character, player, _ = await aget_or_create_character(player_name, player_id, http_client_mod)
+      character, player, *_ = await aget_or_create_character(player_name, player_id, http_client_mod)
       await PlayerChatLog.objects.acreate(
         timestamp=timestamp,
         character=character, 
@@ -753,6 +756,7 @@ Sorry, the verification code did not match, please try again:
           asyncio.create_task(
             announce("Loans are only for server residents", http_client)
           )
+          return
 
         loan_balance = await get_player_loan_balance(character)
         max_loan = get_character_max_loan(character, player)
@@ -894,7 +898,7 @@ The loan amount has been deposited into your wallet. You can view your loan deta
 
     case PlayerVehicleLogEvent(timestamp, player_name, player_id, vehicle_name, vehicle_id):
       action = PlayerVehicleLog.action_for_event(event)
-      character, _, _ = await aget_or_create_character(player_name, player_id, http_client_mod)
+      character, *_ = await aget_or_create_character(player_name, player_id, http_client_mod)
       await PlayerVehicleLog.objects.acreate(
         timestamp=timestamp,
         character=character, 
@@ -911,7 +915,7 @@ The loan amount has been deposited into your wallet. You can view your loan deta
         )
 
     case PlayerLoginLogEvent(timestamp, player_name, player_id):
-      character, player, character_created = await aget_or_create_character(player_name, player_id, http_client_mod)
+      character, player, character_created, player_info = await aget_or_create_character(player_name, player_id, http_client_mod)
       if ctx.get('startup_time') and timestamp > ctx.get('startup_time'):
         try:
           last_login = None
@@ -933,6 +937,34 @@ The loan amount has been deposited into your wallet. You can view your loan deta
             asyncio.create_task(
               announce(welcome_message, http_client, delay=5)
             )
+          if (is_new_player or player.suspect) and player_info.get('Location') is not None:
+            location = Point(**{
+              axis.lower(): value for axis, value in player_info.get('Location').items()
+            })
+            dps = DeliveryPoint.objects.filter(coord__isnull=False).only('coord')
+            spawned_near_delivery_point = False
+            async for dp in dps:
+              if location.distance(dp.coord) < 200:
+                spawned_near_delivery_point = True
+                break
+
+            if spawned_near_delivery_point:
+              impound_location = {
+                'X': -289988 + random.randint(-60_00, 60_00),
+                'Y': 201790 + random.randint(-60_00, 60_00),
+                'Z': -21950,
+              }
+              await teleport_player(
+                http_client_mod,
+                player.unique_id,
+                impound_location,
+                no_vehicles=False
+              )
+              asyncio.create_task(
+                announce(f"{player_name}, you have been teleported since you spawned too close to a delivery point as a new player on the server.", http_client, color="FF0000")
+              )
+              player.suspect = True
+              await player.asave(update_fields=['suspect'])
         except Exception as e:
           asyncio.create_task(
             announce(f'Failed to greet player: {e}', http_client)
@@ -946,7 +978,7 @@ The loan amount has been deposited into your wallet. You can view your loan deta
         )
 
     case PlayerLogoutLogEvent(timestamp, player_name, player_id):
-      character, _, _ = await aget_or_create_character(player_name, player_id)
+      character, *_ = await aget_or_create_character(player_name, player_id)
       await process_logout_event(character.id, timestamp)
       if discord_client and ctx.get('startup_time') and timestamp > ctx.get('startup_time'):
         forward_message = (
@@ -967,7 +999,7 @@ The loan amount has been deposited into your wallet. You can view your loan deta
       await process_logout_event(character.id, timestamp)
 
     case CompanyAddedLogEvent(timestamp, company_name, is_corp, owner_name, owner_id) | CompanyRemovedLogEvent(timestamp, company_name, is_corp, owner_name, owner_id):
-      character, _, _ = await aget_or_create_character(owner_name, owner_id, http_client_mod)
+      character, *_ = await aget_or_create_character(owner_name, owner_id, http_client_mod)
       company, company_created = await Company.objects.aget_or_create(
         name=company_name,
         owner=character,
