@@ -1,8 +1,9 @@
+import math
 import asyncio
 import random
 from datetime import timedelta
 from django.utils import timezone
-from django.db.models import Q, Prefetch, F, Case, When, Subquery, OuterRef
+from django.db.models import Q, Prefetch
 from amc.models import Cargo, DeliveryPoint, DeliveryPointStorage, DeliveryJob
 from amc.game_server import get_deliverypoints, get_players, announce
 from amc.enums import CargoKey
@@ -94,8 +95,9 @@ async def monitor_jobs(ctx):
   num_active_jobs = await DeliveryJob.objects.filter_active().acount()
   players = await get_players(ctx['http_client'])
   num_players = len(players)
+  max_active_jobs = max(4, 2 + math.ceil(num_players / 6))
 
-  if num_active_jobs >= 5:
+  if num_active_jobs >= max_active_jobs:
     return
 
   job_templates = (DeliveryJob.objects
@@ -147,18 +149,19 @@ async def monitor_jobs(ctx):
     if destination_capacity == 0:
       is_destination_empty = True
     else:
-      is_destination_empty = (destination_amount / destination_capacity) <= 0.15
+      is_destination_empty = (
+        ((destination_amount / destination_capacity) <= 0.15)
+        or
+        (destination_capacity - destination_amount >= job.quantity_requested)
+      )
 
     if source_capacity == 0:
       is_source_enough = True
     else:
       is_source_enough = source_amount >= quantity_requested
 
-    print(f"{job.name}: {source_amount}/{source_capacity} {destination_amount}/{destination_capacity}")
-
     if is_destination_empty and is_source_enough:
-      print(f"{job.name} is available")
-      chance = job.job_posting_probability * max(10, num_players) / 300 / (5 + num_active_jobs)
+      chance = job.job_posting_probability * max(10, num_players) / 300 / (5 + num_active_jobs * 2)
       if not source_points and not destination_points:
         chance = chance / (24 * 3)
 
@@ -179,100 +182,6 @@ async def monitor_jobs(ctx):
       await new_job.source_points.aadd(*source_points)
       await new_job.destination_points.aadd(*destination_points)
       asyncio.create_task(
-        announce(f"New job posting! {job.name}", ctx['http_client'])
-      )
-
-async def monitor_jobs_from_deliveries(ctx):
-  num_active_jobs = await DeliveryJob.objects.filter_active().acount()
-  players = await get_players(ctx['http_client'])
-  num_players = len(players)
-
-  if num_active_jobs >= 5:
-    return
-
-  dps = DeliveryPoint.objects.all()
-  deliveries = [
-    delivery
-    async for dp in dps
-    for delivery in dp.data['deliveries']
-  ]
-
-  async for d in deliveries:
-    try:
-      cargo = await Cargo.objects.aget(key=d['cargoKey'])
-      source_point = await DeliveryPoint.objects.aget(guid=d['sender_point'].lower())
-      destination_point = await DeliveryPoint.objects.aget(guid=d['receiver_point'].lower())
-    except Exception:
-      continue
-
-    other_active_job_exists = await DeliveryJob.objects.filter_active().filter(
-      Q(cargo_key=cargo.key) | Q(cargos=cargo),
-      Q(source_pointsin=source_point) | Q(destination_pointsin=destination_point),
-    ).aexists()
-    if other_active_job_exists:
-      continue
-
-    destination_storages = DeliveryPointStorage.objects.filter(
-      Q(cargo=cargo),
-      delivery_point=destination_point,
-    )
-    source_storages = DeliveryPointStorage.objects.filter(
-      Q(cargo=cargo),
-      delivery_point=source_point,
-    )
-
-    if any([storage.capacity is None async for storage in destination_storages]):
-      continue
-    if any([storage.capacity is None async for storage in source_storages]):
-      continue
-
-    destination_storage_capacities = [
-      (storage.amount, storage.capacity)
-      async for storage in destination_storages
-    ]
-    source_storage_capacities = [
-      (storage.amount, storage.capacity)
-      async for storage in source_storages
-    ]
-    destination_amount = sum([amount for amount, capacity in destination_storage_capacities])
-    destination_capacity = sum([capacity for amount, capacity in destination_storage_capacities])
-    source_amount = sum([amount for amount, capacity in source_storage_capacities])
-    source_capacity = sum([capacity for amount, capacity in source_storage_capacities])
-
-    if destination_capacity == 0:
-      is_destination_empty = True
-    else:
-      is_destination_empty = (destination_amount / destination_capacity) <= 0.15
-
-    if source_capacity == 0:
-      is_source_full = True
-    else:
-      is_source_full = (source_amount / source_capacity) >= 0.85
-
-    if is_destination_empty and is_source_full:
-      chance = max(10, num_players) / 200 / (5 + num_active_jobs)
-
-      if random.random() > chance:
-        continue
-
-      quantity_requested=min(
-        job.quantity_requested,
-        # source_amount,
-        destination_capacity - destination_amount
-      )
-      new_job = await DeliveryJob.objects.acreate(
-        name=job.name,
-        cargo_key=job.cargo_key,
-        quantity_requested=quantity_requested,
-        expired_at=timezone.now() + timedelta(hours=job.template_job_period_hours),
-        bonus_multiplier=job.bonus_multiplier,
-        completion_bonus=job.completion_bonus * quantity_requested / job.quantity_requested,
-        description=job.description,
-      )
-      await new_job.cargos.aadd(*cargos)
-      await new_job.source_points.aadd(*source_points)
-      await new_job.destination_points.aadd(*destination_points)
-      asyncio.create_task(
-        announce(f"New job posting! {job.name}", ctx['http_client'])
+        announce(f"New job posting! {job.name} - {job.completion_bonus:,} bonus on completion.", ctx['http_client'])
       )
 
