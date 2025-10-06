@@ -27,6 +27,7 @@ def get_character_max_loan(character, player=None):
         max_loan *= (1 + loan_modifier)
         max_loan = max(0, max_loan)
 
+    max_loan = min(6_000_000, max_loan)
     return int(max_loan)
 
 async def get_player_bank_balance(character):
@@ -454,8 +455,6 @@ INTEREST_RATE = 0.022
 ONLINE_INTEREST_MULTIPLIER = 2.0
 
 async def apply_interest_to_bank_accounts(ctx, interest_rate=INTEREST_RATE, online_interest_multiplier=ONLINE_INTEREST_MULTIPLIER, compounding_hours=1):
-  now = timezone.now()
-
   bank_expense_account, _ = await Account.objects.aget_or_create(
     account_type=Account.AccountType.EXPENSE,
     book=Account.Book.BANK,
