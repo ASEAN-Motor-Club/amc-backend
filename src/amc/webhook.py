@@ -4,7 +4,7 @@ from operator import attrgetter
 from datetime import datetime, timedelta
 from django.utils import timezone
 from django.contrib.gis.geos import Point
-from django.db.models import F
+from django.db.models import F, Q
 from amc.game_server import announce
 from amc.mod_server import get_webhook_events, show_popup
 from amc.subsidies import (
@@ -151,13 +151,19 @@ async def monitor_webhook(ctx):
 
 async def process_events(events, http_client=None, http_client_mod=None, discord_client=None):
   def key_fn(event):
-    return (event['data']['PlayerId'], event['hook'])
+    player_id = event['data'].get('CharacterGuid', '')
+    if not player_id:
+      player_id = event['data'].get('PlayerId', '')
+    return (player_id, event['hook'])
 
   sorted_events = sorted(events, key=key_fn)
   grouped_events = itertools.groupby(sorted_events, key=key_fn)
   aggregated_events = []
 
   for key, group in grouped_events:
+    if not key:
+      continue
+
     group_events = list(group)
     match key[1]:
       case "/Script/MotorTown.MotorTownPlayerController:ServerCargoArrived":
@@ -170,7 +176,7 @@ async def process_events(events, http_client=None, http_client_mod=None, discord
           'hook': key[1],
           'timestamp': group_events[0]['timestamp'],
           'data': {
-            'PlayerId': key[0],
+            'CharacterGuid': key[0],
             'Cargos': cargos,
           }
         })
@@ -178,16 +184,32 @@ async def process_events(events, http_client=None, http_client_mod=None, discord
         aggregated_events.extend(group_events)
 
 
-  def key_by_player(event):
-    return event['data']['PlayerId']
+  def key_by_character(event):
+    player_id = event['data'].get('CharacterGuid')
+    if not player_id:
+      player_id = event['data'].get('PlayerId')
+    return player_id
 
-  sorted_player_events = sorted(aggregated_events, key=key_by_player)
-  grouped_player_events = itertools.groupby(sorted_player_events, key=key_by_player)
+  sorted_player_events = sorted(aggregated_events, key=key_by_character)
+  grouped_player_events = itertools.groupby(sorted_player_events, key=key_by_character)
 
   player_profits = []
-  for player_id, es in grouped_player_events:
+  for character_guid, es in grouped_player_events:
     try:
-      player = await Player.objects.aget(unique_id=player_id)
+      character_q = Q(guid=character_guid, guid__isnull=False)
+      try:
+        character_q = character_q | Q(player__unique_id=int(character_guid))
+      except ValueError:
+        pass
+
+      character = await (Character.objects
+        .select_related('player')
+        .with_last_login()
+        .filter(character_q)
+        .order_by('-last_login')
+        .afirst()
+      )
+      player = character.player
     except Player.DoesNotExist:
       continue
 
@@ -195,7 +217,7 @@ async def process_events(events, http_client=None, http_client_mod=None, discord
     total_subsidy = 0
 
     used_shortcut = await CharacterLocation.objects.filter(
-      character__player=player,
+      character=character,
       location__coveredby=gwangjin_shortcut,
       timestamp__gte=timezone.now() - timedelta(hours=1)
     ).aexists()
@@ -207,7 +229,7 @@ async def process_events(events, http_client=None, http_client_mod=None, discord
         total_subsidy += subsidy
       except Exception as e:
         asyncio.create_task(
-          show_popup(http_client_mod, f"Webhook failed, please send to discord:\n{e}", player_id=player_id)
+          show_popup(http_client_mod, f"Webhook failed, please send to discord:\n{e}", player_id=str(player.unique_id))
         )
         raise e
 
