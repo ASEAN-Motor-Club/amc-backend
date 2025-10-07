@@ -94,3 +94,8 @@ async def get_status(session):
       return None
     return data['data']
 
+async def despawn_player_vehicle(session, player_id):
+  async with session.post(f'/player_vehicles/{player_id}/despawn') as resp:
+    if resp.status != 200:
+      raise Exception('Failed to despawn')
+

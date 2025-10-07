@@ -32,6 +32,7 @@ from amc.server_logs import (
 )
 from amc.models import (
   Player,
+  Team,
   Character,
   CharacterLocation,
   PlayerStatusLog,
@@ -51,9 +52,13 @@ from amc.models import (
   DeliveryJob,
   DeliveryPoint,
 )
-from amc.game_server import announce, get_players
+from amc.game_server import announce, get_players, kick_player
 from amc.mod_server import (
-  show_popup, transfer_money, teleport_player, get_player,
+  show_popup,
+  transfer_money,
+  teleport_player,
+  get_player,
+  despawn_player_vehicle,
 )
 from amc.auth import verify_player
 from amc.mailbox import send_player_messages
@@ -446,6 +451,8 @@ async def process_log_event(event: LogEvent, http_client=None, http_client_mod=N
           asyncio.create_task(
             announce(f"{int(float(location['X']))}, {int(float(location['Y']))}, {int(float(location['Z']))}", http_client, delay=0)
           )
+      elif command_match := re.match(r"/despawn$", message):
+        await despawn_player_vehicle(http_client_mod, player_id)
       elif command_match := re.match(r"/(teleport|tp)\s+(?P<x>[-\d]+)\s+(?P<y>[-\d]+)\s+(?P<z>[-\d]+)$", message):
         player_info = await get_player(http_client_mod, str(player.unique_id))
         if player_info and player_info.get('bIsAdmin'):
@@ -680,7 +687,6 @@ Commands:
 <Highlight>/set_saving_rate [percentage]</> - Automatically set aside your earnings into your account
 <Highlight>/withdraw [amount]</> - Withdraw from your bank account
 <Highlight>/loan [amount]</> - Take out a loan
-<Highlight>/repay_loan [amount]</> - Repay your loan
 
 How to Put Money in the Bank
 <Secondary>Use the /set_saving_rate command to set how much you want to save. It's 0 by default.</>
@@ -917,6 +923,17 @@ The loan amount has been deposited into your wallet. You can view your loan deta
     case PlayerLoginLogEvent(timestamp, player_name, player_id):
       character, player, character_created, player_info = await aget_or_create_character(player_name, player_id, http_client_mod)
       if ctx.get('startup_time') and timestamp > ctx.get('startup_time'):
+        if 'DOT' in player_info['PlayerName']:
+          if not (await Team.objects.filter(tag='DOT', members=player).aexists()):
+            asyncio.create_task(
+              show_popup(http_client_mod, "You are not authorised to use the DOT tag, please remove it then rejoin the server", player_id=str(player_id))
+            )
+            async def kick_after_delay(delay=10):
+              await asyncio.sleep(delay)
+              await kick_player(http_client, str(player_id))
+
+            asyncio.create_task(kick_after_delay())
+
         try:
           last_login = None
           if not character_created:
