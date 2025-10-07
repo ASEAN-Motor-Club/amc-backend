@@ -40,7 +40,7 @@ SUBSIDIES_TEXT = """<Title>ASEAN Server Subsidies</>
 Normal - <Money>2,000 + 50%</>
 Flipped - <Money>2,000 + 100%</>
 
-<Bold>Taxi & Ambulance</> - <Money>2,000 + 50%</>
+<Bold>Taxi</> - <Money>2,000 + 50%</>
 """
 cargo_names = {
 
@@ -198,7 +198,7 @@ def get_subsidy_for_cargo(cargo):
 
 def get_passenger_subsidy(passenger):
   match passenger.passenger_type:
-    case ServerPassengerArrivedLog.PassengerType.Taxi | ServerPassengerArrivedLog.PassengerType.Ambulance:
+    case ServerPassengerArrivedLog.PassengerType.Taxi:
       return 2_000 + passenger.payment * 0.5
     case _:
       return 0
