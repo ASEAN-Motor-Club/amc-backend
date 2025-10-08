@@ -954,14 +954,14 @@ The loan amount has been deposited into your wallet. You can view your loan deta
             asyncio.create_task(
               announce(welcome_message, http_client, delay=5)
             )
-          if (is_new_player or player.suspect) and player_info.get('Location') is not None:
+          if (is_new_player or player.suspect) and player_info.get('Location') is not None and player_info.get('VehicleKey') != "None":
             location = Point(**{
               axis.lower(): value for axis, value in player_info.get('Location').items()
             })
             dps = DeliveryPoint.objects.filter(coord__isnull=False).only('coord')
             spawned_near_delivery_point = False
             async for dp in dps:
-              if location.distance(dp.coord) < 200:
+              if location.distance(dp.coord) < 400:
                 spawned_near_delivery_point = True
                 break
 
@@ -982,6 +982,7 @@ The loan amount has been deposited into your wallet. You can view your loan deta
               )
               player.suspect = True
               await player.asave(update_fields=['suspect'])
+              # TODO: report on discord
         except Exception as e:
           asyncio.create_task(
             announce(f'Failed to greet player: {e}', http_client)
