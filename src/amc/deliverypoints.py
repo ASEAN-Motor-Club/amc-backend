@@ -140,6 +140,11 @@ async def monitor_jobs(ctx):
     source_capacity = sum([capacity for amount, capacity in source_storage_capacities])
 
     quantity_requested = job.quantity_requested
+    if job.expected_player_count_for_quantity:
+      quantity_requested = min(
+        quantity_requested,
+        int(quantity_requested * num_players / job.expected_player_count_for_quantity)
+      )
     if destination_capacity > 0:
       quantity_requested = min(
         job.quantity_requested,

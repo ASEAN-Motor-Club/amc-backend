@@ -502,7 +502,7 @@ class DeliveryJobAdmin(admin.ModelAdmin):
       "fields": ['description']
     }),
     ("Job Template", {
-      "fields": ['template', 'job_posting_probability', 'template_job_period_hours', 'base_template']
+      "fields": ['template', 'expected_player_count_for_quantity', 'job_posting_probability', 'template_job_period_hours', 'base_template']
     }),
     ("Discord integration", {
       "fields": ['discord_message_id']
