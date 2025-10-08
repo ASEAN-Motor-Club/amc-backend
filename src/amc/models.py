@@ -1173,5 +1173,6 @@ class Ticket(models.Model):
 @final
 class ServerStatus(models.Model):
   timestamp = models.DateTimeField(auto_now_add=True)
+  num_players = models.PositiveIntegerField()
   fps = models.PositiveIntegerField()
   used_memory = models.PositiveBigIntegerField()
