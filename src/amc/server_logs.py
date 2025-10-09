@@ -154,7 +154,7 @@ GAME_TIMESTAMP_FORMAT = '%Y.%m.%d-%H.%M.%S'
 def parse_log_line(line: str) -> tuple[ServerLog, LogEvent]:
   try:
     _log_timestamp, hostname, tag, filename, game_timestamp, content = line.split(' ', 5)
-    timestamp = datetime.strptime(game_timestamp.strip('[').strip(']'), GAME_TIMESTAMP_FORMAT).replace(tzinfo=ZoneInfo('UTC'))
+    timestamp = datetime.strptime(game_timestamp.strip('[').strip(']'), GAME_TIMESTAMP_FORMAT).replace(tzinfo=ZoneInfo('Asia/Bangkok'))
     server_log = ServerLog(
       timestamp=timestamp,
       content=content,
