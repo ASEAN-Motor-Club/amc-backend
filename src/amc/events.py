@@ -18,6 +18,17 @@ from amc.models import (
   ScheduledEvent,
 )
 
+import uuid
+
+def generate_guid():
+  """
+  Generates a random GUID (UUID version 4).
+
+  Returns:
+      str: The generated GUID as a string.
+  """
+  return str(uuid.uuid4()).replace('-', '').upper()
+
 async def setup_event(timestamp, player_id, scheduled_event, http_client_mod):
   async with http_client_mod.get('/events') as resp:
     events = (await resp.json()).get('data', [])
@@ -46,8 +57,10 @@ async def setup_event(timestamp, player_id, scheduled_event, http_client_mod):
     race_setup['EngineKeys'] = []
 
   data = {
+    'EventGuid': generate_guid(),
     'EventName': scheduled_event.name,
     'RaceSetup': race_setup,
+    'EventType': 1,
     'OwnerCharacterId': {
       'CharacterGuid': player['CharacterGuid'].rjust(32, '0'),
       'UniqueNetId': str(player_id),
