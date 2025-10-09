@@ -185,9 +185,9 @@ async def process_events(events, http_client=None, http_client_mod=None, discord
 
 
   def key_by_character(event):
-    player_id = event['data'].get('CharacterGuid')
+    player_id = event['data'].get('CharacterGuid', '')
     if not player_id:
-      player_id = event['data'].get('PlayerId')
+      player_id = event['data'].get('PlayerId', '')
     return player_id
 
   sorted_player_events = sorted(aggregated_events, key=key_by_character)
@@ -195,6 +195,9 @@ async def process_events(events, http_client=None, http_client_mod=None, discord
 
   player_profits = []
   for character_guid, es in grouped_player_events:
+    if not character_guid:
+      continue
+
     try:
       character_q = Q(guid=character_guid, guid__isnull=False)
       try:
@@ -210,6 +213,8 @@ async def process_events(events, http_client=None, http_client_mod=None, discord
         .afirst()
       )
       player = character.player
+    except Character.DoesNotExist:
+      continue
     except Player.DoesNotExist:
       continue
 
