@@ -9,6 +9,7 @@ api.add_router('/character_locations/', 'amc.api.routes.player_locations_router'
 api.add_router('/race_setups/', 'amc.api.routes.race_setups_router')
 api.add_router('/teams/', 'amc.api.routes.teams_router')
 api.add_router('/scheduled_events/', 'amc.api.routes.scheduled_events_router')
+api.add_router('/tracks/', 'amc.api.routes.tracks_router')
 api.add_router('/results/', 'amc.api.routes.results_router')
 api.add_router('/championships/', 'amc.api.routes.championships_router')
 api.add_router('/deliverypoints/', 'amc.api.routes.deliverypoints_router')

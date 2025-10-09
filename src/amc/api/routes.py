@@ -8,6 +8,7 @@ from ninja_extra.security.session import AsyncSessionAuth
 from django.core.cache import cache
 from django.db.models import Count, Q, F, Window, Prefetch, Max
 from django.db.models.functions import Ntile
+from django.shortcuts import aget_object_or_404
 from django.utils import timezone
 from ninja import Router
 from django.http import StreamingHttpResponse
@@ -283,6 +284,17 @@ async def list_scheduled_event_results(request, id):
   scheduled_event = await ScheduledEvent.objects.select_related('race_setup').aget(id=id)
 
   qs = GameEventCharacter.objects.results_for_scheduled_event(scheduled_event)
+  return [
+    participant
+    async for participant in qs
+  ]
+
+tracks_router = Router()
+@tracks_router.get('/{hash}/results/', response=list[ParticipantSchema])
+async def list_track_results(request, hash):
+  track = await aget_object_or_404(RaceSetup, hash__startswith=hash)
+
+  qs = GameEventCharacter.objects.results_for_track(track)
   return [
     participant
     async for participant in qs

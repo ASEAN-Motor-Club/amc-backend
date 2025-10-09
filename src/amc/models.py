@@ -435,6 +435,9 @@ class ParticipantQuerySet(models.QuerySet):
       criteria = Q(game_event__scheduled_event=scheduled_event)
     return self.filter(criteria)
 
+  def filter_by_track(self, track):
+    return self.filter(game_event__race_setup=track)
+
   def results_for_scheduled_event(self, scheduled_event):
     return (self
       .select_related(
@@ -444,6 +447,28 @@ class ParticipantQuerySet(models.QuerySet):
         'championship_point__team'
       )
       .filter_by_scheduled_event(scheduled_event)
+      .filter_best_time_per_player()
+      .order_by(
+        'disqualified',
+        'wrong_engine',
+        'wrong_vehicle',
+        '-finished',
+        'laps',
+        'section_index',
+        'net_time'
+      )
+    )
+
+  def results_for_track(self, track):
+    return (self
+      .select_related(
+        'character',
+        'character__player',
+        'championship_point',
+        'championship_point__team'
+      )
+      .filter(finished=True, disqualified=False)
+      .filter_by_track(track)
       .filter_best_time_per_player()
       .order_by(
         'disqualified',
