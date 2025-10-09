@@ -43,7 +43,7 @@ class StatusCog(commands.Cog):
     ax1.set_ylabel("FPS", color=color_fps)
     ax1.plot(fps_data, color=color_fps, marker='o', label='FPS')
     ax1.tick_params(axis='y', labelcolor=color_fps)
-    ax1.set_ylim(0, 65)
+    ax1.set_ylim(0, 120)
     ax1.grid(True, linestyle='--', alpha=0.6)
 
     # Create a second y-axis for memory data that shares the x-axis
