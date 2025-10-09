@@ -66,7 +66,7 @@ async def repay_loan_for_profit(player, payment, session):
     loan_balance = await get_player_loan_balance(character)
     if loan_balance == 0:
       return 0
-    max_loan = get_character_max_loan(character)
+    max_loan, _ = await get_character_max_loan(character)
     repayment = calculate_loan_repayment(Decimal(payment), loan_balance, max_loan)
 
     await transfer_money(

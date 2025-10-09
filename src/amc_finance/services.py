@@ -4,42 +4,84 @@ from django.utils import timezone
 from django.db import transaction
 from django.db.models import F, Sum
 from asgiref.sync import sync_to_async
-from amc.models import CharacterLocation
+from amc.models import Player, Delivery, CharacterLocation
 from amc_finance.models import Account, JournalEntry, LedgerEntry
 
 
-def get_character_max_loan(character, player=None):
-    """
-    Calculates the maximum loan amount for a character, modified by their social score.
-    """
-    SOCIAL_SCORE_LOAN_MODIFIER = 0.05
+from enum import Enum
+from typing import Optional, Tuple
 
-    base_loan = 10_000
-    if character.driver_level:
-        base_loan += character.driver_level * 3_000
-    if character.truck_level:
-        base_loan += character.truck_level * 3_000
-    
-    max_loan = base_loan
+class LoanLimitReason(Enum):
+  """Enumeration for reasons a character's loan may be limited."""
+  INELIGIBLE = "You are currently ineligible for a loan due to your social score."
+  BANK_POLICY = "Your loan has reached the maximum amount set by bank policy."
+  EARNINGS_HISTORY = "Your loan amount is limited by your recent earnings history."
+  SOCIAL_SCORE = "Your loan amount has been reduced due to a low social score."
 
-    if player and hasattr(player, 'social_score'):
-        loan_modifier = player.social_score * SOCIAL_SCORE_LOAN_MODIFIER
-        max_loan *= (1 + loan_modifier)
-        max_loan = max(0, max_loan)
+  def __str__(self):
+      """Returns the human-readable message for the reason."""
+      return self.value
 
-    max_loan = min(6_000_000, max_loan)
-    return int(max_loan)
+async def get_character_max_loan(character) -> Tuple[int, Optional[LoanLimitReason]]:
+  """
+  Calculates the maximum loan amount for a character and identifies the reason if it's limited.
 
-async def get_player_bank_balance(character):
-  account, _ = await Account.objects.aget_or_create(
-    account_type=Account.AccountType.LIABILITY,
-    book=Account.Book.BANK,
-    character=character,
-    defaults={
-      'name': 'Checking Account',
-    }
+  Returns:
+    A tuple containing:
+    - int: The maximum loan amount.
+    - Optional[LoanLimitReason]: The reason for the loan limit, or None if not limited.
+  """
+  SOCIAL_SCORE_LOAN_MODIFIER = 0.05
+  BANK_POLICY_CAP = 6_000_000
+
+  player = await Player.objects.aget(characters=character)
+  deliveries_agg = await Delivery.objects.filter(character__player=player).aaggregate(
+    total_payment=Sum('payment', default=0) + Sum('subsidy', default=0),
   )
-  return account.balance
+
+  # --- Loan Calculation ---
+
+  # 1. Start with the base loan from character levels
+  base_loan = 10_000
+  if character.driver_level:
+    base_loan += character.driver_level * 3_000
+  if character.truck_level:
+    base_loan += character.truck_level * 3_000
+
+  max_loan = float(base_loan)
+  reason: Optional[LoanLimitReason] = None
+
+  # 2. Apply social score modifier
+  social_score_reduced_loan = False
+  if player and hasattr(player, 'social_score'):
+    loan_modifier = player.social_score * SOCIAL_SCORE_LOAN_MODIFIER
+    max_loan *= (1 + loan_modifier)
+    if player.social_score < 0:
+      social_score_reduced_loan = True
+
+  # If social score makes them ineligible, it's the final reason
+  if max_loan <= 0:
+    return 0, LoanLimitReason.INELIGIBLE
+
+  # 3. Apply the bank's hard policy cap
+  if max_loan > BANK_POLICY_CAP:
+    max_loan = BANK_POLICY_CAP
+    reason = LoanLimitReason.BANK_POLICY
+
+  # 4. Apply the cap based on earnings history
+  # This check comes after the bank policy cap, so it will correctly
+  # become the reason if it's an even more restrictive limit.
+  earnings_cap = deliveries_agg['total_payment'] * 5
+  if max_loan > earnings_cap:
+    max_loan = earnings_cap
+    reason = LoanLimitReason.EARNINGS_HISTORY
+
+  # 5. If no cap was hit, check if a negative social score was the limiting factor
+  if reason is None and social_score_reduced_loan:
+    reason = LoanLimitReason.SOCIAL_SCORE
+
+  return int(max_loan), reason
+
 
 async def get_player_loan_balance(character):
   loan_account, _ = await Account.objects.aget_or_create(
@@ -151,8 +193,7 @@ async def register_player_withdrawal(amount, character, player):
 
 LOAN_INTEREST_RATES = [0.1, 0.2, 0.3]
 
-def calc_loan_fee(amount, character):
-  max_loan = get_character_max_loan(character)
+def calc_loan_fee(amount, character, max_loan):
   threshold = 0
   fee = 0
   for i, interest_rate in enumerate(LOAN_INTEREST_RATES, start=1):
@@ -167,7 +208,8 @@ def calc_loan_fee(amount, character):
   return int(fee)
 
 async def register_player_take_loan(amount, character):
-  fee = calc_loan_fee(amount, character)
+  max_loan, _ = await get_character_max_loan(character)
+  fee = calc_loan_fee(amount, character, max_loan)
   principal = Decimal(amount) + Decimal(fee)
 
   loan_account, _ = await Account.objects.aget_or_create(

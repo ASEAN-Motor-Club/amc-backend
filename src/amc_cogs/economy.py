@@ -335,7 +335,7 @@ Tow Requests: {tow_requests_aggregates['total_payments']:,}
     character = await player.characters.with_last_login().filter(last_login__isnull=False).alatest('last_login')
     balance = await get_player_bank_balance(character)
     loan_balance = await get_player_loan_balance(character)
-    max_loan = get_character_max_loan(character)
+    max_loan, _ = await get_character_max_loan(character)
     saving_rate = character.saving_rate if character.saving_rate is not None else Decimal(DEFAULT_SAVING_RATE)
     await interaction.response.send_message(f"""\
 # Your Bank ASEAN Account
