@@ -96,12 +96,7 @@ async def monitor_jobs(ctx):
   players = await get_players(ctx['http_client'])
   num_players = len(players)
 
-  num_failed_jobs = await (DeliveryJob.objects
-    .filter(template=False, expired_at__gte=timezone.now() - timedelta(hours=4))
-    .acount('?')
-  )
-
-  max_active_jobs = max(4, 2 + math.ceil(num_players / 6)) - math.ceil(num_failed_jobs / 2)
+  max_active_jobs = max(4, 3 + math.ceil(num_players / 6))
 
   if num_active_jobs >= max_active_jobs:
     return
@@ -172,7 +167,7 @@ async def monitor_jobs(ctx):
       is_source_enough = source_amount >= quantity_requested
 
     if is_destination_empty and is_source_enough:
-      chance = job.job_posting_probability * max(10, num_players) / 600 / (5 + num_active_jobs * 2)
+      chance = job.job_posting_probability * max(10, num_players) / 1800 / (5 + num_active_jobs * 2)
       if not source_points and not destination_points:
         chance = chance / (24 * 3)
 
