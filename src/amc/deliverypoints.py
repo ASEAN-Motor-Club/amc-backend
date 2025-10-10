@@ -148,7 +148,7 @@ async def monitor_jobs(ctx):
       )
     if destination_capacity > 0:
       quantity_requested = min(
-        job.quantity_requested,
+        quantity_requested,
         destination_capacity - destination_amount
       )
 
@@ -158,7 +158,7 @@ async def monitor_jobs(ctx):
       is_destination_empty = (
         ((destination_amount / destination_capacity) <= 0.15)
         or
-        (destination_capacity - destination_amount >= job.quantity_requested)
+        (destination_capacity - destination_amount >= quantity_requested)
       )
 
     if source_capacity == 0:
