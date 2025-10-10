@@ -2,6 +2,7 @@ import asyncio
 from datetime import datetime, timedelta
 from zoneinfo import ZoneInfo
 from django.utils import timezone
+from django.core.signing import Signer
 
 def lowercase_first_char_in_keys(obj):
     """
@@ -155,3 +156,11 @@ def get_time_difference_string(start_time: datetime, end_time: datetime) -> str:
     minutes = remaining_seconds // 60
 
     return f"{hours} hours, {minutes} minutes"
+
+def with_verification_code(input, input_verification_code):
+  signer = Signer()
+  signed_obj = signer.sign(input)
+  verification_code = signed_obj.replace('-', '').replace('_', '')[-4:]
+
+  return verification_code, input_verification_code.lower() == verification_code.lower()
+

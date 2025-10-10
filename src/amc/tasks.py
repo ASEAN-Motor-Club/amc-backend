@@ -69,7 +69,13 @@ from amc.events import (
   auto_starting_grid,
 )
 from amc.locations import gwangjin_shortcut
-from amc.utils import format_in_local_tz, format_timedelta, delay, get_time_difference_string
+from amc.utils import (
+  format_in_local_tz,
+  format_timedelta,
+  delay,
+  get_time_difference_string,
+  with_verification_code,
+)
 from amc.subsidies import DEFAULT_SAVING_RATE, SUBSIDIES_TEXT
 from amc_finance.services import (
   register_player_withdrawal,
@@ -466,7 +472,7 @@ async def process_log_event(event: LogEvent, http_client=None, http_client_mod=N
             },
             no_vehicles=not player_info.get('bIsAdmin')
           )
-      elif command_match := re.match(r"/(teleport|tp)\s+(?P<player_name>\S+)\s+(?P<tp_name>\S*)", message):
+      elif command_match := re.match(r"/(teleport|tp)\s+(?P<player_name>\S+)\s+(?P<tp_name>\S+)", message):
         player_name = command_match.group('player_name')
         tp_name = command_match.group('tp_name')
 
@@ -745,11 +751,26 @@ Sorry, the verification code did not match, please try again:
             asyncio.create_task(
               show_popup(http_client_mod, f"<Title>Donation failed</>\n\n{e}", player_id=str(player_id))
             )
-      elif command_match := re.match(r"/withdraw (?P<amount>\d+)", message):
-        amount = int(command_match.group('amount'))
+      elif command_match := re.match(r"/withdraw\s+(?P<amount>[\d,]+)\s*(?P<verification_code>\S*)", message):
+        amount = int(command_match.group('amount').replace(',', ''))
         balance = await get_player_bank_balance(character)
         amount = min(amount, balance)
-        if amount > 0:
+        verification_code, code_verified = with_verification_code((amount, character.guid), command_match.group('verification_code'))
+
+        if amount <= 0:
+          pass
+        elif amount > 1_000_000 and not code_verified:
+          asyncio.create_task(show_popup(http_client_mod, f"""\
+<Title>Withdrawal</>
+
+Withdrawals above 1,000,000 coins require confirmation.
+
+The amount you will be withdrawing is:
+<Money>{amount:,}</>
+
+If you wish to proceed, type the command again followed by the verification code:
+<Highlight>/withdraw {command_match.group('amount')} {verification_code.upper()}</>""", player_id=str(player_id)))
+        else:
           try:
             await register_player_withdrawal(amount, character, player)
             await transfer_money(http_client_mod, int(amount), 'Bank Withdrawal', player_id)
@@ -757,10 +778,10 @@ Sorry, the verification code did not match, please try again:
             asyncio.create_task(
               show_popup(http_client_mod, f"<Title>Withdrawal failed</>\n\n{e}", player_id=str(player_id))
             )
-      elif command_match := re.match(r"/loan\s*(?P<amount>[\d,]+)\s*(?P<verification_code>\S*)", message):
+      elif command_match := re.match(r"/loan\s+(?P<amount>[\d,]+)\s*(?P<verification_code>\S*)$", message):
         if not (await Delivery.objects.filter(character=character).aexists()):
           asyncio.create_task(
-            announce("Loans are only for server residents", http_client)
+            announce("You must have done at least one delivery", http_client)
           )
           return
 
