@@ -41,7 +41,7 @@ class LogParserTestCase(SimpleTestCase):
         Verifies that a standard player chat message is parsed correctly.
         """
         log_line = "2024-07-08T10:00:00.123Z hostname tag filename [2025.03.22-08.13.07] [CHAT] TestPlayer (123): Hello world!"
-        expected_timestamp = datetime.fromisoformat("2025-03-22T08:13:07Z").replace(tzinfo=ZoneInfo('UTC'))
+        expected_timestamp = datetime.fromisoformat("2025-03-22T08:13:07Z").replace(tzinfo=ZoneInfo('Asia/Bangkok'))
 
         # Await the async function call
         _log, result = parse_log_line(log_line)
@@ -60,7 +60,7 @@ class LogParserTestCase(SimpleTestCase):
         Verifies that a player login event is parsed correctly.
         """
         log_line = "2024-07-08T10:01:00Z hostname tag filename [2025.03.22-08.13.07] Player Login: Admin (1)"
-        expected_timestamp = datetime.fromisoformat("2025-03-22T08:13:07Z").replace(tzinfo=ZoneInfo('UTC'))
+        expected_timestamp = datetime.fromisoformat("2025-03-22T08:13:07Z").replace(tzinfo=ZoneInfo('Asia/Bangkok'))
 
         _log, result = parse_log_line(log_line)
 
@@ -74,7 +74,7 @@ class LogParserTestCase(SimpleTestCase):
         Verifies that a player login event is parsed correctly.
         """
         log_line = "2024-07-08T10:01:00Z hostname tag filename [2025.03.22-08.13.07] Player Login: Admin Admin (1)"
-        expected_timestamp = datetime.fromisoformat("2025-03-22T08:13:07Z").replace(tzinfo=ZoneInfo('UTC'))
+        expected_timestamp = datetime.fromisoformat("2025-03-22T08:13:07Z").replace(tzinfo=ZoneInfo('Asia/Bangkok'))
 
         _log, result = parse_log_line(log_line)
 
@@ -88,7 +88,7 @@ class LogParserTestCase(SimpleTestCase):
         Verifies that a player login event is parsed correctly.
         """
         log_line = "2024-07-08T10:01:00Z hostname tag filename [2025.03.22-08.13.07] Player Login: Admin (100) (1)"
-        expected_timestamp = datetime.fromisoformat("2025-03-22T08:13:07Z").replace(tzinfo=ZoneInfo('UTC'))
+        expected_timestamp = datetime.fromisoformat("2025-03-22T08:13:07Z").replace(tzinfo=ZoneInfo('Asia/Bangkok'))
 
         _log, result = parse_log_line(log_line)
 
@@ -102,7 +102,7 @@ class LogParserTestCase(SimpleTestCase):
         Verifies that a player login event is parsed correctly.
         """
         log_line = "2024-07-08T10:01:00Z hostname tag filename [2025.03.22-08.13.07] Player Logout: Admin"
-        expected_timestamp = datetime.fromisoformat("2025-03-22T08:13:07Z").replace(tzinfo=ZoneInfo('UTC'))
+        expected_timestamp = datetime.fromisoformat("2025-03-22T08:13:07Z").replace(tzinfo=ZoneInfo('Asia/Bangkok'))
 
         _log, result = parse_log_line(log_line)
 
@@ -115,7 +115,7 @@ class LogParserTestCase(SimpleTestCase):
         Verifies that a company creation event is parsed, including boolean conversion.
         """
         log_line = "2024-07-08T10:02:00Z hostname tag filename [2025.03.22-08.13.07] Company added. Name=MegaCorp(Corp?true) Owner=CEO(99)"
-        expected_timestamp = datetime.fromisoformat("2025-03-22T08:13:07Z").replace(tzinfo=ZoneInfo('UTC'))
+        expected_timestamp = datetime.fromisoformat("2025-03-22T08:13:07Z").replace(tzinfo=ZoneInfo('Asia/Bangkok'))
 
         _log, result = parse_log_line(log_line)
 
@@ -131,7 +131,7 @@ class LogParserTestCase(SimpleTestCase):
         Verifies that a vehicle entered event is parsed
         """
         log_line = "2024-07-08T10:02:00Z hostname tag filename [2025.03.22-08.13.07] Player entered vehicle. Player=Dr-P (76561198129501840) Vehicle=Atlas 6x4 Semi(854460) "
-        expected_timestamp = datetime.fromisoformat("2025-03-22T08:13:07Z").replace(tzinfo=ZoneInfo('UTC'))
+        expected_timestamp = datetime.fromisoformat("2025-03-22T08:13:07Z").replace(tzinfo=ZoneInfo('Asia/Bangkok'))
 
         _log, result = parse_log_line(log_line)
 
@@ -148,7 +148,7 @@ class LogParserTestCase(SimpleTestCase):
         This test is important to ensure the order of regex patterns is working correctly.
         """
         log_line = "2024-07-08T10:03:00Z hostname tag filename [2025.03.22-08.13.07] [CHAT] Server is restarting in 5 minutes."
-        expected_timestamp = datetime.fromisoformat("2025-03-22T08:13:07Z").replace(tzinfo=ZoneInfo('UTC'))
+        expected_timestamp = datetime.fromisoformat("2025-03-22T08:13:07Z").replace(tzinfo=ZoneInfo('Asia/Bangkok'))
 
         _log, result = parse_log_line(log_line)
 
@@ -162,7 +162,7 @@ class LogParserTestCase(SimpleTestCase):
         """
         original_content = "This is a weird and unexpected log format."
         log_line = f"2024-07-08T10:04:00Z hostname tag filename [2025.03.22-08.13.07] {original_content}"
-        expected_timestamp = datetime.fromisoformat("2025-03-22T08:13:07Z").replace(tzinfo=ZoneInfo('UTC'))
+        expected_timestamp = datetime.fromisoformat("2025-03-22T08:13:07Z").replace(tzinfo=ZoneInfo('Asia/Bangkok'))
 
         _log, result = parse_log_line(log_line)
 
