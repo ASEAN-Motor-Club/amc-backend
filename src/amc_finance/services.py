@@ -14,6 +14,7 @@ from typing import Optional, Tuple
 class LoanLimitReason(Enum):
   """Enumeration for reasons a character's loan may be limited."""
   INELIGIBLE = "You are currently ineligible for a loan due to your social score."
+  UNVERIFIED = "You must first verify yourself through discord"
   BANK_POLICY = "Your loan has reached the maximum amount set by bank policy."
   EARNINGS_HISTORY = "Your loan amount is limited by your recent earnings history."
   SOCIAL_SCORE = "Your loan amount has been reduced due to a low social score."
@@ -38,6 +39,9 @@ async def get_character_max_loan(character) -> Tuple[int, Optional[LoanLimitReas
   deliveries_agg = await Delivery.objects.filter(character__player=player).aaggregate(
     total_payment=Sum('payment', default=0) + Sum('subsidy', default=0),
   )
+
+  if player.discord_user_id is None:
+    return 0, LoanLimitReason.UNVERIFIED
 
   # --- Loan Calculation ---
 
@@ -81,6 +85,17 @@ async def get_character_max_loan(character) -> Tuple[int, Optional[LoanLimitReas
     reason = LoanLimitReason.SOCIAL_SCORE
 
   return int(max_loan), reason
+
+async def get_player_bank_balance(character):
+  account, _ = await Account.objects.aget_or_create(
+    account_type=Account.AccountType.LIABILITY,
+    book=Account.Book.BANK,
+    character=character,
+    defaults={
+      'name': 'Checking Account',
+    }
+  )
+  return account.balance
 
 
 async def get_player_loan_balance(character):

@@ -667,7 +667,7 @@ async def process_log_event(event: LogEvent, http_client=None, http_client_mod=N
       elif command_match := re.match(r"/bank", message):
         balance = await get_player_bank_balance(character)
         loan_balance = await get_player_loan_balance(character)
-        max_loan, _ = await get_character_max_loan(character)
+        max_loan, max_loan_reason = await get_character_max_loan(character)
         transactions = LedgerEntry.objects.filter(
           account__character=character,
           account__book=Account.Book.BANK,
@@ -685,7 +685,7 @@ async def process_log_event(event: LogEvent, http_client=None, http_client_mod=N
 <Small>Daily (IRL) Interest Rate: 2.2% (offline), 4.4% (online).</>
 <Bold>Loans:</> <Money>{loan_balance:,}</>
 <Bold>Max Available Loan:</> <Money>{max_loan:,}</>
-<Small>Max available loan depends on your driver level (currently {character.driver_level})</>
+<Small>{max_loan_reason or 'Max available loan depends on your driver+trucking level'}</>
 <Bold>Earnings Saving Rate:</> <Money>{saving_rate * Decimal(100):.0f}%</>
 <Small>Use /set_saving_rate [percentage] to automatically set aside your earnings into your account.</>
 
