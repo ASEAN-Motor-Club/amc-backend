@@ -1,4 +1,4 @@
-from typing import Optional
+from typing import Optional, List
 from pydantic import AwareDatetime
 from datetime import timedelta
 from ninja import Schema, ModelSchema, Field
@@ -11,6 +11,9 @@ from ..models import (
   GameEventCharacter,
   ChampionshipPoint,
   DeliveryPoint,
+  Cargo,
+  Delivery,
+  DeliveryJob,
   LapSectionTime,
 )
 
@@ -201,6 +204,46 @@ class DeliveryPointSchema(ModelSchema):
       'type',
       'data',
       'last_updated',
+    ]
+
+class CargoSchema(ModelSchema):
+  class Meta:
+    model = Cargo
+    fields = ['key', 'label']
+
+class DeliverySchema(ModelSchema):
+  character: CharacterSchema
+
+  class Meta:
+    model = Delivery
+    fields = ['timestamp', 'character', 'cargo_key', 'quantity', 'payment', 'subsidy']
+
+class DeliveryJobSchema(ModelSchema):
+  cargos: List[CargoSchema]
+  source_points: List[DeliveryPointSchema]
+  destination_points: List[DeliveryPointSchema]
+  deliveries: List[DeliverySchema]
+
+  class Meta:
+    model = DeliveryJob
+    fields = [
+      'id',
+      'name',
+      'quantity_requested',
+      'quantity_fulfilled',
+      'requested_at',
+      'fulfilled_at',
+      'expired_at',
+      'bonus_multiplier',
+      'completion_bonus',
+      # 'discord_message_id',
+      'description',
+      # 'template',
+      # 'base_template',
+      # 'expected_player_count_for_quantity',
+      # 'job_posting_probability',
+      # 'template_job_period_hours',
+      'fulfilled',
     ]
 
 class WebhookPayloadSchema(Schema):

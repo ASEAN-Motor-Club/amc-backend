@@ -24,6 +24,7 @@ from .schema import (
   PersonalStandingSchema,
   TeamStandingSchema,
   DeliveryPointSchema,
+  DeliveryJobSchema,
   LapSectionTimeSchema,
 )
 from django.conf import settings
@@ -36,8 +37,10 @@ from amc.models import (
   ScheduledEvent,
   GameEventCharacter,
   ChampionshipPoint,
+  Delivery,
   DeliveryPoint,
   LapSectionTime,
+  DeliveryJob,
 )
 from amc.utils import lowercase_first_char_in_keys
 
@@ -369,4 +372,20 @@ async def list_deliverypoints(request):
 async def get_deliverypoint(request, guid):
   return await DeliveryPoint.objects.aget(guid=guid)
 
+
+deliveryjobs_router = Router()
+
+@deliveryjobs_router.get('/', response=list[DeliveryJobSchema])
+async def list_deliveryjobs(request):
+  return [
+    dp async for dp in (DeliveryJob.objects
+      .prefetch_related(
+        'cargos',
+        'source_points',
+        'destination_points',
+        Prefetch('deliveries', queryset=Delivery.objects.select_related('character'))
+      )
+      .filter_active()
+    )
+  ]
 

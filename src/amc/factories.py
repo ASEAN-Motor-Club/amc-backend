@@ -1,4 +1,7 @@
 import random
+import uuid
+from django.utils import timezone
+from django.contrib.gis.geos import Point
 from datetime import timedelta
 from factory import (
   SubFactory,
@@ -16,6 +19,9 @@ from .models import (
   GameEventCharacter,
   Championship,
   ChampionshipPoint,
+  DeliveryJob,
+  DeliveryPoint,
+  Cargo,
 )
 
 class CharacterFactory(DjangoModelFactory):
@@ -96,4 +102,23 @@ class GameEventCharacterFactory(DjangoModelFactory):
   finished = True
   last_section_total_time_seconds = LazyAttribute(lambda p: random.randint(100, 1000) if p.finished else None)
   first_section_total_time_seconds = LazyAttribute(lambda p: random.randint(0, 99) if p.finished else None)
+
+class CargoFactory(DjangoModelFactory):
+  class Meta:
+    model = Cargo
+
+class DeliveryPointFactory(DjangoModelFactory):
+  class Meta:
+    model = DeliveryPoint
+
+  guid = LazyAttribute(lambda _: uuid.uuid4())
+  coord = LazyAttribute(lambda _: Point(random.randint(100, 1000), random.randint(100, 1000), random.randint(100, 1000)))
+
+class DeliveryJobFactory(DjangoModelFactory):
+  class Meta:
+    model = DeliveryJob
+
+  quantity_requested = LazyAttribute(lambda _: random.randint(1, 1000))
+  bonus_multiplier = LazyAttribute(lambda _: random.random())
+  expired_at = LazyAttribute(lambda _: timezone.now() + timedelta(hours=random.randint(2, 8)))
 

@@ -14,6 +14,7 @@ from amc.api.routes import (
   scheduled_events_router,
   championships_router,
   results_router,
+  deliveryjobs_router,
 )
 from amc.factories import (
   PlayerFactory,
@@ -23,6 +24,9 @@ from amc.factories import (
   GameEventCharacterFactory,
   ChampionshipFactory,
   ChampionshipPointFactory,
+  DeliveryJobFactory,
+  CargoFactory,
+  DeliveryPointFactory,
 )
 from amc.models import (
   PlayerStatusLog,
@@ -357,4 +361,18 @@ class ChampionshipAPITest(TestCase):
     data = response.json()
     self.assertEqual(len(data), 1)
 
+
+class DeliveryJobsAPITest(TestCase):
+  def setUp(self):
+    self.client = TestAsyncClient(deliveryjobs_router)
+
+  async def test_list(self):
+    job = await sync_to_async(DeliveryJobFactory)()
+    await job.cargos.aadd(await sync_to_async(CargoFactory)())
+    await job.source_points.aadd(await sync_to_async(DeliveryPointFactory)())
+    await job.destination_points.aadd(await sync_to_async(DeliveryPointFactory)())
+
+    response = await self.client.get("/")
+    data = response.json()
+    self.assertEqual(len(data), 1)
 
