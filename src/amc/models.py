@@ -116,11 +116,14 @@ class CharacterManager(models.Manager):
     if character_guid:
       # A GUID is provided. First, attempt to "claim" a character that matches the name
       # but currently has no GUID. This handles the 'test_add_guid' case.
-      await self.get_queryset().filter(
-        player=player,
-        name=player_name,
-        guid__isnull=True
-      ).aupdate(guid=character_guid)
+      try:
+        await self.get_queryset().filter(
+          player=player,
+          name=player_name,
+          guid__isnull=True
+        ).aupdate(guid=character_guid)
+      except Exception:
+        pass
 
       # Now, use aupdate_or_create with the GUID as the definitive lookup key.
       # This will find the character (either pre-existing or the one just updated)
