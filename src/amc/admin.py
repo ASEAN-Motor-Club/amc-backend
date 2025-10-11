@@ -131,7 +131,7 @@ class PlayerStatusLogInlineAdmin(admin.TabularInline):
 class CharacterAdmin(admin.ModelAdmin):
   list_display = ['name', 'player__unique_id', 'last_login', 'total_session_time']
   list_select_related = ['player']
-  search_fields = ['player__unique_id', 'player__discord_user_id', 'name']
+  search_fields = ['player__unique_id', 'player__discord_user_id', 'name', 'guid']
   inlines = [AccountInlineAdmin, PlayerStatusLogInlineAdmin]
   readonly_fields = ['guid', 'player', 'last_login', 'total_session_time']
 
