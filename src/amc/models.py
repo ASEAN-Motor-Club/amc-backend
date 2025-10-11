@@ -1144,15 +1144,22 @@ class DeliveryJob(models.Model):
     source_amount = sum([amount for amount, capacity in source_storage_capacities])
     source_capacity = sum([capacity for amount, capacity in source_storage_capacities])
 
-    quantity_requested = min(
-      job.quantity_requested,
-      destination_capacity - destination_amount
-    )
+    quantity_requested = job.quantity_requested
 
     if destination_capacity == 0:
       is_destination_empty = True
     else:
-      is_destination_empty = (destination_amount / destination_capacity) <= 0.15
+      is_destination_empty = (
+        ((destination_amount / destination_capacity) <= 0.15)
+        or
+        (destination_capacity - destination_amount >= quantity_requested)
+      )
+
+    if destination_capacity > 0:
+      quantity_requested = min(
+        quantity_requested,
+        destination_capacity - destination_amount
+      )
 
     if source_capacity == 0:
       is_source_enough = True
