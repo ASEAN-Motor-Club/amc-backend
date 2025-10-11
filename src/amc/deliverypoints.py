@@ -96,7 +96,7 @@ async def monitor_jobs(ctx):
   players = await get_players(ctx['http_client'])
   num_players = len(players)
 
-  max_active_jobs = max(4, 3 + math.ceil(num_players / 6))
+  max_active_jobs = max(4, 2 + math.ceil(num_players / 6))
 
   if num_active_jobs >= max_active_jobs:
     return
@@ -146,11 +146,6 @@ async def monitor_jobs(ctx):
         quantity_requested,
         int(quantity_requested * num_players / job.expected_player_count_for_quantity)
       )
-    if destination_capacity > 0:
-      quantity_requested = min(
-        quantity_requested,
-        destination_capacity - destination_amount
-      )
 
     if destination_capacity == 0:
       is_destination_empty = True
@@ -161,33 +156,41 @@ async def monitor_jobs(ctx):
         (destination_capacity - destination_amount >= quantity_requested)
       )
 
+    if destination_capacity > 0:
+      quantity_requested = min(
+        quantity_requested,
+        destination_capacity - destination_amount
+      )
+
     if source_capacity == 0:
       is_source_enough = True
     else:
       is_source_enough = source_amount >= quantity_requested
 
-    if is_destination_empty and is_source_enough:
-      chance = job.job_posting_probability * max(10, num_players) / 1800 / (5 + num_active_jobs * 2)
-      if not source_points and not destination_points:
-        chance = chance / (24 * 3)
+    if not is_destination_empty or not is_source_enough:
+      continue
+    chance = job.job_posting_probability * max(10, num_players) / 2400 / (5 + num_active_jobs * 2)
+    if not source_points and not destination_points:
+      chance = chance / (24 * 3)
 
-      if random.random() > chance:
-        continue
+    if random.random() > chance:
+      continue
 
-      new_job = await DeliveryJob.objects.acreate(
-        name=job.name,
-        cargo_key=job.cargo_key,
-        quantity_requested=quantity_requested,
-        expired_at=timezone.now() + timedelta(hours=job.template_job_period_hours),
-        bonus_multiplier=job.bonus_multiplier,
-        completion_bonus=job.completion_bonus * quantity_requested / job.quantity_requested,
-        description=job.description,
-        base_template=job,
-      )
-      await new_job.cargos.aadd(*cargos)
-      await new_job.source_points.aadd(*source_points)
-      await new_job.destination_points.aadd(*destination_points)
-      asyncio.create_task(
-        announce(f"New job posting! {job.name} - {job.completion_bonus:,} bonus on completion.", ctx['http_client'])
-      )
+    new_job = await DeliveryJob.objects.acreate(
+      name=job.name,
+      cargo_key=job.cargo_key,
+      quantity_requested=quantity_requested,
+      expired_at=timezone.now() + timedelta(hours=job.template_job_period_hours),
+      bonus_multiplier=job.bonus_multiplier,
+      completion_bonus=job.completion_bonus * quantity_requested / job.quantity_requested,
+      description=job.description,
+      base_template=job,
+    )
+    await new_job.cargos.aadd(*cargos)
+    await new_job.source_points.aadd(*source_points)
+    await new_job.destination_points.aadd(*destination_points)
+    asyncio.create_task(
+      announce(f"New job posting! {job.name} - {job.completion_bonus:,} bonus on completion.", ctx['http_client'])
+    )
+    break
 
