@@ -6,8 +6,9 @@ from amc.models import ServerStatus
 async def monitor_server_status(ctx):
   status = await get_status(ctx['http_client_mod'])
   try:
-    players = await get_players(ctx['http_client_game'])
-  except Exception:
+    players = await get_players(ctx['http_client'])
+  except Exception as e:
+    print(f"Failed to get players: {e}")
     players = []
 
   mem = psutil.virtual_memory()
