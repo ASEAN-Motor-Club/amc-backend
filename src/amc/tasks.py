@@ -51,6 +51,7 @@ from amc.models import (
   Delivery,
   DeliveryJob,
   DeliveryPoint,
+  VehicleDecal,
 )
 from amc.game_server import announce, get_players, kick_player
 from amc.mod_server import (
@@ -60,6 +61,8 @@ from amc.mod_server import (
   get_player,
   despawn_player_vehicle,
   toggle_rp_session,
+  get_decal,
+  set_decal,
 )
 from amc.auth import verify_player
 from amc.mailbox import send_player_messages
@@ -266,7 +269,7 @@ async def process_log_event(event: LogEvent, http_client=None, http_client_mod=N
 
   match event:
     case PlayerChatMessageLogEvent(timestamp, player_name, player_id, message):
-      character, player, *_ = await aget_or_create_character(player_name, player_id, http_client_mod)
+      character, player, character_created, player_info = await aget_or_create_character(player_name, player_id, http_client_mod)
       await PlayerChatLog.objects.acreate(
         timestamp=timestamp,
         character=character, 
@@ -308,6 +311,58 @@ async def process_log_event(event: LogEvent, http_client=None, http_client_mod=N
           character=character, 
           prompt="credits",
         )
+      if command_match := re.match(r"/decals$", message):
+        qs = VehicleDecal.objects.filter(player=player)
+        decals = '\n'.join([
+          f"#{decal.hash[:8]} - {decal.name} ({decal.vehicle_key})"
+          async for decal in qs
+        ])
+        popup_message = f"""\
+<Title>Your Decals</>
+-<Highlight>/apply_decal [name_or_hash]</> to apply an decal
+-<Highlight>/save_decal [name_or_hash]</> while in a vehicle to save its decal
+
+<Bold>Your decals:</>
+{decals}
+"""
+        asyncio.create_task(show_popup(http_client_mod, popup_message, player_id=str(player_id)))
+      if command_match := re.match(r"/save_decal\s+(?P<decal_name>.+)$", message):
+        decal = await get_decal(http_client_mod, player_id=str(player_id))
+        hash = VehicleDecal.calculate_hash(decal)
+        decal = await VehicleDecal.objects.acreate(
+          name=command_match.group('decal_name'),
+          player=player,
+          config=decal,
+          hash=hash,
+          vehicle_key=player_info['VehicleKey']
+        )
+        popup_message = f"""\
+<Title>Decal Saved!</>
+
+{decal.name} has been saved.
+The unique ID for your decal is: <Event>{hash[:8]}</>
+You can apply this decal to other vehicles with:
+<Highlight>/apply_decal {decal.name}</>
+
+To see all your decals, use:
+<Highlight>/decals</>
+"""
+        asyncio.create_task(show_popup(http_client_mod, popup_message, player_id=str(player_id)))
+      if command_match := re.match(r"/apply_decal\s+(?P<decal_name>.+)$", message):
+        try:
+          decal = await VehicleDecal.objects.aget(
+            Q(name=command_match.group('decal_name')) | Q(hash=command_match.group('decal_name')),
+            Q(player=player) | Q(private=False),
+          )
+        except VehicleDecal.DoesNotExist:
+          qs = VehicleDecal.objects.filter(player=player)
+          decals = '\n'.join([
+            f"#{decal.hash} - {decal.name} ({decal.vehicle_key})"
+            async for decal in qs
+          ])
+          asyncio.create_task(show_popup(http_client_mod, f"<Title>Decal not found</>\n\n{decals}", player_id=str(player_id)))
+          return
+        await set_decal(http_client_mod, str(player_id), decal.config)
       if command_match := re.match(r"/jobs", message):
         jobs = DeliveryJob.objects.filter(
           quantity_fulfilled__lt=F('quantity_requested'),

@@ -1213,3 +1213,32 @@ class ServerStatus(models.Model):
   num_players = models.PositiveIntegerField()
   fps = models.PositiveIntegerField()
   used_memory = models.PositiveBigIntegerField()
+
+@final
+class VehicleDecal(models.Model):
+  name = models.CharField(max_length=128)
+  player = models.ForeignKey(Player, on_delete=models.SET_NULL, null=True, blank=True, related_name='decals')
+  config = models.JSONField(null=True, blank=True)
+  hash = models.CharField(max_length=200, unique=True)
+  vehicle_key = models.CharField(max_length=100, null=True)
+  private = models.BooleanField(default=True)
+  price = models.PositiveIntegerField(default=0)
+
+  @staticmethod
+  def calculate_hash(decal_config):
+    hashes = DeepHash(decal_config)
+    return hashes[decal_config]
+
+  @override
+  def __str__(self):
+    return f"{self.name} - {self.hash[:8]}"
+
+  class Meta:
+    constraints = [
+      models.UniqueConstraint(
+        fields=["hash", "player"], name="unique_player_decal_hash"
+      ),
+      models.UniqueConstraint(
+        fields=["name", "player"], name="unique_player_decal_name"
+      ),
+    ]

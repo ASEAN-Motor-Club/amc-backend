@@ -119,6 +119,18 @@ async def get_rp_mode(session, player_id):
       return False
     return data['isRpMode']
 
+async def get_decal(session, player_id):
+  async with session.get(f'/player_vehicles/{player_id}/decal') as resp:
+    if resp.status != 200:
+      raise Exception('Failed to get decal')
+    data = await resp.json()
+    return data
+
+async def set_decal(session, player_id, decal):
+  async with session.post(f'/player_vehicles/{player_id}/decal', json=decal) as resp:
+    if resp.status != 200:
+      raise Exception('Failed to set decal')
+
 async def despawn_player_vehicle(session, player_id):
   async with session.post(f'/player_vehicles/{player_id}/despawn') as resp:
     if resp.status != 200:
