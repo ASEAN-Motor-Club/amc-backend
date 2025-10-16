@@ -28,7 +28,7 @@ async def monitor_server_condition(ctx):
 
   fps = status.get('FPS')
   base_vehicles_per_player = 12
-  target_fps = 26
+  target_fps = 22
   max_vehicles_per_player = min(
     base_vehicles_per_player,
     max(int(fps * base_vehicles_per_player * 20 / target_fps / len(players)), 3)
@@ -38,9 +38,9 @@ async def monitor_server_condition(ctx):
   if fps < target_fps:
     if max_vehicles_per_player < base_vehicles_per_player:
       await announce(
-        f"Max vehicles per player is now {max_vehicles_per_player}. Please despawn your unused vehicles to help server fps.",
+        f"Max vehicles per player is now {max_vehicles_per_player}.",
         ctx['http_client'],
-        color="FF0000"
+        color="FF59EE"
       )
 
     for player_id, player_name in players:
