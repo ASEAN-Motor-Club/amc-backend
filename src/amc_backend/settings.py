@@ -187,34 +187,33 @@ DISCORD_VERIFIED_ROLE_ID = int(os.environ.get('DISCORD_VERIFIED_ROLE_ID', '13767
 DISCORD_ADMIN_ROLE_ID = int(os.environ.get('DISCORD_ADMIN_ROLE_ID', '1395460420189421713'))
 
 HELP_TEXT = """\
-<Event>www.aseanmotorclub.com</>
-Visit the website & Join the Discord!
-
-<Title>Available Commands</>
+<Bold>Available Commands</>
 
 <Highlight>/teleport</> - See a list of teleport points.
 <Secondary>Shorthand: /tp</>
-
-<Highlight>/bot [your question]</> - Ask the bot anything related to the game. It understands most of the basic information about the game.
-
-<Highlight>/song_request [name of song and artist]</> - Queue up a song on our radio station. Visit <Focus>aseanmotorclub.com/radio</> to tune in.
-
+<Secondary></>
+<Highlight>/bot [your question]</> - Ask the bot anything related to the game.
+<Secondary></>
 <Highlight>/jobs</> - List available server jobs and subsidies.
-
+<Secondary></>
 <Highlight>/bank</> - See your Bank ASEAN account.
-
+<Secondary></>
+<Highlight>/rescue</> - Calls for rescue service
+<Secondary></>
+<Highlight>/song_request [name of song and artist]</> - Queue up a song on our radio station. Visit <Focus>aseanmotorclub.com/radio</> to tune in.
+<Secondary></>
 <Highlight>/toggle_ubi</> - Toggle your Universal Basic Income
-
+<Secondary></>
 <Highlight>/credits</> - List the awesome people who made this community possible
-
+<Secondary></>
 <Title>Event Commands</>
-
+<Secondary></>
 <Highlight>/events</> - List current and upcoming scheduled events
-
+<Secondary></>
 <Highlight>/countdown</> - Want to do an impromptu race? Use this command to initiate a 5 second countdown.
-
+<Secondary></>
 <Highlight>/setup_event</> - (Event Server only) Creates an event based on the currently active scheduled event.
-
+<Secondary></>
 <Highlight>/results</> - See the results of active events
 """
 
