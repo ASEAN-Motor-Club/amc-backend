@@ -13,7 +13,7 @@ from amc.locations import monitor_locations
 from amc.webhook import monitor_webhook
 from amc.ubi import handout_ubi, TASK_FREQUENCY as UBI_TASK_FREQUENCY
 from amc.deliverypoints import monitor_deliverypoints, monitor_jobs
-from amc.status import monitor_server_status
+from amc.status import monitor_server_status, monitor_server_condition
 from amc.companies import monitor_corporations
 import discord
 from amc.discord_client import bot as discord_client
@@ -81,13 +81,14 @@ class WorkerSettings:
         cron(monitor_locations, second=None),
         cron(handout_ubi, minute=set(range(0, 60, UBI_TASK_FREQUENCY)), second=37),
         cron(apply_interest_to_bank_accounts, hour=None, minute=0, second=0),
-        # cron(monitor_events, second=None),
-        # cron(send_event_embeds, second=set(range(0, 60, 10))),
+        cron(monitor_events, second=None),
+        cron(send_event_embeds, second=set(range(0, 60, 10))),
         # cron(monitor_event_locations, second=None),
         cron(monitor_deliverypoints, second=set(range(0, 60, 7))),
         cron(monitor_jobs, second=37),
         cron(monitor_corporations, second=23),
         cron(monitor_server_status, second=None),
+        cron(monitor_server_condition, minute=set(range(3, 60, 5))),
     ]
     on_startup = startup
     on_shutdown = shutdown
