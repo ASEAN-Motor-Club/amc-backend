@@ -326,6 +326,7 @@ This notice was issued by Officer {interaction.user.display_name}. If you wish t
       c.name for c in player.characters.all()
     ])
     await ban_player(self.bot.http_client_game, player_id, hours, reason)
+    await ban_player(self.bot.http_client_event, player_id, hours, reason)
     await ctx.response.send_message(f'Banned {player_id} (Aliases: {character_names}) for {hours} hours, due to: {reason}')
 
   @app_commands.command(name='kick_player', description='Kick a player from the server')
@@ -343,6 +344,7 @@ This notice was issued by Officer {interaction.user.display_name}. If you wish t
       return
 
     await kick_player(self.bot.http_client_game, player_id)
+    await kick_player(self.bot.http_client_event, player_id)
     await interaction.response.send_message(f'Kicked {player_id} (Aliases: {character_names})')
 
   @app_commands.command(name='admin_profile_player', description='Profile a player')
