@@ -296,16 +296,16 @@ async def process_log_event(event: LogEvent, http_client=None, http_client_mod=N
           popup_message += "<Warning>You were detected inside the forbidden zone in the last hour</>\n"
         else:
           popup_message += "<EffectGood>You have not been inside the forbidden zone for the last hour</>\n"
-        asyncio.create_task(show_popup(http_client_mod, popup_message, player_id=str(player_id)))
+        asyncio.create_task(show_popup(http_client_mod, popup_message, character_guid=character.guid))
       if command_match := re.match(r"/help$", message):
-        asyncio.create_task(show_popup(http_client_mod, settings.HELP_TEXT, player_id=str(player_id)))
+        asyncio.create_task(show_popup(http_client_mod, settings.HELP_TEXT, character_guid=character.guid))
         await BotInvocationLog.objects.acreate(
           timestamp=timestamp,
           character=character, 
           prompt="help",
         )
       if command_match := re.match(r"/credits?$", message):
-        asyncio.create_task(show_popup(http_client_mod, settings.CREDITS_TEXT, player_id=str(player_id)))
+        asyncio.create_task(show_popup(http_client_mod, settings.CREDITS_TEXT, character_guid=character.guid))
         await BotInvocationLog.objects.acreate(
           timestamp=timestamp,
           character=character, 
@@ -325,7 +325,7 @@ async def process_log_event(event: LogEvent, http_client=None, http_client_mod=N
 <Bold>Your decals:</>
 {decals}
 """
-        asyncio.create_task(show_popup(http_client_mod, popup_message, player_id=str(player_id)))
+        asyncio.create_task(show_popup(http_client_mod, popup_message, character_guid=character.guid))
       if command_match := re.match(r"/save_decal\s+(?P<decal_name>.+)$", message):
         decal = await get_decal(http_client_mod, player_id=str(player_id))
         hash = VehicleDecal.calculate_hash(decal)
@@ -347,7 +347,7 @@ You can apply this decal to other vehicles with:
 To see all your decals, use:
 <Highlight>/decals</>
 """
-        asyncio.create_task(show_popup(http_client_mod, popup_message, player_id=str(player_id)))
+        asyncio.create_task(show_popup(http_client_mod, popup_message, character_guid=character.guid))
       if command_match := re.match(r"/apply_decal\s+(?P<decal_name>.+)$", message):
         try:
           decal = await VehicleDecal.objects.aget(
@@ -360,7 +360,7 @@ To see all your decals, use:
             f"#{decal.hash} - {decal.name} ({decal.vehicle_key})"
             async for decal in qs
           ])
-          asyncio.create_task(show_popup(http_client_mod, f"<Title>Decal not found</>\n\n{decals}", player_id=str(player_id)))
+          asyncio.create_task(show_popup(http_client_mod, f"<Title>Decal not found</>\n\n{decals}", character_guid=character.guid))
           return
         await set_decal(http_client_mod, str(player_id), decal.config)
       if command_match := re.match(r"/jobs", message):
@@ -409,10 +409,10 @@ To see all your decals, use:
 <Secondary>These jobs are always subsidised on the server.</>
 
 {SUBSIDIES_TEXT}
-""", player_id=str(player_id)))
+""", character_guid=character.guid))
 
       if command_match := re.match(r"/subsidies", message):
-        asyncio.create_task(show_popup(http_client_mod, SUBSIDIES_TEXT, player_id=str(player_id)))
+        asyncio.create_task(show_popup(http_client_mod, SUBSIDIES_TEXT, character_guid=character.guid))
         await BotInvocationLog.objects.acreate(
           timestamp=timestamp,
           character=character, 
@@ -431,7 +431,7 @@ To see all your decals, use:
           .alatest('last_updated')
         )
         if not active_event:
-          asyncio.create_task(show_popup(http_client_mod, "No active events", player_id=str(player_id)))
+          asyncio.create_task(show_popup(http_client_mod, "No active events", character_guid=character.guid))
         try:
           asyncio.create_task(staggered_start(
             http_client,
@@ -441,7 +441,7 @@ To see all your decals, use:
             delay=float(command_match.group('delay'))
           ))
         except Exception as e:
-          asyncio.create_task(show_popup(http_client_mod, f"Failed: {e}", player_id=str(player_id)))
+          asyncio.create_task(show_popup(http_client_mod, f"Failed: {e}", character_guid=character.guid))
 
       if command_match := re.match(r"/auto_grid$", message):
         active_event = await (GameEvent.objects
@@ -455,21 +455,21 @@ To see all your decals, use:
           .alatest('last_updated')
         )
         if not active_event:
-          asyncio.create_task(show_popup(http_client_mod, "No active events", player_id=str(player_id)))
+          asyncio.create_task(show_popup(http_client_mod, "No active events", character_guid=character.guid))
         try:
           asyncio.create_task(auto_starting_grid(
             http_client_mod,
             active_event,
           ))
         except Exception as e:
-          asyncio.create_task(show_popup(http_client_mod, f"Failed: {e}", player_id=str(player_id)))
+          asyncio.create_task(show_popup(http_client_mod, f"Failed: {e}", character_guid=character.guid))
 
       if command_match := re.match(r"/results", message):
         active_event = await ScheduledEvent.objects.filter_active_at(timestamp).select_related('race_setup').afirst()
         if not active_event:
-          asyncio.create_task(show_popup(http_client_mod, "No active events", player_id=str(player_id)))
+          asyncio.create_task(show_popup(http_client_mod, "No active events", character_guid=character.guid))
           return
-        asyncio.create_task(show_scheduled_event_results_popup(http_client_mod, active_event, player_id=str(player_id)))
+        asyncio.create_task(show_scheduled_event_results_popup(http_client_mod, active_event, character_guid=character.guid))
       if command_match := re.match(r"/setup_event\s*(?P<event_id>\d*)", message):
         try:
           if event_id := command_match.group('event_id'):
@@ -490,15 +490,15 @@ To see all your decals, use:
               .afirst()
             )
             if not scheduled_event:
-              asyncio.create_task(show_popup(http_client_mod, "There does not seem to be an active event. Please first create an event.", player_id=str(player_id)))
+              asyncio.create_task(show_popup(http_client_mod, "There does not seem to be an active event. Please first create an event.", character_guid=character.guid))
               return
           event_setup = await setup_event(timestamp, player_id, scheduled_event, http_client_mod)
           if event_setup:
-            asyncio.create_task(show_popup(http_client_mod, "<Event>Event is setup!</>\n\nPress \"i\" to open the Event menu and start the race.\n\nYour times will be recorded automatically.\n\nGood luck!", player_id=str(player_id)))
+            asyncio.create_task(show_popup(http_client_mod, "<Event>Event is setup!</>\n\nPress \"i\" to open the Event menu and start the race.\n\nYour times will be recorded automatically.\n\nGood luck!", character_guid=character.guid))
           else:
-            asyncio.create_task(show_popup(http_client_mod, "There does not seem to be an active event. Please first create an event.", player_id=str(player_id)))
+            asyncio.create_task(show_popup(http_client_mod, "There does not seem to be an active event. Please first create an event.", character_guid=character.guid))
         except Exception as e:
-          asyncio.create_task(show_popup(http_client_mod, f"Failed to setup event: {e}", player_id=str(player_id)))
+          asyncio.create_task(show_popup(http_client_mod, f"Failed to setup event: {e}", character_guid=character.guid))
           raise e
 
         await BotInvocationLog.objects.acreate(
@@ -515,7 +515,7 @@ To see all your decals, use:
           )
       elif command_match := re.match(r"/despawn$", message):
         await despawn_player_vehicle(http_client_mod, player_id)
-        # asyncio.create_task(show_popup(http_client_mod, "Sorry, this feature is temporarily disabled", player_id=str(player_id)))
+        # asyncio.create_task(show_popup(http_client_mod, "Sorry, this feature is temporarily disabled", character_guid=character.guid))
       elif command_match := re.match(r"/rp_mode$", message):
         verification_code, code_verified = with_verification_code((character.guid, 0), "")
         asyncio.create_task(
@@ -533,22 +533,31 @@ Use <Highlight>/rescue</> to call for help instead.
 If you understand the above, confirm by typing in:
 <Highlight>/rp_mode {verification_code.upper()}</>
 """,
-            player_id=str(player.unique_id)
+            character_guid=character.guid
           )
         )
       elif command_match := re.match(r"/rp_mode\s+(?P<verification_code>\S+)$", message):
         verification_code, code_verified = with_verification_code((character.guid, 0), command_match.group('verification_code'))
         if code_verified:
           await toggle_rp_session(http_client_mod, character.guid)
-      elif command_match := re.match(r"/rescue", message):
+      elif command_match := re.match(r"/rescue\s*(?P<message>.*)$", message):
+        if await RescueRequest.objects.filter(character=character, timestamp__gte=timezone.now() - timedelta(mins=5)).aexists():
+          asyncio.create_task(
+            show_popup(
+              http_client_mod, "You have requested a rescue less than 5 minutes ago",
+              character_guid=character.guid
+            )
+          )
+          return
         players = await get_players(http_client)
+        rescue_request_message = command_match.group('message')
         target_player_id = None
         sent = False
         for p_id, p_name in players:
           if '[ARWRS]' in p_name or '[ARWRS]' in p_name:
             asyncio.create_task(
               show_popup(
-                http_client_mod, f"<Title>Rescue Request</>\n\n<Event>{character.name}</> is requesting for a rescue, please respond if you can.",
+                http_client_mod, f"<Title>Rescue Request</>\n\n<Event>{character.name}</> is requesting for a rescue, please respond if you can.\n\nMessage: {rescue_request_message}",
                 player_id=str(p_id)
               )
             )
@@ -561,7 +570,7 @@ If you understand the above, confirm by typing in:
         asyncio.create_task(
           show_popup(
             http_client_mod, popup_message,
-            player_id=str(player.unique_id)
+            character_guid=character.guid
           )
         )
       elif command_match := re.match(r"/(teleport|tp)\s+(?P<x>[-\d]+)\s+(?P<y>[-\d]+)\s+(?P<z>[-\d]+)$", message):
@@ -589,13 +598,13 @@ If you understand the above, confirm by typing in:
             break
         if not target_player_id:
           asyncio.create_task(
-            show_popup(http_client_mod, "<Title>Player not found</>", player_id=str(player_id))
+            show_popup(http_client_mod, "<Title>Player not found</>", character_guid=character.guid)
           )
           return
         player_info = await get_player(http_client_mod, str(player.unique_id))
         if (not player_info or not player_info.get('bIsAdmin')):
           asyncio.create_task(
-            show_popup(http_client_mod, "<Title>Admin-only Command</>", player_id=str(player_id))
+            show_popup(http_client_mod, "<Title>Admin-only Command</>", character_guid=character.guid)
           )
         else:
           if tp_name == "impound":
@@ -617,7 +626,7 @@ If you understand the above, confirm by typing in:
                 'Z': location.z,
               }
             except TeleportPoint.DoesNotExist:
-              asyncio.create_task(show_popup(http_client_mod, "Teleport point not found", player_id=str(player_id)))
+              asyncio.create_task(show_popup(http_client_mod, "Teleport point not found", character_guid=character.guid))
               return
           await teleport_player(
             http_client_mod,
@@ -642,7 +651,7 @@ If you understand the above, confirm by typing in:
           tp_points = TeleportPoint.objects.filter(character__isnull=True).order_by('name')
           tp_points_names = [tp.name async for tp in tp_points]
           asyncio.create_task(
-            show_popup(http_client_mod, f"<Title>Teleport</>\nUsage: <Highlight>/tp [location]</>\nChoose from one of the following locations:\n\n{'\n'.join(tp_points_names)}", player_id=str(player_id))
+            show_popup(http_client_mod, f"<Title>Teleport</>\nUsage: <Highlight>/tp [location]</>\nChoose from one of the following locations:\n\n{'\n'.join(tp_points_names)}", character_guid=character.guid)
           )
         else:
           if name:
@@ -658,7 +667,7 @@ If you understand the above, confirm by typing in:
                 'Z': location.z,
               }
             except TeleportPoint.DoesNotExist:
-              asyncio.create_task(show_popup(http_client_mod, "Teleport point not found", player_id=str(player_id)))
+              asyncio.create_task(show_popup(http_client_mod, "Teleport point not found", character_guid=character.guid))
               return
           else:
             location = player_info['CustomDestinationAbsoluteLocation']
@@ -686,9 +695,9 @@ If you understand the above, confirm by typing in:
             ),
             discord_client.loop
           )
-          asyncio.create_task(show_popup(http_client_mod, "You are now verified!", player_id=str(player_id)))
+          asyncio.create_task(show_popup(http_client_mod, "You are now verified!", character_guid=character.guid))
         except Exception as e:
-          asyncio.create_task(show_popup(http_client_mod, f"Failed to verify: {e}", player_id=str(player_id)))
+          asyncio.create_task(show_popup(http_client_mod, f"Failed to verify: {e}", character_guid=character.guid))
         await BotInvocationLog.objects.acreate(
           timestamp=timestamp,
           character=character, 
@@ -708,7 +717,7 @@ If you understand the above, confirm by typing in:
           async for event in ScheduledEvent.objects.filter(end_time__gte=timezone.now()).order_by('start_time')
         ])
         asyncio.create_task(
-          show_popup(http_client_mod, f"[EVENTS]\n\n{events_str}", player_id=str(player_id))
+          show_popup(http_client_mod, f"[EVENTS]\n\n{events_str}", character_guid=character.guid)
         )
         await BotInvocationLog.objects.acreate(
           timestamp=timestamp,
@@ -736,7 +745,7 @@ If you understand the above, confirm by typing in:
         )
         if is_current_event:
           asyncio.create_task(
-            show_popup(http_client_mod, "<Title>Your song is being downloaded</>\n\nThis usually takes 30-60 seconds.", player_id=str(player_id))
+            show_popup(http_client_mod, "<Title>Your song is being downloaded</>\n\nThis usually takes 30-60 seconds.", character_guid=character.guid)
           )
       elif command_match := re.match(r"/set_saving_rate (?P<saving_rate>\d+)%?$", message):
         try:
@@ -746,11 +755,11 @@ If you understand the above, confirm by typing in:
           )
           await character.asave(update_fields=['saving_rate'])
           asyncio.create_task(
-            show_popup(http_client_mod, f"<Title>Savings rate saved</>\n\n{character.saving_rate*100:.0f}% of your earnings will automatically go into your bank account", player_id=str(player_id))
+            show_popup(http_client_mod, f"<Title>Savings rate saved</>\n\n{character.saving_rate*100:.0f}% of your earnings will automatically go into your bank account", character_guid=character.guid)
           )
         except Exception as e:
           asyncio.create_task(
-            show_popup(http_client_mod, f"<Title>Set savings rate failed</>\n\n{e}", player_id=str(player_id))
+            show_popup(http_client_mod, f"<Title>Set savings rate failed</>\n\n{e}", character_guid=character.guid)
           )
 
       elif command_match := re.match(r"/toggle_ubi$", message):
@@ -762,11 +771,11 @@ If you understand the above, confirm by typing in:
           else:
             popup_message = "You will start to receive a universal basic income"
           asyncio.create_task(
-            show_popup(http_client_mod, popup_message, player_id=str(player_id))
+            show_popup(http_client_mod, popup_message, character_guid=character.guid)
           )
         except Exception as e:
           asyncio.create_task(
-            show_popup(http_client_mod, f"<Title>Toggle UBI failed</>\n\n{e}", player_id=str(player_id))
+            show_popup(http_client_mod, f"<Title>Toggle UBI failed</>\n\n{e}", character_guid=character.guid)
           )
 
       elif command_match := re.match(r"/bank", message):
@@ -809,7 +818,7 @@ How ASEAN Loans Works
 
 <Bold>Latest Transactions</>
 {transactions_str}
-""", player_id=str(player_id))
+""", character_guid=character.guid)
         )
       elif command_match := re.match(r"/donate\s+(?P<amount>[\d,]+)\s*(?P<verification_code>\S*)", message):
         max_donation = character.driver_level * 15_000 + character.truck_level * 15_000
@@ -837,7 +846,7 @@ To prevent any mishap, please read the following:
 - You have donated {total_donations:,} in the last 7 days (irl)
 
 If you wish to proceed, type the command again followed by the verification code:
-<Highlight>/donate {command_match.group('amount')} {verification_code.upper()}</>""", player_id=str(player_id))
+<Highlight>/donate {command_match.group('amount')} {verification_code.upper()}</>""", character_guid=character.guid)
           )
         elif input_verification_code.lower() != verification_code.lower():
           asyncio.create_task(
@@ -845,7 +854,7 @@ If you wish to proceed, type the command again followed by the verification code
 <Title>Donation</>
 
 Sorry, the verification code did not match, please try again:
-<Highlight>/donate {command_match.group('amount')} {verification_code.upper()}</>""", player_id=str(player_id))
+<Highlight>/donate {command_match.group('amount')} {verification_code.upper()}</>""", character_guid=character.guid)
           )
         else:
           try:
@@ -854,7 +863,7 @@ Sorry, the verification code did not match, please try again:
             await transfer_money(http_client_mod, int(-amount), 'Donation', player_id)
           except Exception as e:
             asyncio.create_task(
-              show_popup(http_client_mod, f"<Title>Donation failed</>\n\n{e}", player_id=str(player_id))
+              show_popup(http_client_mod, f"<Title>Donation failed</>\n\n{e}", character_guid=character.guid)
             )
       elif command_match := re.match(r"/burn\s+(?P<amount>[\d,]+)\s*(?P<verification_code>\S*)", message):
         amount = int(command_match.group('amount').replace(',', ''))
@@ -873,7 +882,7 @@ To prevent any mishap, please read the following:
 - Please do not burn more than your wallet balance! You will end up with negative balance.
 
 If you wish to proceed, type the command again followed by the verification code:
-<Highlight>/burn {command_match.group('amount')} {verification_code.upper()}</>""", player_id=str(player_id))
+<Highlight>/burn {command_match.group('amount')} {verification_code.upper()}</>""", character_guid=character.guid)
           )
         elif input_verification_code.lower() != verification_code.lower():
           asyncio.create_task(
@@ -881,7 +890,7 @@ If you wish to proceed, type the command again followed by the verification code
 <Title>Burn</>
 
 Sorry, the verification code did not match, please try again:
-<Highlight>/burn {command_match.group('amount')} {verification_code.upper()}</>""", player_id=str(player_id))
+<Highlight>/burn {command_match.group('amount')} {verification_code.upper()}</>""", character_guid=character.guid)
           )
         else:
           try:
@@ -889,7 +898,7 @@ Sorry, the verification code did not match, please try again:
             await transfer_money(http_client_mod, int(-amount), 'Burn', player_id)
           except Exception as e:
             asyncio.create_task(
-              show_popup(http_client_mod, f"<Title>Burn failed</>\n\n{e}", player_id=str(player_id))
+              show_popup(http_client_mod, f"<Title>Burn failed</>\n\n{e}", character_guid=character.guid)
             )
       elif command_match := re.match(r"/withdraw\s+(?P<amount>[\d,]+)\s*(?P<verification_code>\S*)", message):
         amount = int(command_match.group('amount').replace(',', ''))
@@ -909,14 +918,14 @@ The amount you will be withdrawing is:
 <Money>{amount:,}</>
 
 If you wish to proceed, type the command again followed by the verification code:
-<Highlight>/withdraw {command_match.group('amount')} {verification_code.upper()}</>""", player_id=str(player_id)))
+<Highlight>/withdraw {command_match.group('amount')} {verification_code.upper()}</>""", character_guid=character.guid))
         else:
           try:
             await register_player_withdrawal(amount, character, player)
             await transfer_money(http_client_mod, int(amount), 'Bank Withdrawal', player_id)
           except Exception as e:
             asyncio.create_task(
-              show_popup(http_client_mod, f"<Title>Withdrawal failed</>\n\n{e}", player_id=str(player_id))
+              show_popup(http_client_mod, f"<Title>Withdrawal failed</>\n\n{e}", character_guid=character.guid)
             )
       elif command_match := re.match(r"/loan\s+(?P<amount>[\d,]+)\s*(?P<verification_code>\S*)$", message):
         if not (await Delivery.objects.filter(character=character).aexists()):
@@ -954,7 +963,7 @@ You will receive:
 <Money>{amount:,}</>
 
 If you wish to proceed, type the command again followed by the verification code:
-<Highlight>/loan {command_match.group('amount')} {verification_code.upper()}</>""", player_id=str(player_id))
+<Highlight>/loan {command_match.group('amount')} {verification_code.upper()}</>""", character_guid=character.guid)
           )
         elif input_verification_code.lower() != verification_code.lower():
           asyncio.create_task(
@@ -962,7 +971,7 @@ If you wish to proceed, type the command again followed by the verification code
 <Title>Taking out a loan</>
 
 Sorry, the verification code did not match, please try again:
-<Highlight>/loan {command_match.group('amount')} {verification_code.upper()}</>""", player_id=str(player_id))
+<Highlight>/loan {command_match.group('amount')} {verification_code.upper()}</>""", character_guid=character.guid)
           )
         elif amount > 0:
           try:
@@ -982,15 +991,15 @@ Congratulations, your loan application was successful. Here is a summary of your
 
 <Bold>Total Balance to Repay:</> <Money>{int(repay_amount):,}</>
 
-The loan amount has been deposited into your wallet. You can view your loan details and repayment schedule at any time from your account dashboard (<Highlight>/bank</>).""", player_id=str(player_id))
+The loan amount has been deposited into your wallet. You can view your loan details and repayment schedule at any time from your account dashboard (<Highlight>/bank</>).""", character_guid=character.guid)
             )
           except Exception as e:
             asyncio.create_task(
-              show_popup(http_client_mod, f"<Title>Loan failed</>\n\n{e}", player_id=str(player_id))
+              show_popup(http_client_mod, f"<Title>Loan failed</>\n\n{e}", character_guid=character.guid)
             )
       elif command_match := re.match(r"/repay_loan (?P<amount>\d+)", message):
         asyncio.create_task(
-          show_popup(http_client_mod, "<Title>Command Removed</>\n\nYou will automatically repay your loan as you earn money on the server", player_id=str(player_id))
+          show_popup(http_client_mod, "<Title>Command Removed</>\n\nYou will automatically repay your loan as you earn money on the server", character_guid=character.guid)
         )
         #amount = int(command_match.group('amount'))
         #loan_balance = await get_player_loan_balance(character)
@@ -1001,7 +1010,7 @@ The loan amount has been deposited into your wallet. You can view your loan deta
         #    await transfer_money(http_client_mod, int(-amount), 'ASEAN Bank Loan Repayment', player_id)
         #  except Exception as e:
         #    asyncio.create_task(
-        #      show_popup(http_client_mod, f"<Title>Loan failed</>\n\n{e}", player_id=str(player_id))
+        #      show_popup(http_client_mod, f"<Title>Loan failed</>\n\n{e}", character_guid=character.guid)
         #    )
 
       elif command_match := re.match(r"^/thank\s+(?P<target_player_name>\S+)$", message):
@@ -1017,7 +1026,7 @@ The loan amount has been deposited into your wallet. You can view your loan deta
             break
         if thanked_player_id is None:
           asyncio.create_task(
-            show_popup(http_client_mod, "<Title>Player not found</>\n\nPlease make sure you typed the name correctly.", player_id=str(player_id))
+            show_popup(http_client_mod, "<Title>Player not found</>\n\nPlease make sure you typed the name correctly.", character_guid=character.guid)
           )
           raise Exception('Player not found')
 
@@ -1034,7 +1043,7 @@ The loan amount has been deposited into your wallet. You can view your loan deta
 
         if already_thanked:
           asyncio.create_task(
-            show_popup(http_client_mod, "You have already thanked this player.\n\nYou may only thank a player once per hour.", player_id=str(player_id))
+            show_popup(http_client_mod, "You have already thanked this player.\n\nYou may only thank a player once per hour.", character_guid=character.guid)
           )
         else:
           await Thank.objects.acreate(
@@ -1044,7 +1053,7 @@ The loan amount has been deposited into your wallet. You can view your loan deta
           )
           await Player.objects.filter(characters=thanked_character).aupdate(social_score=F('social_score')+1)
           asyncio.create_task(
-            show_popup(http_client_mod, "<Title>Thank sent</>", player_id=str(player_id))
+            show_popup(http_client_mod, "<Title>Thank sent</>", character_guid=character.guid)
           )
           asyncio.create_task(
             show_popup(http_client_mod, f"<Title>{character.name} thanked you</>", player_id=str(thanked_player_id))
@@ -1087,7 +1096,7 @@ The loan amount has been deposited into your wallet. You can view your loan deta
         if 'DOT' in player_info['PlayerName']:
           if not (await Team.objects.filter(tag='DOT', members=player).aexists()):
             asyncio.create_task(
-              show_popup(http_client_mod, "You are not authorised to use the DOT tag, please remove it then rejoin the server", player_id=str(player_id))
+              show_popup(http_client_mod, "You are not authorised to use the DOT tag, please remove it then rejoin the server", character_guid=character.guid)
             )
             async def kick_after_delay(delay=10):
               await asyncio.sleep(delay)
@@ -1109,7 +1118,7 @@ The loan amount has been deposited into your wallet. You can view your loan deta
           welcome_message, is_new_player = get_welcome_message(last_login, player_name)
           if is_new_player:
             asyncio.create_task(
-              show_popup(http_client_mod, settings.WELCOME_TEXT, player_id=str(player_id))
+              show_popup(http_client_mod, settings.WELCOME_TEXT, character_guid=character.guid)
             )
           if welcome_message:
             asyncio.create_task(
@@ -1310,4 +1319,3 @@ async def process_log_line(ctx, line):
   await server_log.asave(update_fields=['event_processed'])
 
   return {'status': 'created', 'timestamp': event.timestamp}
-

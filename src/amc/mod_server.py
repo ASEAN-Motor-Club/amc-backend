@@ -1,7 +1,9 @@
-async def show_popup(session, message, player_id=None):
+async def show_popup(session, message, player_id=None, character_guid=None):
   params = {'message': message}
   if player_id is not None:
     params['playerId'] = str(player_id)
+  if character_guid is not None:
+    params['characterGuid'] = str(character_guid)
   await session.post("/messages/popup", json=params)
 
 async def set_config(session, max_vehicles_per_player=12):
