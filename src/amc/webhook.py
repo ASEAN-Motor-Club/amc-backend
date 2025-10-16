@@ -166,7 +166,7 @@ async def process_events(events, http_client=None, http_client_mod=None, discord
 
     group_events = list(group)
     match key[1]:
-      case "/Script/MotorTown.MotorTownPlayerController:ServerCargoArrived":
+      case "ServerCargoArrived":
         cargos = [
           cargo
           for event in group_events
@@ -294,7 +294,7 @@ async def process_event(event, player, used_shortcut=False, http_client=None, ht
     vehicle_key = latest_loc.get_vehicle_key_display()
 
   match event['hook']:
-    case "/Script/MotorTown.MotorTownPlayerController:ServerCargoArrived":
+    case "ServerCargoArrived":
       logs = await asyncio.gather(*[
         process_cargo_log(cargo, player, character, timestamp)
         for cargo in event['data']['Cargos']
@@ -362,7 +362,7 @@ async def process_event(event, player, used_shortcut=False, http_client=None, ht
 
       total_payment += sum([log.payment for log in logs]) + subsidy
 
-    case "/Script/MotorTown.MotorTownPlayerController:ServerCargoDumped":
+    case "ServerCargoDumped":
       cargo = event['data']['Cargo']
       log = await ServerCargoArrivedLog.objects.acreate(
         timestamp=timestamp,
@@ -376,7 +376,7 @@ async def process_event(event, player, used_shortcut=False, http_client=None, ht
       subsidy, _ = get_subsidy_for_cargo(log)
       total_payment += log.payment + subsidy
 
-    case "/Script/MotorTown.MotorTownPlayerController:ServerSignContract":
+    case "ServerSignContract":
       contract = event['data'].get('Contract')
       if contract:
         await ServerSignContractLog.objects.acreate(
@@ -388,7 +388,7 @@ async def process_event(event, player, used_shortcut=False, http_client=None, ht
           cost=contract['Cost']['BaseValue'],
         )
 
-    case "/Script/MotorTown.MotorTownPlayerController:ServerContractCargoDelivered":
+    case "ServerContractCargoDelivered":
       contract = event['data'].get('Contract')
       if contract:
         log, _created = await ServerSignContractLog.objects.aget_or_create(
@@ -406,18 +406,19 @@ async def process_event(event, player, used_shortcut=False, http_client=None, ht
       else:
         try:
           log = await ServerSignContractLog.objects.aget(
-            guid=event['data']['ContractGuid'],
+            guid=event['data'].get('ContractGuid'),
           )
         except ServerSignContractLog.DoesNotExist:
-          return
-      if event['data']['FinishedAmount'] == log.amount - 1:
-        if not log.delivered:
-          total_payment += log.payment
-        log.delivered = True
+          return 0, 0
       log.finished_amount = F('finished_amount') + 1
-      await log.asave(update_fields=['finished_amount', 'delivered'])
+      await log.asave(update_fields=['finished_amount'])
+      await log.arefresh_from_db()
+      if log.finished_amount == log.amount and not log.delivered:
+        total_payment += log.payment
+      log.delivered = True
+      await log.asave(update_fields=['delivered'])
 
-    case "/Script/MotorTown.MotorTownPlayerController:ServerPassengerArrived":
+    case "ServerPassengerArrived":
       passenger = event['data']['Passenger']
       flag = passenger.get('Net_PassengerFlags', 0)
 
@@ -449,7 +450,7 @@ async def process_event(event, player, used_shortcut=False, http_client=None, ht
       subsidy = get_passenger_subsidy(log)
       total_payment += log.payment + subsidy
 
-    case "/Script/MotorTown.MotorTownPlayerController:ServerTowRequestArrived":
+    case "ServerTowRequestArrived":
       tow_request = event['data']['TowRequest']
       payment = tow_request['Net_Payment']
       await ServerTowRequestArrivedLog.objects.acreate(
