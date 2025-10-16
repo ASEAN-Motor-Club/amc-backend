@@ -6,7 +6,7 @@ from django.utils import timezone
 from django.contrib.gis.geos import Point
 from django.db.models import F, Q
 from amc.game_server import announce
-from amc.mod_server import get_webhook_events, show_popup
+from amc.mod_server import get_webhook_events, show_popup, get_rp_mode
 from amc.subsidies import (
   repay_loan_for_profit,
   set_aside_player_savings,
@@ -221,6 +221,7 @@ async def process_events(events, http_client=None, http_client_mod=None, discord
     total_payment = 0
     total_subsidy = 0
 
+    is_rp_mode = await get_rp_mode(http_client_mod, character_guid)
     used_shortcut = await CharacterLocation.objects.filter(
       character=character,
       location__coveredby=gwangjin_shortcut,
@@ -229,7 +230,15 @@ async def process_events(events, http_client=None, http_client_mod=None, discord
 
     for event in es:
       try:
-        payment, subsidy = await process_event(event, player, used_shortcut, http_client, http_client_mod, discord_client)
+        payment, subsidy = await process_event(
+          event,
+          player,
+          is_rp_mode,
+          used_shortcut,
+          http_client,
+          http_client_mod,
+          discord_client
+        )
         total_payment += payment
         total_subsidy += subsidy
       except Exception as e:
@@ -277,7 +286,7 @@ async def process_cargo_log(cargo, player, character, timestamp):
     data=cargo,
   )
 
-async def process_event(event, player, used_shortcut=False, http_client=None, http_client_mod=None, discord_client=None):
+async def process_event(event, player, is_rp_mode=False, used_shortcut=False, http_client=None, http_client_mod=None, discord_client=None):
   total_payment = 0
   subsidy = 0
   current_tz = timezone.get_current_timezone()
@@ -315,6 +324,7 @@ async def process_event(event, player, used_shortcut=False, http_client=None, ht
         jobs_qs = (DeliveryJob.objects
           .filter_active()
           .filter_by_delivery(delivery_source, delivery_destination, cargo_key)
+          .filter(Q(rp_mode=is_rp_mode) | Q(rp_mode=False))
           .distinct()
         )
 

@@ -493,6 +493,7 @@ class DeliveryJobAdmin(admin.ModelAdmin):
         'source_points',
         'destination_points',
         'expired_at',
+        'rp_mode',
       ]
     }),
     ("Payout", {

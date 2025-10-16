@@ -110,6 +110,15 @@ async def get_status(session):
       return None
     return data['data']
 
+async def get_rp_mode(session, player_id):
+  async with session.get(f'/rp_sessions/{player_id}') as resp:
+    if resp.status != 200:
+      return False
+    data = await resp.json()
+    if not data or not data.get('isRpMode'):
+      return False
+    return data['isRpMode']
+
 async def despawn_player_vehicle(session, player_id):
   async with session.post(f'/player_vehicles/{player_id}/despawn') as resp:
     if resp.status != 200:

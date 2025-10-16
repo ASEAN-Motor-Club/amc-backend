@@ -1100,6 +1100,7 @@ class DeliveryJob(models.Model):
   discord_message_id = models.PositiveBigIntegerField(null=True, blank=True, help_text="For bot use only, leave blank")
   description = models.TextField(blank=True, null=True)
   template = models.BooleanField(default=False, help_text="If true this will be used to create future jobs")
+  rp_mode = models.BooleanField(default=False, help_text="Requires the job to be done in RP mode")
   base_template = models.ForeignKey('self', models.SET_NULL, null=True, blank=True, help_text="The template this job was created from")
   expected_player_count_for_quantity = models.PositiveIntegerField(null=True, blank=True, help_text="When player count is lower than this, quantity will be scaled down")
   job_posting_probability = models.FloatField(default=1.0, help_text="The probability at which the job is posted. Defaults to 100% (1.0)")
