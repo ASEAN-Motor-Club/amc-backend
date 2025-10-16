@@ -2,8 +2,10 @@ import asyncio
 from django.contrib.gis.geos import Point
 from amc.models import Character, CharacterLocation
 from amc.mod_server import show_popup, teleport_player
+from django.conf import settings
 
 gwangjin_shortcut = Point(359285, 892222, -3519).buffer(100_00)
+migeum_shortcut = Point(227878, 449541, -9308).buffer(60_00)
 point_of_interests = [
   (
     Point(**{"z": -20696.78, "y": 150230.13, "x": 1025.73}),
@@ -35,6 +37,15 @@ For any other purposes, <Highlight>please contact the admins on the discord</>.
 - You only have to pay them back when you make a profit
 
 Use <Highlight>/bank</> to create a Bank ASEAN account today!
+"""
+  ),
+  (
+    Point(** {"z": -21564.73, "y": 157275.61, "x": -83784.37}),
+    1000,
+    f"""\
+<Title>Welcome to the ASEAN Park</>
+
+{settings.CREDITS_TEXT}
 """
   ),
 ]
