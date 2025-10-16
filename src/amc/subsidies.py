@@ -83,14 +83,14 @@ async def repay_loan_for_profit(player, payment, session):
     )
     raise e
 
-DEFAULT_SAVING_RATE = 0
+DEFAULT_SAVING_RATE = 1
 async def set_aside_player_savings(player, payment, session):
   try:
     character = await player.characters.with_last_login().filter(last_login__isnull=False).alatest('last_login')
     if character.saving_rate is not None:
       saving_rate = character.saving_rate
     else:
-      saving_rate = min(Decimal(1), Decimal(DEFAULT_SAVING_RATE))
+      saving_rate = Decimal(DEFAULT_SAVING_RATE)
     if saving_rate == Decimal(0):
       return 0
 
