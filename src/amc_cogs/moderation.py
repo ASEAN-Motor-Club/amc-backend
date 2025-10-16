@@ -7,8 +7,8 @@ from django.db.models import Q, F
 from django.contrib.gis.geos import Point
 from .utils import create_player_autocomplete
 from amc.models import Player, CharacterLocation, TeleportPoint, Ticket, PlayerMailMessage
-from amc.mod_server import show_popup, teleport_player, get_player, transfer_money
-from amc.game_server import announce, is_player_online, kick_player, ban_player
+from amc.mod_server import show_popup, teleport_player, get_player, transfer_money, list_player_vehicles
+from amc.game_server import announce, is_player_online, kick_player, ban_player, get_players
 
 class VoteKickView(discord.ui.View):
   def __init__(self, player, player_id, bot, timeout=120):
@@ -349,6 +349,23 @@ This notice was issued by Officer {interaction.user.display_name}. If you wish t
 #
 {'\n\n'.join([character_report(c) async for c in player.characters.all()])}
 """
+    await ctx.response.send_message(resp)
+
+  @app_commands.command(name='admin_list_players_vehicles', description='List players spawned vehicles')
+  @app_commands.checks.has_any_role(1395460420189421713)
+  async def list_player_vehicles_cmd(self, ctx):
+    try:
+      players = await get_players(self.bot.http_client_game)
+    except Exception as e:
+      print(f"Failed to get players: {e}")
+      players = []
+
+    resp = "# Player Vehicles\n\n"
+    for player_id, player_name in players:
+      player_vehicles = await list_player_vehicles(self.bot.http_client_mod, player_id)
+
+      resp += f"""
+{player_name}: {len(player_vehicles)}"""
     await ctx.response.send_message(resp)
 
   @app_commands.command(name="votekick", description="Initiate a vote to kick a player")
