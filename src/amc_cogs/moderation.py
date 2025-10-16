@@ -88,7 +88,18 @@ class ModerationCog(commands.Cog):
     player = await Player.objects.aget(
       Q(unique_id=player_id) | Q(discord_user_id=player_id)
     )
-    await show_popup(self.bot.http_client_mod, message, player_id=player.unique_id)
+    mail_message = f"""\
+<Bold>Message from {ctx.user.display_name}</Bold>
+
+{message}
+"""
+    if await is_player_online(player_id, self.bot.http_client_game):
+      await show_popup(self.bot.http_client_mod, mail_message, player_id=player.unique_id)
+    else:
+      await PlayerMailMessage.objects.acreate(
+        to_player=player,
+        content=mail_message
+      )
     await ctx.response.send_message(f'Popup sent to {player.unique_id}: {message}')
 
   @app_commands.command(name='add_teleport_point', description='Create a new teleport point')
