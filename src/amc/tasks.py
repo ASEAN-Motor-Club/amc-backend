@@ -59,6 +59,7 @@ from amc.mod_server import (
   teleport_player,
   get_player,
   despawn_player_vehicle,
+  toggle_rp_session,
 )
 from amc.auth import verify_player
 from amc.mailbox import send_player_messages
@@ -68,7 +69,7 @@ from amc.events import (
   staggered_start,
   auto_starting_grid,
 )
-from amc.locations import gwangjin_shortcut
+from amc.locations import gwangjin_shortcut, migeum_shortcut
 from amc.utils import (
   format_in_local_tz,
   format_timedelta,
@@ -273,8 +274,8 @@ async def process_log_event(event: LogEvent, http_client=None, http_client_mod=N
       )
       if command_match := re.match(r"/shortcutcheck", message):
         in_shortcut = await CharacterLocation.objects.filter(
+          Q(location__coveredby=gwangjin_shortcut) | Q(location__coveredby=migeum_shortcut),
           character=character,
-          location__coveredby=gwangjin_shortcut,
           timestamp__gte=timestamp - timedelta(seconds=5),
         ).aexists()
         used_shortcut = await CharacterLocation.objects.filter(
@@ -459,6 +460,55 @@ async def process_log_event(event: LogEvent, http_client=None, http_client_mod=N
           )
       elif command_match := re.match(r"/despawn$", message):
         await despawn_player_vehicle(http_client_mod, player_id)
+        # asyncio.create_task(show_popup(http_client_mod, "Sorry, this feature is temporarily disabled", player_id=str(player_id)))
+      elif command_match := re.match(r"/rp_mode$", message):
+        verification_code, code_verified = with_verification_code((character.guid, 0), "")
+        asyncio.create_task(
+          show_popup(
+            http_client_mod, f"""\
+<Title>Roleplay Mode</>
+
+<Bold>Enhance your immersion by by toggling RP mode.</>
+When enabled, you are expected not to use roadside recovery.
+The use of roadside recovery will result in the loss of cargo and vehicle.
+Use <Highlight>/rescue</> to call for help instead.
+
+<Warning>ALL Your vehicles will be despawned by toggling this mode!</>
+
+If you understand the above, confirm by typing in:
+<Highlight>/rp_mode {verification_code.upper()}</>
+""",
+            player_id=str(player.unique_id)
+          )
+        )
+      elif command_match := re.match(r"/rp_mode\s+(?P<verification_code>\S+)$", message):
+        verification_code, code_verified = with_verification_code((character.guid, 0), command_match.group('verification_code'))
+        if code_verified:
+          await toggle_rp_session(http_client_mod, character.guid)
+      elif command_match := re.match(r"/rescue", message):
+        players = await get_players(http_client)
+        target_player_id = None
+        sent = False
+        for p_id, p_name in players:
+          if '[ARWRS]' in p_name or '[ARWRS]' in p_name:
+            asyncio.create_task(
+              show_popup(
+                http_client_mod, f"<Title>Rescue Request</>\n\n<Event>{character.name}</> is requesting for a rescue, please respond if you can.",
+                player_id=str(p_id)
+              )
+            )
+            sent = True
+
+        if sent:
+          popup_message = "Rescue request sent"
+        else:
+          popup_message = "Sorry, the rescue team is not available at the moment"
+        asyncio.create_task(
+          show_popup(
+            http_client_mod, popup_message,
+            player_id=str(player.unique_id)
+          )
+        )
       elif command_match := re.match(r"/(teleport|tp)\s+(?P<x>[-\d]+)\s+(?P<y>[-\d]+)\s+(?P<z>[-\d]+)$", message):
         player_info = await get_player(http_client_mod, str(player.unique_id))
         if player_info and player_info.get('bIsAdmin'):
@@ -473,13 +523,13 @@ async def process_log_event(event: LogEvent, http_client=None, http_client_mod=N
             no_vehicles=not player_info.get('bIsAdmin')
           )
       elif command_match := re.match(r"/(teleport|tp)\s+(?P<player_name>\S+)\s+(?P<tp_name>\S+)", message):
-        player_name = command_match.group('player_name')
+        target_player_name = command_match.group('player_name')
         tp_name = command_match.group('tp_name')
 
         players = await get_players(http_client)
         target_player_id = None
         for p_id, p_name in players:
-          if player_name == p_name:
+          if target_player_name == p_name:
             target_player_id = p_id
             break
         if not target_player_id:
@@ -751,6 +801,41 @@ Sorry, the verification code did not match, please try again:
             asyncio.create_task(
               show_popup(http_client_mod, f"<Title>Donation failed</>\n\n{e}", player_id=str(player_id))
             )
+      elif command_match := re.match(r"/burn\s+(?P<amount>[\d,]+)\s*(?P<verification_code>\S*)", message):
+        amount = int(command_match.group('amount').replace(',', ''))
+        signer = Signer()
+        signed_obj = signer.sign((amount, character.id))
+        verification_code = signed_obj.replace('-', '').replace('_', '')[-4:]
+
+        input_verification_code = command_match.group('verification_code')
+        if not input_verification_code:
+          asyncio.create_task(
+            show_popup(http_client_mod, f"""\
+<Title>Burn</>
+
+To prevent any mishap, please read the following:
+- This action is non-reversible
+- Please do not burn more than your wallet balance! You will end up with negative balance.
+
+If you wish to proceed, type the command again followed by the verification code:
+<Highlight>/burn {command_match.group('amount')} {verification_code.upper()}</>""", player_id=str(player_id))
+          )
+        elif input_verification_code.lower() != verification_code.lower():
+          asyncio.create_task(
+            show_popup(http_client_mod, f"""\
+<Title>Burn</>
+
+Sorry, the verification code did not match, please try again:
+<Highlight>/burn {command_match.group('amount')} {verification_code.upper()}</>""", player_id=str(player_id))
+          )
+        else:
+          try:
+            amount = max(0, amount)
+            await transfer_money(http_client_mod, int(-amount), 'Burn', player_id)
+          except Exception as e:
+            asyncio.create_task(
+              show_popup(http_client_mod, f"<Title>Burn failed</>\n\n{e}", player_id=str(player_id))
+            )
       elif command_match := re.match(r"/withdraw\s+(?P<amount>[\d,]+)\s*(?P<verification_code>\S*)", message):
         amount = int(command_match.group('amount').replace(',', ''))
         balance = await get_player_bank_balance(character)
@@ -791,7 +876,7 @@ If you wish to proceed, type the command again followed by the verification code
           int(command_match.group('amount').replace(',', '')),
           max_loan - loan_balance
         ), 0)
-        fee = calc_loan_fee(amount, character)
+        fee = calc_loan_fee(amount, character, max_loan)
 
         signer = Signer()
         signed_obj = signer.sign((amount, character.id))
