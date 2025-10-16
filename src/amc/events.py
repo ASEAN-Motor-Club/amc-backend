@@ -145,7 +145,7 @@ async def process_event(event):
     character, *_ = await Character.objects.aget_or_create_character_player(
       player_info['PlayerName'],
       int(player_info['CharacterId']['UniqueNetId']),
-      character_guid=player_info.get('CharacterGuid'),
+      character_guid=player_info['CharacterId']['CharacterGuid'],
     )
     player_finished = await GameEventCharacter.objects.filter(
       character=character,
@@ -284,23 +284,26 @@ async def show_scheduled_event_results_popup(http_client, scheduled_event, playe
 async def monitor_events(ctx):
   http_client = ctx.get('http_client_event_mod')
 
-  async with http_client.get('/events') as resp:
-    events = (await resp.json()).get('data', [])
-    results = await asyncio.gather(*[
-      process_event(event)
-      for event in events
-    ])
+  try:
+    async with http_client.get('/events') as resp:
+      events = (await resp.json()).get('data', [])
+      results = await asyncio.gather(*[
+        process_event(event)
+        for event in events
+      ])
 
-    for (game_event, transition) in results:
-      if transition == (2, 3): # Finished
-        await asyncio.sleep(1)
-        participants = [p async for p in (GameEventCharacter.objects
-          .select_related('character', 'character__player')
-          .filter(
-            game_event=game_event,
-          )
-        )]
-        await show_results_popup(http_client, participants)
+      for (game_event, transition) in results:
+        if transition == (2, 3): # Finished
+          await asyncio.sleep(1)
+          participants = [p async for p in (GameEventCharacter.objects
+            .select_related('character', 'character__player')
+            .filter(
+              game_event=game_event,
+            )
+          )]
+          await show_results_popup(http_client, participants)
+  except Exception:
+    pass
 
 
 
