@@ -1,6 +1,7 @@
 import math
 import asyncio
 import discord
+import aiohttp
 from datetime import timedelta
 from django.utils import timezone
 from urllib.parse import quote
@@ -404,71 +405,77 @@ async def send_event_embeds(ctx):
     await discord_client.wait_until_ready()
   channel = discord_client.get_channel(settings.DISCORD_EVENTS_CHANNEL_ID)
 
-  async with http_client.get('/events') as resp:
-    events = (await resp.json()).get('data', [])
-    event_guids = [event['EventGuid'] for event in events]
-    qs = (GameEvent.objects
-      .select_related('race_setup', 'scheduled_event')
-      .prefetch_related(
-        Prefetch('participants', queryset=GameEventCharacter.objects.select_related('character'))
+  try: 
+    async with http_client.get('/events') as resp:
+      if resp.status != 200:
+        return
+      events = (await resp.json()).get('data', [])
+  except aiohttp.ClientConnectorError:
+    return
+
+  event_guids = [event['EventGuid'] for event in events]
+  qs = (GameEvent.objects
+    .select_related('race_setup', 'scheduled_event')
+    .prefetch_related(
+      Prefetch('participants', queryset=GameEventCharacter.objects.select_related('character'))
+    )
+    .annotate(
+      rank=Window(
+        expression=RowNumber(),
+        partition_by=[F('guid')],
+        order_by=[F('last_updated').desc()]
       )
-      .annotate(
-        rank=Window(
-          expression=RowNumber(),
-          partition_by=[F('guid')],
-          order_by=[F('last_updated').desc()]
+    )
+    .filter(rank=1, guid__in=event_guids)
+  )
+
+  async for game_event in qs:
+    asyncio.run_coroutine_threadsafe(
+      send_event_embed(game_event, channel),
+      discord_client.loop
+    )
+
+  # Remove expired embeds
+
+  expired_discord_message_ids = list(set([
+    discord_message_id
+    async for discord_message_id in (GameEvent.objects
+      .filter(discord_message_id__isnull=False, last_updated__gte=timezone.now() - timedelta(days=7))
+      .exclude(Exists(
+        GameEventCharacter.objects.filter(
+          game_event=OuterRef('pk'),
+          finished=True
         )
-      )
-      .filter(rank=1, guid__in=event_guids)
-    )
+      ))
+      .difference(qs)
+      .order_by('-last_updated')
+      .values_list('discord_message_id', flat=True)
+    )[:50]
+  ]))
+  async def delete_expired_messages(mIds):
+    expired_discord_messages = [discord.Object(id=str(mId)) for mId in mIds]
+    if expired_discord_messages:
+      try:
+        await GameEvent.objects.filter(discord_message_id__in=mIds).aupdate(discord_message_id=None)
+        await channel.delete_messages(expired_discord_messages)
+      except Exception as e:
+        print(f'Failed to delete {mIds}: {e}', flush=True)
 
-    async for game_event in qs:
-      asyncio.run_coroutine_threadsafe(
-        send_event_embed(game_event, channel),
-        discord_client.loop
-      )
+  async def delete_unattached_embeds():
+    to_delete = []
+    async for m in channel.history(limit=20):
+      if not (await GameEvent.objects.filter(discord_message_id=m.id).aexists()):
+        to_delete.append(m)
+    await channel.delete_messages(to_delete)
 
-    # Remove expired embeds
-
-    expired_discord_message_ids = list(set([
-      discord_message_id
-      async for discord_message_id in (GameEvent.objects
-        .filter(discord_message_id__isnull=False, last_updated__gte=timezone.now() - timedelta(days=7))
-        .exclude(Exists(
-          GameEventCharacter.objects.filter(
-            game_event=OuterRef('pk'),
-            finished=True
-          )
-        ))
-        .difference(qs)
-        .order_by('-last_updated')
-        .values_list('discord_message_id', flat=True)
-      )[:50]
-    ]))
-    async def delete_expired_messages(mIds):
-      expired_discord_messages = [discord.Object(id=str(mId)) for mId in mIds]
-      if expired_discord_messages:
-        try:
-          await GameEvent.objects.filter(discord_message_id__in=mIds).aupdate(discord_message_id=None)
-          await channel.delete_messages(expired_discord_messages)
-        except Exception as e:
-          print(f'Failed to delete {mIds}: {e}', flush=True)
-
-    async def delete_unattached_embeds():
-      to_delete = []
-      async for m in channel.history(limit=20):
-        if not (await GameEvent.objects.filter(discord_message_id=m.id).aexists()):
-          to_delete.append(m)
-      await channel.delete_messages(to_delete)
-
-    asyncio.run_coroutine_threadsafe(
-      delete_expired_messages(expired_discord_message_ids),
-      discord_client.loop
-    )
-    asyncio.run_coroutine_threadsafe(
-      delete_unattached_embeds(),
-      discord_client.loop
-    )
+  asyncio.run_coroutine_threadsafe(
+    delete_expired_messages(expired_discord_message_ids),
+    discord_client.loop
+  )
+  asyncio.run_coroutine_threadsafe(
+    delete_unattached_embeds(),
+    discord_client.loop
+  )
 
 async def staggered_start(http_client_game, http_client_mod, game_event, player_id=None, delay=20.0):
   async with http_client_mod.get(f'/events/{game_event.guid}') as resp:
