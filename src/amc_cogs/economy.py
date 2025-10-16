@@ -335,7 +335,7 @@ Tow Requests: {tow_requests_aggregates['total_payments']:,}
     character = await player.characters.with_last_login().filter(last_login__isnull=False).alatest('last_login')
     balance = await get_player_bank_balance(character)
     loan_balance = await get_player_loan_balance(character)
-    max_loan, _ = await get_character_max_loan(character)
+    max_loan, max_loan_reason = await get_character_max_loan(character)
     saving_rate = character.saving_rate if character.saving_rate is not None else Decimal(DEFAULT_SAVING_RATE)
     await interaction.response.send_message(f"""\
 # Your Bank ASEAN Account
@@ -344,8 +344,8 @@ Tow Requests: {tow_requests_aggregates['total_payments']:,}
 **Balance:** `{balance:,}`
 -# Daily Interest Rate: `2.2%` (offline), `4.4%` (online) 
 **Loans:** `{loan_balance:,}`
-**Max Available Loan:** `{max_loan:,}`
--# Max available loan depends on your driver level (currently {character.driver_level})
+<Bold>Max Available Loan:</> <Money>{max_loan:,}</>
+<Small>{max_loan_reason or 'Max available loan depends on your driver+trucking level'}</>
 **Earnings Saving Rate:** `{saving_rate * Decimal(100):.0f}%`
 
 ### How to Put Money in the Bank
