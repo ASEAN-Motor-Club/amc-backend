@@ -4,6 +4,10 @@ async def show_popup(session, message, player_id=None):
     params['playerId'] = str(player_id)
   await session.post("/messages/popup", json=params)
 
+async def set_config(session, max_vehicles_per_player=12):
+  params = {'MaxVehiclePerPlayer': max_vehicles_per_player}
+  await session.post("/config", json=params)
+
 
 async def transfer_money(session, amount, message, player_id):
   transfer = {
@@ -13,6 +17,11 @@ async def transfer_money(session, amount, message, player_id):
   async with session.post(f'/players/{player_id}/money', json=transfer) as resp:
     if resp.status != 200:
       raise Exception('Failed to transfer money')
+
+async def toggle_rp_session(session, player_guid):
+  async with session.post(f'/rp_sessions/{player_guid}/toggle') as resp:
+    if resp.status != 200:
+      raise Exception('Failed to toggle RP session')
 
 async def join_player_to_event(session, event_guid, player_id):
   data = {
@@ -37,6 +46,13 @@ async def get_events(session):
       raise Exception('Failed to fetch events')
     data = await resp.json()
     return data['data']
+
+async def list_player_vehicles(session, player_id):
+  async with session.get(f'/player_vehicles/{player_id}/list') as resp:
+    if resp.status != 200:
+      raise Exception(f'Failed to fetch player vehicles: {player_id}')
+    data = await resp.json()
+    return data['vehicles']
 
 async def send_message_as_player(session, message, player_id):
   data = {
