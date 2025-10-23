@@ -45,6 +45,7 @@ from .models import (
   DeliveryJob,
   Cargo,
   ServerStatus,
+  PlayerShift,
 )
 from amc_finance.services import send_fund_to_player
 from amc_finance.admin import AccountInlineAdmin
@@ -563,4 +564,8 @@ class DeliveryAdmin(admin.ModelAdmin):
 @admin.register(ServerStatus)
 class ServerStatusAdmin(admin.ModelAdmin):
   list_display = ['timestamp', 'fps', 'used_memory']
+
+@admin.register(PlayerShift)
+class PlayerShiftAdmin(admin.ModelAdmin):
+  list_display = ['player', 'start_time_utc', 'end_time_utc', 'user_timezone']
 

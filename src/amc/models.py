@@ -1242,3 +1242,27 @@ class VehicleDecal(models.Model):
         fields=["name", "player"], name="unique_player_decal_name"
       ),
     ]
+
+@final
+class PlayerShift(models.Model):
+  player = models.ForeignKey(Player, on_delete=models.SET_NULL, null=True, blank=True, related_name='shifts')
+  start_time_utc = models.TimeField(
+    help_text="The start time of the user's shift in UTC."
+  )
+  end_time_utc = models.TimeField(
+    help_text="The end time of the user's shift in UTC."
+  )
+
+  user_timezone = models.CharField(
+    max_length=100,
+    default='UTC',
+    help_text="The user's local timezone (e.g., 'America/New_York')."
+  )
+
+@final
+class RescueRequest(models.Model):
+  timestamp = models.DateTimeField(auto_now_add=True)
+  character = models.ForeignKey(Character, on_delete=models.CASCADE, related_name='rescue_requests')
+  message = models.TextField(blank=True)
+
+

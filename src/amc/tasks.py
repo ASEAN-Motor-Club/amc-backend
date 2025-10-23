@@ -52,6 +52,7 @@ from amc.models import (
   DeliveryJob,
   DeliveryPoint,
   VehicleDecal,
+  RescueRequest,
 )
 from amc.game_server import announce, get_players, kick_player
 from amc.mod_server import (
@@ -572,6 +573,10 @@ If you understand the above, confirm by typing in:
             http_client_mod, popup_message,
             character_guid=character.guid
           )
+        )
+        await RescueRequest.objects.acreate(
+          character=character,
+          message=rescue_request_message,
         )
       elif command_match := re.match(r"/(teleport|tp)\s+(?P<x>[-\d]+)\s+(?P<y>[-\d]+)\s+(?P<z>[-\d]+)$", message):
         player_info = await get_player(http_client_mod, str(player.unique_id))
@@ -1319,3 +1324,4 @@ async def process_log_line(ctx, line):
   await server_log.asave(update_fields=['event_processed'])
 
   return {'status': 'created', 'timestamp': event.timestamp}
+
