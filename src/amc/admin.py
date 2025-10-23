@@ -220,9 +220,9 @@ class PlayerVehicleLogAdmin(admin.ModelAdmin):
 
 @admin.register(ServerLog)
 class ServerLogAdmin(admin.ModelAdmin):
-  list_display = ['timestamp', 'text', 'event_processed']
+  list_display = ['timestamp', 'hostname', 'text', 'event_processed']
   ordering = ['-timestamp']
-  list_filter = ['event_processed']
+  list_filter = ['event_processed', 'hostname']
   search_fields = ['text']
 
 
@@ -471,7 +471,7 @@ class CargoAdmin(admin.ModelAdmin):
 
 @admin.register(DeliveryJob)
 class DeliveryJobAdmin(admin.ModelAdmin):
-  list_display = ['id', 'name', 'finished', 'requested_at', 'template', 'postable']
+  list_display = ['id', 'name', 'finished', 'requested_at', 'template', 'postable', 'num_posted']
   ordering = ['-requested_at']
   search_fields = [
     'name',
@@ -519,9 +519,19 @@ class DeliveryJobAdmin(admin.ModelAdmin):
   def postable(self, job):
     return async_to_sync(job.is_postable)()
 
+  @admin.display()
+  def num_posted(self, job):
+    return job.num_posted
+
   def get_queryset(self, request):
     qs = super().get_queryset(request)
-    return qs.annotate_active().prefetch_related('source_points', 'destination_points', 'cargos') 
+    return (qs
+      .annotate_active()
+      .prefetch_related('source_points', 'destination_points', 'cargos')
+      .annotate(
+        num_posted=Count('job_postings', distinct=True)
+      )
+    )
 
   @admin.action(description="Create job from template")
   def create_job_from_template(self, request, queryset):
