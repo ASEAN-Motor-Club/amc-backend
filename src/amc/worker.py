@@ -10,7 +10,7 @@ from django.utils import timezone
 from amc.tasks import process_log_line
 from amc.events import monitor_events, send_event_embeds
 from amc.locations import monitor_locations
-from amc.webhook import monitor_webhook
+from amc.webhook import monitor_webhook, monitor_webhook_test
 from amc.ubi import handout_ubi, TASK_FREQUENCY as UBI_TASK_FREQUENCY
 from amc.deliverypoints import monitor_deliverypoints, monitor_jobs
 from amc.status import monitor_server_status, monitor_server_condition
@@ -46,8 +46,12 @@ async def startup(ctx):
   ctx['startup_time'] = timezone.now()
   ctx['http_client'] = aiohttp.ClientSession(base_url=settings.GAME_SERVER_API_URL)
   ctx['http_client_mod'] = aiohttp.ClientSession(base_url=settings.MOD_SERVER_API_URL)
+  ctx['http_client_webhook'] = aiohttp.ClientSession(base_url=settings.WEBHOOK_SERVER_API_URL)
   ctx['http_client_event'] = aiohttp.ClientSession(base_url=settings.EVENT_GAME_SERVER_API_URL)
   ctx['http_client_event_mod'] = aiohttp.ClientSession(base_url=settings.EVENT_MOD_SERVER_API_URL)
+  ctx['http_client_test'] = aiohttp.ClientSession(base_url=settings.TEST_GAME_SERVER_API_URL)
+  ctx['http_client_test_mod'] = aiohttp.ClientSession(base_url=settings.TEST_MOD_SERVER_API_URL)
+  ctx['http_client_test_webhook'] = aiohttp.ClientSession(base_url=settings.TEST_WEBHOOK_SERVER_API_URL)
 
   if settings.DISCORD_TOKEN:
     ctx['discord_client'] = discord_client
@@ -61,10 +65,22 @@ async def shutdown(ctx):
   if http_client_mod := ctx.get('http_client_mod'):
     await http_client_mod.close()
 
+  if http_client_mod := ctx.get('http_client_webhook'):
+    await http_client_mod.close()
+
   if http_client := ctx.get('http_client_event'):
     await http_client.close()
 
   if http_client := ctx.get('http_client_event_mod'):
+    await http_client.close()
+
+  if http_client := ctx.get('http_client_test'):
+    await http_client.close()
+
+  if http_client := ctx.get('http_client_test_mod'):
+    await http_client.close()
+
+  if http_client := ctx.get('http_client_test_webhook'):
     await http_client.close()
 
   if bot_task_handle and (discord_client := ctx.get('discord_client')):
@@ -78,6 +94,7 @@ class WorkerSettings:
     functions = [process_log_line]
     cron_jobs = [
         cron(monitor_webhook, second=set(range(0, 60, 4))),
+        cron(monitor_webhook_test, second=set(range(0, 60, 4))),
         cron(monitor_locations, second=None),
         cron(handout_ubi, minute=set(range(0, 60, UBI_TASK_FREQUENCY)), second=37),
         cron(apply_interest_to_bank_accounts, hour=None, minute=0, second=0),
@@ -86,12 +103,12 @@ class WorkerSettings:
         # cron(monitor_event_locations, second=None),
         cron(monitor_deliverypoints, second=set(range(0, 60, 7))),
         cron(monitor_jobs, second=37),
-        cron(monitor_corporations, second=23),
+        #cron(monitor_corporations, second=23),
         cron(monitor_server_status, second=None),
-        cron(monitor_server_condition, minute=set(range(3, 60, 5))),
+        # cron(monitor_server_condition, minute=set(range(3, 60, 5))),
     ]
     on_startup = startup
     on_shutdown = shutdown
     redis_settings = REDIS_SETTINGS
-    max_jobs = 30
+    max_jobs = 100
 

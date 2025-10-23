@@ -1,3 +1,4 @@
+import json
 import asyncio
 import itertools
 from operator import attrgetter
@@ -6,7 +7,7 @@ from django.utils import timezone
 from django.contrib.gis.geos import Point
 from django.db.models import F, Q
 from amc.game_server import announce
-from amc.mod_server import get_webhook_events, show_popup, get_rp_mode
+from amc.mod_server import get_webhook_events2, show_popup, get_rp_mode, despawn_player_vehicle
 from amc.subsidies import (
   repay_loan_for_profit,
   set_aside_player_savings,
@@ -144,8 +145,17 @@ async def post_discord_delivery_embed(
 async def monitor_webhook(ctx):
   http_client = ctx.get('http_client')
   http_client_mod = ctx.get('http_client_mod')
+  http_client_webhook = ctx.get('http_client_webhook')
   discord_client = ctx.get('discord_client')
-  events = await get_webhook_events(http_client_mod)
+  events = await get_webhook_events2(http_client_webhook)
+  await process_events(events, http_client, http_client_mod, discord_client)
+
+async def monitor_webhook_test(ctx):
+  http_client = ctx.get('http_client_test')
+  http_client_mod = ctx.get('http_client_test_mod')
+  http_client_webhook = ctx.get('http_client_test_webhook')
+  discord_client = ctx.get('discord_client')
+  events = await get_webhook_events2(http_client_webhook)
   await process_events(events, http_client, http_client_mod, discord_client)
 
 
@@ -178,6 +188,15 @@ async def process_events(events, http_client=None, http_client_mod=None, discord
           'data': {
             'CharacterGuid': key[0],
             'Cargos': cargos,
+          }
+        })
+      case "ServerResetVehicleAtResponse":
+        aggregated_events.append({
+          'hook': key[1],
+          'timestamp': group_events[0]['timestamp'],
+          'data': {
+            'CharacterGuid': key[0],
+            'VehicleId': group_events[0]['data'].get('VehicleId'),
           }
         })
       case _:
@@ -233,6 +252,7 @@ async def process_events(events, http_client=None, http_client_mod=None, discord
         payment, subsidy = await process_event(
           event,
           player,
+          character,
           is_rp_mode,
           used_shortcut,
           http_client,
@@ -242,8 +262,9 @@ async def process_events(events, http_client=None, http_client_mod=None, discord
         total_payment += payment
         total_subsidy += subsidy
       except Exception as e:
+        event_str = json.dumps(event)
         asyncio.create_task(
-          show_popup(http_client_mod, f"Webhook failed, please send to discord:\n{e}", player_id=str(player.unique_id))
+          show_popup(http_client_mod, f"Webhook failed, please send to discord:\n{e}\n{event_str}", player_id=str(player.unique_id))
         )
         raise e
 
@@ -278,24 +299,20 @@ async def process_cargo_log(cargo, player, character, timestamp):
     player=player,
     character=character,
     cargo_key=cargo['Net_CargoKey'],
-    payment=cargo['Net_Payment']['BaseValue'],
-    weight=cargo['Net_Weight'],
+    payment=cargo['Net_Payment'],
+    weight=cargo.get('Net_Weight', 0),
     damage=cargo['Net_Damage'],
     sender_point=sender,
     destination_point=destination,
     data=cargo,
   )
 
-async def process_event(event, player, is_rp_mode=False, used_shortcut=False, http_client=None, http_client_mod=None, discord_client=None):
+async def process_event(event, player, character, is_rp_mode=False, used_shortcut=False, http_client=None, http_client_mod=None, discord_client=None):
+  print(event)
   total_payment = 0
   subsidy = 0
   current_tz = timezone.get_current_timezone()
-  timestamp = datetime.fromtimestamp(event['timestamp'] / 1000, tz=current_tz)
-
-  try:
-    character = await player.get_latest_character()
-  except Exception:
-    character = None
+  timestamp = datetime.fromtimestamp(event['timestamp'], tz=current_tz)
 
   vehicle_key = ""
   if character:
@@ -378,8 +395,8 @@ async def process_event(event, player, is_rp_mode=False, used_shortcut=False, ht
         timestamp=timestamp,
         player=player,
         cargo_key=cargo['Net_CargoKey'],
-        payment=cargo['Net_Payment']['BaseValue'],
-        weight=cargo['Net_Weight'],
+        payment=cargo['Net_Payment'],
+        weight=cargo.get('Net_Weight', 0),
         damage=cargo['Net_Damage'],
         data=event['data'],
       )
@@ -399,7 +416,8 @@ async def process_event(event, player, is_rp_mode=False, used_shortcut=False, ht
         )
 
     case "ServerContractCargoDelivered":
-      contract = event['data'].get('Contract')
+      print(event)
+      contract = event['data']
       if contract:
         log, _created = await ServerSignContractLog.objects.aget_or_create(
           guid=event['data']['ContractGuid'],
@@ -408,8 +426,8 @@ async def process_event(event, player, is_rp_mode=False, used_shortcut=False, ht
             'player': player,
             'cargo_key': contract['Item'],
             'amount': contract['Amount'],
-            'payment': contract['CompletionPayment']['BaseValue'],
-            'cost': contract['Cost']['BaseValue'],
+            'payment': contract['CompletionPayment'],
+            'cost': contract.get('Cost', 0),
             'data': contract
           },
         )
@@ -425,8 +443,8 @@ async def process_event(event, player, is_rp_mode=False, used_shortcut=False, ht
       await log.arefresh_from_db()
       if log.finished_amount == log.amount and not log.delivered:
         total_payment += log.payment
-      log.delivered = True
-      await log.asave(update_fields=['delivered'])
+        log.delivered = True
+        await log.asave(update_fields=['delivered'])
 
     case "ServerPassengerArrived":
       passenger = event['data']['Passenger']
@@ -475,6 +493,11 @@ async def process_event(event, player, is_rp_mode=False, used_shortcut=False, ht
         case _:
           subsidy = 2_000 + payment * 0.5
       total_payment += payment + subsidy
+
+    case "ServerResetVehicleAtResponse":
+      if is_rp_mode:
+        await despawn_player_vehicle(http_client_mod, player.unique_id)
+        asyncio.create_task(announce(f"{character.name} used roadside in RP mode. Shame!", http_client, color="FFA500"))
 
 
   return total_payment, subsidy

@@ -112,6 +112,11 @@ async def get_webhook_events(session):
     data = await resp.json()
     return data
 
+async def get_webhook_events2(session):
+  async with session.get('/events') as resp:
+    data = await resp.json()
+    return data['events']
+
 async def get_status(session):
   async with session.get('/status/general') as resp:
     data = await resp.json()
