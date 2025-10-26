@@ -96,13 +96,17 @@ async def set_aside_player_savings(player, payment, session):
 
     saving = Decimal(saving_rate) * Decimal(payment)
     if saving > 0:
+      message = 'Earnings Bank Deposit'
+      if character.saving_rate is None:
+        message = 'Automated Bank Deposit (Use /bank to check your balance)'
+
       await transfer_money(
         session,
         int(-saving),
-        'Earnings Deposit (Use /bank to see)',
+        message,
         str(player.unique_id),
       )
-      await register_player_deposit(saving, character, player, "ASEAN Subsidy")
+      await register_player_deposit(saving, character, player, "Earnings Deposit")
       return int(saving)
   except Exception as e:
     asyncio.create_task(
