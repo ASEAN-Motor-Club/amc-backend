@@ -238,7 +238,7 @@ CREDITS_TEXT = """\
 This awesome community and server is made possible by the hard work of our members, who have dedicated their time and effort for the benefit of all.
 
 <Bold>Donators & Server Boosters</>
-Patreon: <Whisper>Dunst</> <Whisper>YOUYU</> <Whisper>dvdurL</> <Whisper>Dr.P</> <Whisper>DrPlanecraft</> <Whisper>Meehoi</>
+Patreon: <Whisper>Dunst</> <Whisper>YOUYU</> <Whisper>dvdurL</> <Whisper>Dr.P</> <Whisper>DrPlanecraft</> <Whisper>Meehoi</> <Whisper>Hako</>
 Discord boosts: <Whisper>Diallo128</> (from 41Shots) <Whisper>Zackson</> <Whisper>Pliyego</> <Whisper>Glitch</> <Whisper>Dunst</> <Whisper>mordecool</>
 
 <Bold>Dev</>
