@@ -32,18 +32,16 @@ from amc.locations import gwangjin_shortcut
 
 
 async def on_player_profits(player_profits, session):
-  for player, total_subsidy, total_payment in player_profits:
-    await on_player_profit(player, total_subsidy, total_payment, session)
-    await asyncio.sleep(0.5)
+  for character, total_subsidy, total_payment in player_profits:
+    await on_player_profit(character, total_subsidy, total_payment, session)
 
-async def on_player_profit(player, total_subsidy, total_payment, session):
+async def on_player_profit(character, total_subsidy, total_payment, session):
   if total_subsidy != 0:
-    await subsidise_player(total_subsidy, player, session)
-    await asyncio.sleep(0.5)
-  loan_repayment = await repay_loan_for_profit(player, total_payment, session)
+    await subsidise_player(total_subsidy, character, session)
+  loan_repayment = await repay_loan_for_profit(character, total_payment, session)
   savings = total_payment - loan_repayment
   if savings > 0:
-    await set_aside_player_savings(player, savings, session)
+    await set_aside_player_savings(character, savings, session)
 
 async def on_delivery_job_fulfilled(job, http_client):
     """
@@ -272,7 +270,7 @@ async def process_events(events, http_client=None, http_client_mod=None, discord
       total_payment -= total_subsidy
       total_subsidy = 0
 
-    player_profits.append((player, total_subsidy, total_payment))
+    player_profits.append((character, total_subsidy, total_payment))
 
   if http_client_mod:
     asyncio.create_task(

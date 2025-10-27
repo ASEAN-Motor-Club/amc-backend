@@ -60,9 +60,8 @@ def calculate_loan_repayment(payment, loan_balance, max_loan):
   repayment = min(loan_balance, max(Decimal(1), int(payment * Decimal(repayment_percentage))))
   return repayment
 
-async def repay_loan_for_profit(player, payment, session):
+async def repay_loan_for_profit(character, payment, session):
   try:
-    character = await player.characters.with_last_login().filter(last_login__isnull=False).alatest('last_login')
     loan_balance = await get_player_loan_balance(character)
     if loan_balance == 0:
       return 0
@@ -73,20 +72,19 @@ async def repay_loan_for_profit(player, payment, session):
       session,
       int(-repayment),
       'ASEAN Loan Repayment',
-      str(player.unique_id),
+      str(character.player.unique_id),
     )
     await register_player_repay_loan(repayment, character)
     return int(repayment)
   except Exception as e:
     asyncio.create_task(
-      show_popup(session, f'Repayment failed {e}', player_id=player.unique_id)
+      show_popup(session, f'Repayment failed {e}', character_guid=character.guid)
     )
     raise e
 
 DEFAULT_SAVING_RATE = 1
-async def set_aside_player_savings(player, payment, session):
+async def set_aside_player_savings(character, payment, session):
   try:
-    character = await player.characters.with_last_login().filter(last_login__isnull=False).alatest('last_login')
     if character.saving_rate is not None:
       saving_rate = character.saving_rate
     else:
@@ -104,13 +102,13 @@ async def set_aside_player_savings(player, payment, session):
         session,
         int(-saving),
         message,
-        str(player.unique_id),
+        str(character.player.unique_id),
       )
-      await register_player_deposit(saving, character, player, "Earnings Deposit")
+      await register_player_deposit(saving, character, character.player, "Earnings Deposit")
       return int(saving)
   except Exception as e:
     asyncio.create_task(
-      show_popup(session, f'Failed to deposit earnings:\n{e}', player_id=player.unique_id)
+      show_popup(session, f'Failed to deposit earnings:\n{e}', character_guid=character.guid)
     )
     raise e
 
@@ -207,15 +205,14 @@ def get_passenger_subsidy(passenger):
     case _:
       return 0
 
-async def subsidise_player(subsidy, player, session, message=None):
-  character = await player.characters.with_last_login().filter(last_login__isnull=False).alatest('last_login')
+async def subsidise_player(subsidy, character, session, message=None):
   if message is None:
     message = 'ASEAN Subsidy' if subsidy > 0 else 'ASEAN Tax'
   await transfer_money(
     session,
     int(subsidy),
     message,
-    player.unique_id,
+    character.player.unique_id,
   )
   await send_fund_to_player_wallet(subsidy, character, message)
 
