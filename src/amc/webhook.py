@@ -5,6 +5,8 @@ from operator import attrgetter
 from datetime import datetime, timedelta
 from django.utils import timezone
 from django.contrib.gis.geos import Point
+from django.db import transaction
+from asgiref.sync import sync_to_async
 from django.db.models import F, Q
 from amc.game_server import announce
 from amc.mod_server import get_webhook_events2, show_popup, get_rp_mode, despawn_player_vehicle
@@ -47,6 +49,9 @@ async def on_delivery_job_fulfilled(job, http_client):
     """
     Finds all players who contributed to a job and rewards them proportionally.
     """
+
+    if job.fulfilled_at is not None:
+      return
 
     if job.quantity_fulfilled >= job.quantity_requested:
       job.fulfilled_at = timezone.now()
@@ -305,6 +310,20 @@ async def process_cargo_log(cargo, player, character, timestamp):
     data=cargo,
   )
 
+def atomic_update_job(job_id, quantity, payment, cargo_subsidy):
+  with transaction.atomic():
+    job = DeliveryJob.objects.select_for_update().get(pk=job_id)
+    if job:
+      requested_remaining = job.quantity_requested - job.quantity_fulfilled
+      quantity_to_add = min(requested_remaining, quantity)
+      if quantity_to_add > 0:
+        bonus = quantity_to_add * job.bonus_multiplier * payment
+        cargo_subsidy = max(cargo_subsidy, bonus)
+        job.quantity_fulfilled = F('quantity_fulfilled') + quantity_to_add
+        job.save(update_fields=['quantity_fulfilled'])
+        job.refresh_from_db(fields=['quantity_fulfilled'])
+    return job
+
 async def process_event(event, player, character, is_rp_mode=False, used_shortcut=False, http_client=None, http_client_mod=None, discord_client=None):
   print(event)
   total_payment = 0
@@ -336,21 +355,14 @@ async def process_event(event, player, character, is_rp_mode=False, used_shortcu
         cargo_subsidy = get_subsidy_for_cargo(group_list[0])[0] * quantity
         cargo_name = group_list[0].get_cargo_key_display()
 
-        jobs_qs = (DeliveryJob.objects
+        job = await (DeliveryJob.objects
           .filter_active()
           .filter_by_delivery(delivery_source, delivery_destination, cargo_key)
-          .filter(Q(rp_mode=is_rp_mode) | Q(rp_mode=False))
-          .distinct()
-        )
+          # .filter(Q(rp_mode=is_rp_mode) | Q(rp_mode=False))
+        ).afirst()
 
-        job = await jobs_qs.afirst()
         if job and not used_shortcut:
-          requested_remaining = job.quantity_requested - job.quantity_fulfilled
-          bonus = min(requested_remaining, quantity) * job.bonus_multiplier * payment
-          cargo_subsidy = max(cargo_subsidy, bonus)
-          job.quantity_fulfilled = F('quantity_fulfilled') + min(requested_remaining, quantity)
-          await job.asave(update_fields=['quantity_fulfilled'])
-          await job.arefresh_from_db(fields=['quantity_fulfilled'])
+          job = await sync_to_async(atomic_update_job)(job.id, quantity, payment, cargo_subsidy)
 
         await Delivery.objects.acreate(
           timestamp=timestamp,
@@ -363,7 +375,7 @@ async def process_event(event, player, character, is_rp_mode=False, used_shortcu
           destination_point=delivery_destination,
           job=job,
         )
-        if job and job.quantity_fulfilled >= job.quantity_requested:
+        if job and job.quantity_fulfilled >= job.quantity_requested and not job.fulfilled_at:
           asyncio.create_task(on_delivery_job_fulfilled(job, http_client))
 
         # ADDED: Call the discord embed posting function
@@ -492,10 +504,10 @@ async def process_event(event, player, character, is_rp_mode=False, used_shortcu
           subsidy = 2_000 + payment * 0.5
       total_payment += payment + subsidy
 
-    case "ServerResetVehicleAtResponse":
+    case "ServerResetVehicleAt":
       if is_rp_mode:
         await despawn_player_vehicle(http_client_mod, player.unique_id)
-        asyncio.create_task(announce(f"{character.name} used roadside in RP mode. Shame!", http_client, color="FFA500"))
+        asyncio.create_task(announce(f"{character.name} used roadside recovery in RP mode. Shame! Their vehicle has been despawned!", http_client, color="FFA500"))
 
 
   return total_payment, subsidy
