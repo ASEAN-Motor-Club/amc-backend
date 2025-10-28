@@ -1180,7 +1180,7 @@ The loan amount has been deposited into your wallet. You can view your loan deta
       character, player, character_created, player_info = await aget_or_create_character(player_name, player_id, http_client_mod)
       if ctx.get('startup_time') and timestamp > ctx.get('startup_time'):
         if 'DOT' in player_info['PlayerName']:
-          if not (await Team.objects.filter(tag='DOT', members=player).aexists()):
+          if not (await Team.objects.filter(tag='DOT', players=player).aexists()):
             asyncio.create_task(
               show_popup(http_client_mod, "You are not authorised to use the DOT tag, please remove it then rejoin the server", character_guid=character.guid, player_id=str(player.unique_id))
             )
@@ -1314,7 +1314,7 @@ The loan amount has been deposited into your wallet. You can view your loan deta
         )
         subsidy_amount = 10_000
         await on_player_profit(
-          character.player,
+          character,
           subsidy_amount,
           subsidy_amount,
           http_client_mod
