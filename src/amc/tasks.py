@@ -786,7 +786,7 @@ Use <Highlight>/rescue</> to alert rescuers in the game and on discord if you ne
           character=character, 
           prompt=f"verify {command_match.group('signed_message')}",
         )
-      if command_match := re.match(r"/events?", message):
+      if command_match := re.match(r"/events?$", message):
         def get_event_start_time_in(event):
           if event.start_time > timezone.now():
             return f"{format_timedelta(event.start_time - timezone.now())} from now"
@@ -794,6 +794,7 @@ Use <Highlight>/rescue</> to alert rescuers in the game and on discord if you ne
         events_str = '\n\n'.join([
           f"""\
 <Title>{event.name}</>
+Use <Highlight>/setup_event {event.id}</> to start
 <Secondary>{format_in_local_tz(event.start_time)}</>
 <Secondary>{get_event_start_time_in(event)}</>
 {event.description}"""
