@@ -367,6 +367,7 @@ To see all your decals, use:
           return
         await set_decal(http_client_mod, str(player_id), decal.config)
       if command_match := re.match(r"/jobs", message):
+        is_rp_mode = await get_rp_mode(http_client_mod, character.guid)
         jobs = DeliveryJob.objects.filter(
           quantity_fulfilled__lt=F('quantity_requested'),
           expired_at__gte=timestamp,
@@ -381,8 +382,11 @@ To see all your decals, use:
               for cargo in job.cargos.all()
             ])
           title = f"""\
-({job.quantity_fulfilled}/{job.quantity_requested}) {job.name} · <EffectGood>{job.bonus_multiplier*100:.0f}%</> · <Money>{job.completion_bonus:,}</> 
-<Secondary>Expiring in {get_time_difference_string(timestamp, job.expired_at)}</>"""
+({job.quantity_fulfilled}/{job.quantity_requested}) {job.name} · <EffectGood>{job.bonus_multiplier*100:.0f}%</> · <Money>{job.completion_bonus:,}</>"""
+          if job.rp_mode:
+            title += f"\n<Warning>Requires RP Mode</> (Your RP mode is {'<EffectGood>ON</>' if is_rp_mode else '<Warning>OFF</>, enable with /rp_mode'})"
+
+          title += f'\n<Secondary>Expiring in {get_time_difference_string(timestamp, job.expired_at)}</>'
           title += f'\n<Secondary>Cargo: {cargo_key}</>'
           source_points = list(job.source_points.all())
           if source_points:
@@ -407,6 +411,9 @@ To see all your decals, use:
 
 {jobs_str}
 
+<Title>RP Mode Status</>
+Your RP mode is {'<EffectGood>ON</>' if is_rp_mode else '<Warning>OFF</>'}
+Toggle it with <Highlight>/rp_mode</>
 
 <Title>Subsidies</>
 <Secondary>These jobs are always subsidised on the server.</>
@@ -521,21 +528,49 @@ To see all your decals, use:
         # asyncio.create_task(show_popup(http_client_mod, "Sorry, this feature is temporarily disabled", character_guid=character.guid, player_id=str(player.unique_id)))
       elif command_match := re.match(r"/rp_mode$", message):
         is_rp_mode = await get_rp_mode(http_client_mod, character.guid)
+        verification_code, code_verified = with_verification_code((character.guid, is_rp_mode), "")
         if is_rp_mode:
-          verification_code, code_verified = with_verification_code((character.guid, 0), "")
-          asyncio.create_task(
-            show_popup(
-              http_client_mod, f"""\
-<Title>Roleplay Mode</>
-
+          notes = """
+To turn off this feature, resend the command with the confirmation code:
+          """
+        else:
+          notes = """
 <Bold>Enhance your immersion by by toggling RP mode.</>
 When enabled, you are expected not to use roadside recovery.
 The use of roadside recovery will result in the loss of cargo and vehicle.
 Use <Highlight>/rescue</> to call for help instead.
 
-<Warning>ALL Your vehicles will be despawned by toggling this mode!</>
+<Bold>Some jobs require RP mode to be enabled</>
 
+<Warning>ALL Your vehicles will be despawned by toggling this mode!</>
 If you understand the above, confirm by typing in:
+          """
+        asyncio.create_task(
+          show_popup(
+            http_client_mod, f"""\
+<Title>Roleplay Mode</>
+
+Your RP mode is {'<EffectGood>ON</>' if is_rp_mode else '<Warning>OFF</>'}
+
+{notes}
+
+<Highlight>/rp_mode {verification_code.upper()}</>
+""",
+            character_guid=character.guid,
+            player_id=str(player.unique_id),
+          )
+        )
+      elif command_match := re.match(r"/rp_mode\s+(?P<verification_code>\S+)$", message):
+        is_rp_mode = await get_rp_mode(http_client_mod, character.guid)
+        verification_code, code_verified = with_verification_code((character.guid, is_rp_mode), command_match.group('verification_code'))
+        if not code_verified:
+          asyncio.create_task(
+            show_popup(
+              http_client_mod, f"""\
+<Title>Verification Code Incorrect</>
+
+Please try again:
+
 <Highlight>/rp_mode {verification_code.upper()}</>
 """,
               character_guid=character.guid,
@@ -544,40 +579,32 @@ If you understand the above, confirm by typing in:
           )
         else:
           await toggle_rp_session(http_client_mod, character.guid)
-          asyncio.create_task(
-            show_popup(
-              http_client_mod, """\
-<Title>Roleplay Mode Disabled</>
-""",
-              character_guid=character.guid,
-              player_id=str(player.unique_id),
-            )
-          )
-      elif command_match := re.match(r"/rp_mode\s+(?P<verification_code>\S+)$", message):
-        verification_code, code_verified = with_verification_code((character.guid, 0), command_match.group('verification_code'))
-        if code_verified:
-          await toggle_rp_session(http_client_mod, character.guid)
-        is_rp_mode = await get_rp_mode(http_client_mod, character.guid)
-        if is_rp_mode:
-          asyncio.create_task(
-            show_popup(
-              http_client_mod, """\
+          is_rp_mode = await get_rp_mode(http_client_mod, character.guid)
+          if is_rp_mode:
+            asyncio.create_task(
+              show_popup(
+                http_client_mod, """\
 <Title>Roleplay Mode Enabled</>
+
+<EffectGood>You can now take on RP mode jobs!</>
+Use <Highlight>/rescue</> to alert rescuers in the game and on discord if you need a rescue.
 """,
-              character_guid=character.guid,
-              player_id=str(player.unique_id),
+                character_guid=character.guid,
+                player_id=str(player.unique_id),
+              )
             )
-          )
-        else:
-          asyncio.create_task(
-            show_popup(
-              http_client_mod, """\
+          else:
+            asyncio.create_task(
+              show_popup(
+                http_client_mod, """\
 <Title>Roleplay Mode Disabled</>
-""",
-              character_guid=character.guid,
-              player_id=str(player.unique_id),
+
+<Warning>You have disabled RP mode</>
+  """,
+                character_guid=character.guid,
+                player_id=str(player.unique_id),
+              )
             )
-          )
       elif command_match := re.match(r"/rescue\s*(?P<message>.*)$", message):
         if await RescueRequest.objects.filter(character=character, timestamp__gte=timezone.now() - timedelta(minutes=5)).aexists():
           asyncio.create_task(

@@ -95,6 +95,15 @@ class JobsCog(commands.Cog):
         color=color,
         timestamp=job.requested_at # Use job creation time for consistency
     )
+
+    # --- Add the prominent RP Mode field if applicable ---
+    if job.rp_mode:
+        embed.add_field(
+            name="🚨 Requirement 🚨",
+            value="**This job requires RP mode to be enabled for bonuses.**",
+            inline=False # Ensures the field spans the full width of the embed
+        )
+
     embed.set_footer(text=f"Job ID: {job.id}")
     return embed
 
@@ -255,3 +264,4 @@ class JobsCog(commands.Cog):
     job = await DeliveryJob.objects.aget(pk=job_id)
     await on_delivery_job_fulfilled(job, self.bot.http_client_game)
     await interaction.response.send_message(f"Finished {str(job_id)}", ephemeral=True)
+
