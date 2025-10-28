@@ -258,10 +258,10 @@ def print_results(participants):
   return '\n'.join(lines)
 
 
-async def show_results_popup(http_client, participants, player_id=None):
+async def show_results_popup(http_client, participants, player_id=None, character_guid=None):
   message = f"<Title>Results</>\n\n{print_results(participants)}"
   if player_id is not None:
-    await show_popup(http_client, message, player_id=player_id)
+    await show_popup(http_client, message, player_id=player_id, character_guid=character_guid)
     return
 
 
@@ -274,12 +274,12 @@ async def show_results_popup(http_client, participants, player_id=None):
     await asyncio.sleep(0.5)
 
 
-async def show_scheduled_event_results_popup(http_client, scheduled_event, player_id=None):
+async def show_scheduled_event_results_popup(http_client, scheduled_event, player_id=None, character_guid=None):
   participants = [
     p
     async for p in GameEventCharacter.objects.results_for_scheduled_event(scheduled_event)
   ]
-  await show_results_popup(http_client, participants, player_id=player_id)
+  await show_results_popup(http_client, participants, player_id=player_id, character_guid=character_guid)
 
 
 async def monitor_events(ctx):
