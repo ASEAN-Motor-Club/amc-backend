@@ -174,7 +174,11 @@ async def process_event(event):
         'wrong_engine': player_info['bWrongEngine'],
       }
     if game_event.state == 2 and player_info['SectionIndex'] == 0 and player_info['Laps'] == 1:
-      defaults['first_section_total_time_seconds'] = player_info['LastSectionTotalTimeSeconds']
+      # There's a bug where the first section is a big number
+      if player_info['LastSectionTotalTimeSeconds'] < 10_000_000:
+        defaults['first_section_total_time_seconds'] = player_info['LastSectionTotalTimeSeconds']
+      else:
+        defaults['first_section_total_time_seconds'] = 0
 
     game_event_character, _ = await GameEventCharacter.objects.aupdate_or_create(
       character=character,
