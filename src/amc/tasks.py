@@ -66,6 +66,7 @@ from amc.mod_server import (
   get_rp_mode,
   get_decal,
   set_decal,
+  set_character_name,
 )
 from amc.auth import verify_player
 from amc.mailbox import send_player_messages
@@ -815,6 +816,13 @@ Use <Highlight>/setup_event {event.id}</> to start
           timestamp=timestamp,
           character=character, 
           prompt='/countdown',
+        )
+      if command_match := re.match(r"/rename\s+(?P<name>.+)", message):
+        asyncio.create_task(set_character_name(http_client_mod, character.guid, command_match.group('name')))
+        await BotInvocationLog.objects.acreate(
+          timestamp=timestamp,
+          character=character, 
+          prompt='/rename',
         )
       if command_match := re.match(r"/bot (?P<prompt>.+)", message):
         await BotInvocationLog.objects.acreate(

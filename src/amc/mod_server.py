@@ -11,6 +11,14 @@ async def set_config(session, max_vehicles_per_player=12):
   await session.post("/config", json=params)
 
 
+async def set_character_name(session, character_guid, name):
+  transfer = {
+    'name': name,
+  }
+  async with session.put(f'/players/{character_guid}/name', json=transfer) as resp:
+    if resp.status != 200:
+      raise Exception('Failed to change name')
+
 async def transfer_money(session, amount, message, player_id):
   transfer = {
     'Amount': amount,
