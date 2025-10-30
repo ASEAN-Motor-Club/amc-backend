@@ -1,8 +1,10 @@
 import discord
 from discord.ext import commands
 from discord import app_commands, ui
+from django.conf import settings
 
 from amc.models import Player, PlayerShift
+from amc.game_server import announce
 
 COMMON_TIMEZONES = [
     "Asia/Jakarta", "Asia/Singapore", "Asia/Tokyo", "Australia/Sydney",
@@ -139,5 +141,12 @@ class RoleplayCog(commands.Cog):
             await interaction.response.send_message("❌ You must be an administrator to use this command.", ephemeral=True)
         else:
             raise error
+
+    @commands.Cog.listener()
+    async def on_reaction_add(self, reaction, user):
+      channel = reaction.message.channel
+      if channel and \
+        channel.id == settings.DISCORD_RESCUE_CHANNEL_ID:
+          await announce(f"{user.display_name} just responded to the rescue request!", self.bot.http_client_game)
 
 

@@ -636,6 +636,9 @@ Use <Highlight>/rescue</> to alert rescuers in the game and on discord if you ne
           popup_message = "<EffectGood>Request Sent</>\n\nSomeone will respond to you shortly."
         else:
           popup_message = "<EffectGood>Request Sent</>\n\nThe rescue team is offline but they have been notified on discord."
+          asyncio.create_task(
+            announce(f"{character.name} needs a rescue!", http_client)
+          )
         asyncio.create_task(
           show_popup(
             http_client_mod, popup_message,
