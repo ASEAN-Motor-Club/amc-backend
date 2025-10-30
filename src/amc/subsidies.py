@@ -55,7 +55,7 @@ cargo_names = {
 
 def calculate_loan_repayment(payment, loan_balance, max_loan):
   loan_utilisation = loan_balance / max(max_loan, loan_balance)
-  repayment_percentage = Decimal(0.1) + (Decimal(0.7) * loan_utilisation)
+  repayment_percentage = Decimal(0.5) + (Decimal(0.5) * loan_utilisation)
 
   repayment = min(loan_balance, max(Decimal(1), int(payment * Decimal(repayment_percentage))))
   return repayment
