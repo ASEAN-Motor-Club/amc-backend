@@ -1,12 +1,13 @@
 from io import BytesIO
 from decimal import Decimal
+from datetime import time as dt_time, timedelta, timezone as dt_timezone
 from django.utils import timezone
 from django.db import models
-from django.db.models import Sum, OuterRef, Subquery, Value, Q, F, DecimalField, Case, When
+from django.db.models import Sum, OuterRef, Subquery, Value, Q, F, DecimalField, Case, When, Count
 from django.db.models.functions import Coalesce
 import discord
 from discord import app_commands
-from discord.ext import commands
+from discord.ext import tasks, commands
 from django.conf import settings
 from amc.models import (
   Character,
@@ -15,6 +16,7 @@ from amc.models import (
   ServerSignContractLog,
   ServerPassengerArrivedLog,
   ServerTowRequestArrivedLog,
+  Delivery,
 )
 from .utils import create_player_autocomplete
 from amc.utils import get_timespan
@@ -77,6 +79,12 @@ class EconomyCog(commands.Cog):
     self.general_channel_id = general_channel_id
     self.decrypt_save_file_channel_id = settings.DISCORD_DECRYPT_SAVE_FILE_CHANNEL_ID
     self.player_autocomplete = create_player_autocomplete(self.bot.http_client_game)
+
+  @tasks.loop(time=dt_time(hour=2, minute=0, tzinfo=dt_timezone.utc))
+  async def daily_top_haulers_task(self):
+    embed = await self.build_top_haulers_embed()
+    general_channel = self.bot.get_channel(self.general_channel_id)
+    await general_channel.send(embed=embed)
 
   async def player_autocomplete(self, interaction, current):
     return await self.player_autocomplete(interaction, current)
@@ -246,6 +254,44 @@ Tow Requests: {tow_requests_aggregates['total_payments']:,}
     )
     embed.set_footer(text=f"Requested by {interaction.user.display_name}")
     await interaction.followup.send(embed=embed)
+
+  @app_commands.command(name='top_haulers', description='List the top haulers for a given period')
+  @app_commands.describe(
+    num_days='The number of days before today to start searching from',
+    top_n='The number of top players to show'
+  )
+  async def top_haulers_cmd(self, interaction, num_days: int=1, top_n: int=5):
+    await interaction.response.defer()
+    embed = await self.build_top_haulers_embed(days=num_days, top_n=top_n)
+    embed.set_footer(text=f"Requested by {interaction.user.display_name}")
+    await interaction.followup.send(embed=embed)
+
+  async def build_top_haulers_embed(self, days=1, top_n=5):
+    haulers = (Delivery.objects
+      .filter(timestamp__gte=timezone.now() - timedelta(days=days))
+      .values('character')
+      .annotate(total_payment=Sum(F('payment') + F('subsidy')), num_deliveries=Count('id'), character_name=F('character__name'))
+      .order_by('-total_payment')
+    )[:top_n]
+    
+    haulers_list = [
+      f"**{hauler['character_name']}:** {hauler['total_payment']:,} ({hauler['num_deliveries']} deliveries)"
+      async for hauler in haulers
+    ]
+    haulers_str = '\n'.join(haulers_list) if haulers_list else "No deliveries recorded yet."
+    # Create the embed
+    embed = discord.Embed(
+      title="🚚️ Top Haulers",
+      description=f"The top {top_n} players for the last {days} day(s)",
+      color=discord.Color.gold(),
+      timestamp=timezone.now()
+    )
+    embed.add_field(
+      name='By payment (incl. subsidies)',
+      value=haulers_str,
+      inline=False,
+    )
+    return embed
 
 
   @app_commands.command(name='treasury_stats', description='Display treasury and donations info')
