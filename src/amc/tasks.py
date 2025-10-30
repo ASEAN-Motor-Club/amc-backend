@@ -818,12 +818,20 @@ Use <Highlight>/setup_event {event.id}</> to start
           prompt='/countdown',
         )
       if command_match := re.match(r"/rename\s+(?P<name>.+)", message):
-        asyncio.create_task(set_character_name(http_client_mod, character.guid, command_match.group('name')))
-        await BotInvocationLog.objects.acreate(
-          timestamp=timestamp,
-          character=character, 
-          prompt='/rename',
-        )
+        new_name = command_match.group('name')
+        if len(new_name) > 20:
+          asyncio.create_task(
+            show_popup(http_client_mod, "Max character name is 20 characters", character_guid=character.guid)
+          )
+        else:
+          character.custom_name = new_name
+          await character.asave(update_fields=['custom_name'])
+          asyncio.create_task(set_character_name(http_client_mod, character.guid, new_name))
+          await BotInvocationLog.objects.acreate(
+            timestamp=timestamp,
+            character=character, 
+            prompt='/rename',
+          )
       if command_match := re.match(r"/bot (?P<prompt>.+)", message):
         await BotInvocationLog.objects.acreate(
           timestamp=timestamp,
@@ -1211,7 +1219,7 @@ The loan amount has been deposited into your wallet. You can view your loan deta
               last_login = latest_status.timespan.upper
             except PlayerStatusLog.DoesNotExist:
               pass
-          welcome_message, is_new_player = get_welcome_message(last_login, player_name)
+          welcome_message, is_new_player = get_welcome_message(last_login, character.custom_name or character.name)
           if is_new_player:
             asyncio.create_task(
               show_popup(http_client_mod, settings.WELCOME_TEXT, character_guid=character.guid, player_id=str(player.unique_id))
@@ -1255,6 +1263,8 @@ The loan amount has been deposited into your wallet. You can view your loan deta
           )
       await process_login_event(character.id, timestamp)
       asyncio.create_task(send_player_messages(http_client_mod, player))
+      if character.custom_name:
+        asyncio.create_task(set_character_name(http_client_mod, character.guid, character.custom_name))
       if discord_client and ctx.get('startup_time') and timestamp > ctx.get('startup_time'):
         forward_message = (
           settings.DISCORD_GAME_CHAT_CHANNEL_ID,

@@ -154,15 +154,16 @@ class Character(models.Model):
   player = models.ForeignKey(Player, on_delete=models.CASCADE, related_name='characters')
   guid = models.CharField(max_length=32, unique=True, editable=False, null=True)
   name = models.CharField(max_length=200)
-  money = models.PositiveIntegerField(null=True)
+  custom_name = models.CharField(max_length=200, null=True, blank=True)
+  money = models.PositiveIntegerField(null=True, blank=True)
   # levels
-  driver_level = models.PositiveIntegerField(null=True)
-  bus_level = models.PositiveIntegerField(null=True)
-  taxi_level = models.PositiveIntegerField(null=True)
-  police_level = models.PositiveIntegerField(null=True)
-  truck_level = models.PositiveIntegerField(null=True)
-  wrecker_level = models.PositiveIntegerField(null=True)
-  racer_level = models.PositiveIntegerField(null=True)
+  driver_level = models.PositiveIntegerField(null=True, blank=True)
+  bus_level = models.PositiveIntegerField(null=True, blank=True)
+  taxi_level = models.PositiveIntegerField(null=True, blank=True)
+  police_level = models.PositiveIntegerField(null=True, blank=True)
+  truck_level = models.PositiveIntegerField(null=True, blank=True)
+  wrecker_level = models.PositiveIntegerField(null=True, blank=True)
+  racer_level = models.PositiveIntegerField(null=True, blank=True)
   saving_rate = models.DecimalField(
     max_digits=3,
     decimal_places=2,
