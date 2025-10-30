@@ -823,6 +823,10 @@ Use <Highlight>/setup_event {event.id}</> to start
           asyncio.create_task(
             show_popup(http_client_mod, "Max character name is 20 characters", character_guid=character.guid)
           )
+        if '(' in new_name or ')' in new_name:
+          asyncio.create_task(
+            show_popup(http_client_mod, "Name contains invalid characters", character_guid=character.guid)
+          )
         else:
           character.custom_name = new_name
           await character.asave(update_fields=['custom_name'])
