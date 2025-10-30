@@ -85,7 +85,7 @@ class TicketAdmin(admin.ModelAdmin):
 
 class TeamPlayerInlineAdmin(admin.TabularInline):
   model = Team.players.through
-  autocomplete_fields = ['player']
+  autocomplete_fields = ['player', 'character']
   show_change_link = True
 
 class PlayerTeamInlineAdmin(admin.TabularInline):
@@ -348,11 +348,18 @@ class ScheduledEventAdmin(admin.ModelAdmin):
         .filter(p_rank=1)
         .order_by('net_time')
       )
+
+      def get_participant_team(participant):
+        team_membership = participant.character.team_memberships.last()
+        if team_membership is None:
+          return
+        return team_membership.team
+
       cps = [
         ChampionshipPoint(
           championship=championship,
           participant=participant,
-          team=participant.character.player.teams.last(),
+          team=get_participant_team(participant),
           points=ChampionshipPoint.get_event_points_for_position(i, time_trial=scheduled_event.time_trial),
           prize=ChampionshipPoint.get_event_prize_for_position(i, time_trial=scheduled_event.time_trial),
         )

@@ -218,7 +218,8 @@ class Team(models.Model):
 
 @final
 class TeamMembership(models.Model):
-  player = models.ForeignKey(Player, on_delete=models.CASCADE, related_name='members')
+  player = models.ForeignKey(Player, on_delete=models.CASCADE, related_name='team_memberships')
+  character = models.ForeignKey(Character, on_delete=models.CASCADE, null=True, related_name='team_memberships')
   team = models.ForeignKey(Team, on_delete=models.CASCADE)
   date_joined = models.DateTimeField(default=timezone.now)
 
