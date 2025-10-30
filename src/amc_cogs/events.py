@@ -19,6 +19,34 @@ from amc.models import (
   ChampionshipPoint,
 )
 
+def format_time(total_seconds: float) -> str:
+  if total_seconds is None or total_seconds < 0:
+    return "-"
+  """Converts seconds (float) into MM:SS.sss format.
+
+  Args:
+    total_seconds: The total number of seconds as a float.
+
+  Returns:
+    A string representing the time in MM:SS.sss format.
+  """
+  if not isinstance(total_seconds, (int, float)):
+    raise TypeError("Input must be a number (int or float).")
+  if total_seconds < 0:
+    raise ValueError("Input seconds cannot be negative.")
+
+  minutes = int(total_seconds // 60)
+  seconds = total_seconds % 60
+
+  # Format minutes to always have two digits
+  formatted_minutes = f"{minutes:02d}"
+
+  # Format seconds to have two digits for the integer part
+  # and three digits for the fractional part
+  formatted_seconds = f"{seconds:06.3f}" # 06.3f ensures XX.YYY format
+
+  return f"{formatted_minutes}:{formatted_seconds}"
+
 def generate_deterministic_penalty(
   seed_string: str, 
   min_penalty: float, 
@@ -177,6 +205,64 @@ class EventsCog(commands.Cog):
     for thread in threads:
       await self.thread_to_team(thread)
 
+  async def update_scheduled_event_embed(self, scheduled_event_id):
+    scheduled_event = await ScheduledEvent.objects.select_related('race_setup').aget(pk=scheduled_event_id)
+    race_setup = scheduled_event.race_setup
+
+    embed = discord.Embed(
+      title=f"{scheduled_event.name} - Results",
+      color=discord.Color.yellow(),  # You can choose any color
+    )
+    participant_list_str = ""
+    participants = [p async for p in GameEventCharacter.objects.results_for_scheduled_event(scheduled_event)]
+    for rank, participant in enumerate(participants, start=1):
+      if participant.finished:
+        progress_str = format_time(participant.net_time)
+      else:
+        total_laps = max(race_setup.num_laps, 1)
+        total_waypoints = race_setup.num_sections
+
+        if race_setup.num_laps == 0:
+          total_waypoints = total_waypoints - 1
+
+        progress_percentage = 0.0
+        if total_waypoints > 0:
+          progress_percentage = 100.0 * max(participant.laps - 1, 0) / total_laps
+          progress_percentage += 100.0 * max(participant.section_index, 0) / float(total_waypoints) / total_laps
+        if race_setup.num_laps > 0:
+          progress_str = f"{participant.laps}/{race_setup.num_laps} Laps - {progress_percentage:.1f}%"
+        else:
+          progress_str = f"{progress_percentage:.1f}%"
+
+      participant_line = f"{rank}. {participant.character.name} ({progress_str})"
+
+      if participant.wrong_vehicle:
+        participant_line += " [Wrong Vehicle]"
+      if participant.wrong_engine:
+        participant_line += " [Wrong Engine]"
+
+      participant_list_str += f"{participant_line}\n"
+
+    embed.add_field(name="👥 Latest Results", value=participant_list_str.strip(), inline=False)
+
+    channel = self.bot.get_channel(settings.DISCORD_CHAMPIONSHIP_CHANNEL_ID)
+    if scheduled_event.discord_message_id:
+      try:
+        message = await channel.fetch_message(scheduled_event.discord_message_id)
+        await message.edit(embed=embed)
+      except discord.NotFound:
+        # Message was deleted in Discord. Clear the invalid ID.
+        # It will be recreated in the CREATE path below.
+        scheduled_event.discord_message_id = None
+      except Exception as e:
+        print(f"Error updating message for scheduled_event {scheduled_event.id}: {e}")
+
+    # CREATE path
+    if not scheduled_event.discord_message_id:
+      new_message = await channel.send(embed=embed)
+      scheduled_event.discord_message_id = new_message.id
+      await scheduled_event.asave(update_fields=['discord_message_id'])
+
   async def update_championship_standings(self):
     championship = await Championship.objects.alast()
     if not championship:
@@ -186,7 +272,8 @@ class EventsCog(commands.Cog):
     
     embed = discord.Embed(
       title=f"{championship.name} Standings",
-      color=discord.Color.blue(),  # You can choose any color
+      description="[See more details on the website](https://www.aseanmotorclub.com/championship/details)",
+      color=discord.Color.yellow(),  # You can choose any color
     )
     team_standings_str = '\n'.join([
       f"{str(rank).rjust(2)}. {s['team__tag'].ljust(6)} {s['team__name'].ljust(30)} {str(s['total_points']).rjust(3)}"
@@ -212,7 +299,7 @@ class EventsCog(commands.Cog):
     last_embed_message = self.last_embed_message
     channel = self.bot.get_channel(settings.DISCORD_CHAMPIONSHIP_CHANNEL_ID)
     if last_embed_message is None:
-        async for message in channel.history(limit=1):
+        async for message in channel.history(limit=1, oldest_first=True):
           last_embed_message = message
         if last_embed_message:
           await last_embed_message.edit(embed=embed)
@@ -276,4 +363,9 @@ class EventsCog(commands.Cog):
     event = events[0]
     await kick_player_from_event(self.bot.event_http_client_mod, event['EventGuid'], player_id)
     await ctx.response.send_message(f'Player {player_id} kicked')
+
+  @app_commands.command(name='post_scheduled_event_embed', description='Creates a scheduled event embed')
+  @app_commands.checks.has_permissions(administrator=True)
+  async def post_scheduled_event_embed(self, ctx, scheduled_event_id: str):
+    await self.update_scheduled_event_embed(int(scheduled_event_id))
 

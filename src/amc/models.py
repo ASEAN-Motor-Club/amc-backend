@@ -365,6 +365,7 @@ class ScheduledEvent(models.Model):
   end_time = models.DateTimeField(null=True, blank=True)
   discord_event_id = models.CharField(max_length=32, null=True, blank=True, unique=True)
   discord_thread_id = models.CharField(max_length=32, null=True, blank=True, unique=True)
+  discord_message_id = models.CharField(max_length=32, null=True, blank=True, unique=True)
   race_setup = models.ForeignKey(RaceSetup, on_delete=models.SET_NULL, null=True, related_name='scheduled_events')
   championship = models.ForeignKey(Championship, on_delete=models.SET_NULL, null=True, blank=True, related_name='scheduled_events')
   players = models.ManyToManyField(

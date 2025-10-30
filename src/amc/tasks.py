@@ -795,8 +795,9 @@ Use <Highlight>/rescue</> to alert rescuers in the game and on discord if you ne
           f"""\
 <Title>{event.name}</>
 Use <Highlight>/setup_event {event.id}</> to start
-<Secondary>{format_in_local_tz(event.start_time)}</>
-<Secondary>{get_event_start_time_in(event)}</>
+<Secondary>{format_in_local_tz(event.start_time)} - {format_in_local_tz(event.end_time)}</>
+<Secondary>({get_event_start_time_in(event)})</>
+
 {event.description}"""
           async for event in ScheduledEvent.objects.filter(end_time__gte=timezone.now()).order_by('start_time')
         ])

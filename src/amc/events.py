@@ -95,6 +95,7 @@ async def process_event(event):
         guid=event['EventGuid'],
         state__lte=event['State'],
       )
+      .select_related('scheduled_event')
       .alatest('start_time')
     )
 
@@ -105,6 +106,7 @@ async def process_event(event):
     game_event.owner = owner
     game_event.race_setup = race_setup
     await game_event.asave()
+    scheduled_event = game_event.scheduled_event
   except GameEvent.DoesNotExist:
     try:
       # TODO: Refactor, use the above query as the existing_event
@@ -211,7 +213,7 @@ async def process_event(event):
     for player_info in event['Players']
   ])
 
-  return game_event, transition
+  return game_event, transition, scheduled_event
 
 def format_time(total_seconds: float) -> str:
   if total_seconds is None or total_seconds < 0:
@@ -264,7 +266,7 @@ def print_results(participants):
 
 async def show_results_popup(http_client, participants, player_id=None, character_guid=None):
   message = f"<Title>Results</>\n\n{print_results(participants)}"
-  if player_id is not None:
+  if player_id is not None or character_guid is not None:
     await show_popup(http_client, message, player_id=player_id, character_guid=character_guid)
     return
 
@@ -273,9 +275,8 @@ async def show_results_popup(http_client, participants, player_id=None, characte
     await show_popup(
       http_client,
       message,
-      player_id=participant.character.player.unique_id
+      character_guid=participant.character.guid,
     )
-    await asyncio.sleep(0.5)
 
 
 async def show_scheduled_event_results_popup(http_client, scheduled_event, player_id=None, character_guid=None):
@@ -288,6 +289,8 @@ async def show_scheduled_event_results_popup(http_client, scheduled_event, playe
 
 async def monitor_events(ctx):
   http_client = ctx.get('http_client_event_mod')
+  discord_client = ctx.get('discord_client')
+  events_cog = discord_client.get_cog('EventsCog')
 
   try:
     async with http_client.get('/events') as resp:
@@ -297,9 +300,8 @@ async def monitor_events(ctx):
         for event in events
       ])
 
-      for (game_event, transition) in results:
+      for (game_event, transition, scheduled_event) in results:
         if transition == (2, 3): # Finished
-          await asyncio.sleep(1)
           participants = [p async for p in (GameEventCharacter.objects
             .select_related('character', 'character__player')
             .filter(
@@ -307,6 +309,21 @@ async def monitor_events(ctx):
             )
           )]
           await show_results_popup(http_client, participants)
+          try:
+            if scheduled_event and events_cog and hasattr(events_cog, 'update_scheduled_event_embed'):
+              loop = asyncio.get_running_loop()
+              loop.run_in_executor(
+                None,
+                lambda: asyncio.run_coroutine_threadsafe(
+                  events_cog.update_scheduled_event_embed(
+                    scheduled_event.id
+                  ),
+                  discord_client.loop
+                )
+              )
+          except Exception as e:
+            print(f"Failed to update scheduled event embed: {e}")
+
   except Exception:
     pass
 
