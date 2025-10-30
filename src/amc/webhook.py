@@ -124,6 +124,7 @@ async def post_discord_delivery_embed(
   payment,
   subsidy,
   vehicle_key,
+  job=None,
 ):
   jobs_cog = discord_client.get_cog('JobsCog')
   delivery_source_name = ''
@@ -147,6 +148,7 @@ async def post_discord_delivery_embed(
           payment,
           subsidy,
           vehicle_key,
+          job=job,
         ),
         discord_client.loop
       )
@@ -402,6 +404,7 @@ async def process_event(event, player, character, is_rp_mode=False, used_shortcu
               payment * quantity,
               cargo_subsidy,
               vehicle_key,
+              job=job,
             )
           )
 

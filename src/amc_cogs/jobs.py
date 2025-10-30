@@ -1,7 +1,6 @@
 import discord
-from datetime import timedelta
 from django.utils import timezone
-from django.db.models import F, Prefetch
+from django.db.models import Prefetch
 from discord import app_commands
 from discord.ext import commands, tasks
 from django.conf import settings
@@ -117,6 +116,7 @@ class JobsCog(commands.Cog):
     payment,
     subsidy,
     vehicle_key,
+    job=None,
   ) -> discord.Embed:
     description = ''
     description += '\n**Payment**: '
@@ -143,15 +143,17 @@ class JobsCog(commands.Cog):
         color=discord.Color.green(),
         timestamp=timezone.now()
     )
-    # embed.set_footer(text=f"Job ID: {job.id}")
+    if job:
+      embed.set_footer(text=f"Job: {job.name} (#{job.id})")
+
     return embed
 
-  async def post_delivery_embed(self, *args):
+  async def post_delivery_embed(self, *args, **kwargs):
     deliveries_channel = self.bot.get_channel(self.deliveries_channel_id)
     if not deliveries_channel:
       print(f"Error: Could not find channel with ID {self.deliveries_channel_id}")
       return
-    await deliveries_channel.send(embed=self._build_delivery_embed(*args))
+    await deliveries_channel.send(embed=self._build_delivery_embed(*args, **kwargs))
 
   async def update_jobs(self):
     """
