@@ -568,30 +568,8 @@ class ChampionshipPoint(models.Model):
 
   objects = models.Manager.from_queryset(ChampionshipPointQuerySet)()
 
-  event_prize_by_position = [
-    450_000,
-    270_000,
-    180_000,
-    150_000,
-    120_000,
-    90_000,
-    75_000,
-    60_000,
-    52_500,
-    52_500,
-  ]
-  time_trial_prize_by_position = [
-    150_000,
-    90_000,
-    60_000,
-    50_000,
-    40_000,
-    30_000,
-    25_000,
-    20_000,
-    17_500,
-    17_500,
-  ]
+  event_prize_by_position = [900000, 540000, 360000, 300000, 240000, 180000, 150000, 120000, 105000, 105000]
+  time_trial_prize_by_position = [300000, 180000, 120000, 100000, 80000, 60000, 50000, 40000, 35000, 35000]
   event_points_by_position = [25, 20, 16, 13, 11, 10, 9, 8, 7, 6, 5, 4, 3, 2, 1]
   time_trial_points_by_position = [10, 8, 6, 5, 4, 3, 2, 1]
 
