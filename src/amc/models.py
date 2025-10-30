@@ -921,6 +921,7 @@ class Delivery(models.Model):
   quantity = models.PositiveIntegerField()
   payment = models.PositiveBigIntegerField()
   subsidy = models.PositiveBigIntegerField(default=0)
+  rp_mode = models.BooleanField(default=False)
   sender_point = models.ForeignKey('DeliveryPoint', models.SET_NULL, null=True, blank=True, related_name='batch_deliveries_out')
   destination_point = models.ForeignKey('DeliveryPoint', models.SET_NULL, null=True, blank=True, related_name='batch_deliveries_in')
   job = models.ForeignKey('DeliveryJob', models.SET_NULL, null=True, blank=True, related_name='deliveries')

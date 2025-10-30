@@ -80,7 +80,14 @@ async def on_delivery_job_fulfilled(job, http_client):
     character_contributions = {}
     for character_id, group in itertools.groupby(contributing_logs, key=attrgetter('character_id')):
         if character_id:
-            character_contributions[character_id] = sum([delivery.quantity for delivery in list(group)])
+            character_deliveries = list(group)
+            character_contributions[character_id] = {
+              'count': sum([delivery.quantity for delivery in character_deliveries]),
+              'reward': sum([
+                int(delivery.quantity / total_deliveries * completion_bonus * (1.2 if delivery.rp_mode else 1))
+                for delivery in character_deliveries
+              ]),
+            }
 
     if not character_contributions:
         print('No character_contributions')
@@ -92,12 +99,12 @@ async def on_delivery_job_fulfilled(job, http_client):
 
     # Distribute the bonus proportionally.
     contributors_names = []
-    for character_id, count in character_contributions.items():
+    for character_id, character_contribution in character_contributions.items():
         character_obj = characters.get(character_id)
         if not character_obj:
             continue
-        
-        reward = int((count / total_deliveries) * completion_bonus)
+        count = character_contribution['count']
+        reward = character_contribution['reward']
         if reward > 0:
             await send_fund_to_player(reward, character_obj, "Job Completion")
             contributors_names.append(f"{character_obj.name} ({count})")
@@ -275,6 +282,9 @@ async def process_events(events, http_client=None, http_client_mod=None, discord
       total_payment -= total_subsidy
       total_subsidy = 0
 
+    if is_rp_mode:
+      total_subsidy = int(total_subsidy * 1.2) + int(total_payment * 0.2)
+
     player_profits.append((character, total_subsidy, total_payment))
 
   if http_client_mod:
@@ -374,6 +384,7 @@ async def process_event(event, player, character, is_rp_mode=False, used_shortcu
           sender_point=delivery_source,
           destination_point=delivery_destination,
           job=job,
+          rp_mode=is_rp_mode,
         )
         if job and job.quantity_fulfilled >= job.quantity_requested and not job.fulfilled_at:
           asyncio.create_task(on_delivery_job_fulfilled(job, http_client))
