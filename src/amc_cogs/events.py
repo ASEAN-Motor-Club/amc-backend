@@ -1,5 +1,7 @@
+import asyncio
 import re
-from django.db.models import StdDev
+from django.db.models import StdDev, F, Window
+from django.db.models.functions import RowNumber
 from discord import app_commands
 import discord
 import hashlib
@@ -18,6 +20,7 @@ from amc.models import (
   Championship,
   ChampionshipPoint,
 )
+from amc_finance.services import send_fund_to_player
 
 def format_time(total_seconds: float) -> str:
   if total_seconds is None or total_seconds < 0:
@@ -87,6 +90,60 @@ def generate_deterministic_penalty(
   penalty = random_instance.uniform(min_penalty, max_penalty)
   
   return penalty
+
+
+async def send_results_message(channel, scheduled_event, championship, participants):
+    """
+    Sends a formatted embed with the event results to a specified channel.
+    """
+    # 1. Basic Embed Setup
+    embed = discord.Embed(
+        title=f"🏁 Event Results: {scheduled_event.name} 🏁",
+        description=f"The results are in! Congratulations to all participants in the **{championship.name}** series. Here are the final standings:",
+        color=discord.Color.gold(),  # Gold for victory!
+        timestamp=discord.utils.utcnow()
+    )
+
+    # You could set a thumbnail, e.g., a trophy or your club logo
+    embed.set_thumbnail(url="https://www.aseanmotorclub.com/_app/immutable/assets/splash_big.CPTGQ296.jpg")
+
+    # 2. Add Podium Finishers (Top 3)
+    podium_medals = ["🥇", "🥈", "🥉"]
+    for i, participant in enumerate(participants[:3]):
+        member_name = participant.character.name 
+        
+        prize = ChampionshipPoint.get_event_prize_for_position(i, time_trial=scheduled_event.time_trial)
+        points = ChampionshipPoint.get_event_points_for_position(i, time_trial=scheduled_event.time_trial)
+        
+        embed.add_field(
+            name=f"{podium_medals[i]} {i+1}{'st' if i==0 else 'nd' if i==1 else 'rd'} Place: {member_name}",
+            value=f"🏆 **Points:** `{points}`\n💰 **Prize:** `${prize:,}`", # The :, adds thousand separators
+            inline=False
+        )
+        
+    # 3. Add Other Points Finishers (4th to 10th)
+    if len(participants) > 3:
+        other_finishers_text = []
+        for i, participant in enumerate(participants[3:10], start=4):
+            member_name = participant.character.name
+            prize = ChampionshipPoint.get_event_prize_for_position(i-1, time_trial=scheduled_event.time_trial)
+            points = ChampionshipPoint.get_event_points_for_position(i-1, time_trial=scheduled_event.time_trial)
+            
+            other_finishers_text.append(
+                f"`{i}.` **{member_name}** — Points: `{points}`, Prize: `${prize:,}`"
+            )
+        
+        if other_finishers_text:
+            embed.add_field(
+                name="Points Finishers",
+                value="\n".join(other_finishers_text),
+                inline=False
+            )
+
+    # embed.set_footer(text=f"")
+
+    await channel.send(embed=embed)
+
 
 class EventsCog(commands.Cog):
   def __init__(self, bot, teams_channel_id=settings.DISCORD_TEAMS_CHANNEL_ID):
@@ -368,4 +425,67 @@ class EventsCog(commands.Cog):
   @app_commands.checks.has_permissions(administrator=True)
   async def post_scheduled_event_embed(self, ctx, scheduled_event_id: str):
     await self.update_scheduled_event_embed(int(scheduled_event_id))
+
+  @app_commands.command(name='conclude_event', description='Awards prizes and points for an event')
+  @app_commands.checks.has_permissions(administrator=True)
+  async def conclude_event(self, ctx, scheduled_event_id: str):
+    await ctx.response.defer(ephemeral=True)
+    scheduled_event = await ScheduledEvent.objects.select_related('championship', 'race_setup').aget(pk=scheduled_event_id)
+
+    # TODO: Create custom ParticipantQuerySet
+    participants_qs = (GameEventCharacter.objects
+      .select_related('character')
+      .filter_by_scheduled_event(scheduled_event)
+      .filter(finished=True).filter(
+        finished=True,
+        disqualified=False,
+        wrong_engine=False,
+        wrong_vehicle=False,
+      )
+      .annotate(
+        p_rank=Window(
+          expression=RowNumber(),
+          partition_by=[F('character')],
+          order_by=[F('net_time').asc()]
+        ),
+      )
+      .filter(p_rank=1)
+      .order_by('net_time')
+    )
+    participants = [p async for p in participants_qs]
+
+    championship = scheduled_event.championship
+    if championship:
+      async def get_participant_team(participant):
+        team_membership = await participant.character.team_memberships.select_related('team').alast()
+        if team_membership is None:
+          return
+        return team_membership.team
+
+      team_coroutines = [get_participant_team(p) for p in participants]
+      teams = await asyncio.gather(*team_coroutines)
+      cps = [
+        ChampionshipPoint(
+          championship=championship,
+          participant=participant,
+          team=team,
+          points=ChampionshipPoint.get_event_points_for_position(i, time_trial=scheduled_event.time_trial),
+          prize=ChampionshipPoint.get_event_prize_for_position(i, time_trial=scheduled_event.time_trial),
+        )
+        for i, (participant, team) in enumerate(zip(participants, teams))
+      ]
+      await ChampionshipPoint.objects.abulk_create(cps)
+
+    for i, participant in enumerate(participants):
+      await send_fund_to_player(
+        ChampionshipPoint.get_event_prize_for_position(i, time_trial=scheduled_event.time_trial),
+        participant.character,
+        f"Prize money: {scheduled_event.name} - #{i}"
+      )
+
+    if championship:
+      channel = self.bot.get_channel(settings.DISCORD_CHAMPIONSHIP_CHANNEL_ID)
+      await send_results_message(channel, scheduled_event, championship, participants)
+
+    await ctx.followup.send('Succeeded', ephemeral=True)
 
