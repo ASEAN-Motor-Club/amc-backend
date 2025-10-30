@@ -164,25 +164,29 @@ async def monitor_jobs(ctx):
 
     if source_capacity == 0:
       is_source_enough = True
+    elif source_amount >= source_capacity * 0.85:
+      is_source_enough = True
     else:
       is_source_enough = source_amount >= quantity_requested
 
     if not is_destination_empty or not is_source_enough:
       continue
-    chance = job.job_posting_probability * max(10, num_players) / 2400 / (5 + num_active_jobs * 2)
+    chance = job.job_posting_probability * max(10, num_players) / 2000 / (5 + num_active_jobs * 2)
     if not source_points and not destination_points:
       chance = chance / (24 * 3)
 
     if random.random() > chance:
       continue
 
+    bonus_multiplier = job.bonus_multiplier * random.uniform(0.8, 1.2)
+    completion_bonus = int(job.completion_bonus * quantity_requested / job.quantity_requested * random.uniform(0.7, 1.3))
     new_job = await DeliveryJob.objects.acreate(
       name=job.name,
       cargo_key=job.cargo_key,
       quantity_requested=quantity_requested,
       expired_at=timezone.now() + timedelta(hours=job.template_job_period_hours),
-      bonus_multiplier=job.bonus_multiplier,
-      completion_bonus=job.completion_bonus * quantity_requested / job.quantity_requested,
+      bonus_multiplier=bonus_multiplier,
+      completion_bonus=completion_bonus,
       description=job.description,
       base_template=job,
     )
@@ -190,7 +194,7 @@ async def monitor_jobs(ctx):
     await new_job.source_points.aadd(*source_points)
     await new_job.destination_points.aadd(*destination_points)
     asyncio.create_task(
-      announce(f"New job posting! {job.name} - {job.completion_bonus:,} bonus on completion.", ctx['http_client'])
+      announce(f"New job posting! {job.name} - {completion_bonus:,} bonus on completion.", ctx['http_client'])
     )
     break
 

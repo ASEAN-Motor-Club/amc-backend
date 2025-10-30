@@ -1125,7 +1125,7 @@ class DeliveryJob(models.Model):
 
     non_type_cargos = [c for c in cargos if 'T::' not in c.key]
     destination_storages = DeliveryPointStorage.objects.filter(
-      Q(cargo=job.cargo_key) | Q(cargo__in=non_type_cargos) | Q(cargo__type__in=cargos),
+      Q(cargo__in=non_type_cargos) | Q(cargo__type__in=cargos),
       delivery_point__in=destination_points,
     ).annotate_default_capacity()
     source_storages = DeliveryPointStorage.objects.filter(
@@ -1164,6 +1164,8 @@ class DeliveryJob(models.Model):
       )
 
     if source_capacity == 0:
+      is_source_enough = True
+    elif source_amount >= source_capacity * 0.85:
       is_source_enough = True
     else:
       is_source_enough = source_amount >= quantity_requested
