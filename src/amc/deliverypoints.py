@@ -178,7 +178,7 @@ async def monitor_jobs(ctx):
     if random.random() > chance:
       continue
 
-    bonus_multiplier = job.bonus_multiplier * random.uniform(0.8, 1.2)
+    bonus_multiplier = round(job.bonus_multiplier * random.uniform(0.8, 1.2), 2)
     completion_bonus = int(job.completion_bonus * quantity_requested / job.quantity_requested * random.uniform(0.7, 1.3))
     new_job = await DeliveryJob.objects.acreate(
       name=job.name,
