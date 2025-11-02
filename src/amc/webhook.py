@@ -521,7 +521,13 @@ async def process_event(event, player, character, is_rp_mode=False, used_shortcu
     case "ServerResetVehicleAt":
       if is_rp_mode:
         await despawn_player_vehicle(http_client_mod, player.unique_id)
-        asyncio.create_task(announce(f"{character.name} used roadside recovery in RP mode. Shame! Their vehicle has been despawned!", http_client, color="FFA500"))
+        asyncio.create_task(
+          announce(
+            f"{character.name}'s vehicle has been despawned for using roadside recovery while on RP mode",
+            http_client,
+            color="FFA500"
+          )
+        )
 
 
   return total_payment, subsidy
