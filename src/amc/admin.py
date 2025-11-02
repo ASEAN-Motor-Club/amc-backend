@@ -92,6 +92,7 @@ class TeamPlayerInlineAdmin(admin.TabularInline):
 class PlayerTeamInlineAdmin(admin.TabularInline):
   model = Player.teams.through
   show_change_link = True
+  autocomplete_fields = ['character']
 
 @admin.register(Player)
 class PlayerAdmin(admin.ModelAdmin):
@@ -479,7 +480,7 @@ class CargoAdmin(admin.ModelAdmin):
 
 @admin.register(DeliveryJob)
 class DeliveryJobAdmin(admin.ModelAdmin):
-  list_display = ['id', 'name', 'finished', 'requested_at', 'template', 'postable', 'num_posted']
+  list_display = ['id', 'name', 'completion_bonus', 'finished', 'requested_at', 'template', 'postable', 'num_posted']
   ordering = ['-requested_at']
   search_fields = [
     'name',
