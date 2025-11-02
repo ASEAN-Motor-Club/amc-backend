@@ -46,6 +46,7 @@ from .models import (
   Cargo,
   ServerStatus,
   PlayerShift,
+  RescueRequest,
 )
 from amc_finance.services import send_fund_to_player
 from amc_finance.admin import AccountInlineAdmin
@@ -585,4 +586,10 @@ class ServerStatusAdmin(admin.ModelAdmin):
 @admin.register(PlayerShift)
 class PlayerShiftAdmin(admin.ModelAdmin):
   list_display = ['player', 'start_time_utc', 'end_time_utc', 'user_timezone']
+
+@admin.register(RescueRequest)
+class RescueRequestAdmin(admin.ModelAdmin):
+  list_display = ['timestamp', 'character']
+  list_select_related = ['character']
+  autocomplete_fields = ['character', 'responders']
 

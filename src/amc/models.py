@@ -1247,6 +1247,8 @@ class PlayerShift(models.Model):
 class RescueRequest(models.Model):
   timestamp = models.DateTimeField(auto_now_add=True)
   character = models.ForeignKey(Character, on_delete=models.CASCADE, related_name='rescue_requests')
+  responders = models.ManyToManyField(Player, related_name='rescue_responses')
+  discord_message_id = models.CharField(max_length=32, null=True, blank=True, unique=True)
   message = models.TextField(blank=True)
 
 

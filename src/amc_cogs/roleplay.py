@@ -3,7 +3,7 @@ from discord.ext import commands
 from discord import app_commands, ui
 from django.conf import settings
 
-from amc.models import Player, PlayerShift
+from amc.models import Player, PlayerShift, RescueRequest
 from amc.game_server import announce
 
 COMMON_TIMEZONES = [
@@ -145,8 +145,24 @@ class RoleplayCog(commands.Cog):
     @commands.Cog.listener()
     async def on_reaction_add(self, reaction, user):
       channel = reaction.message.channel
+      print('RESCUE')
       if channel and \
         channel.id == settings.DISCORD_RESCUE_CHANNEL_ID:
-          await announce(f"{user.display_name} just responded to the rescue request!", self.bot.http_client_game)
+          await self.on_rescue_response(reaction.message, user)
 
+    async def on_rescue_response(self, message, user):
+      try:
+        rescue_request = await RescueRequest.objects.select_related('character').aget(discord_message_id=message.id)
+      except RescueRequest.DoesNotExists:
+        print(f"Reaction to a rescue request without associated discord_message_id: {message.id}")
+        return
+
+      await announce(f"{user.display_name} responded to {rescue_request.character.name}'s rescue request!", self.bot.http_client_game)
+      try:
+        player = await Player.objects.aget(discord_user_id=user.id)
+      except Player.DoesNotExists:
+        print(f"User {user.id} has not verified yet responded to a rescue request")
+        return
+
+      await rescue_request.responders.aadd(player)
 

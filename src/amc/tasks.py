@@ -231,16 +231,18 @@ async def process_logout_event(character_id, timestamp):
   await async_execute_raw_sql(raw_sql, params)
 
 
-async def forward_to_discord(client, channel_id, content):
+async def forward_to_discord(client, channel_id, content, escape_mentions=True):
   if not client.is_ready():
     await client.wait_until_ready()
 
+  allowed_mentions = discord.AllowedMentions.all()
+  if escape_mentions:
+    content = discord.utils.escape_mentions(content)
+    allowed_mentions = discord.AllowedMentions.none()
+
   channel = client.get_channel(int(channel_id))
   if channel:
-    await channel.send(
-      discord.utils.escape_mentions(content),
-      allowed_mentions=discord.AllowedMentions.none()
-    )
+    return await channel.send(content, allowed_mentions=allowed_mentions)
 
 async def add_discord_verified_role(client, discord_user_id, player_id):
   guild = client.get_guild(settings.DISCORD_GUILD_ID)
@@ -641,25 +643,52 @@ Use <Highlight>/rescue</> to alert rescuers in the game and on discord if you ne
           asyncio.create_task(
             announce(f"{character.name} needs a rescue!", http_client)
           )
-        asyncio.create_task(
-          show_popup(
-            http_client_mod, popup_message,
-            character_guid=character.guid,
-            player_id=str(player.unique_id)
-          )
-        )
-        await RescueRequest.objects.acreate(
+        rescue_request = await RescueRequest.objects.acreate(
           character=character,
           message=rescue_request_message,
         )
-        asyncio.run_coroutine_threadsafe(
-          forward_to_discord(
-            discord_client,
-            1428483540898545805,
-            f"## 🚨 Rescue Request\n\n**{character.name}** requested a rescue.\nMessage: {rescue_request_message or '-'}"
-          ),
-          discord_client.loop
-        )
+
+        if is_current_event:
+          asyncio.create_task(
+            show_popup(
+              http_client_mod, popup_message,
+              character_guid=character.guid,
+              player_id=str(player.unique_id)
+            )
+          )
+          async def send_discord_rescue_request():
+            message = await forward_to_discord(
+              discord_client,
+              settings.DISCORD_RESCUE_CHANNEL_ID,
+              f"""\
+@here
+
+## 🚨 Rescue Request
+
+**{character.name}** requested a rescue.
+**Message:** {rescue_request_message or '-'}
+
+### Responding
+To respond, react to the message with your team's emoji.
+<:cone:1374642183172260001> DOT `:cone:`
+🟩 ARWRS `:green_square:`
+🔵 CKM `:blue_circle:`
+The first reaction will be the one on the left.
+Only 1 rescue team should respond to a request.
+
+### If you don't want to be notified:
+- Right click the channel > Notification Settings > Nothing
+- Remove your role (DOT/ARWRS/CKM)
+""",
+              escape_mentions=False
+            )
+            if message:
+              rescue_request.discord_message_id = message.id
+              await rescue_request.asave(update_fields=['discord_message_id'])
+          asyncio.run_coroutine_threadsafe(
+            send_discord_rescue_request(),
+            discord_client.loop
+          )
       elif command_match := re.match(r"/(teleport|tp)\s+(?P<x>[-\d]+)\s+(?P<y>[-\d]+)\s+(?P<z>[-\d]+)$", message):
         player_info = await get_player(http_client_mod, str(player.unique_id))
         if player_info and player_info.get('bIsAdmin'):
