@@ -842,7 +842,7 @@ Use <Highlight>/setup_event {event.id}</> to start
 <Secondary>{format_in_local_tz(event.start_time)} - {format_in_local_tz(event.end_time)}</>
 <Secondary>({get_event_start_time_in(event)})</>
 
-{event.description}"""
+{event.description_in_game or event.description}"""
           async for event in ScheduledEvent.objects.filter(end_time__gte=timezone.now()).order_by('start_time')
         ])
         asyncio.create_task(

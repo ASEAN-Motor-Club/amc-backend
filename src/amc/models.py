@@ -376,6 +376,7 @@ class ScheduledEvent(models.Model):
     related_name='scheduled_events'
   )
   description = models.TextField(blank=True)
+  description_in_game = models.TextField(blank=True, help_text="This will be shown when players use /events. Defaults to description")
   time_trial = models.BooleanField(default=False)
   staggered_start_delay = models.PositiveIntegerField(default=0, help_text="Delay between staggered start, in seconds. This can be overridden in the game")
   objects = models.Manager.from_queryset(ScheduledEventQuerySet)()
