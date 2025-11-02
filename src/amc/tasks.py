@@ -417,7 +417,7 @@ To see all your decals, use:
 <Title>RP Mode Status</>
 Your RP mode is {'<EffectGood>ON</>' if is_rp_mode else '<Warning>OFF</>'}
 Toggle it with <Highlight>/rp_mode</>
-<Secondary>Jobs pay 20% more with RP Mode on</>
+<Secondary>Jobs pay 100% more with RP Mode on</>
 
 <Title>Subsidies</>
 <Secondary>These jobs are always subsidised on the server.</>
@@ -543,7 +543,7 @@ When enabled, using roadside recovery will result in the loss of cargo and vehic
 Use <Highlight>/rescue</> to call for help instead.
 
 <Bold>Some jobs require RP mode to be enabled</>
-Jobs pay <Money>20%</> with RP mode.
+Jobs pay <Money>100%</> more with RP mode.
 
 <Warning>ALL Your vehicles will be despawned by toggling this mode!</>
 If you understand the above, confirm by typing in:
@@ -590,7 +590,7 @@ Please try again:
 <Title>Roleplay Mode Enabled</>
 
 <EffectGood>You can now take on RP mode jobs!</>
-You will also get <Money>20%</> more bonuses and subsidies.
+You will also get <Money>100%</> more bonuses and subsidies.
 
 Use <Highlight>/rescue</> to alert rescuers in the game and on discord if you need a rescue.
 """,

@@ -84,7 +84,7 @@ async def on_delivery_job_fulfilled(job, http_client):
             character_contributions[character_id] = {
               'count': sum([delivery.quantity for delivery in character_deliveries]),
               'reward': sum([
-                int(delivery.quantity / total_deliveries * completion_bonus * (1.2 if delivery.rp_mode else 1))
+                int(delivery.quantity / total_deliveries * completion_bonus)
                 for delivery in character_deliveries
               ]),
             }
@@ -276,7 +276,7 @@ async def process_events(events, http_client=None, http_client_mod=None, discord
       except Exception as e:
         event_str = json.dumps(event)
         asyncio.create_task(
-          show_popup(http_client_mod, f"Webhook failed, please send to discord:\n{e}\n{event_str}", player_id=str(player.unique_id))
+          show_popup(http_client_mod, f"Webhook failed, please send to discord:\n{e}\n{event_str}", character_guid=character.guid)
         )
         raise e
 
@@ -285,7 +285,7 @@ async def process_events(events, http_client=None, http_client_mod=None, discord
       total_subsidy = 0
 
     if is_rp_mode:
-      total_subsidy = int(total_subsidy * 1.2) + int(total_payment * 0.2)
+      total_subsidy = int(total_subsidy * 2.0) + int(total_payment * 1.0)
 
     player_profits.append((character, total_subsidy, total_payment))
 

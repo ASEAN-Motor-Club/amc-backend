@@ -178,8 +178,12 @@ async def monitor_jobs(ctx):
     if random.random() > chance:
       continue
 
+    rp_mode =  job.rp_mode or random.random() < 0.15 
     bonus_multiplier = round(job.bonus_multiplier * random.uniform(0.8, 1.2), 2)
     completion_bonus = int(job.completion_bonus * quantity_requested / job.quantity_requested * random.uniform(0.7, 1.3))
+    if rp_mode and not job.rp_mode:
+      completion_bonus = completion_bonus * 2
+
     new_job = await DeliveryJob.objects.acreate(
       name=job.name,
       cargo_key=job.cargo_key,
@@ -188,6 +192,7 @@ async def monitor_jobs(ctx):
       bonus_multiplier=bonus_multiplier,
       completion_bonus=completion_bonus,
       description=job.description,
+      rp_mode=rp_mode,
       base_template=job,
     )
     await new_job.cargos.aadd(*cargos)
