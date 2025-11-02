@@ -100,7 +100,7 @@ class WorkerSettings:
     functions = [process_log_line]
     cron_jobs = [
         cron(monitor_webhook, second=set(range(0, 60, 4))),
-        # cron(monitor_webhook_test, second=set(range(0, 60, 4))),
+        cron(monitor_webhook_test, second=set(range(0, 60, 4))),
         cron(monitor_locations, second=None),
         cron(handout_ubi, minute=set(range(0, 60, UBI_TASK_FREQUENCY)), second=37),
         cron(apply_interest_to_bank_accounts, hour=None, minute=0, second=0),

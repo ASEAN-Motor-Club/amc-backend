@@ -167,7 +167,11 @@ async def monitor_webhook_test(ctx):
   http_client_mod = ctx.get('http_client_test_mod')
   http_client_webhook = ctx.get('http_client_test_webhook')
   discord_client = ctx.get('discord_client')
-  events = await get_webhook_events2(http_client_webhook)
+  try:
+    events = await get_webhook_events2(http_client_webhook)
+  except Exception as e:
+    print(f"Failed to get webhook events: {e}")
+    return
   await process_events(events, http_client, http_client_mod, discord_client)
 
 
@@ -479,28 +483,28 @@ async def process_event(event, player, character, is_rp_mode=False, used_shortcu
         timestamp=timestamp,
         player=player,
         passenger_type=passenger['Net_PassengerType'],
-        distance=passenger['Net_Distance'],
+        distance=passenger.get('Net_Distance'),
         payment=base_payment,
-        arrived=passenger['Net_bArrived'],
+        arrived=passenger.get('Net_bArrived', True),
         comfort=bool(flag & 1),
         urgent=bool(flag & 2),
         limo=bool(flag & 4),
         offroad=bool(flag & 8),
-        comfort_rating=passenger['Net_LCComfortSatisfaction'],
-        urgent_rating=passenger['Net_TimeLimitPoint'],
+        comfort_rating=passenger.get('Net_LCComfortSatisfaction'),
+        urgent_rating=passenger.get('Net_TimeLimitPoint'),
         data=passenger,
       )
-      if log.comfort:
-        bonus_per_star = 0.2
-        if log.limo:
-          bonus_per_star = bonus_per_star * 1.3
-        log.payment += base_payment * log.comfort_rating * bonus_per_star 
-      if log.urgent:
-        log.payment += base_payment * log.urgent_rating * 0.3
-      await log.asave()
-
-      subsidy = get_passenger_subsidy(log)
-      total_payment += log.payment + subsidy
+      if log.passenger_type == ServerPassengerArrivedLog.PassengerType.Taxi:
+        if log.comfort:
+          bonus_per_star = 0.2
+          if log.limo:
+            bonus_per_star = bonus_per_star * 1.3
+          log.payment += base_payment * log.comfort_rating * bonus_per_star 
+        if log.urgent:
+          log.payment += base_payment * log.urgent_rating * 0.3
+        await log.asave()
+        subsidy = get_passenger_subsidy(log)
+        total_payment += log.payment + subsidy
 
     case "ServerTowRequestArrived":
       tow_request = event['data']['TowRequest']
