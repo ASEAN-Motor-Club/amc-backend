@@ -583,6 +583,15 @@ Please try again:
         else:
           await toggle_rp_session(http_client_mod, character.guid)
           is_rp_mode = await get_rp_mode(http_client_mod, character.guid)
+
+          new_name = None
+          if is_rp_mode and '[RP]' not in character.name:
+            new_name = f"{character.name}[RP]"
+          elif not is_rp_mode and '[RP]' in character.name:
+            new_name = character.name.replace('[RP]', '')
+          if new_name is not None:
+            await set_character_name(ctx['http_client_mod'], character.guid, new_name)
+
           if is_rp_mode:
             asyncio.create_task(
               show_popup(
@@ -1301,8 +1310,17 @@ The loan amount has been deposited into your wallet. You can view your loan deta
           )
       await process_login_event(character.id, timestamp)
       asyncio.create_task(send_player_messages(http_client_mod, player))
-      if character.custom_name:
-        asyncio.create_task(set_character_name(http_client_mod, character.guid, character.custom_name))
+      is_rp_mode = await get_rp_mode(http_client_mod, character.guid)
+
+      new_name = character.custom_name or character.name
+      if is_rp_mode and '[RP]' not in new_name:
+        new_name = f"{new_name}[RP]"
+      elif not is_rp_mode and '[RP]' in new_name:
+        new_name = character.name.replace('[RP]', '')
+
+      if new_name != character.name:
+        asyncio.create_task(set_character_name(http_client_mod, character.guid, new_name))
+
       if discord_client and ctx.get('startup_time') and timestamp > ctx.get('startup_time'):
         forward_message = (
           settings.DISCORD_GAME_CHAT_CHANNEL_ID,
