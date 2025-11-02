@@ -97,9 +97,14 @@ async def send_results_message(channel, scheduled_event, championship, participa
     Sends a formatted embed with the event results to a specified channel.
     """
     # 1. Basic Embed Setup
+    if championship:
+      embed_description = f"The results are in! Congratulations to all participants in the **{championship.name}** series. Here are the final standings:"
+    else:
+      embed_description = f"The results are in! Congratulations to all participants in the **{scheduled_event.name}** event. Here are the final standings:"
+
     embed = discord.Embed(
         title=f"🏁 Event Results: {scheduled_event.name} 🏁",
-        description=f"The results are in! Congratulations to all participants in the **{championship.name}** series. Here are the final standings:",
+        description=embed_description,
         color=discord.Color.gold(),  # Gold for victory!
         timestamp=discord.utils.utcnow()
     )
@@ -113,7 +118,7 @@ async def send_results_message(channel, scheduled_event, championship, participa
         member_name = participant.character.name 
         
         prize = ChampionshipPoint.get_event_prize_for_position(i, time_trial=scheduled_event.time_trial)
-        points = ChampionshipPoint.get_event_points_for_position(i, time_trial=scheduled_event.time_trial)
+        points = ChampionshipPoint.get_event_points_for_position(i, time_trial=scheduled_event.time_trial) if championship else 0
         
         embed.add_field(
             name=f"{podium_medals[i]} {i+1}{'st' if i==0 else 'nd' if i==1 else 'rd'} Place: {member_name}",
@@ -127,7 +132,7 @@ async def send_results_message(channel, scheduled_event, championship, participa
         for i, participant in enumerate(participants[3:10], start=4):
             member_name = participant.character.name
             prize = ChampionshipPoint.get_event_prize_for_position(i-1, time_trial=scheduled_event.time_trial)
-            points = ChampionshipPoint.get_event_points_for_position(i-1, time_trial=scheduled_event.time_trial)
+            points = ChampionshipPoint.get_event_points_for_position(i-1, time_trial=scheduled_event.time_trial) if championship else 0
             
             other_finishers_text.append(
                 f"`{i}.` **{member_name}** — Points: `{points}`, Prize: `${prize:,}`"
@@ -140,7 +145,8 @@ async def send_results_message(channel, scheduled_event, championship, participa
                 inline=False
             )
 
-    # embed.set_footer(text=f"")
+    if championship:
+      embed.set_footer(text=f"Part of {championship.name}")
 
     await channel.send(embed=embed)
 
@@ -486,6 +492,9 @@ class EventsCog(commands.Cog):
     if championship:
       channel = self.bot.get_channel(settings.DISCORD_CHAMPIONSHIP_CHANNEL_ID)
       await send_results_message(channel, scheduled_event, championship, participants)
+    else:
+      channel = self.bot.get_channel(settings.DISCORD_GENERAL_CHANNEL_ID)
+      await send_results_message(channel, scheduled_event, None, participants)
 
     await ctx.followup.send('Succeeded', ephemeral=True)
 

@@ -287,8 +287,7 @@ async def show_scheduled_event_results_popup(http_client, scheduled_event, playe
   await show_results_popup(http_client, participants, player_id=player_id, character_guid=character_guid)
 
 
-async def monitor_events(ctx):
-  http_client = ctx.get('http_client_event_mod')
+async def monitor_events(ctx, http_client):
   discord_client = ctx.get('discord_client')
   events_cog = discord_client.get_cog('EventsCog')
 
