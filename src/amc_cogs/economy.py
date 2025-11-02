@@ -80,6 +80,9 @@ class EconomyCog(commands.Cog):
     self.decrypt_save_file_channel_id = settings.DISCORD_DECRYPT_SAVE_FILE_CHANNEL_ID
     self.player_autocomplete = create_player_autocomplete(self.bot.http_client_game)
 
+  async def cog_load(self):
+    self.daily_top_haulers_task.start()
+
   @tasks.loop(time=dt_time(hour=2, minute=0, tzinfo=dt_timezone.utc))
   async def daily_top_haulers_task(self):
     embed = await self.build_top_haulers_embed()
