@@ -909,13 +909,13 @@ Use <Highlight>/setup_event {event.id}</> to start
           character=character, 
           song=command_match.group('song'),
         )
-        asyncio.create_task(
-          show_popup(http_client_mod, "<Title>Song Request is Unavailable</>", character_guid=character.guid, player_id=str(player.unique_id))
-        )
-        # if is_current_event:
-        #   asyncio.create_task(
-        #     show_popup(http_client_mod, "<Title>Your song is being downloaded</>\n\nThis usually takes 30-60 seconds.", character_guid=character.guid, player_id=str(player.unique_id))
-        #   )
+        # asyncio.create_task(
+        #   show_popup(http_client_mod, "<Title>Song Request is Unavailable</>", character_guid=character.guid, player_id=str(player.unique_id))
+        # )
+        if is_current_event:
+          asyncio.create_task(
+            show_popup(http_client_mod, "<Title>Your song is being downloaded</>\n\nThis usually takes 30-60 seconds.", character_guid=character.guid, player_id=str(player.unique_id))
+          )
       elif command_match := re.match(r"/set_saving_rate (?P<saving_rate>\d+)%?$", message):
         try:
           character.saving_rate = min(
