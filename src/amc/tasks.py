@@ -67,6 +67,7 @@ from amc.mod_server import (
   get_decal,
   set_decal,
   set_character_name,
+  force_exit_vehicle,
 )
 from amc.auth import verify_player
 from amc.mailbox import send_player_messages
@@ -810,6 +811,23 @@ Only 1 rescue team should respond to a request.
             character=character, 
             prompt=message,
           )
+
+      elif command_match := re.match(r"/exit\s+(?P<target_player_name>.*)$", message):
+        if player_info and player_info.get('bIsAdmin'):
+          target_player_name = command_match.group('target_player_name')
+          players = await get_players_mod(http_client_mod)
+          target_character_guid = None
+          for _player_info in players:
+            p_name = _player_info.get('PlayerName')
+            c_guid = _player_info.get('CharacterGuid')
+            if p_name == target_player_name:
+              target_character_guid = c_guid
+
+          if target_character_guid is not None:
+            await force_exit_vehicle(
+              http_client_mod,
+              target_character_guid,
+            )
 
       if command_match := re.match(r"/verify (?P<signed_message>.+)", message):
         try:
