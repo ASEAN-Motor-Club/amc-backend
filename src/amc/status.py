@@ -1,5 +1,5 @@
 import psutil
-from amc.mod_server import get_status, set_config, list_player_vehicles
+from amc.mod_server import get_status, set_config, list_player_vehicles, despawn_player_vehicle
 from amc.game_server import get_players2, announce
 from amc.models import ServerStatus
 
@@ -43,11 +43,44 @@ async def monitor_server_condition(ctx):
         color="FF59EE"
       )
 
-    for player_id, player in players:
-      player_vehicles = await list_player_vehicles(ctx['http_client_mod'], player_id)
+  for player_id, player in players:
+    player_vehicles = await list_player_vehicles(ctx['http_client_mod'], player_id)
+    player_name = player.get('name')
+
+    if fps < target_fps:
       if len(player_vehicles) > max_vehicles_per_player:
         await announce(
-          f"{player.get('name', '')}, please despawn your vehicles, you currently have {len(player_vehicles)} spanwed",
+          f"{player_name}, please despawn your vehicles, you currently have {len(player_vehicles)} spanwed",
           ctx['http_client'],
         )
+
+async def monitor_rp_mode(ctx):
+  try:
+    players = await get_players2(ctx['http_client'])
+  except Exception as e:
+    print(f"Failed to get players: {e}")
+    players = []
+
+  for player_id, player in players:
+    player_name = player.get('name')
+    is_rp_mode = '[RP]' in player_name
+    if not is_rp_mode:
+      continue
+
+    player_vehicles = await list_player_vehicles(ctx['http_client_mod'], player_id)
+
+    def is_position_zero(position):
+      if not position:
+        return True
+      return position['X'] == 0 and position['Y'] == 0 and position['Z'] == 0
+
+    is_autopilot = any([v.get('bIsAIDriving') and not is_position_zero(v.get('position')) for v in player_vehicles])
+    if is_autopilot:
+      await despawn_player_vehicle(ctx['http_client_mod'], player_id)
+      await announce(
+        f"{player_name}'s vehicle has been despawned for using autopilot while in RP mode",
+        ctx['http_client'],
+        color="FFA500"
+      )
+
 

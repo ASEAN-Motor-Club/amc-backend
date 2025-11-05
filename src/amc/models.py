@@ -174,6 +174,7 @@ class Character(models.Model):
       MaxValueValidator(Decimal('1.00'))
     ]
   )
+  rp_mode = models.BooleanField(default=False)
   reject_ubi = models.BooleanField(default=False)
   ubi_multiplier = models.FloatField(default=1.0)
 

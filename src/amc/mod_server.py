@@ -28,8 +28,9 @@ async def transfer_money(session, amount, message, player_id):
     if resp.status != 200:
       raise Exception('Failed to transfer money')
 
-async def toggle_rp_session(session, player_guid):
-  async with session.post(f'/rp_sessions/{player_guid}/toggle') as resp:
+async def toggle_rp_session(session, player_guid, despawn=False):
+  json = {'despawn': despawn}
+  async with session.post(f'/rp_sessions/{player_guid}/toggle', json=json) as resp:
     if resp.status != 200:
       raise Exception('Failed to toggle RP session')
 
@@ -153,8 +154,19 @@ async def set_decal(session, player_id, decal):
     if resp.status != 200:
       raise Exception('Failed to set decal')
 
-async def despawn_player_vehicle(session, player_id):
-  async with session.post(f'/player_vehicles/{player_id}/despawn') as resp:
+async def despawn_player_vehicle(session, player_id, category='current'):
+  if category == 'current':
+    json = {}
+  if category == 'others':
+    json = {'others': True}
+  if category == 'all':
+    json = {'all': True}
+  async with session.post(f'/player_vehicles/{player_id}/despawn', json=json) as resp:
     if resp.status != 200:
       raise Exception('Failed to despawn')
+
+async def force_exit_vehicle(session, character_guid):
+  async with session.get(f'/player_vehicles/{character_guid}/exit') as resp:
+    if resp.status != 200:
+      raise Exception('Failed to exit vehicle')
 

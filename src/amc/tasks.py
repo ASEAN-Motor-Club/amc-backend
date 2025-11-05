@@ -538,16 +538,14 @@ Toggle it with <Highlight>/rp_mode</>
 To turn off this feature, resend the command with the confirmation code:
           """
         else:
-          notes = """
-When enabled, using roadside recovery will result in the loss of cargo and vehicle.
-Use <Highlight>/rescue</> to call for help instead.
-
-<Bold>Some jobs require RP mode to be enabled</>
-Jobs pay <Money>100%</> more with RP mode.
+          notes = """\
+Enabling RP mode gives you 100% across all payments and subsidies. Some jobs are exclusive to RP mode.
+- Using <Bold>Roadside Recovery</> will result in the loss of cargo and vehicle.
+- Using <Bold>Autopilot</> will result in the loss of cargo and vehicle.
+- Use <Highlight>/rescue</> to call for help instead.
 
 <Warning>ALL Your vehicles will be despawned by toggling this mode!</>
-If you understand the above, confirm by typing in:
-          """
+If you understand the above, confirm by typing in:"""
         asyncio.create_task(
           show_popup(
             http_client_mod, f"""\
@@ -581,8 +579,10 @@ Please try again:
             )
           )
         else:
-          await toggle_rp_session(http_client_mod, character.guid)
+          await toggle_rp_session(http_client_mod, character.guid, despawn=True)
           is_rp_mode = await get_rp_mode(http_client_mod, character.guid)
+          character.rp_mode = is_rp_mode
+          await character.asave(update_fields=['rp_mode'])
 
           new_name = None
           if is_rp_mode and '[RP]' not in character.name:
@@ -1310,7 +1310,10 @@ The loan amount has been deposited into your wallet. You can view your loan deta
           )
       await process_login_event(character.id, timestamp)
       asyncio.create_task(send_player_messages(http_client_mod, player))
+
       is_rp_mode = await get_rp_mode(http_client_mod, character.guid)
+      if character.rp_mode and not is_rp_mode:
+        await toggle_rp_session(http_client_mod, player_id)
 
       new_name = character.custom_name or character.name
       if is_rp_mode and '[RP]' not in new_name:
