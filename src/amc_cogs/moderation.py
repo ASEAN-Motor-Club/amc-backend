@@ -89,7 +89,7 @@ class ModerationCog(commands.Cog):
       Q(unique_id=player_id) | Q(discord_user_id=player_id)
     )
     mail_message = f"""\
-<Bold>Message from {ctx.user.display_name}</Bold>
+<Bold>Message from {ctx.user.display_name}</>
 
 {message}
 """
