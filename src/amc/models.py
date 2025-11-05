@@ -424,12 +424,17 @@ class GameEvent(models.Model):
 
 class ParticipantQuerySet(models.QuerySet):
   def filter_best_time_per_player(self):
-    return self.alias(
+    return self.annotate(
+      attempts_count=Window(
+        expression=Count('id', filter=Q(finished=True)),
+        partition_by=[F('character')]
+      )
+    ).alias(
       p_rank=Window(
         expression=RowNumber(),
         partition_by=[F('character')],
         order_by=[F('disqualified').asc(), F('finished').desc(), F('net_time').asc()]
-      )
+      ),
     ).filter(p_rank=1)
 
   def filter_by_scheduled_event(self, scheduled_event):

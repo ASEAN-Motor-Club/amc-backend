@@ -89,6 +89,13 @@ async def process_event(event):
     guid=event['OwnerCharacterId']['CharacterGuid']
   ).afirst()
 
+  scheduled_event = await ScheduledEvent.objects.filter(
+    race_setup=race_setup,
+    start_time__lte=timezone.now(),
+    end_time__gte=timezone.now(),
+    time_trial=True # only auto-associate time trials
+  ).afirst()
+
   try:
     game_event = await (GameEvent.objects
       .filter(
@@ -105,8 +112,9 @@ async def process_event(event):
     game_event.state = event['State']
     game_event.owner = owner
     game_event.race_setup = race_setup
+    if not game_event.scheduled_event:
+      game_event.scheduled_event = scheduled_event
     await game_event.asave()
-    scheduled_event = game_event.scheduled_event
   except GameEvent.DoesNotExist:
     try:
       # TODO: Refactor, use the above query as the existing_event
@@ -126,13 +134,6 @@ async def process_event(event):
       discord_message_id = existing_event.discord_message_id
     except GameEvent.DoesNotExist:
       discord_message_id = None
-
-    scheduled_event = await ScheduledEvent.objects.filter(
-      race_setup=race_setup,
-      start_time__lte=timezone.now(),
-      end_time__gte=timezone.now(),
-      time_trial=True # only auto-associate time trials
-    ).afirst()
 
     game_event = await GameEvent.objects.acreate(
       guid=event['EventGuid'],

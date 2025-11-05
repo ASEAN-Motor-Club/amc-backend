@@ -298,6 +298,8 @@ class EventsCog(commands.Cog):
           progress_str = f"{progress_percentage:.1f}%"
 
       participant_line = f"{rank}. {participant.character.name} ({progress_str})"
+      if scheduled_event.time_trial:
+        participant_line += f" ({participant.attempts_count} attempts)"
 
       if participant.wrong_vehicle:
         participant_line += " [Wrong Vehicle]"
