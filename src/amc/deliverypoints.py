@@ -199,7 +199,7 @@ async def monitor_jobs(ctx):
     await new_job.source_points.aadd(*source_points)
     await new_job.destination_points.aadd(*destination_points)
     asyncio.create_task(
-      announce(f"New job posting! {job.name} - {completion_bonus:,} bonus on completion.", ctx['http_client'])
+      announce(f"New job posting! {job.name} - {completion_bonus:,} bonus on completion. See /jobs for more details", ctx['http_client'])
     )
     break
 
