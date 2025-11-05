@@ -663,7 +663,7 @@ async def auto_starting_grid(http_client_mod, game_event):
     player_location = {
       'X': final_x,
       'Y': final_y,
-      'Z': final_z + 50,
+      'Z': final_z + 20,
     }
     player_rotation = {
       'Roll': 0,
