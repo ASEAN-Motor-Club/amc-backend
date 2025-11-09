@@ -1,3 +1,4 @@
+import re
 from io import BytesIO
 from decimal import Decimal
 from datetime import time as dt_time, timedelta, timezone as dt_timezone
@@ -29,7 +30,7 @@ from amc_finance.services import (
   make_treasury_bank_deposit,
 )
 from amc.subsidies import DEFAULT_SAVING_RATE
-from amc.save_file import decrypt
+from amc.save_file import decrypt, encrypt
 
 
 DONATION_EXPECTATION_BRACKETS = [
@@ -527,7 +528,7 @@ The purpose of this transfer is to ensure sufficient liquidity within the server
 
   @commands.Cog.listener()
   async def on_message(self, message):
-    if message.channel.id == self.decrypt_save_file_channel_id:
+    if message.channel.id == self.decrypt_save_file_channel_id and not message.author.bot:
       channel = message.channel
       attachments = message.attachments
       if not attachments:
@@ -537,10 +538,15 @@ The purpose of this transfer is to ensure sufficient liquidity within the server
 
       attachment = attachments[0]
       attachment_bytes = await attachment.read()
-      decrypted_bytes = decrypt(attachment_bytes)
+      if re.match('.*\.json', attachment.filename):
+        file_bytes = encrypt(attachment_bytes)
+        file_ext = 'sav'
+      else:
+        file_bytes = decrypt(attachment_bytes)
+        file_ext = 'json'
       
       await channel.send(
-        file=discord.File(fp=BytesIO(decrypted_bytes), filename=f"{attachment.filename}.json"),
+        file=discord.File(fp=BytesIO(file_bytes), filename=f"{attachment.filename}.{file_ext}"),
         reference=message,
       )
 
