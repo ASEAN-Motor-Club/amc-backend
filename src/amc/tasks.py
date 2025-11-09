@@ -820,7 +820,10 @@ Only 1 rescue team should respond to a request.
               return
           else:
             location = player_info['CustomDestinationAbsoluteLocation']
-            location['Z'] += 100
+            if player_info['VehicleKey'] == 'None':
+              location['Z'] += 100
+            else:
+              location['Z'] += 5
           await teleport_player(
               http_client_mod,
               player.unique_id,
