@@ -1497,7 +1497,7 @@ The loan amount has been deposited into your wallet. You can view your loan deta
       forward_to_discord(
         discord_client,
         forward_message_channel_id,
-        forward_message_content
+        forward_message_content[:240]
       ),
       discord_client.loop
     )
