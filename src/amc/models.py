@@ -440,7 +440,8 @@ class ParticipantQuerySet(models.QuerySet):
   def filter_by_scheduled_event(self, scheduled_event):
     if scheduled_event.time_trial:
       criteria = Q(
-        game_event__race_setup=scheduled_event.race_setup,
+        Q(game_event__scheduled_event=scheduled_event) |
+        Q(game_event__race_setup=scheduled_event.race_setup),
         game_event__start_time__gte=scheduled_event.start_time,
         game_event__start_time__lte=scheduled_event.end_time,
       )
