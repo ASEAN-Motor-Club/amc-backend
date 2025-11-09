@@ -901,6 +901,10 @@ Use <Highlight>/setup_event {event.id}</> to start
         )
       if command_match := re.match(r"/rename\s+(?P<name>.+)", message):
         new_name = command_match.group('name')
+        if True:
+          asyncio.create_task(
+            show_popup(http_client_mod, "This command has been deprecated", character_guid=character.guid)
+          )
         if len(new_name) > 20:
           asyncio.create_task(
             show_popup(http_client_mod, "Max character name is 20 characters", character_guid=character.guid)
@@ -910,6 +914,11 @@ Use <Highlight>/setup_event {event.id}</> to start
             show_popup(http_client_mod, "Name contains invalid characters", character_guid=character.guid)
           )
         else:
+          is_rp_mode = await get_rp_mode(http_client_mod, character.guid)
+          if is_rp_mode and '[RP]' not in new_name:
+            new_name = f"{new_name}[RP]"
+          elif not is_rp_mode and '[RP]' in new_name:
+            new_name = character.name.replace('[RP]', '')
           character.custom_name = new_name
           await character.asave(update_fields=['custom_name'])
           asyncio.create_task(set_character_name(http_client_mod, character.guid, new_name))
@@ -1305,7 +1314,7 @@ The loan amount has been deposited into your wallet. You can view your loan deta
               last_login = latest_status.timespan.upper
             except PlayerStatusLog.DoesNotExist:
               pass
-          welcome_message, is_new_player = get_welcome_message(last_login, character.custom_name or character.name)
+          welcome_message, is_new_player = get_welcome_message(last_login, character.name)
           if is_new_player:
             asyncio.create_task(
               show_popup(http_client_mod, settings.WELCOME_TEXT, character_guid=character.guid, player_id=str(player.unique_id))
@@ -1354,7 +1363,7 @@ The loan amount has been deposited into your wallet. You can view your loan deta
       if character.rp_mode and not is_rp_mode:
         await toggle_rp_session(http_client_mod, player_id)
 
-      new_name = character.custom_name or character.name
+      new_name = character.name
       if is_rp_mode and '[RP]' not in new_name:
         new_name = f"{new_name}[RP]"
       elif not is_rp_mode and '[RP]' in new_name:
