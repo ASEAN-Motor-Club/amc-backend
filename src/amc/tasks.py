@@ -12,6 +12,7 @@ from django.conf import settings
 from django.core.signing import Signer
 from asgiref.sync import sync_to_async
 from amc.models import ServerLog
+from amc.enums import VehicleKey
 from amc.server_logs import (
   parse_log_line,
   LogEvent,
@@ -68,6 +69,7 @@ from amc.mod_server import (
   set_decal,
   set_character_name,
   force_exit_vehicle,
+  spawn_vehicle,
 )
 from amc.auth import verify_player
 from amc.mailbox import send_player_messages
@@ -701,6 +703,23 @@ Only 1 rescue team should respond to a request.
             send_discord_rescue_request(),
             discord_client.loop
           )
+      elif command_match := re.match(r"/spawn\s*(?P<vehicle_label>.*)$", message):
+        if player_info and player_info.get('bIsAdmin'):
+          vehicle_label = command_match.group('vehicle_label')
+          if not vehicle_label:
+            vehicles_list_str = '\n'.join(VehicleKey.labels)
+            asyncio.create_task(
+              show_popup(http_client_mod, f"<Title>Spawn Vehicle</>\n\n{vehicles_list_str}", character_guid=character.guid, player_id=str(player.unique_id))
+            )
+          else:
+            location = player_info['CustomDestinationAbsoluteLocation']
+            asyncio.create_task(
+              spawn_vehicle(
+                http_client_mod,
+                vehicle_label,
+                location,
+              )
+            )
       elif command_match := re.match(r"/(teleport|tp)\s+(?P<x>[-\d]+)\s+(?P<y>[-\d]+)\s+(?P<z>[-\d]+)$", message):
         player_info = await get_player(http_client_mod, str(player.unique_id))
         if player_info and player_info.get('bIsAdmin'):

@@ -1,3 +1,6 @@
+import json
+from amc.enums import VehicleKeyByLabel, VEHICLE_DATA
+
 async def show_popup(session, message, player_id=None, character_guid=None):
   params = {'message': message}
   if player_id is not None:
@@ -169,4 +172,38 @@ async def force_exit_vehicle(session, character_guid):
   async with session.get(f'/player_vehicles/{character_guid}/exit') as resp:
     if resp.status != 200:
       raise Exception('Failed to exit vehicle')
+
+async def spawn_vehicle(
+  session,
+  vehicle_label,
+  location,
+  rotation={},
+  customization=None,
+  decal=None,
+  tag="amc",
+):
+  vehicle_key = VehicleKeyByLabel.get(vehicle_label)
+  if not vehicle_key:
+    raise Exception(f'Vehicle {vehicle_label} not found')
+
+  vehicle_data = VEHICLE_DATA.get(vehicle_key)
+  if not vehicle_data:
+    raise Exception(f'Vehicle data for key {vehicle_key} not found')
+
+  asset_path = vehicle_data['asset_path']
+  data = {
+    'Location': location,
+    'Rotation': rotation,
+    'AssetPath': asset_path,
+    'tag': tag,
+  }
+  if customization:
+    data['customization'] = customization
+  if decal:
+    data['decal'] = decal
+  print(json.dumps(data))
+
+  async with session.post('/vehicles/spawn', json=data) as resp:
+    if resp.status != 200:
+      raise Exception('Failed to spawn vehicle')
 
