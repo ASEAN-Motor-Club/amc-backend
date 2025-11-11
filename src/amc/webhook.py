@@ -289,14 +289,12 @@ async def process_events(events, http_client=None, http_client_mod=None, discord
       total_subsidy = 0
 
     if is_rp_mode:
-      total_subsidy = int(total_subsidy * 2.0) + int(total_payment * 1.0)
+      total_subsidy = int(total_payment * 2)
 
     player_profits.append((character, total_subsidy, total_payment))
 
   if http_client_mod:
-    asyncio.create_task(
-      on_player_profits(player_profits, http_client_mod)
-    )
+    await on_player_profits(player_profits, http_client_mod)
 
 async def process_cargo_log(cargo, player, character, timestamp):
   sender_coord_raw = cargo['Net_SenderAbsoluteLocation']
@@ -326,15 +324,13 @@ async def process_cargo_log(cargo, player, character, timestamp):
     data=cargo,
   )
 
-def atomic_update_job(job_id, quantity, payment, cargo_subsidy):
+def atomic_update_job(job_id, quantity):
   with transaction.atomic():
     job = DeliveryJob.objects.select_for_update().get(pk=job_id)
     if job:
       requested_remaining = job.quantity_requested - job.quantity_fulfilled
       quantity_to_add = min(requested_remaining, quantity)
       if quantity_to_add > 0:
-        bonus = quantity_to_add * job.bonus_multiplier * payment
-        cargo_subsidy = max(cargo_subsidy, bonus)
         job.quantity_fulfilled = F('quantity_fulfilled') + quantity_to_add
         job.save(update_fields=['quantity_fulfilled'])
         job.refresh_from_db(fields=['quantity_fulfilled'])
@@ -378,7 +374,10 @@ async def process_event(event, player, character, is_rp_mode=False, used_shortcu
         ).afirst()
 
         if job and not used_shortcut:
-          job = await sync_to_async(atomic_update_job)(job.id, quantity, payment, cargo_subsidy)
+          job = await sync_to_async(atomic_update_job)(job.id, quantity)
+
+        bonus = quantity * job.bonus_multiplier * payment
+        subsidy = max(cargo_subsidy, bonus)
 
         await Delivery.objects.acreate(
           timestamp=timestamp,
@@ -386,7 +385,7 @@ async def process_event(event, player, character, is_rp_mode=False, used_shortcu
           cargo_key=cargo_key,
           quantity=quantity,
           payment=payment * quantity,
-          subsidy=cargo_subsidy,
+          subsidy=subsidy,
           sender_point=delivery_source,
           destination_point=delivery_destination,
           job=job,
