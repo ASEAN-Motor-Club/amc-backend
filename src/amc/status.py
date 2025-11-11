@@ -1,7 +1,7 @@
 import psutil
-from amc.mod_server import get_status, set_config, list_player_vehicles, despawn_player_vehicle
+from amc.mod_server import get_status, set_config, list_player_vehicles, teleport_player
 from amc.game_server import get_players2, announce
-from amc.models import ServerStatus
+from amc.models import ServerStatus, CharacterLocation
 
 async def monitor_server_status(ctx):
   status = await get_status(ctx['http_client_mod'])
@@ -74,11 +74,26 @@ async def monitor_rp_mode(ctx):
         return True
       return position['X'] == 0 and position['Y'] == 0 and position['Z'] == 0
 
-    is_autopilot = any([v.get('bIsAIDriving') and not is_position_zero(v.get('position')) for v in player_vehicles])
+    is_autopilot = any([v.get('bIsAIDriving') and not is_position_zero(v.get('position')) for v in player_vehicles.values()])
     if is_autopilot:
-      await despawn_player_vehicle(ctx['http_client_mod'], player_id)
+      character_location = await (CharacterLocation.objects
+        .filter(character__guid=player.get('character_guid'))
+        .alatest('timestamp')
+      )
+      await teleport_player(
+        ctx['http_client_mod'],
+        player_id,
+        {
+          'X': character_location.location.x,
+          'Y': character_location.location.y,
+          'Z': character_location.location.z,
+        },
+        no_vehicles=False,
+        reset_trailers=False,
+        reset_carried_vehicles=False,
+      )
       await announce(
-        f"{player_name}'s vehicle has been despawned for using autopilot while in RP mode",
+        f"{player_name}, you may not use Autopilot on RP mode",
         ctx['http_client'],
         color="FFA500"
       )
