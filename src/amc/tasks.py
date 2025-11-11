@@ -828,7 +828,9 @@ Only 1 rescue team should respond to a request.
               http_client_mod,
               player.unique_id,
               location,
-              no_vehicles=not player_info.get('bIsAdmin')
+              no_vehicles=not player_info.get('bIsAdmin'),
+              reset_trailers=not player_info.get('bIsAdmin'),
+              reset_carried_vehicles=not player_info.get('bIsAdmin'),
             )
           await BotInvocationLog.objects.acreate(
             timestamp=timestamp,
@@ -1364,7 +1366,7 @@ The loan amount has been deposited into your wallet. You can view your loan deta
 
       is_rp_mode = await get_rp_mode(http_client_mod, character.guid)
       if character.rp_mode and not is_rp_mode:
-        await toggle_rp_session(http_client_mod, player_id)
+        asyncio.create_task(toggle_rp_session(http_client_mod, character.guid))
 
       new_name = character.name
       if is_rp_mode and '[RP]' not in new_name:
