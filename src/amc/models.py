@@ -1260,3 +1260,20 @@ class RescueRequest(models.Model):
   message = models.TextField(blank=True)
 
 
+@final
+class CharacterVehicle(models.Model):
+  character = models.ForeignKey(Character, on_delete=models.SET_NULL, null=True, blank=True, related_name='owned_vehicles')
+  vehicle_id = models.PositiveIntegerField(db_index=True)
+  config = models.JSONField()
+
+  @override
+  def __str__(self):
+    return f"{self.vehicle_id}"
+
+  class Meta:
+    constraints = [
+      models.UniqueConstraint(
+        fields=["character", "vehicle_id"], name="unique_character_vehicle_id"
+      ),
+    ]
+

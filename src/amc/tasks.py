@@ -100,6 +100,7 @@ from amc_finance.services import (
 )
 from amc_finance.models import Account, LedgerEntry
 from amc.webhook import on_player_profit
+from amc.vehicles import register_player_vehicles
 
 
 def get_welcome_message(last_login, player_name):
@@ -1278,7 +1279,7 @@ The loan amount has been deposited into your wallet. You can view your loan deta
 
     case PlayerVehicleLogEvent(timestamp, player_name, player_id, vehicle_name, vehicle_id):
       action = PlayerVehicleLog.action_for_event(event)
-      character, *_ = await aget_or_create_character(player_name, player_id, http_client_mod)
+      character, player, *_ = await aget_or_create_character(player_name, player_id, http_client_mod)
       await PlayerVehicleLog.objects.acreate(
         timestamp=timestamp,
         character=character, 
@@ -1286,6 +1287,8 @@ The loan amount has been deposited into your wallet. You can view your loan deta
         vehicle_name=vehicle_name,
         action=action,
       )
+      if action == PlayerVehicleLog.Action.ENTERED:
+        await register_player_vehicles(http_client_mod, character, player)
       if action == PlayerVehicleLog.Action.BOUGHT and vehicle_name == 'Vulcan':
         await player_donation(2_250_000, character)
       if discord_client and ctx.get('startup_time') and timestamp > ctx.get('startup_time'):

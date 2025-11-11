@@ -47,6 +47,7 @@ from .models import (
   ServerStatus,
   PlayerShift,
   RescueRequest,
+  CharacterVehicle,
 )
 from amc_finance.services import send_fund_to_player
 from amc_finance.admin import AccountInlineAdmin
@@ -593,4 +594,11 @@ class RescueRequestAdmin(admin.ModelAdmin):
   list_display = ['timestamp', 'character']
   list_select_related = ['character']
   autocomplete_fields = ['character', 'responders']
+
+@admin.register(CharacterVehicle)
+class CharacterVehicleAdmin(admin.ModelAdmin):
+  list_display = ['id', 'character', 'vehicle_id']
+  list_select_related = ['character']
+  autocomplete_fields = ['character']
+  search_fields = ['character__name', 'character__guid', 'character__player__unique_id']
 
