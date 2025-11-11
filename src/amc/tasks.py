@@ -535,7 +535,7 @@ Toggle it with <Highlight>/rp_mode</>
       elif command_match := re.match(r"/despawn\s*(?P<category>\S+)$", message):
         await despawn_player_vehicle(http_client_mod, player_id, category=command_match.group('category'))
         # asyncio.create_task(show_popup(http_client_mod, "Sorry, this feature is temporarily disabled", character_guid=character.guid, player_id=str(player.unique_id)))
-      elif command_match := re.match(r"/rp_mode$", message):
+      elif command_match := re.match(r"/(rp_mode|rp)$", message):
         is_rp_mode = await get_rp_mode(http_client_mod, character.guid)
         verification_code, code_verified = with_verification_code((character.guid, is_rp_mode), "")
         if is_rp_mode:
@@ -566,7 +566,7 @@ Your RP mode is {'<EffectGood>ON</>' if is_rp_mode else '<Warning>OFF</>'}
             player_id=str(player.unique_id),
           )
         )
-      elif command_match := re.match(r"/rp_mode\s+(?P<verification_code>\S+)$", message):
+      elif command_match := re.match(r"/(rp_mode|rp)\s+(?P<verification_code>\S+)$", message):
         is_rp_mode = await get_rp_mode(http_client_mod, character.guid)
         verification_code, code_verified = with_verification_code((character.guid, is_rp_mode), command_match.group('verification_code'))
         if not code_verified:
