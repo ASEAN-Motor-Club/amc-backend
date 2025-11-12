@@ -1,4 +1,3 @@
-import json
 from amc.enums import VehicleKeyByLabel, VEHICLE_DATA
 
 async def show_popup(session, message, player_id=None, character_guid=None):
@@ -37,8 +36,8 @@ async def transfer_money(session, amount, message, player_id):
       raise Exception('Failed to transfer money')
 
 async def toggle_rp_session(session, player_guid, despawn=False):
-  json = {'despawn': despawn}
-  async with session.post(f'/rp_sessions/{player_guid}/toggle', json=json) as resp:
+  data = {'despawn': despawn}
+  async with session.post(f'/rp_sessions/{player_guid}/toggle', json=data) as resp:
     if resp.status != 200:
       raise Exception('Failed to toggle RP session')
 
