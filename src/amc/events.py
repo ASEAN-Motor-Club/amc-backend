@@ -8,7 +8,7 @@ from urllib.parse import quote
 from django.conf import settings
 from django.db.models import F, Prefetch, Exists, OuterRef, Window
 from django.db.models.functions import RowNumber
-from amc.mod_server import show_popup, teleport_player
+from amc.mod_server import show_popup, send_system_message, teleport_player
 from amc.game_server import announce
 from amc.models import (
   Character,
@@ -549,10 +549,10 @@ async def staggered_start(http_client_game, http_client_mod, game_event, player_
         f"{player_info['PlayerName']} GO!!!",
         http_client_game,
       ),
-      show_popup(
+      send_system_message(
         http_client_mod,
-        "<Large>GO!!!</>",
-        player_id=player_info['CharacterId']['UniqueNetId']
+        "GO!!!",
+        character_guid=player_info['CharacterId']['CharacterGuid']
       )
     )
 
