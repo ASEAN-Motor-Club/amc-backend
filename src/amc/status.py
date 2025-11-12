@@ -68,13 +68,15 @@ async def monitor_rp_mode(ctx):
       continue
 
     player_vehicles = await list_player_vehicles(ctx['http_client_mod'], player_id)
+    if not player_vehicles:
+      continue
 
     def is_position_zero(position):
       if not position:
         return True
       return position['X'] == 0 and position['Y'] == 0 and position['Z'] == 0
 
-    is_autopilot = any([v.get('bIsAIDriving') and not is_position_zero(v.get('position')) for v in player_vehicles.values()])
+    is_autopilot = any([v.get('isLastVehicle') and v.get('bIsAIDriving') and not is_position_zero(v.get('position')) for v in player_vehicles.values()])
     if is_autopilot:
       character_location = await (CharacterLocation.objects
         .filter(character__guid=player.get('character_guid'))
