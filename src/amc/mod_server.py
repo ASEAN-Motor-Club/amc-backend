@@ -192,17 +192,21 @@ async def spawn_vehicle(
   rotation={},
   customization=None,
   decal=None,
+  parts=None,
   tag="amc",
 ):
-  vehicle_key = VehicleKeyByLabel.get(vehicle_label)
-  if not vehicle_key:
-    raise Exception(f'Vehicle {vehicle_label} not found')
+  try:
+    vehicle_key = VehicleKeyByLabel.get(vehicle_label)
+    if not vehicle_key:
+      raise Exception(f'Vehicle {vehicle_label} not found')
 
-  vehicle_data = VEHICLE_DATA.get(vehicle_key)
-  if not vehicle_data:
-    raise Exception(f'Vehicle data for key {vehicle_key} not found')
+    vehicle_data = VEHICLE_DATA.get(vehicle_key)
+    if not vehicle_data:
+      raise Exception(f'Vehicle data for key {vehicle_key} not found')
+    asset_path = vehicle_data['asset_path']
+  except Exception:
+    asset_path = vehicle_label
 
-  asset_path = vehicle_data['asset_path']
   data = {
     'Location': location,
     'Rotation': rotation,
@@ -213,7 +217,8 @@ async def spawn_vehicle(
     data['customization'] = customization
   if decal:
     data['decal'] = decal
-  print(json.dumps(data))
+  if parts:
+    data['parts'] = parts
 
   async with session.post('/vehicles/spawn', json=data) as resp:
     if resp.status != 200:

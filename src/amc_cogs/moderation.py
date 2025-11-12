@@ -9,6 +9,7 @@ from .utils import create_player_autocomplete
 from amc.models import Player, CharacterLocation, TeleportPoint, Ticket, PlayerMailMessage
 from amc.mod_server import show_popup, teleport_player, get_player, transfer_money, list_player_vehicles
 from amc.game_server import announce, is_player_online, kick_player, ban_player, get_players
+from amc.vehicles import format_vehicle_name, format_vehicle_parts
 
 class VoteKickView(discord.ui.View):
   def __init__(self, player, player_id, bot, timeout=120):
@@ -366,7 +367,7 @@ This notice was issued by Officer {interaction.user.display_name}. If you wish t
 
   @app_commands.command(name='admin_list_players_vehicles', description='List players spawned vehicles')
   @app_commands.checks.has_any_role(1395460420189421713)
-  async def list_player_vehicles_cmd(self, ctx):
+  async def list_players_vehicles_cmd(self, ctx):
     try:
       players = await get_players(self.bot.http_client_game)
     except Exception as e:
@@ -380,6 +381,40 @@ This notice was issued by Officer {interaction.user.display_name}. If you wish t
       resp += f"""
 {player_name}: {len(player_vehicles)}"""
     await ctx.response.send_message(resp)
+
+  @app_commands.command(name='admin_list_player_vehicles', description='List a player\'s spawned vehicles')
+  @app_commands.checks.has_any_role(1395460420189421713)
+  @app_commands.autocomplete(player_id=player_autocomplete)
+  async def list_player_vehicles_cmd(self, ctx, player_id: str, only_active_vehicle: bool=True, include_trailers: bool=False):
+    await ctx.response.defer()
+    player = await Player.objects.prefetch_related('characters').aget(
+      Q(unique_id=player_id) | Q(discord_user_id=player_id)
+    )
+    character = await player.get_latest_character()
+    try:
+      player_vehicles = await list_player_vehicles(self.bot.http_client_mod, player_id)
+    except Exception:
+      await ctx.followup.send(f"Failed to get {character.name}'s vehicles, make sure they are online")
+      return
+
+    if not player_vehicles:
+      await ctx.followup.send(f"{character.name} has not spawned any vehicles")
+      return
+
+    if only_active_vehicle:
+      player_vehicles = {v_id: v for v_id, v in player_vehicles.items() if v['isLastVehicle'] and (include_trailers or v['index'] == 0)}
+      if not player_vehicles:
+        await ctx.followup.send(f"{character.name} has no active vehicles")
+        return
+
+    for vehicle in player_vehicles.values():
+      embed = discord.Embed(
+        title=f"{character.name}'s {format_vehicle_name(vehicle['fullName'])} (#{vehicle['vehicleId']})",
+        color=discord.Color.dark_grey(),
+        description=format_vehicle_parts([p for p in vehicle['parts'] if p['Slot'] < 135]),
+        timestamp=timezone.now()
+      )
+      await ctx.followup.send(embed=embed)
 
   @app_commands.command(name="votekick", description="Initiate a vote to kick a player")
   @app_commands.describe(player_id="The name of the player to kick")

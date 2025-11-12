@@ -55,9 +55,10 @@ from amc.models import (
   VehicleDecal,
   RescueRequest,
 )
-from amc.game_server import announce, get_players, kick_player
+from amc.game_server import announce, get_players, get_players2, kick_player
 from amc.mod_server import (
   show_popup,
+  send_system_message,
   transfer_money,
   teleport_player,
   get_player,
@@ -100,7 +101,7 @@ from amc_finance.services import (
 )
 from amc_finance.models import Account, LedgerEntry
 from amc.webhook import on_player_profit
-from amc.vehicles import register_player_vehicles
+from amc.vehicles import register_player_vehicles, spawn_player_vehicle
 
 
 def get_welcome_message(last_login, player_name):
@@ -511,9 +512,7 @@ Toggle it with <Highlight>/rp_mode</>
               asyncio.create_task(show_popup(http_client_mod, "There does not seem to be an active event. Please first create an event.", character_guid=character.guid, player_id=str(player.unique_id)))
               return
           event_setup = await setup_event(timestamp, player_id, scheduled_event, http_client_mod)
-          if event_setup:
-            asyncio.create_task(show_popup(http_client_mod, "<Event>Event is setup!</>\n\nPress \"i\" to open the Event menu and start the race.\n\nYour times will be recorded automatically.\n\nGood luck!", character_guid=character.guid, player_id=str(player.unique_id)))
-          else:
+          if not event_setup:
             asyncio.create_task(show_popup(http_client_mod, "There does not seem to be an active event. Please first create an event.", character_guid=character.guid, player_id=str(player.unique_id)))
         except Exception as e:
           asyncio.create_task(show_popup(http_client_mod, f"Failed to setup event: {e}", character_guid=character.guid, player_id=str(player.unique_id)))
@@ -705,8 +704,12 @@ Only 1 rescue team should respond to a request.
             discord_client.loop
           )
       elif command_match := re.match(r"/spawn\s*(?P<vehicle_label>.*)$", message):
-        if player_info and player_info.get('bIsAdmin'):
-          vehicle_label = command_match.group('vehicle_label')
+        vehicle_label = command_match.group('vehicle_label')
+        if vehicle_label.isdigit():
+          await register_player_vehicles(http_client_mod, character, player)
+          location = player_info['CustomDestinationAbsoluteLocation']
+          await spawn_player_vehicle(http_client_mod, character, int(vehicle_label), location)
+        elif player_info and player_info.get('bIsAdmin'):
           if not vehicle_label:
             vehicles_list_str = '\n'.join(VehicleKey.labels)
             asyncio.create_task(
