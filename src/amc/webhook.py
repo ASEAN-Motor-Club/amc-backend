@@ -327,6 +327,7 @@ async def process_cargo_log(cargo, player, character, timestamp):
 def atomic_update_job(job_id, quantity):
   with transaction.atomic():
     job = DeliveryJob.objects.select_for_update().get(pk=job_id)
+    quantity_to_add = 0
     if job:
       requested_remaining = job.quantity_requested - job.quantity_fulfilled
       quantity_to_add = min(requested_remaining, quantity)
@@ -334,7 +335,7 @@ def atomic_update_job(job_id, quantity):
         job.quantity_fulfilled = F('quantity_fulfilled') + quantity_to_add
         job.save(update_fields=['quantity_fulfilled'])
         job.refresh_from_db(fields=['quantity_fulfilled'])
-    return job
+    return job, quantity_to_add
 
 async def process_event(event, player, character, is_rp_mode=False, used_shortcut=False, http_client=None, http_client_mod=None, discord_client=None):
   print(event)
@@ -373,11 +374,11 @@ async def process_event(event, player, character, is_rp_mode=False, used_shortcu
           # .filter(Q(rp_mode=is_rp_mode) | Q(rp_mode=False))
         ).afirst()
 
+        subsidy = cargo_subsidy
         if job and not used_shortcut:
-          job = await sync_to_async(atomic_update_job)(job.id, quantity)
-
-        bonus = quantity * job.bonus_multiplier * payment
-        subsidy = max(cargo_subsidy, bonus)
+          job, quantity_to_add = await sync_to_async(atomic_update_job)(job.id, quantity)
+          bonus = quantity_to_add * job.bonus_multiplier * payment
+          subsidy = max(cargo_subsidy, bonus)
 
         await Delivery.objects.acreate(
           timestamp=timestamp,
