@@ -1226,22 +1226,21 @@ The loan amount has been deposited into your wallet. You can view your loan deta
         if target_player_name == character.name:
           return
 
-        players = await get_players(http_client)
-        thanked_player_id = None
-        for p_id, p_name in players:
-          if target_player_name == p_name:
-            thanked_player_id = p_id
+        players = await get_players2(http_client)
+        thanked_character_guid = None
+        for p_id, player in players:
+          if player['name'].startswith(target_player_name):
+            thanked_character_guid = player['character_guid']
             break
-        if thanked_player_id is None:
+        if thanked_character_guid  is None:
           asyncio.create_task(
             show_popup(http_client_mod, "<Title>Player not found</>\n\nPlease make sure you typed the name correctly.", character_guid=character.guid, player_id=str(player.unique_id))
           )
           raise Exception('Player not found')
 
-        thanked_character = await Character.objects.select_related('player').filter(
-          name=player_name,
-          player__unique_id=int(thanked_player_id)
-        ).alatest('status_logs__timespan__startswith')
+        thanked_character = await Character.objects.select_related('player').aget(
+          guid=thanked_character_guid
+        )
 
         already_thanked = await Thank.objects.filter(
           sender_character=character,
@@ -1261,10 +1260,10 @@ The loan amount has been deposited into your wallet. You can view your loan deta
           )
           await Player.objects.filter(characters=thanked_character).aupdate(social_score=F('social_score')+1)
           asyncio.create_task(
-            show_popup(http_client_mod, "<Title>Thank sent</>", character_guid=character.guid, player_id=str(player.unique_id))
+            send_system_message(http_client_mod, "Thank sent", character_guid=character.guid)
           )
           asyncio.create_task(
-            show_popup(http_client_mod, f"<Title>{character.name} thanked you</>", player_id=str(thanked_player_id))
+            send_system_message(http_client_mod, f"{character.name} thanked you", character_guid=str(thanked_character.guid))
           )
 
       if discord_client and ctx.get('startup_time') and timestamp > ctx.get('startup_time'):

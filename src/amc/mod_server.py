@@ -9,6 +9,11 @@ async def show_popup(session, message, player_id=None, character_guid=None):
     params['characterGuid'] = str(character_guid)
   await session.post("/messages/popup", json=params)
 
+async def send_system_message(session, message, character_guid=None):
+  params = {'message': message}
+  params['characterGuid'] = str(character_guid)
+  await session.post("/messages/system", json=params)
+
 async def set_config(session, max_vehicles_per_player=12):
   params = {'MaxVehiclePerPlayer': max_vehicles_per_player}
   await session.post("/config", json=params)
