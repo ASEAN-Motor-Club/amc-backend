@@ -10,7 +10,7 @@ async def register_player_vehicles(http_client_mod, character, player):
 
   for vehicle_id, vehicle in player_vehicles.items():
     if vehicle['companyGuid'] != ('0'*32):
-      continue
+      character = None
 
     config = {
       "CompanyGuid": vehicle['companyGuid'],
@@ -27,6 +27,7 @@ async def register_player_vehicles(http_client_mod, character, player):
     await CharacterVehicle.objects.aupdate_or_create(
       character=character,
       vehicle_id=vehicle_id,
+      company_guid=vehicle['companyGuid'],
       defaults={
         'config': config
       }
