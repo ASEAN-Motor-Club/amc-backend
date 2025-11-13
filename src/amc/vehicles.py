@@ -18,20 +18,30 @@ async def register_player_vehicles(http_client_mod, character, player):
       "Customization": vehicle['customization'],
       "Decal": vehicle['decal'],
       "Parts": vehicle['parts'],
+      "Location": vehicle['position'],
+      "Rotation": vehicle['rotation'],
     }
     vehicle_name = vehicle['fullName'].split(' ')[0].replace('_C', '')
     config['VehicleName'] = vehicle_name
     asset_path = vehicle['classFullName'].split(' ')[1]
     config['AssetPath'] = asset_path
 
-    await CharacterVehicle.objects.aupdate_or_create(
-      character=character,
-      vehicle_id=vehicle_id,
-      company_guid=vehicle['companyGuid'],
-      defaults={
-        'config': config
-      }
-    )
+    if character is not None:
+      await CharacterVehicle.objects.aupdate_or_create(
+        character=character,
+        vehicle_id=int(vehicle_id),
+        defaults={
+          'config': config
+        }
+      )
+    else:
+      await CharacterVehicle.objects.aupdate_or_create(
+        company_guid=vehicle['companyGuid'],
+        vehicle_id=int(vehicle_id),
+        defaults={
+          'config': config
+        }
+      )
 
 def format_key_string(key_str):
     """
@@ -88,12 +98,33 @@ async def spawn_player_vehicle(http_client_mod, character, vehicle_id, location)
     )
     return
 
+  await spawn_registered_vehicle(
+    http_client_mod,
+    vehicle,
+    location=location,
+    tag=character.name,
+  )
+
+async def spawn_registered_vehicle(
+  http_client_mod,
+  vehicle,
+  location=None,
+  rotation={},
+  tag="player_vehicles"
+):
+  if not location:
+    location = vehicle.config['Location']
+  if not rotation:
+    rotation = vehicle.config.get('Rotation', {})
+
   await spawn_vehicle(
     http_client_mod,
     vehicle.config['AssetPath'],
     location,
+    rotation=rotation,
     customization=vehicle.config['Customization'],
     decal=vehicle.config['Decal'],
     parts=vehicle.config['Parts'],
-    tag=character.name,
+    tag=tag,
   )
+

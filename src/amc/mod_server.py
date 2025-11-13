@@ -65,8 +65,11 @@ async def get_events(session):
     data = await resp.json()
     return data['data']
 
-async def list_player_vehicles(session, player_id):
-  async with session.get(f'/player_vehicles/{player_id}/list') as resp:
+async def list_player_vehicles(session, player_id, active=None):
+  params = {}
+  if active:
+    params['active'] = 1
+  async with session.get(f'/player_vehicles/{player_id}/list', params=params) as resp:
     if resp.status != 200:
       raise Exception(f'Failed to fetch player vehicles: {player_id}')
     data = await resp.json()

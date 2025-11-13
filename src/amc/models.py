@@ -1265,6 +1265,7 @@ class CharacterVehicle(models.Model):
   character = models.ForeignKey(Character, on_delete=models.SET_NULL, null=True, blank=True, related_name='owned_vehicles')
   vehicle_id = models.PositiveIntegerField(db_index=True)
   company_guid = models.CharField(max_length=32, null=True, blank=True)
+  spawn_on_restart = models.BooleanField(default=False)
   config = models.JSONField()
 
   @override

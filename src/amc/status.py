@@ -67,7 +67,7 @@ async def monitor_rp_mode(ctx):
     if not is_rp_mode:
       continue
 
-    player_vehicles = await list_player_vehicles(ctx['http_client_mod'], player_id)
+    player_vehicles = await list_player_vehicles(ctx['http_client_mod'], player_id, active=True)
     if not player_vehicles:
       continue
 

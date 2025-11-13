@@ -54,6 +54,7 @@ from amc.models import (
   DeliveryPoint,
   VehicleDecal,
   RescueRequest,
+  CharacterVehicle,
 )
 from amc.game_server import announce, get_players, get_players2, kick_player
 from amc.mod_server import (
@@ -71,6 +72,7 @@ from amc.mod_server import (
   set_character_name,
   force_exit_vehicle,
   spawn_vehicle,
+  list_player_vehicles,
 )
 from amc.auth import verify_player
 from amc.mailbox import send_player_messages
@@ -101,7 +103,7 @@ from amc_finance.services import (
 )
 from amc_finance.models import Account, LedgerEntry
 from amc.webhook import on_player_profit
-from amc.vehicles import register_player_vehicles, spawn_player_vehicle
+from amc.vehicles import register_player_vehicles, spawn_player_vehicle, spawn_registered_vehicle
 
 
 def get_welcome_message(last_login, player_name):
@@ -703,6 +705,19 @@ Only 1 rescue team should respond to a request.
             send_discord_rescue_request(),
             discord_client.loop
           )
+      elif command_match := re.match(r"/spawn_dealerships$", message):
+        if player_info and player_info.get('bIsAdmin'):
+          async def spawn_dealerships():
+            async for vd in VehicleDealership.objects.filter(spawn_on_restart=True):
+              await vd.spawn(http_client_mod)
+          asyncio.create_task(
+            delay(spawn_dealerships(), 60)
+          )
+      elif command_match := re.match(r"/register_vehicles$", message):
+        await register_player_vehicles(http_client_mod, character, player)
+        asyncio.create_task(
+          show_popup(http_client_mod, "<Title>Vehicles Registered!</>", character_guid=character.guid, player_id=str(player.unique_id))
+        )
       elif command_match := re.match(r"/spawn\s*(?P<vehicle_label>.*)$", message):
         vehicle_label = command_match.group('vehicle_label')
         if vehicle_label.isdigit():
@@ -724,6 +739,13 @@ Only 1 rescue team should respond to a request.
                 location,
               )
             )
+      elif command_match := re.match(r"/admin_spawn\s*(?P<vehicle_label>.*)$", message):
+        if not player_info.get('bIsAdmin'):
+          return
+        vehicle_label = command_match.group('vehicle_label')
+        if vehicle_label.isdigit():
+          v = await CharacterVehicle.objects.aget(pk=int(vehicle_label))
+          await spawn_registered_vehicle(http_client_mod, v)
       elif command_match := re.match(r"/(teleport|tp)\s+(?P<x>[-\d]+)\s+(?P<y>[-\d]+)\s+(?P<z>[-\d]+)$", message):
         player_info = await get_player(http_client_mod, str(player.unique_id))
         if player_info and player_info.get('bIsAdmin'):
@@ -792,55 +814,60 @@ Only 1 rescue team should respond to a request.
           )
 
       elif command_match := re.match(r"/(teleport|tp)\s*(?P<name>.*)", message):
+        CORPS_WITH_TP = { "69FF57844F3F79D1F9665991B4006325" }
         name = command_match.group('name')
         player_info = await get_player(http_client_mod, str(player.unique_id))
-        teleport_point_exists = await TeleportPoint.objects.filter(
-          Q(character=character) | Q(character__isnull=True),
-          name__iexact=name,
-        ).aexists()
-        is_arwrs = await player.teams.filter(tag='AWRS').aexists()
         tp_points = TeleportPoint.objects.filter(character__isnull=True).order_by('name')
         tp_points_names = [tp.name async for tp in tp_points]
+        player_vehicles = await list_player_vehicles(http_client_mod, player.unique_id, active=True)
+        current_vehicle = None
+        for vehicle_id, vehicle in player_vehicles.items():
+          if vehicle.get('index') == 0:
+            current_vehicle = vehicle
 
-        if (not player_info.get('bIsAdmin') and not is_arwrs) and (not name or not teleport_point_exists):
+        no_vehicles = not player_info.get('bIsAdmin')
+
+        if name:
+          try:
+            teleport_point = await TeleportPoint.objects.aget(
+              Q(character=character) | Q(character__isnull=True),
+              name__iexact=name,
+            )
+            location = teleport_point.location
+            location = {
+              'X': location.x, 
+              'Y': location.y, 
+              'Z': location.z,
+            }
+          except TeleportPoint.DoesNotExist:
+            asyncio.create_task(show_popup(http_client_mod, f"Teleport point not found\nChoose from one of the following locations:\n\n{'\n'.join(tp_points_names)}", character_guid=character.guid, player_id=str(player.unique_id)))
+            return
+        elif player_info.get('bIsAdmin') or current_vehicle.get('companyGuid') in CORPS_WITH_TP:
+          no_vehicles = False
+          location = player_info['CustomDestinationAbsoluteLocation']
+          if player_info['VehicleKey'] == 'None':
+            location['Z'] += 100
+          else:
+            location['Z'] += 5
+        else:
           asyncio.create_task(
             show_popup(http_client_mod, f"<Title>Teleport</>\nUsage: <Highlight>/tp [location]</>\nChoose from one of the following locations:\n\n{'\n'.join(tp_points_names)}", character_guid=character.guid, player_id=str(player.unique_id))
           )
-        else:
-          if name:
-            try:
-              teleport_point = await TeleportPoint.objects.aget(
-                Q(character=character) | Q(character__isnull=True),
-                name__iexact=name,
-              )
-              location = teleport_point.location
-              location = {
-                'X': location.x, 
-                'Y': location.y, 
-                'Z': location.z,
-              }
-            except TeleportPoint.DoesNotExist:
-              asyncio.create_task(show_popup(http_client_mod, f"Teleport point not found\nChoose from one of the following locations:\n\n{'\n'.join(tp_points_names)}", character_guid=character.guid, player_id=str(player.unique_id)))
-              return
-          else:
-            location = player_info['CustomDestinationAbsoluteLocation']
-            if player_info['VehicleKey'] == 'None':
-              location['Z'] += 100
-            else:
-              location['Z'] += 5
-          await teleport_player(
-              http_client_mod,
-              player.unique_id,
-              location,
-              no_vehicles=not player_info.get('bIsAdmin'),
-              reset_trailers=not player_info.get('bIsAdmin'),
-              reset_carried_vehicles=not player_info.get('bIsAdmin'),
-            )
-          await BotInvocationLog.objects.acreate(
-            timestamp=timestamp,
-            character=character, 
-            prompt=message,
-          )
+          return
+
+        await teleport_player(
+          http_client_mod,
+          player.unique_id,
+          location,
+          no_vehicles=no_vehicles,
+          reset_trailers=not player_info.get('bIsAdmin'),
+          reset_carried_vehicles=not player_info.get('bIsAdmin'),
+        )
+        await BotInvocationLog.objects.acreate(
+          timestamp=timestamp,
+          character=character, 
+          prompt=message,
+        )
 
       elif command_match := re.match(r"/exit\s+(?P<target_player_name>.*)$", message):
         if player_info and player_info.get('bIsAdmin'):
@@ -1289,8 +1316,8 @@ The loan amount has been deposited into your wallet. You can view your loan deta
         vehicle_name=vehicle_name,
         action=action,
       )
-      if action == PlayerVehicleLog.Action.ENTERED:
-        await register_player_vehicles(http_client_mod, character, player)
+      #if action == PlayerVehicleLog.Action.ENTERED:
+      #  asyncio.create_task(delay(register_player_vehicles(http_client_mod, character, player), 5))
       if action == PlayerVehicleLog.Action.BOUGHT and vehicle_name == 'Vulcan':
         await player_donation(2_250_000, character)
       if discord_client and ctx.get('startup_time') and timestamp > ctx.get('startup_time'):
@@ -1307,11 +1334,7 @@ The loan amount has been deposited into your wallet. You can view your loan deta
             asyncio.create_task(
               show_popup(http_client_mod, "You are not authorised to use the DOT tag, please remove it then rejoin the server", character_guid=character.guid, player_id=str(player.unique_id))
             )
-            async def kick_after_delay(delay=10):
-              await asyncio.sleep(delay)
-              await kick_player(http_client, str(player_id))
-
-            asyncio.create_task(kick_after_delay())
+            asyncio.create_task(delay(kick_player(http_client, str(player_id)), 10))
 
         try:
           last_login = None
@@ -1487,8 +1510,14 @@ The loan amount has been deposited into your wallet. You can view your loan deta
       async def spawn_dealerships():
         async for vd in VehicleDealership.objects.filter(spawn_on_restart=True):
           await vd.spawn(http_client_mod)
+      async def spawn_player_vehicles():
+        async for v in CharacterVehicle.objects.filter(spawn_on_restart=True):
+          await spawn_registered_vehicle(http_client_mod, v)
       asyncio.create_task(
-        delay(spawn_dealerships(), 60)
+        delay(spawn_dealerships(), 30)
+      )
+      asyncio.create_task(
+        delay(spawn_player_vehicles(), 60)
       )
 
     case UnknownLogEntry():
