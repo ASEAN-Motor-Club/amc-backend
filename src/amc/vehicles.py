@@ -3,14 +3,21 @@ from amc.models import CharacterVehicle
 from amc.mod_server import list_player_vehicles, spawn_vehicle, show_popup
 from amc.enums import VehiclePartSlot
 
-async def register_player_vehicles(http_client_mod, character, player):
-  player_vehicles = await list_player_vehicles(http_client_mod, player.unique_id)
+async def register_player_vehicles(http_client_mod, character, player, active=None):
+  player_vehicles = await list_player_vehicles(http_client_mod, player.unique_id, active=active)
   if not player_vehicles:
     return
 
+  if not isinstance(player_vehicles, dict):
+    return []
+
+  results = []
   for vehicle_id, vehicle in player_vehicles.items():
-    if vehicle['companyGuid'] != ('0'*32):
-      character = None
+    if int(vehicle_id) < 0:
+      continue
+    owner = character
+    if len(vehicle['companyName']) > 0:
+      owner = None
 
     config = {
       "CompanyGuid": vehicle['companyGuid'],
@@ -20,28 +27,31 @@ async def register_player_vehicles(http_client_mod, character, player):
       "Parts": vehicle['parts'],
       "Location": vehicle['position'],
       "Rotation": vehicle['rotation'],
+      "Net_VehicleOwnerSetting": vehicle.get('Net_VehicleOwnerSetting', None),
     }
     vehicle_name = vehicle['fullName'].split(' ')[0].replace('_C', '')
     config['VehicleName'] = vehicle_name
     asset_path = vehicle['classFullName'].split(' ')[1]
     config['AssetPath'] = asset_path
 
-    if character is not None:
-      await CharacterVehicle.objects.aupdate_or_create(
-        character=character,
+    if owner:
+      v, _ = await CharacterVehicle.objects.aupdate_or_create(
+        character=owner,
         vehicle_id=int(vehicle_id),
         defaults={
           'config': config
         }
       )
     else:
-      await CharacterVehicle.objects.aupdate_or_create(
+      v, _ = await CharacterVehicle.objects.aupdate_or_create(
         company_guid=vehicle['companyGuid'],
         vehicle_id=int(vehicle_id),
         defaults={
           'config': config
         }
       )
+    results.append(v)
+  return results
 
 def format_key_string(key_str):
     """
@@ -84,7 +94,12 @@ def format_vehicle_name(vehicle_full_name):
   vehicle_name = vehicle_full_name.split(' ')[0].replace('_C', '')
   return vehicle_name
 
-async def spawn_player_vehicle(http_client_mod, character, vehicle_id, location):
+async def spawn_player_vehicle(
+  http_client_mod,
+  character,
+  vehicle_id,
+  location
+):
   try:
     vehicle = await CharacterVehicle.objects.aget(
       character=character,
@@ -103,6 +118,7 @@ async def spawn_player_vehicle(http_client_mod, character, vehicle_id, location)
     vehicle,
     location=location,
     tag=character.name,
+    driver_guid=character.guid,
   )
 
 async def spawn_registered_vehicle(
@@ -110,12 +126,23 @@ async def spawn_registered_vehicle(
   vehicle,
   location=None,
   rotation={},
-  tag="player_vehicles"
+  tag="player_vehicles",
+  driver_guid=None
 ):
   if not location:
     location = vehicle.config['Location']
   if not rotation:
     rotation = vehicle.config.get('Rotation', {})
+
+  extra_data = {
+    'profitShare': 0,
+  }
+  if owner_setting := vehicle.config.get('Net_VehicleOwnerSetting'):
+    extra_data['profitShare'] = owner_setting.get('VehicleOwnerProfitShare', 0)
+
+  if vehicle.config.get('CompanyGuid') and vehicle.config.get('CompanyGuid'):
+    extra_data['companyGuid'] = vehicle.config.get('CompanyGuid')
+    extra_data['companyName'] = vehicle.config.get('CompanyName')
 
   await spawn_vehicle(
     http_client_mod,
@@ -125,6 +152,8 @@ async def spawn_registered_vehicle(
     customization=vehicle.config['Customization'],
     decal=vehicle.config['Decal'],
     parts=vehicle.config['Parts'],
+    extra_data=extra_data,
+    driver_guid=driver_guid,
     tag=tag,
   )
 

@@ -660,6 +660,8 @@ class Company(models.Model):
   is_corp = models.BooleanField()
   first_seen_at = models.DateTimeField(blank=True)
   money = models.IntegerField(null=True, blank=True)
+  guid = models.CharField(max_length=32, null=True, blank=True)
+  has_tp_permission = models.BooleanField(default=False)
   
 
   class Meta:
@@ -1266,6 +1268,7 @@ class CharacterVehicle(models.Model):
   vehicle_id = models.PositiveIntegerField(db_index=True)
   company_guid = models.CharField(max_length=32, null=True, blank=True)
   spawn_on_restart = models.BooleanField(default=False)
+  rental = models.BooleanField(default=False)
   config = models.JSONField()
 
   @override

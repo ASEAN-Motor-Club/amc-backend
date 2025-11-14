@@ -200,7 +200,9 @@ async def spawn_vehicle(
   customization=None,
   decal=None,
   parts=None,
+  driver_guid=None,
   tag="amc",
+  extra_data={},
 ):
   try:
     vehicle_key = VehicleKeyByLabel.get(vehicle_label)
@@ -219,6 +221,8 @@ async def spawn_vehicle(
     'Rotation': rotation,
     'AssetPath': asset_path,
     'tag': tag,
+    'driverGuid': driver_guid,
+    **extra_data,
   }
   if customization:
     data['customization'] = customization
