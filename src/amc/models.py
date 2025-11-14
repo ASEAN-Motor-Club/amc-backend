@@ -174,6 +174,16 @@ class Character(models.Model):
       MaxValueValidator(Decimal('1.00'))
     ]
   )
+  loan_repayment_rate = models.DecimalField(
+    max_digits=3,
+    decimal_places=2,
+    null=True,
+    blank=True,
+    validators=[
+      MinValueValidator(Decimal('0.00')),
+      MaxValueValidator(Decimal('1.00'))
+    ]
+  )
   rp_mode = models.BooleanField(default=False)
   reject_ubi = models.BooleanField(default=False)
   ubi_multiplier = models.FloatField(default=1.0)

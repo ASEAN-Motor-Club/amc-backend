@@ -53,9 +53,11 @@ cargo_names = {
   'Log_Oak_12ft': '12ft Oak Log',
 }
 
-def calculate_loan_repayment(payment, loan_balance, max_loan):
+def calculate_loan_repayment(payment, loan_balance, max_loan, character_repayment_rate=None):
   loan_utilisation = loan_balance / max(max_loan, loan_balance)
   repayment_percentage = Decimal(0.5) + (Decimal(0.5) * loan_utilisation)
+  if character_repayment_rate is not None:
+    repayment_percentage = max(repayment_percentage, character_repayment_rate)
 
   repayment = min(loan_balance, max(Decimal(1), int(payment * Decimal(repayment_percentage))))
   return repayment
@@ -66,7 +68,12 @@ async def repay_loan_for_profit(character, payment, session):
     if loan_balance == 0:
       return 0
     max_loan, _ = await get_character_max_loan(character)
-    repayment = calculate_loan_repayment(Decimal(payment), loan_balance, max_loan)
+    repayment = calculate_loan_repayment(
+      Decimal(payment),
+      loan_balance,
+      max_loan,
+      character_repayment_rate=character.loan_repayment_rate
+    )
 
     await transfer_money(
       session,

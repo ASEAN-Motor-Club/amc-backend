@@ -1087,6 +1087,21 @@ Use <Highlight>/setup_event {event.id}</> to start
             show_popup(http_client_mod, f"<Title>Set savings rate failed</>\n\n{e}", character_guid=character.guid, player_id=str(player.unique_id))
           )
 
+      elif command_match := re.match(r"/set_repayment_rate (?P<repayment_rate>\d+)%?$", message):
+        try:
+          character.loan_repayment_rate = min(
+            max(Decimal(command_match.group('repayment_rate')) / Decimal(100), Decimal(0)),
+            Decimal(1)
+          )
+          await character.asave(update_fields=['loan_repayment_rate'])
+          asyncio.create_task(
+            show_popup(http_client_mod, f"<Title>Loan repayment rate saved</>\n\n{character.repayment_rate*100:.0f}% of your earnings will automatically go repaying loans, if any", character_guid=character.guid, player_id=str(player.unique_id))
+          )
+        except Exception as e:
+          asyncio.create_task(
+            show_popup(http_client_mod, f"<Title>Set loan repayment rate failed</>\n\n{e}", character_guid=character.guid, player_id=str(player.unique_id))
+          )
+
       elif command_match := re.match(r"/toggle_ubi$", message):
         try:
           character.reject_ubi = not character.reject_ubi
