@@ -1279,6 +1279,7 @@ class CharacterVehicle(models.Model):
   company_guid = models.CharField(max_length=32, null=True, blank=True)
   spawn_on_restart = models.BooleanField(default=False)
   rental = models.BooleanField(default=False)
+  for_sale = models.BooleanField(default=False)
   config = models.JSONField()
 
   @override

@@ -98,7 +98,8 @@ async def spawn_player_vehicle(
   http_client_mod,
   character,
   vehicle_id,
-  location
+  location,
+  for_sale=False,
 ):
   try:
     vehicle = await CharacterVehicle.objects.aget(
@@ -113,12 +114,16 @@ async def spawn_player_vehicle(
     )
     return
 
+  if 'Raven' in vehicle.config['AssetPath'] or 'Terra' in vehicle.config['AssetPath'] or 'Formula' in vehicle.config['AssetPath']:
+    raise Exception('You may not sell this vehicle')
+
   await spawn_registered_vehicle(
     http_client_mod,
     vehicle,
     location=location,
     tag=character.name,
     driver_guid=character.guid,
+    for_sale=for_sale,
   )
 
 async def spawn_registered_vehicle(
@@ -127,7 +132,9 @@ async def spawn_registered_vehicle(
   location=None,
   rotation={},
   tag="player_vehicles",
-  driver_guid=None
+  tags=[],
+  driver_guid=None,
+  for_sale=None,
 ):
   if not location:
     location = vehicle.config['Location']
@@ -136,13 +143,19 @@ async def spawn_registered_vehicle(
 
   extra_data = {
     'profitShare': 0,
+    'tags': tags,
   }
-  if owner_setting := vehicle.config.get('Net_VehicleOwnerSetting'):
-    extra_data['profitShare'] = owner_setting.get('VehicleOwnerProfitShare', 0)
+  #if owner_setting := vehicle.config.get('Net_VehicleOwnerSetting'):
+  #  extra_data['profitShare'] = owner_setting.get('VehicleOwnerProfitShare', 0)
 
   if vehicle.config.get('CompanyGuid') and vehicle.config.get('CompanyGuid'):
     extra_data['companyGuid'] = vehicle.config.get('CompanyGuid')
     extra_data['companyName'] = vehicle.config.get('CompanyName')
+  if for_sale is not None:
+    extra_data['forSale'] = for_sale
+  else:
+    extra_data['forSale'] = vehicle.for_sale
+
 
   await spawn_vehicle(
     http_client_mod,

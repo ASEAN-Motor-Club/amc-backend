@@ -597,8 +597,9 @@ class RescueRequestAdmin(admin.ModelAdmin):
 
 @admin.register(CharacterVehicle)
 class CharacterVehicleAdmin(admin.ModelAdmin):
-  list_display = ['id', 'character', 'company_guid', 'vehicle_id']
+  list_display = ['id', 'character', 'company_guid', 'vehicle_id', 'rental']
   list_select_related = ['character']
   autocomplete_fields = ['character']
   search_fields = ['company_guid', 'character__name', 'character__guid', 'character__player__unique_id']
+  list_filter = ['rental', 'spawn_on_restart', 'for_sale']
 

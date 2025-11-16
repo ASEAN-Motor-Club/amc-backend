@@ -104,7 +104,7 @@ from amc_finance.services import (
 )
 from amc_finance.models import Account, LedgerEntry
 from amc.webhook import on_player_profit
-from amc.vehicles import register_player_vehicles, spawn_player_vehicle, spawn_registered_vehicle
+from amc.vehicles import register_player_vehicles, spawn_player_vehicle, spawn_registered_vehicle, format_key_string
 
 
 def get_welcome_message(last_login, player_name):
@@ -536,7 +536,8 @@ Toggle it with <Highlight>/rp_mode</>
       elif command_match := re.match(r"/despawn$", message):
         await despawn_player_vehicle(http_client_mod, player_id)
       elif command_match := re.match(r"/despawn\s*(?P<category>\S+)$", message):
-        if player_info and player_info.get('bIsAdmin'):
+        category =command_match.group('category')
+        if player_info and player_info.get('bIsAdmin') and category != "all" and category != "others":
           players = await get_players2(http_client)
           target_player_id = None
           for p_id, player in players:
@@ -705,7 +706,7 @@ Use <Highlight>/rescue</> to alert rescuers in the game and on discord if you ne
 To respond, react to the message with your team's emoji.
 <:cone:1374642183172260001> DOT `:cone:`
 🟩 ARWRS `:green_square:`
-🔵 CKM `:blue_circle:`
+👍 Independent `:thumbsup:` or any other reaction
 The first reaction will be the one on the left.
 Only 1 rescue team should respond to a request.
 
@@ -737,6 +738,7 @@ Only 1 rescue team should respond to a request.
           show_popup(http_client_mod, f"<Title>Vehicles Registered!</>\n\n{vehicle_names}", character_guid=character.guid, player_id=str(player.unique_id))
         )
       elif command_match := re.match(r"/rent\s*(?P<vehicle_id>\d*)$", message):
+
         vehicle_id = command_match.group('vehicle_id')
         if not vehicle_id:
           vehicles = [v async for v in CharacterVehicle.objects.filter(rental=True)]
@@ -750,7 +752,7 @@ Only 1 rescue team should respond to a request.
           for company_name, vs in vehicles_by_company:
             vehicles_str += f"\n{company_name}\n"
             vehicles_str += '\n'.join([
-              f"<Small>#{v.id} - {v.config['VehicleName']}</>"
+              f"<Small>#{v.id} - {format_key_string(v.config['VehicleName'])}</>"
               for v in vs
             ])
           asyncio.create_task(
@@ -776,7 +778,7 @@ Only 1 rescue team should respond to a request.
         vehicles = await register_player_vehicles(http_client_mod, character, player, active=True)
         vehicles = [
           v for v in vehicles
-          if not v.config.get('CompanyName') and v.company_guid == player_info['OwnCompanyGuid']
+          if v.config.get('CompanyName') and v.company_guid == player_info['OwnCompanyGuid']
         ]
         if not vehicles:
           asyncio.create_task(
@@ -803,31 +805,64 @@ Use <Highlight>/rental </> to put up a <Bold>Corporation</> vehicle for rent.
 
         vehicles_str = '\n'.join([
           f"<Small>#{v.id} - {v.config['VehicleName']}</>"
-          for v in vs
+          for v in vehicles
+          if v.rental
         ])
-        asyncio.create_task(show_popup(http_client_mod, "Successfully marked as rental\n\n{vehicles_str}", character_guid=character.guid, player_id=str(player.unique_id)))
+        asyncio.create_task(
+          show_popup(
+            http_client_mod,
+            f"<Title>Successfully marked as rental</>\nPlayers can rent your vehicle using <Highlight>/rent</>\n\n{vehicles_str}",
+            character_guid=character.guid,
+            player_id=str(player.unique_id)
+          )
+        )
+      elif command_match := re.match(r"/sell$", message):
+        if not player_info.get('bIsAdmin'):
+          asyncio.create_task(
+            show_popup(http_client_mod, "Admin-only command", character_guid=character.guid, player_id=str(player.unique_id))
+          )
+          return
+        vehicles = await register_player_vehicles(http_client_mod, character, player, active=True)
+        await despawn_player_vehicle(http_client_mod, player_id)
+        for vehicle in vehicles:
+          vehicle.for_sale = True
+          await vehicle.asave(update_fields=['for_sale'])
+          await spawn_registered_vehicle(
+            http_client_mod,
+            vehicle,
+            vehicle.config['Location'],
+            rotation=vehicle.config['Rotation'],
+            for_sale=True,
+            driver_guid=character.guid
+          )
+
       elif command_match := re.match(r"/spawn\s*(?P<vehicle_label>.*)$", message):
+        if not player_info.get('bIsAdmin'):
+          asyncio.create_task(
+            show_popup(http_client_mod, "Admin-only command", character_guid=character.guid, player_id=str(player.unique_id))
+          )
+          return
         vehicle_label = command_match.group('vehicle_label')
         if vehicle_label.isdigit():
-          await register_player_vehicles(http_client_mod, character, player)
+          vehicle = await CharacterVehicle.objects.aget(pk=int(vehicle_label))
           location = player_info['Location']
-          location['Z'] -= 100
-          await spawn_player_vehicle(http_client_mod, character, int(vehicle_label), location)
-        elif player_info and player_info.get('bIsAdmin'):
-          if not vehicle_label:
-            vehicles_list_str = '\n'.join(VehicleKey.labels)
-            asyncio.create_task(
-              show_popup(http_client_mod, f"<Title>Spawn Vehicle</>\n\n{vehicles_list_str}", character_guid=character.guid, player_id=str(player.unique_id))
+          location['Z'] -= 95
+          await spawn_registered_vehicle(http_client_mod, vehicle, location, driver_guid=character.guid)
+        elif not vehicle_label:
+          vehicles_list_str = '\n'.join(VehicleKey.labels)
+          asyncio.create_task(
+            show_popup(http_client_mod, f"<Title>Spawn Vehicle</>\n\n{vehicles_list_str}", character_guid=character.guid, player_id=str(player.unique_id))
+          )
+        else:
+          location = player_info['Location']
+          asyncio.create_task(
+            spawn_vehicle(
+              http_client_mod,
+              vehicle_label,
+              location,
+              driver_guid=character.guid
             )
-          else:
-            location = player_info['CustomDestinationAbsoluteLocation']
-            asyncio.create_task(
-              spawn_vehicle(
-                http_client_mod,
-                vehicle_label,
-                location,
-              )
-            )
+          )
       elif command_match := re.match(r"/admin_spawn\s*(?P<vehicle_label>.*)$", message):
         if not player_info.get('bIsAdmin'):
           return
@@ -932,7 +967,7 @@ Use <Highlight>/rental </> to put up a <Bold>Corporation</> vehicle for rent.
           except TeleportPoint.DoesNotExist:
             asyncio.create_task(show_popup(http_client_mod, f"Teleport point not found\nChoose from one of the following locations:\n\n{'\n'.join(tp_points_names)}", character_guid=character.guid, player_id=str(player.unique_id)))
             return
-        elif player_info.get('bIsAdmin') or current_vehicle.get('companyGuid') in CORPS_WITH_TP:
+        elif player_info.get('bIsAdmin') or (current_vehicle and current_vehicle.get('companyGuid') in CORPS_WITH_TP):
           no_vehicles = False
           location = player_info['CustomDestinationAbsoluteLocation']
           if player_info['VehicleKey'] == 'None':
@@ -1095,7 +1130,7 @@ Use <Highlight>/setup_event {event.id}</> to start
           )
           await character.asave(update_fields=['loan_repayment_rate'])
           asyncio.create_task(
-            show_popup(http_client_mod, f"<Title>Loan repayment rate saved</>\n\n{character.repayment_rate*100:.0f}% of your earnings will automatically go repaying loans, if any", character_guid=character.guid, player_id=str(player.unique_id))
+            show_popup(http_client_mod, f"<Title>Loan repayment rate saved</>\n\n{character.loan_repayment_rate*100:.0f}% of your earnings will automatically go repaying loans, if any", character_guid=character.guid, player_id=str(player.unique_id))
           )
         except Exception as e:
           asyncio.create_task(
@@ -1500,6 +1535,7 @@ The loan amount has been deposited into your wallet. You can view your loan deta
       is_rp_mode = await get_rp_mode(http_client_mod, character.guid)
       if character.rp_mode and not is_rp_mode:
         asyncio.create_task(toggle_rp_session(http_client_mod, character.guid))
+        is_rp_mode = True
 
       new_name = character.name
       if is_rp_mode and '[RP]' not in new_name:
