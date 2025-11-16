@@ -423,7 +423,10 @@ async def send_event_embeds(ctx):
   http_client = ctx.get('http_client_event_mod')
   discord_client = ctx.get('discord_client')
   if not discord_client.is_ready():
-    await discord_client.wait_until_ready()
+    await asyncio.wrap_future(asyncio.run_coroutine_threadsafe(
+      discord_client.wait_until_ready(),
+      discord_client.loop
+    )) 
   channel = discord_client.get_channel(settings.DISCORD_EVENTS_CHANNEL_ID)
 
   try: 
