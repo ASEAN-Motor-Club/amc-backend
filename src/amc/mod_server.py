@@ -177,12 +177,12 @@ async def set_decal(session, player_id, decal):
       raise Exception('Failed to set decal')
 
 async def despawn_player_vehicle(session, player_id, category='current'):
-  if category == 'current':
-    json = {}
   if category == 'others':
     json = {'others': True}
-  if category == 'all':
+  elif category == 'all':
     json = {'all': True}
+  else:
+    json = {}
   async with session.post(f'/player_vehicles/{player_id}/despawn', json=json) as resp:
     if resp.status != 200:
       raise Exception('Failed to despawn')
@@ -191,6 +191,53 @@ async def force_exit_vehicle(session, character_guid):
   async with session.get(f'/player_vehicles/{character_guid}/exit') as resp:
     if resp.status != 200:
       raise Exception('Failed to exit vehicle')
+
+async def set_world_vehicle_decal(
+  session,
+  vehicle_class,
+  customization=None,
+  decal=None,
+  parts=None,
+):
+  data = {}
+  if customization:
+    data['customization'] = customization
+  if decal:
+    data['decal'] = decal
+  if parts:
+    data['parts'] = parts
+  async with session.post(f'/world_vehicles/{vehicle_class}/decal', json=data) as resp:
+    if resp.status != 200:
+      raise Exception('Failed to set vehicle decals')
+
+
+async def despawn_by_tag(
+  session,
+  tag
+):
+  data = {
+    'Tag': tag,
+    'Tags': []
+  }
+  async with session.post('/assets/despawn', json=data) as resp:
+    if resp.status != 204:
+      raise Exception('Failed to despawn by tag')
+
+async def spawn_garage(
+  session,
+  location,
+  rotation,
+):
+  data = {
+    'Location': location,
+    'Rotation': rotation
+  }
+  async with session.post('/garages/spawn', json=data) as resp:
+    if resp.status != 201:
+      raise Exception('Failed to spawn garage')
+    data = await resp.json()
+    return data['data']
+
 
 async def spawn_vehicle(
   session,

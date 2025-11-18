@@ -81,6 +81,11 @@ def format_key_string(key_str):
 
     return s2
 
+def format_vehicle_part_game(part):
+  key = format_key_string(part['Key'])
+  slot = VehiclePartSlot(part['Slot'])
+  return f"{slot.name}: {key}"
+
 def format_vehicle_part(part):
   key = format_key_string(part['Key'])
   slot = VehiclePartSlot(part['Slot'])
@@ -135,6 +140,7 @@ async def spawn_registered_vehicle(
   tags=[],
   driver_guid=None,
   for_sale=None,
+  extra_data={},
 ):
   if not location:
     location = vehicle.config['Location']
@@ -142,13 +148,14 @@ async def spawn_registered_vehicle(
     rotation = vehicle.config.get('Rotation', {})
 
   extra_data = {
+    **extra_data,
     'profitShare': 0,
     'tags': tags,
   }
-  #if owner_setting := vehicle.config.get('Net_VehicleOwnerSetting'):
-  #  extra_data['profitShare'] = owner_setting.get('VehicleOwnerProfitShare', 0)
+  if owner_setting := vehicle.config.get('Net_VehicleOwnerSetting'):
+    extra_data['profitShare'] = owner_setting.get('VehicleOwnerProfitShare', 0)
 
-  if vehicle.config.get('CompanyGuid') and vehicle.config.get('CompanyGuid'):
+  if vehicle.config.get('CompanyGuid') and vehicle.config.get('CompanyName'):
     extra_data['companyGuid'] = vehicle.config.get('CompanyGuid')
     extra_data['companyName'] = vehicle.config.get('CompanyName')
   if for_sale is not None:
@@ -164,7 +171,10 @@ async def spawn_registered_vehicle(
     rotation=rotation,
     customization=vehicle.config['Customization'],
     decal=vehicle.config['Decal'],
-    parts=vehicle.config['Parts'],
+    parts=[
+      { **p, "partKey": p['Key'] }
+      for p in vehicle.config['Parts']
+    ],
     extra_data=extra_data,
     driver_guid=driver_guid,
     tag=tag,

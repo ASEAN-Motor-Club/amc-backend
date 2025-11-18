@@ -54,6 +54,7 @@ class Player(models.Model):
   user = models.OneToOneField(User, models.SET_NULL, related_name='player', null=True, blank=True)
   suspect = models.BooleanField(default=False)
   adminstrator = models.BooleanField(default=False)
+  displayer = models.BooleanField(default=False, help_text="Livery artists, showcase etc")
   social_score = models.IntegerField(default=0)
   notes = models.TextField(blank=True)
 
@@ -1276,6 +1277,7 @@ class RescueRequest(models.Model):
 class CharacterVehicle(models.Model):
   character = models.ForeignKey(Character, on_delete=models.SET_NULL, null=True, blank=True, related_name='owned_vehicles')
   vehicle_id = models.PositiveIntegerField(db_index=True)
+  alias = models.CharField(max_length=32, null=True, blank=True)
   company_guid = models.CharField(max_length=32, null=True, blank=True)
   spawn_on_restart = models.BooleanField(default=False)
   rental = models.BooleanField(default=False)
