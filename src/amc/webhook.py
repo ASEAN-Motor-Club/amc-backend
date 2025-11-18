@@ -371,8 +371,9 @@ async def process_event(event, player, character, is_rp_mode=False, used_shortcu
         job = await (DeliveryJob.objects
           .filter_active()
           .filter_by_delivery(delivery_source, delivery_destination, cargo_key)
-          # .filter(Q(rp_mode=is_rp_mode) | Q(rp_mode=False))
         ).afirst()
+        if job is not None and job.rp_mode and not is_rp_mode:
+          job = None
 
         subsidy = cargo_subsidy
         if job and not used_shortcut:
