@@ -113,7 +113,7 @@ class WorkerSettings:
         #cron(monitor_corporations, second=23),
         cron(monitor_server_status, second=None),
         # cron(monitor_server_condition, minute=set(range(3, 60, 5))),
-        cron(monitor_rp_mode, second=set(range(7, 60, 11))),
+        # cron(monitor_rp_mode, second=set(range(7, 60, 13))),
     ]
     on_startup = startup
     on_shutdown = shutdown

@@ -4,7 +4,7 @@ from amc.mod_server import list_player_vehicles, spawn_vehicle, show_popup
 from amc.enums import VehiclePartSlot
 
 async def register_player_vehicles(http_client_mod, character, player, active=None):
-  player_vehicles = await list_player_vehicles(http_client_mod, player.unique_id, active=active)
+  player_vehicles = await list_player_vehicles(http_client_mod, player.unique_id, active=active, complete=True)
   if not player_vehicles:
     return
 

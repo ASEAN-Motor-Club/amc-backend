@@ -65,15 +65,43 @@ async def get_events(session):
     data = await resp.json()
     return data['data']
 
-async def list_player_vehicles(session, player_id, active=None):
+async def list_player_vehicles(session, player_id, active=None, complete=None):
   params = {}
   if active:
     params['active'] = 1
+  if complete:
+    params['complete'] = 1
   async with session.get(f'/player_vehicles/{player_id}/list', params=params) as resp:
     if resp.status != 200:
       raise Exception(f'Failed to fetch player vehicles: {player_id}')
     data = await resp.json()
-    return data['vehicles']
+    player_vehicles = data['vehicles']
+    if not player_vehicles:
+      return {}
+    res = {}
+    if isinstance(player_vehicles, dict):
+      for vehicle_id, vehicle in player_vehicles.items():
+        res[vehicle_id] = {
+          **vehicle
+        }
+        vehicle_name = vehicle['fullName'].split(' ')[0].replace('_C', '')
+        res[vehicle_id]['VehicleName'] = vehicle_name
+        asset_path = vehicle['classFullName'].split(' ')[1]
+        res[vehicle_id]['AssetPath'] = asset_path
+
+      return res
+    elif isinstance(player_vehicles, list):
+      for vehicle in player_vehicles:
+        vehicle_id = vehicle['vehicleId']
+        res[vehicle_id] = {
+          **vehicle
+        }
+        vehicle_name = vehicle['fullName'].split(' ')[0].replace('_C', '')
+        res[vehicle_id]['VehicleName'] = vehicle_name
+        asset_path = vehicle['classFullName'].split(' ')[1]
+        res[vehicle_id]['AssetPath'] = asset_path
+
+      return res
 
 async def send_message_as_player(session, message, player_id):
   data = {

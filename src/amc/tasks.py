@@ -691,8 +691,8 @@ Use <Highlight>/rescue</> to alert rescuers in the game and on discord if you ne
         players = await get_players_mod(http_client_mod)
         rescue_request_message = command_match.group('message')
         sent = False
-        vehicles = await register_player_vehicles(http_client_mod, character, player, active=True)
-        vehicle_names = '+'.join([format_key_string(v.config.get('VehicleName', '?')) for v in vehicles])
+        vehicles = await list_player_vehicles(http_client_mod, player.unique_id, active=True)
+        vehicle_names = '+'.join([format_key_string(v.get('VehicleName', '?')) for v in vehicles.values()])
 
         for _player_info in players:
           p_name = _player_info.get('PlayerName')
@@ -1159,12 +1159,15 @@ To change the position, you will need to do /display again with the same vehicle
         player_info = await get_player(http_client_mod, str(player.unique_id))
         tp_points = TeleportPoint.objects.filter(character__isnull=True).order_by('name')
         tp_points_names = [tp.name async for tp in tp_points]
-        player_vehicles = await list_player_vehicles(http_client_mod, player.unique_id, active=True)
         current_vehicle = None
-        if isinstance(player_vehicles, dict):
-          for vehicle_id, vehicle in player_vehicles.items():
-            if vehicle.get('index') == 0:
-              current_vehicle = vehicle
+        try:
+          player_vehicles = await list_player_vehicles(http_client_mod, player.unique_id, active=True)
+          if isinstance(player_vehicles, dict):
+            for vehicle_id, vehicle in player_vehicles.items():
+              if vehicle.get('index') == 0:
+                current_vehicle = vehicle
+        except Exception:
+          pass
 
         no_vehicles = not player_info.get('bIsAdmin')
 
