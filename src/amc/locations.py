@@ -41,7 +41,7 @@ Use <Highlight>/bank</> to create a Bank ASEAN account today!
   ),
   (
     Point(** {"z": -21564.73, "y": 157275.61, "x": -83784.37}),
-    1000,
+    2000,
     f"""\
 <Title>Welcome to the ASEAN Park</>
 
