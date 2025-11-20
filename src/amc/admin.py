@@ -48,6 +48,7 @@ from .models import (
   PlayerShift,
   RescueRequest,
   CharacterVehicle,
+  Garage,
 )
 from amc_finance.services import send_fund_to_player
 from amc_finance.admin import AccountInlineAdmin
@@ -603,3 +604,8 @@ class CharacterVehicleAdmin(admin.ModelAdmin):
   search_fields = ['company_guid', 'character__name', 'character__guid', 'character__player__unique_id']
   list_filter = ['rental', 'spawn_on_restart', 'for_sale']
 
+
+@admin.register(Garage)
+class GarageAdmin(admin.ModelAdmin):
+  list_display = ['id', 'notes', 'spawn_on_restart']
+  search_fields = ['notes']

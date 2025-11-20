@@ -56,6 +56,7 @@ from amc.models import (
   VehicleDecal,
   RescueRequest,
   CharacterVehicle,
+  Garage,
 )
 from amc.game_server import announce, get_players, get_players2, kick_player
 from amc.mod_server import (
@@ -760,21 +761,25 @@ Only 1 rescue team should respond to a request.
           asyncio.create_task(
             delay(spawn_dealerships(), 60)
           )
-      elif command_match := re.match(r"/spawn_garage\s*(?P<yaw>\d*)$", message):
-        yaw = 0
-        if command_match.group('yaw'):
-          yaw = int(command_match.group('yaw'))
+      elif command_match := re.match(r"/spawn_garage\s*(?P<name>.*)$", message):
         if player_info and player_info.get('bIsAdmin'):
           location = player_info['Location']
           location['Z'] = location['Z'] - 100
+          rotation = player_info.get('Rotation', {})
           resp = await spawn_garage(
             http_client_mod,
             location,
-            player_info.get('Rotation', { 'Yaw': yaw })
+            rotation
           )
           tag = resp.get('tag')
           asyncio.create_task(
             announce(f"Garage spawned! Tag: {tag}", http_client)
+          )
+          await Garage.objects.acreate(
+            config={'Location': location, 'Rotation': rotation},
+            hostname=hostname,
+            notes=command_match.group('name').strip(),
+            tag=tag,
           )
       elif command_match := re.match(r"/register_vehicles$", message):
         vehicles = await register_player_vehicles(http_client_mod, character, player)

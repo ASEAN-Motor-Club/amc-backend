@@ -1023,6 +1023,15 @@ class VehicleDealership(models.Model):
 
 
 @final
+class Garage(models.Model):
+  config = models.JSONField(null=True, blank=True)
+  hostname = models.CharField(max_length=128)
+  spawn_on_restart = models.BooleanField(default=True)
+  notes = models.TextField(blank=True)
+  tag = models.CharField(max_length=256, null=True, blank=True)
+
+
+@final
 class Thank(models.Model):
   sender_character = models.ForeignKey(Character, on_delete=models.CASCADE, related_name='thanks_given')
   recipient_character = models.ForeignKey(Character, on_delete=models.CASCADE, related_name='thanks_received')
@@ -1286,7 +1295,9 @@ class CharacterVehicle(models.Model):
 
   @override
   def __str__(self):
-    return f"{self.vehicle_id}"
+    if vehicle_name := self.config.get('VehicleName'):
+      return f"{self.id} {vehicle_name}"
+    return f"{self.id}"
 
   class Meta:
     constraints = [
