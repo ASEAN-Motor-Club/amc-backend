@@ -1989,7 +1989,7 @@ Not everyone likes to be roughed up!
     case _:
       pass
 
-  if forward_message and discord_client and ctx.get('startup_time') and timestamp > ctx.get('startup_time'):
+  if forward_message and discord_client and ctx.get('startup_time') and timestamp > ctx.get('startup_time') and hostname == "asean-mt-server":
     forward_message_channel_id, forward_message_content = forward_message
     asyncio.run_coroutine_threadsafe(
       forward_to_discord(
