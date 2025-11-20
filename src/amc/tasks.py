@@ -839,6 +839,21 @@ Only 1 rescue team should respond to a request.
           asyncio.create_task(
             delay(spawn_dealerships(), 60)
           )
+      elif command_match := re.match(r"/spawn_garages$", message):
+        if player_info and player_info.get('bIsAdmin'):
+          async def spawn_garages():
+            async for g in Garage.objects.filter(spawn_on_restart=True):
+              location = g.config['Location']
+              rotation = g.config['Rotation']
+              resp = await spawn_garage(
+                http_client_mod,
+                location,
+                rotation
+              )
+              tag = resp.get('tag')
+              g.tag = tag
+              await g.asave(update_fields=['tag'])
+          asyncio.create_task(spawn_garages())
       elif command_match := re.match(r"/spawn_garage\s*(?P<name>.*)$", message):
         if player_info and player_info.get('bIsAdmin'):
           location = player_info['Location']
@@ -1969,6 +1984,18 @@ Not everyone likes to be roughed up!
               for p in v.config['Parts']
             ],
           )
+      async def spawn_garages():
+        async for g in Garage.objects.filter(spawn_on_restart=True):
+          location = g.config['Location']
+          rotation = g.config['Rotation']
+          resp = await spawn_garage(
+            http_client_mod,
+            location,
+            rotation
+          )
+          tag = resp.get('tag')
+          g.tag = tag
+          await g.asave(update_fields=['tag'])
       asyncio.create_task(
         delay(spawn_world_vehicles(), 20)
       )
@@ -1977,6 +2004,9 @@ Not everyone likes to be roughed up!
       )
       asyncio.create_task(
         delay(spawn_player_vehicles(), 60)
+      )
+      asyncio.create_task(
+        delay(spawn_garages(), 45)
       )
 
     case UnknownLogEntry():
