@@ -670,10 +670,10 @@ Please try again:
           if new_name is not None:
             await set_character_name(ctx['http_client_mod'], character.guid, new_name)
 
+          await asyncio.sleep(1)
           if is_rp_mode:
-            asyncio.create_task(
-              show_popup(
-                http_client_mod, """\
+            await show_popup(
+              http_client_mod, """\
 <Title>Roleplay Mode Enabled</>
 
 <EffectGood>You can now take on RP mode jobs!</>
@@ -681,21 +681,18 @@ You will also get <Money>100%</> more bonuses and subsidies.
 
 Use <Highlight>/rescue</> to alert rescuers in the game and on discord if you need a rescue.
 """,
-                character_guid=character.guid,
-                player_id=str(player.unique_id),
-              )
+              character_guid=character.guid,
+              player_id=str(player.unique_id),
             )
           else:
-            asyncio.create_task(
-              show_popup(
-                http_client_mod, """\
+            await show_popup(
+              http_client_mod, """\
 <Title>Roleplay Mode Disabled</>
 
 <Warning>You have disabled RP mode</>
-  """,
-                character_guid=character.guid,
-                player_id=str(player.unique_id),
-              )
+""",
+              character_guid=character.guid,
+              player_id=str(player.unique_id),
             )
       elif command_match := re.match(r"/respond\s*(?P<rescue_id>\d*)$", message):
         try:
