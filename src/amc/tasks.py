@@ -537,10 +537,55 @@ Toggle it with <Highlight>/rp_mode</>
           asyncio.create_task(
             announce(f"{int(float(location['X']))}, {int(float(location['Y']))}, {int(float(location['Z']))}", http_client, delay=0)
           )
-      elif command_match := re.match(r"/despawn$", message):
+      elif command_match := re.match(r"/(despawn|d)$", message):
+        players = await get_players2(http_client)
+        if len(players) > 8:
+          asyncio.create_task(
+            show_popup(http_client_mod, "<Title>Feature disabled</>\n\nSorry, this feature is only useable when there are max 8 online players", character_guid=character.guid, player_id=str(player.unique_id))
+          )
+          return
         await despawn_player_vehicle(http_client_mod, player_id)
-      elif command_match := re.match(r"/despawn\s*(?P<category>\S+)$", message):
-        category =command_match.group('category')
+      elif command_match := re.match(r"/(despawn|d)\s+(?P<category>\S+)$", message):
+        players = await get_players2(http_client)
+        if len(players) > 8:
+          asyncio.create_task(
+            show_popup(http_client_mod, "<Title>Feature disabled</>\n\nSorry, this feature is only useable when there are max 8 online players", character_guid=character.guid, player_id=str(player.unique_id))
+          )
+          return
+        category = command_match.group('category')
+        if player_info and player_info.get('bIsAdmin') and category != "all" and category != "others":
+          players = await get_players2(http_client)
+          target_player_id = None
+          for p_id, player in players:
+            if player['name'].startswith(command_match.group('category')):
+              target_player_id = p_id
+              break
+          if target_player_id  is None:
+            asyncio.create_task(
+              show_popup(http_client_mod, "<Title>Player not found</>\n\nPlease make sure you typed the name correctly.", character_guid=character.guid, player_id=str(player.unique_id))
+            )
+            raise Exception('Player not found')
+          if target_player_id is not None:
+            await despawn_player_vehicle(http_client_mod, target_player_id, category='others')
+            asyncio.create_task(
+              show_popup(http_client_mod, "<Title>Player vehicles despawned</>\n\n", character_guid=character.guid, player_id=str(player.unique_id))
+            )
+            return
+
+        await despawn_player_vehicle(http_client_mod, player_id, category=command_match.group('category'))
+        if category == "all":
+          await despawn_by_tag(http_client_mod, f'rental-{character.guid}')
+        # asyncio.create_task(show_popup(http_client_mod, "Sorry, this feature is temporarily disabled", character_guid=character.guid, player_id=str(player.unique_id)))
+      elif command_match := re.match(r"/admin_despawn$", message):
+        if player_info.get('bIsAdmin'):
+          await despawn_player_vehicle(http_client_mod, player_id)
+      elif command_match := re.match(r"/admin_despawn\s*(?P<category>\S+)$", message):
+        if not player_info.get('bIsAdmin'):
+          asyncio.create_task(
+            show_popup(http_client_mod, "<Title>Feature disabled</>\n\nSorry, this feature is temporarily unavailable", character_guid=character.guid, player_id=str(player.unique_id))
+          )
+          return
+        category = command_match.group('category')
         if player_info and player_info.get('bIsAdmin') and category != "all" and category != "others":
           players = await get_players2(http_client)
           target_player_id = None
@@ -612,6 +657,7 @@ Please try again:
           )
         else:
           await toggle_rp_session(http_client_mod, character.guid, despawn=True)
+          await despawn_by_tag(http_client_mod, f'rental-{character.guid}')
           is_rp_mode = await get_rp_mode(http_client_mod, character.guid)
           character.rp_mode = is_rp_mode
           await character.asave(update_fields=['rp_mode'])
@@ -763,9 +809,12 @@ Only 1 rescue team should respond to a request.
             send_discord_rescue_request(),
             discord_client.loop
           )
-      elif command_match := re.match(r"/spawn_displays$", message):
+      elif command_match := re.match(r"/spawn_displays\s*(?P<display_id>\d*)$", message):
+        qs = CharacterVehicle.objects.select_related('character').filter(spawn_on_restart=True)
+        if display_id := command_match.group('display_id'):
+          qs = qs.filter(pk=int(display_id))
         if player_info and player_info.get('bIsAdmin'):
-          async for v in CharacterVehicle.objects.select_related('character').filter(spawn_on_restart=True):
+          async for v in qs:
             extra_data = {}
             if v.character:
               extra_data={
@@ -776,6 +825,8 @@ Only 1 rescue team should respond to a request.
             tags = [f'display-{v.id}']
             if v.character:
               tags.append(v.character.name)
+              tags.append(f"display-{v.character.guid}")
+            await despawn_by_tag(http_client_mod, f'display-{v.id}')
             await spawn_registered_vehicle(
               http_client_mod,
               v,
@@ -917,7 +968,6 @@ Use <Highlight>/rental </> to put up a <Bold>Corporation</> vehicle for rent.
 You must be on a flat surface with enough space for the vehicle to appear.
 Use <Highlight>/rent 123</> to rent a vehicle from the list
 Use <Highlight>/rent jemusi</> to search for a Jemusi
-
 {vehicles_str}""", character_guid=character.guid, player_id=str(player.unique_id))
           )
         else:
@@ -932,7 +982,7 @@ Use <Highlight>/rent jemusi</> to search for a Jemusi
                 'Z': location['Z'] - 100,
               },
               driver_guid=character.guid,
-              tags=[character.name, 'rental_vehicles']
+              tags=[character.name, 'rental_vehicles', f'rental-{v.id}', f'rental-{character.guid}']
             )
             profit_share = 0
             if owner_setting := v.config.get('Net_VehicleOwnerSetting'):
