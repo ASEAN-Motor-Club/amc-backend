@@ -147,8 +147,31 @@ class RoleplayCog(commands.Cog):
       channel = reaction.message.channel
       print('RESCUE')
       if channel and \
-        channel.id == settings.DISCORD_RESCUE_CHANNEL_ID:
+        channel.id == settings.DISCORD_RESCUE_CHANNEL_ID and not user.bot:
           await self.on_rescue_response(reaction.message, user)
+
+    async def add_reaction_to_rescue_message(self, message_id, emoji):
+      try:
+        channel = self.bot.get_channel(settings.DISCORD_RESCUE_CHANNEL_ID)
+        if channel is None:
+          print(f"Error: Could not find channel with ID {settings.DISCORD_RESCUE_CHANNEL_ID}.")
+          return
+
+        # 2. Fetch the Message object from the channel (requires an API call)
+        # fetch_message is an asynchronous operation, so we must await it.
+        message = await channel.fetch_message(message_id)
+        
+        # 3. Add the reaction
+        await message.add_reaction(emoji)
+        print(f"Successfully added reaction '{emoji}' to message {message_id}.")
+
+      except discord.NotFound:
+        print(f"Error: Message with ID {message_id} not found in channel {settings.DISCORD_RESCUE_CHANNEL_ID}.")
+      except discord.HTTPException as e:
+        # Handles errors like Invalid Unicode, Forbidden (bot can't react), etc.
+        print(f"Error adding reaction: {e}")
+      except Exception as e:
+        print(f"An unexpected error occurred: {e}")
 
     async def on_rescue_response(self, message, user):
       try:

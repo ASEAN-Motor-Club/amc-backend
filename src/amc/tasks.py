@@ -243,7 +243,7 @@ async def process_logout_event(character_id, timestamp):
   await async_execute_raw_sql(raw_sql, params)
 
 
-async def forward_to_discord(client, channel_id, content, escape_mentions=True):
+async def forward_to_discord(client, channel_id, content, escape_mentions=True, **kwargs):
   if not client.is_ready():
     await client.wait_until_ready()
 
@@ -254,7 +254,7 @@ async def forward_to_discord(client, channel_id, content, escape_mentions=True):
 
   channel = client.get_channel(int(channel_id))
   if channel:
-    return await channel.send(content, allowed_mentions=allowed_mentions)
+    return await channel.send(content, allowed_mentions=allowed_mentions, **kwargs)
 
 async def add_discord_verified_role(client, discord_user_id, player_id):
   guild = client.get_guild(settings.DISCORD_GUILD_ID)
@@ -651,6 +651,33 @@ Use <Highlight>/rescue</> to alert rescuers in the game and on discord if you ne
                 player_id=str(player.unique_id),
               )
             )
+      elif command_match := re.match(r"/respond\s*(?P<rescue_id>\d*)$", message):
+        try:
+          rescue_request = await RescueRequest.objects.select_related('character').aget(timestamp__gte=timezone.now() - timedelta(minutes=5))
+        except RescueRequest.DoesNotExist:
+          asyncio.create_task(
+            show_popup(
+              http_client_mod, "Invalid or expired rescue ID. You can only respond to rescues up to 5 minutes.",
+              character_guid=character.guid,
+              player_id=str(player.unique_id)
+            )
+          )
+          return
+        await rescue_request.responders.aadd(player)
+        asyncio.create_task(
+          announce(f"{character.name} responded to {rescue_request.character.name}'s rescue request!", http_client)
+        )
+        roleplay_cog = discord_client.get_cog('RoleplayCog')
+        if roleplay_cog and hasattr(roleplay_cog, 'add_reaction_to_rescue_message'):
+          loop = asyncio.get_running_loop()
+          loop.run_in_executor(
+            None,
+            lambda: asyncio.run_coroutine_threadsafe(
+              roleplay_cog.add_reaction_to_rescue_message(rescue_request.discord_message_id, '👍'),
+              discord_client.loop
+            )
+          )
+
       elif command_match := re.match(r"/rescue\s*(?P<message>.*)$", message):
         if await RescueRequest.objects.filter(character=character, timestamp__gte=timezone.now() - timedelta(minutes=5)).aexists():
           asyncio.create_task(
@@ -680,19 +707,21 @@ Use <Highlight>/rescue</> to alert rescuers in the game and on discord if you ne
             )
             sent = True
 
-        if sent:
-          popup_message = "<EffectGood>Request Sent</>\n\nSomeone will respond to you shortly."
-        else:
-          popup_message = "<EffectGood>Request Sent</>\n\nThe rescue team is offline but they have been notified on discord."
-          asyncio.create_task(
-            announce(f"{character.name} needs a rescue! They are on: {vehicle_names}", http_client)
-          )
         rescue_request = await RescueRequest.objects.acreate(
           character=character,
           message=rescue_request_message,
         )
 
         if is_current_event:
+          asyncio.create_task(
+            announce(f"{character.name} needs a rescue! They are on: {vehicle_names}. To respond: /respond {rescue_request.id}", http_client)
+          )
+
+          if sent:
+            popup_message = "<EffectGood>Request Sent</>\n\nSomeone will respond to you shortly."
+          else:
+            popup_message = "<EffectGood>Request Sent</>\n\nThe rescue team is offline but they have been notified on discord."
+
           asyncio.create_task(
             show_popup(
               http_client_mod, popup_message,
@@ -724,7 +753,8 @@ Only 1 rescue team should respond to a request.
 - Right click the channel > Notification Settings > Nothing
 - Remove your role (DOT/ARWRS/CKM)
 """,
-              escape_mentions=False
+              escape_mentions=False,
+              silent=True
             )
             if message:
               rescue_request.discord_message_id = message.id
