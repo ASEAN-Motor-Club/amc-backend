@@ -1725,7 +1725,24 @@ The loan amount has been deposited into your wallet. You can view your loan deta
         vehicle_name=vehicle_name,
         action=action,
       )
-      #if action == PlayerVehicleLog.Action.ENTERED:
+      if action == PlayerVehicleLog.Action.ENTERED:
+        if 'Police' in vehicle_name:
+          asyncio.create_task(
+            show_popup(
+              http_client_mod,
+              """\
+<Title>Police Rules</>
+Using police cars does not require whitelisting on the server, but there are some rules:
+- <Warning>No ramming without consent</>
+- No spike strips unless it's part of group play
+
+Please communicate with the other players first to obtain permission to conduct police chases and arrests.
+Not everyone likes to be roughed up!
+""",
+              character_guid=character.guid,
+              player_id=str(player.unique_id)
+            )
+          )
       #  asyncio.create_task(delay(register_player_vehicles(http_client_mod, character, player), 5))
       if action == PlayerVehicleLog.Action.BOUGHT and vehicle_name == 'Vulcan':
         await player_donation(2_250_000, character)
