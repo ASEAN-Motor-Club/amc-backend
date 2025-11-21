@@ -49,6 +49,7 @@ packages = [
   "src/amc",
   "src/amc_cogs",
   "src/amc_finance",
+  "src/necesse",
   "src/manage.py",
 ]
 
