@@ -60,6 +60,7 @@ if os.environ.get('GDAL_LIBRARY_PATH') and os.environ.get('GEOS_LIBRARY_PATH'):
 INSTALLED_APPS += [
     'amc',
     'amc_finance',
+    'necesse',
 ]
 
 MIDDLEWARE = [

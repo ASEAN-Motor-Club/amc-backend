@@ -360,7 +360,7 @@
                 EnvironmentFile = cfg.environmentFile;
               };
               script = ''
-                ${self.packages.x86_64-linux.default}/bin/arq amc.worker.WorkerSettings
+                ${self.packages.x86_64-linux.default}/bin/arq amc_backend.worker.WorkerSettings
               '';
             };
 
