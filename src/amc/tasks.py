@@ -1060,7 +1060,9 @@ Use <Highlight>/display </> to permanently display a vehicle""",
           )
           return
 
+        await asyncio.sleep(0.5)
         await despawn_player_vehicle(http_client_mod, player_id, category=command_match.group('category'))
+        await asyncio.sleep(0.5)
 
         for v in vehicles:
           if v.spawn_on_restart:
