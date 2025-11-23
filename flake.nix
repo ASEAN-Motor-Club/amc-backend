@@ -118,6 +118,9 @@
             fqdn = lib.mkOption {
               type = lib.types.str;
             };
+            necesseFifoPath = lib.mkOption {
+              type = lib.types.str;
+            };
             allowedHosts = lib.mkOption {
               type = lib.types.listOf lib.types.str;
               default = [];
@@ -175,6 +178,7 @@
               autoStart = true;
               restartIfChanged = false;
               bindMounts."/etc/ssh/ssh_host_ed25519_key".isReadOnly = true;
+              bindMounts.${cfg.necesseFifoPath}.isReadOnly = false;
               config = { config, pkgs, ... }: {
                 imports = [
                   self.nixosModules.backend
@@ -182,6 +186,7 @@
                 ];
                 environment.variables = {
                   inherit (mkPostgisDeps pkgs) GEOS_LIBRARY_PATH GDAL_LIBRARY_PATH;
+                  NECESSE_FIFO_PATH = cfg.necesseFifoPath;
                 };
                 age.identityPaths = [ "/etc/ssh/ssh_host_ed25519_key" ];
                 age.secrets.backend = lib.mkIf (cfg.secretFile != null) {
@@ -261,8 +266,10 @@
             users.users.${cfg.user} = {
               isSystemUser = true;
               inherit (cfg) group;
+              extraGroups = [ "modders" ];
               description = "AMC Backend";
             };
+            users.groups.modders.gid = 987;
             users.groups.${cfg.group} = {
               members = [ cfg.user ];
             };

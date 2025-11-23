@@ -1,8 +1,11 @@
+import os
 from discord.ext import commands
 from django.conf import settings
 from amc.models import Player
 from amc.mod_server import send_message_as_player
 from amc.game_server import announce, get_players
+
+FIFO_PATH = os.environ.get('NECESSE_FIFO_PATH')
 
 class ChatCog(commands.Cog):
   def __init__(self, bot, game_chat_channel_id=settings.DISCORD_GAME_CHAT_CHANNEL_ID):
@@ -27,4 +30,19 @@ class ChatCog(commands.Cog):
         self.bot.http_client_game,
         color="FFFFFF",
       )
+
+    if not message.author.bot and message.channel.id == settings.DISCORD_NECESSE_GAME_CHAT_CHANNEL_ID:
+      try:
+        with open(FIFO_PATH, 'w') as f:
+          f.write(f"/print {message.author.display_name}: {message.content}\n")
+          f.flush()
+      except PermissionError:
+        print(f"Error: Permission denied accessing {FIFO_PATH}.")
+        print("Ensure your user is in the 'modders' group or listed in 'commandUsers'.")
+        await message.channel.send(f"Error: Permission denied accessing {FIFO_PATH}.")
+      except OSError as e:
+        print(f"OS Error: {e}")
+        await message.channel.send(f"OS Error: {e}")
+      except Exception as e:
+        await message.channel.send(f"Exception: {e}")
 

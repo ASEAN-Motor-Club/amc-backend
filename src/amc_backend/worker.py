@@ -8,6 +8,7 @@ django.setup()
 from django.conf import settings
 from django.utils import timezone
 from amc.tasks import process_log_line
+from necesse.tasks import process_necesse_log
 from amc.events import monitor_events, send_event_embeds
 from amc.locations import monitor_locations
 from amc.webhook import monitor_webhook, monitor_webhook_test
@@ -97,7 +98,10 @@ async def monitor_events_event(ctx):
   await monitor_events(ctx, ctx['http_client_event_mod'])
 
 class WorkerSettings:
-    functions = [process_log_line]
+    functions = [
+      process_log_line,
+      process_necesse_log,
+    ]
     cron_jobs = [
         cron(monitor_webhook, second=set(range(0, 60, 4))),
         cron(monitor_webhook_test, second=set(range(0, 60, 4))),
