@@ -125,14 +125,16 @@ def get_welcome_message(last_login, player_name):
 async def aget_or_create_character(player_name, player_id, http_client_mod=None):
   character_guid = None
   player_info = None
+  i = 0
   if http_client_mod:
     while True:
       try:
         player_info = await get_player(http_client_mod, player_id)
         character_guid = player_info.get('CharacterGuid')
-        if character_guid != Character.INVALID_GUID:
+        if character_guid != Character.INVALID_GUID and i < 10:
           break
         await asyncio.sleep(1)
+        i = i + 1
       except Exception as e:
         print(f"Failed to fetch player info for {player_name} ({player_id}): {e}")
         break
