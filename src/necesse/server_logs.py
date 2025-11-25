@@ -113,7 +113,7 @@ def parse_log_content(timestamp, content):
       player_name=pattern_match.group('player_name'),
     )
 
-  if pattern_match := re.match(r"Player \d+ \(\"(?P<player_name>.+)\"\) disconnected with message: \w+$", content):
+  if pattern_match := re.match(r"Player \d+ \(\"(?P<player_name>.+)\"\) disconnected with message: .+$", content):
     return PlayerLogoutLogEvent(
       timestamp=timestamp,
       player_name=pattern_match.group('player_name'),
