@@ -540,12 +540,6 @@ Toggle it with <Highlight>/rp_mode</>
             announce(f"{int(float(location['X']))}, {int(float(location['Y']))}, {int(float(location['Z']))}", http_client, delay=0)
           )
       elif command_match := re.match(r"/(despawn|d)$", message):
-        players = await get_players2(http_client)
-        if len(players) > 8:
-          asyncio.create_task(
-            show_popup(http_client_mod, "<Title>Feature disabled</>\n\nSorry, this feature is only useable when there are max 8 online players", character_guid=character.guid, player_id=str(player.unique_id))
-          )
-          return
         await despawn_player_vehicle(http_client_mod, player_id)
       elif command_match := re.match(r"/(despawn|d)\s+(?P<category>\S+)$", message):
         players = await get_players2(http_client)
@@ -658,7 +652,11 @@ Please try again:
             )
           )
         else:
-          await toggle_rp_session(http_client_mod, character.guid, despawn=True)
+          await despawn_player_vehicle(http_client_mod, player_id)
+          try:
+            await toggle_rp_session(http_client_mod, character.guid, despawn=True)
+          except Exception:
+            pass
           await despawn_by_tag(http_client_mod, f'rental-{character.guid}')
           is_rp_mode = await get_rp_mode(http_client_mod, character.guid)
           character.rp_mode = is_rp_mode
