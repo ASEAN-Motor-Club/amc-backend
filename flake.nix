@@ -184,6 +184,7 @@
                   self.nixosModules.backend
                   ragenix.nixosModules.default
                 ];
+                system.stateVersion = "25.05";
                 environment.variables = {
                   inherit (mkPostgisDeps pkgs) GEOS_LIBRARY_PATH GDAL_LIBRARY_PATH;
                   NECESSE_FIFO_PATH = cfg.necesseFifoPath;
@@ -209,6 +210,7 @@
                 imports = [
                   self.nixosModules.log-listener
                 ];
+                system.stateVersion = "25.05";
                 services.amc-log-listener = {
                   enable = true;
                   inherit (cfg) relpPort;
