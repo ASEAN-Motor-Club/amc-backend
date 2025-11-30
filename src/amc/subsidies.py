@@ -120,13 +120,13 @@ async def set_aside_player_savings(character, payment, session):
     raise e
 
 
-def get_subsidy_for_cargos(cargos):
+def get_subsidy_for_cargos(cargos, treasury_balance=None):
   return sum([
-    get_subsidy_for_cargo(cargo)[0]
+    get_subsidy_for_cargo(cargo, treasury_balance)[0]
     for cargo in cargos
   ])
 
-def get_subsidy_for_cargo(cargo):
+def get_subsidy_for_cargo(cargo, treasury_balance=None):
   subsidy_factor = 0.0
   sender_name = None
   destination_name = None
@@ -203,7 +203,12 @@ def get_subsidy_for_cargo(cargo):
       if subsidy_factor == 0.0:
         subsidy_factor = 3.0
 
-  return int(int(cargo.payment) * subsidy_factor), subsidy_factor
+  subsidy = int(int(cargo.payment) * subsidy_factor)
+  if treasury_balance is not None:
+    subsidy_factor = min(subsidy_factor, subsidy_factor * int(treasury_balance) / 50_000_000)
+    subsidy = min(int(int(cargo.payment) * subsidy_factor), int(treasury_balance))
+
+  return subsidy, subsidy_factor
 
 def get_passenger_subsidy(passenger):
   match passenger.passenger_type:

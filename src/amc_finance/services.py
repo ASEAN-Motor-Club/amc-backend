@@ -109,7 +109,7 @@ async def get_player_loan_balance(character):
   )
   return loan_account.balance
 
-async def get_treasury_fund_balance(character):
+async def get_treasury_fund_balance():
   treasury_fund, _ = await Account.objects.aget_or_create(
     account_type=Account.AccountType.ASSET,
     book=Account.Book.GOVERNMENT,

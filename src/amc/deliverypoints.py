@@ -7,6 +7,7 @@ from django.db.models import Q, Prefetch
 from amc.models import Cargo, DeliveryPoint, DeliveryPointStorage, DeliveryJob
 from amc.game_server import get_deliverypoints, get_players, announce
 from amc.enums import CargoKey
+from amc_finance.services import get_treasury_fund_balance
 
 cargo_key_by_label = { v: k for k, v in CargoKey.choices }
 
@@ -95,6 +96,8 @@ async def monitor_jobs(ctx):
   num_active_jobs = await DeliveryJob.objects.filter_active().acount()
   players = await get_players(ctx['http_client'])
   num_players = len(players)
+  treasury_balance = await get_treasury_fund_balance()
+  treasury_health = min(1.0, float(treasury_balance) / 50_000_000)
 
   max_active_jobs = max(4, 2 + math.ceil(num_players / 6))
 
@@ -180,9 +183,11 @@ async def monitor_jobs(ctx):
 
     rp_mode =  job.rp_mode or random.random() < 0.15 
     bonus_multiplier = round(job.bonus_multiplier * random.uniform(0.8, 1.2), 2)
+    bonus_multiplier = bonus_multiplier * treasury_health
     completion_bonus = int(job.completion_bonus * quantity_requested / job.quantity_requested * random.uniform(0.7, 1.3))
+    completion_bonus = int(treasury_health * completion_bonus)
     if rp_mode and not job.rp_mode:
-      completion_bonus = completion_bonus * 2
+      completion_bonus = completion_bonus * 1.5
 
     new_job = await DeliveryJob.objects.acreate(
       name=job.name,

@@ -542,12 +542,10 @@ Toggle it with <Highlight>/rp_mode</>
       elif command_match := re.match(r"/(despawn|d)$", message):
         await despawn_player_vehicle(http_client_mod, player_id)
       elif command_match := re.match(r"/(despawn|d)\s+(?P<category>\S+)$", message):
-        players = await get_players2(http_client)
-        if len(players) > 8:
-          asyncio.create_task(
-            show_popup(http_client_mod, "<Title>Feature disabled</>\n\nSorry, this feature is only useable when there are max 8 online players", character_guid=character.guid, player_id=str(player.unique_id))
-          )
-          return
+        asyncio.create_task(
+          show_popup(http_client_mod, "<Title>Feature disabled</>\n\nSorry, this feature has been disabled since it causes the server to crash", character_guid=character.guid, player_id=str(player.unique_id))
+        )
+        return
         category = command_match.group('category')
         if player_info and player_info.get('bIsAdmin') and category != "all" and category != "others":
           players = await get_players2(http_client)
@@ -612,7 +610,7 @@ To turn off this feature, resend the command with the confirmation code:
           """
         else:
           notes = """\
-Enabling RP mode gives you 100% across all payments and subsidies. Some jobs are exclusive to RP mode.
+Enabling RP mode gives you 50% across all payments and subsidies. Some jobs are exclusive to RP mode.
 - Using <Bold>Roadside Recovery</> will result in the loss of cargo and vehicle.
 - Using <Bold>Autopilot</> will result in the loss of cargo and vehicle.
 - Use <Highlight>/rescue</> to call for help instead.
@@ -654,7 +652,8 @@ Please try again:
         else:
           await despawn_player_vehicle(http_client_mod, player_id)
           try:
-            await toggle_rp_session(http_client_mod, character.guid, despawn=True)
+            # await toggle_rp_session(http_client_mod, character.guid, despawn=True)
+            await toggle_rp_session(http_client_mod, character.guid)
           except Exception:
             pass
           await despawn_by_tag(http_client_mod, f'rental-{character.guid}')
@@ -677,7 +676,7 @@ Please try again:
 <Title>Roleplay Mode Enabled</>
 
 <EffectGood>You can now take on RP mode jobs!</>
-You will also get <Money>100%</> more bonuses and subsidies.
+You will also get <Money>50%</> more bonuses and subsidies.
 
 Use <Highlight>/rescue</> to alert rescuers in the game and on discord if you need a rescue.
 """,
@@ -1132,8 +1131,8 @@ To change the position, you will need to do /display again with the same vehicle
         vehicle_label = command_match.group('vehicle_label')
         if vehicle_label.isdigit():
           vehicle = await CharacterVehicle.objects.aget(pk=int(vehicle_label))
-          location = player_info['Location']
-          location['Z'] -= 95
+          location = vehicle.config['Location']
+          location['Z'] -= 5
           await spawn_registered_vehicle(http_client_mod, vehicle, location, driver_guid=character.guid, tags=['spawned_vehicles'])
         elif not vehicle_label:
           vehicles_list_str = '\n'.join(VehicleKey.labels)
@@ -1490,7 +1489,7 @@ How ASEAN Loans Works
         verification_code = signed_obj.replace('-', '').replace('_', '')[-4:]
 
         input_verification_code = command_match.group('verification_code')
-        if not input_verification_code:
+        if amount < 100_000 or not input_verification_code:
           asyncio.create_task(
             show_popup(http_client_mod, f"""\
 <Title>Donation</>
@@ -1498,8 +1497,9 @@ How ASEAN Loans Works
 ~~ Thank you so much for your intention to donate ~~
 
 To prevent any mishap, please read the following:
+- Minimum donation is <Highlight>100,000</>
+- Donations are only accepted from <Bold>your bank account</>
 - Donations are <Bold>non-refundable</>
-- Please do not donate more than your wallet balance! You will end up with negative balance.
 - You may donate a maximum of {max_donation:,} per 7 days (irl)
 - You have donated {total_donations:,} in the last 7 days (irl)
 
@@ -1516,9 +1516,23 @@ Sorry, the verification code did not match, please try again:
           )
         else:
           try:
-            amount = max(10_000, min(amount, max_donation - int(total_donations)))
+            amount = min(amount, max_donation - int(total_donations))
+            await register_player_withdrawal(amount, character, player)
             await player_donation(amount, character)
-            await transfer_money(http_client_mod, int(-amount), 'Donation', player_id)
+            await show_popup(http_client_mod, f"""\
+<Title>Donation Successful</>
+
+Amount Received: {amount:,}
+
+Thank you for donating, you are keeping our government subsidies and job system alive!""", character_guid=character.guid, player_id=str(player.unique_id))
+            asyncio.run_coroutine_threadsafe(
+              forward_to_discord(
+                discord_client,
+                settings.DISCORD_GENERAL_CHANNEL_ID,
+                f"**{character.name}** has just donated {amount:,} to the government treasury",
+              ),
+              discord_client.loop
+            )
           except Exception as e:
             asyncio.create_task(
               show_popup(http_client_mod, f"<Title>Donation failed</>\n\n{e}", character_guid=character.guid, player_id=str(player.unique_id))

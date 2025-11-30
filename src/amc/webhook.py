@@ -17,7 +17,7 @@ from amc.subsidies import (
   get_passenger_subsidy,
   subsidise_player,
 )
-from amc_finance.services import send_fund_to_player
+from amc_finance.services import send_fund_to_player, get_treasury_fund_balance
 from amc.models import (
   Player,
   ServerCargoArrivedLog,
@@ -229,6 +229,8 @@ async def process_events(events, http_client=None, http_client_mod=None, discord
   grouped_player_events = itertools.groupby(sorted_player_events, key=key_by_character)
 
   player_profits = []
+
+  treasury_balance = await get_treasury_fund_balance()
   for character_guid, es in grouped_player_events:
     if not character_guid:
       continue
@@ -271,6 +273,7 @@ async def process_events(events, http_client=None, http_client_mod=None, discord
           character,
           is_rp_mode,
           used_shortcut,
+          treasury_balance,
           http_client,
           http_client_mod,
           discord_client
@@ -287,9 +290,6 @@ async def process_events(events, http_client=None, http_client_mod=None, discord
     if used_shortcut:
       total_payment -= total_subsidy
       total_subsidy = 0
-
-    if is_rp_mode:
-      total_subsidy = int(total_payment * 2)
 
     player_profits.append((character, total_subsidy, total_payment))
 
@@ -337,7 +337,7 @@ def atomic_update_job(job_id, quantity):
         job.refresh_from_db(fields=['quantity_fulfilled'])
     return job, quantity_to_add
 
-async def process_event(event, player, character, is_rp_mode=False, used_shortcut=False, http_client=None, http_client_mod=None, discord_client=None):
+async def process_event(event, player, character, is_rp_mode=False, used_shortcut=False, treasury_balance=None, http_client=None, http_client_mod=None, discord_client=None):
   print(event)
   total_payment = 0
   subsidy = 0
@@ -365,7 +365,7 @@ async def process_event(event, player, character, is_rp_mode=False, used_shortcu
         payment = group_list[0].payment
         delivery_source = group_list[0].sender_point
         delivery_destination = group_list[0].destination_point
-        cargo_subsidy = get_subsidy_for_cargo(group_list[0])[0] * quantity
+        cargo_subsidy = get_subsidy_for_cargo(group_list[0], treasury_balance=treasury_balance)[0] * quantity
         cargo_name = group_list[0].get_cargo_key_display()
 
         job = await (DeliveryJob.objects
@@ -375,11 +375,14 @@ async def process_event(event, player, character, is_rp_mode=False, used_shortcu
         if job is not None and job.rp_mode and not is_rp_mode:
           job = None
 
-        subsidy = cargo_subsidy
+        delivery_subsidy = cargo_subsidy
         if job and not used_shortcut:
           job, quantity_to_add = await sync_to_async(atomic_update_job)(job.id, quantity)
           bonus = quantity_to_add * job.bonus_multiplier * payment
-          subsidy = max(cargo_subsidy, bonus)
+          delivery_subsidy = max(cargo_subsidy, bonus)
+
+        if is_rp_mode:
+          delivery_subsidy = (subsidy * 1.5) + (payment * quantity * 0.5)
 
         await Delivery.objects.acreate(
           timestamp=timestamp,
@@ -387,7 +390,7 @@ async def process_event(event, player, character, is_rp_mode=False, used_shortcu
           cargo_key=cargo_key,
           quantity=quantity,
           payment=payment * quantity,
-          subsidy=subsidy,
+          subsidy=delivery_subsidy,
           sender_point=delivery_source,
           destination_point=delivery_destination,
           job=job,
@@ -407,14 +410,13 @@ async def process_event(event, player, character, is_rp_mode=False, used_shortcu
               delivery_source,
               delivery_destination,
               payment * quantity,
-              cargo_subsidy,
+              delivery_subsidy,
               vehicle_key,
               job=job,
             )
           )
 
-
-        subsidy += cargo_subsidy
+        subsidy += delivery_subsidy
 
       total_payment += sum([log.payment for log in logs]) + subsidy
 
@@ -524,7 +526,7 @@ async def process_event(event, player, character, is_rp_mode=False, used_shortcu
       total_payment += payment + subsidy
 
     case "ServerResetVehicleAt":
-      if is_rp_mode:
+      if is_rp_mode and character.last_login < timestamp - timedelta(seconds=15):
         await despawn_player_vehicle(http_client_mod, player.unique_id)
         asyncio.create_task(
           announce(

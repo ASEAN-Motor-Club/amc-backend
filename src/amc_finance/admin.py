@@ -6,6 +6,7 @@ class AccountInlineAdmin(admin.TabularInline):
 
 class LedgerEntryInlineAdmin(admin.TabularInline):
   model = LedgerEntry
+  readonly_fields = ['account']
 
 @admin.register(Account)
 class AccountAdmin(admin.ModelAdmin):
