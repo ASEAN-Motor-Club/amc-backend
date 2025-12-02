@@ -304,9 +304,10 @@ async def spawn_vehicle(
     'Rotation': rotation,
     'AssetPath': asset_path,
     'tag': tag,
-    'driverGuid': driver_guid,
     **extra_data,
   }
+  if driver_guid:
+    data['driverGuid'] = driver_guid
   if customization:
     data['customization'] = customization
   if decal:
