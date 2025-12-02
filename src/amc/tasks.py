@@ -543,10 +543,14 @@ Toggle it with <Highlight>/rp_mode</>
             announce(f"{int(float(location['X']))}, {int(float(location['Y']))}, {int(float(location['Z']))}", http_client, delay=0)
           )
       elif command_match := re.match(r"/(despawn|d)$", message):
+        asyncio.create_task(
+          show_popup(http_client_mod, "<Title>Feature disabled</>\n\nSorry, this feature has been permanently disabled since it causes the server to crash", character_guid=character.guid, player_id=str(player.unique_id))
+        )
+        return
         await despawn_player_vehicle(http_client_mod, player_id)
       elif command_match := re.match(r"/(despawn|d)\s+(?P<category>\S+)$", message):
         asyncio.create_task(
-          show_popup(http_client_mod, "<Title>Feature disabled</>\n\nSorry, this feature has been disabled since it causes the server to crash", character_guid=character.guid, player_id=str(player.unique_id))
+          show_popup(http_client_mod, "<Title>Feature disabled</>\n\nSorry, this feature has been permanently disabled since it causes the server to crash", character_guid=character.guid, player_id=str(player.unique_id))
         )
         return
         category = command_match.group('category')
@@ -1111,11 +1115,11 @@ To change the position, you will need to do /display again with the same vehicle
           )
         )
       elif command_match := re.match(r"/sell$", message):
-        #if not player_info.get('bIsAdmin'):
-        #  asyncio.create_task(
-        #    show_popup(http_client_mod, "Admin-only command", character_guid=character.guid, player_id=str(player.unique_id))
-        #  )
-        #  return
+        if not player_info.get('bIsAdmin'):
+          asyncio.create_task(
+            show_popup(http_client_mod, "Admin-only command", character_guid=character.guid, player_id=str(player.unique_id))
+          )
+          return
         vehicles = await register_player_vehicles(http_client_mod, character, player, active=True)
         await despawn_player_vehicle(http_client_mod, player_id)
         for vehicle in vehicles:
@@ -1142,7 +1146,7 @@ To change the position, you will need to do /display again with the same vehicle
         vehicle_label = command_match.group('vehicle_label')
         if vehicle_label.isdigit():
           vehicle = await CharacterVehicle.objects.aget(pk=int(vehicle_label))
-          location = vehicle.config['Location']
+          location = player_info['Location']
           location['Z'] -= 5
           await spawn_registered_vehicle(http_client_mod, vehicle, location, driver_guid=character.guid, tags=['spawned_vehicles'])
         elif not vehicle_label:
@@ -1355,10 +1359,6 @@ Use <Highlight>/setup_event {event.id}</> to start
         )
       if command_match := re.match(r"/rename\s+(?P<name>.+)", message):
         new_name = command_match.group('name')
-        if True:
-          asyncio.create_task(
-            show_popup(http_client_mod, "This command has been deprecated", character_guid=character.guid)
-          )
         if len(new_name) > 20:
           asyncio.create_task(
             show_popup(http_client_mod, "Max character name is 20 characters", character_guid=character.guid)
@@ -2036,13 +2036,13 @@ Not everyone likes to be roughed up!
         delay(spawn_dealerships(), 30)
       )
       asyncio.create_task(
-        delay(spawn_player_vehicles(), 60)
+        delay(_spawn_assets(), 35)
       )
       asyncio.create_task(
         delay(spawn_garages(), 45)
       )
       asyncio.create_task(
-        delay(_spawn_assets(), 35)
+        delay(spawn_player_vehicles(), 60)
       )
 
     case UnknownLogEntry():
