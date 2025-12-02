@@ -57,6 +57,8 @@ from amc.models import (
   RescueRequest,
   CharacterVehicle,
   Garage,
+  WorldText,
+  WorldObject,
 )
 from amc.game_server import announce, get_players, get_players2, kick_player
 from amc.mod_server import (
@@ -76,6 +78,7 @@ from amc.mod_server import (
   spawn_vehicle,
   list_player_vehicles,
   set_world_vehicle_decal,
+  spawn_assets,
   despawn_by_tag,
   spawn_garage,
 )
@@ -838,6 +841,14 @@ Only 1 rescue team should respond to a request.
           asyncio.create_task(
             delay(spawn_dealerships(), 60)
           )
+      elif command_match := re.match(r"/spawn_assets$", message):
+        if player_info and player_info.get('bIsAdmin'):
+          async def _spawn_assets():
+            async for wt in WorldText.objects.filter():
+              await spawn_assets(http_client_mod, wt.generate_asset_data())
+            async for wt in WorldObject.objects.filter():
+              await spawn_assets(http_client_mod, [wt.generate_asset_data()])
+          await _spawn_assets()
       elif command_match := re.match(r"/spawn_garages$", message):
         if player_info and player_info.get('bIsAdmin'):
           async def spawn_garages():
@@ -2012,6 +2023,12 @@ Not everyone likes to be roughed up!
           tag = resp.get('tag')
           g.tag = tag
           await g.asave(update_fields=['tag'])
+      async def _spawn_assets():
+        async for wt in WorldText.objects.filter():
+          await spawn_assets(http_client_mod, wt.generate_asset_data())
+        async for wt in WorldObject.objects.filter():
+          await spawn_assets(http_client_mod, [wt.generate_asset_data()])
+
       asyncio.create_task(
         delay(spawn_world_vehicles(), 20)
       )
@@ -2023,6 +2040,9 @@ Not everyone likes to be roughed up!
       )
       asyncio.create_task(
         delay(spawn_garages(), 45)
+      )
+      asyncio.create_task(
+        delay(_spawn_assets(), 35)
       )
 
     case UnknownLogEntry():

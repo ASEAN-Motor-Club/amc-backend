@@ -238,6 +238,14 @@ async def set_world_vehicle_decal(
     if resp.status != 200:
       raise Exception('Failed to set vehicle decals')
 
+async def spawn_assets(
+  session,
+  assets
+):
+  data = assets
+  async with session.post('/assets/spawn', json=data) as resp:
+    if resp.status != 200:
+      raise Exception('Failed to spawn asset')
 
 async def despawn_by_tag(
   session,

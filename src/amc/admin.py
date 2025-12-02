@@ -49,6 +49,8 @@ from .models import (
   RescueRequest,
   CharacterVehicle,
   Garage,
+  WorldText,
+  WorldObject,
 )
 from amc_finance.services import send_fund_to_player
 from amc_finance.admin import AccountInlineAdmin
@@ -612,4 +614,12 @@ class CharacterVehicleAdmin(admin.ModelAdmin):
 class GarageAdmin(admin.ModelAdmin):
   list_display = ['id', 'notes', 'spawn_on_restart']
   search_fields = ['notes']
+
+@admin.register(WorldText)
+class WorldTextAdmin(admin.ModelAdmin):
+  list_display = ['id', 'content']
+
+@admin.register(WorldObject)
+class WorldObjectAdmin(admin.ModelAdmin):
+  list_display = ['id', 'asset_path']
 

@@ -1,3 +1,4 @@
+import math
 import asyncstdlib as a
 from datetime import timedelta
 from deepdiff import DeepHash
@@ -1310,4 +1311,131 @@ class CharacterVehicle(models.Model):
         condition=Q(character__isnull=True)
       ),
     ]
+
+class WorldText(models.Model):
+  """
+  Represents a 3D text object to be spawned in the game world.
+  """
+  content = models.CharField(max_length=255, help_text="The text to display (e.g., PANZER)")
+
+  # Location Coordinates
+  location_x = models.FloatField(help_text="World X Coordinate")
+  location_y = models.FloatField(help_text="World Y Coordinate")
+  location_z = models.FloatField(help_text="World Z Coordinate")
+
+  # Orientation and Scale
+  yaw = models.FloatField(default=0.0, help_text="Rotation in degrees (0=X+, 90=Y+)")
+  scale = models.FloatField(default=5.0, help_text="Uniform scale factor")
+  separation = models.FloatField(default=30.0, help_text="Distance between letters relative to scale")
+
+  created_at = models.DateTimeField(auto_now_add=True)
+
+  def __str__(self):
+    return f"{self.content} at ({self.location_x}, {self.location_y})"
+
+  def generate_asset_data(self):
+    """
+    Calculates the individual character positions based on the script logic.
+    Returns a list of dictionaries ready for spawning.
+    """
+    output_objects = []
+
+    # Calculate the actual world-space distance between letters
+    world_spacing = self.separation * self.scale
+
+    # Calculate the midpoint index to center the text
+    text_string = self.content
+    num_chars = len(text_string)
+    midpoint_index = (num_chars - 1) / 2.0
+
+    # Convert Yaw to Radians
+    yaw_rad = math.radians(self.yaw)
+
+    # Calculate Direction Vector
+    dir_x = math.cos(yaw_rad)
+    dir_y = math.sin(yaw_rad)
+
+    for i, char in enumerate(text_string):
+      if char == " ":
+          continue
+
+      # Calculate distance of this specific character from the center point
+      dist_from_center = (i - midpoint_index) * world_spacing
+      
+      # Project distance onto the direction vector
+      x_offset = dist_from_center * dir_x
+      y_offset = dist_from_center * dir_y
+      
+      current_location = {
+          "Z": self.location_z,
+          "X": self.location_x + x_offset,
+          "Y": self.location_y + y_offset
+      }
+      
+      char_upper = char.upper()
+      # Dynamic asset path construction
+      asset_path = f"/Game/Models/PolygonIcons/Meshes/SM_Icon_Text_{char_upper}.SM_Icon_Text_{char_upper}"
+      
+      obj = {
+          "AssetPath": asset_path,
+          "decal": {
+              "DecalLayers": {}
+          },
+          "Location": current_location,
+          "scale": {
+              "X": self.scale,
+              "Z": self.scale,
+              "Y": self.scale
+          },
+          "Rotation": {
+              "Roll": 0,
+              "Pitch": 0,
+              "Yaw": self.yaw
+          }
+      }
+      
+      output_objects.append(obj)
+      
+    return output_objects
+
+
+class WorldObject(models.Model):
+  """
+  Represents a 3D text object to be spawned in the game world.
+  """
+
+  asset_path = models.CharField(max_length=511, help_text="The asset path")
+
+  # Location Coordinates
+  location_x = models.FloatField(help_text="World X Coordinate")
+  location_y = models.FloatField(help_text="World Y Coordinate")
+  location_z = models.FloatField(help_text="World Z Coordinate")
+
+  # Orientation and Scale
+  yaw = models.FloatField(default=0.0, help_text="Rotation in degrees (0=X+, 90=Y+)")
+  scale = models.FloatField(default=1.0, help_text="Uniform scale factor")
+
+  def generate_asset_data(self):
+    current_location = {
+        "Z": self.location_z,
+        "X": self.location_x,
+        "Y": self.location_y
+    }
+    return {
+        "AssetPath": self.asset_path,
+        "decal": {
+            "DecalLayers": {}
+        },
+        "Location": current_location,
+        "scale": {
+            "X": self.scale,
+            "Z": self.scale,
+            "Y": self.scale
+        },
+        "Rotation": {
+            "Roll": 0,
+            "Pitch": 0,
+            "Yaw": self.yaw
+        }
+    }
 
