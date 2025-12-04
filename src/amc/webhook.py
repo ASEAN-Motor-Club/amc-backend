@@ -527,7 +527,7 @@ async def process_event(event, player, character, is_rp_mode=False, used_shortcu
 
     case "ServerResetVehicleAt":
       if is_rp_mode and character.last_login < timestamp - timedelta(seconds=15):
-        await despawn_player_vehicle(http_client_mod, player.unique_id)
+        # await despawn_player_vehicle(http_client_mod, player.unique_id)
         asyncio.create_task(
           announce(
             f"{character.name}'s vehicle has been despawned for using roadside recovery while on RP mode",
