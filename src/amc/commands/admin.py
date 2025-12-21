@@ -13,11 +13,6 @@ from amc.models import (
 from amc.enums import VehicleKey
 from django.utils.translation import gettext as _, gettext_lazy
 
-@registry.register(["/despawn", "/d"], description=gettext_lazy("Despawn your vehicle"), category="Vehicle Management")
-async def cmd_despawn(ctx: CommandContext, category: str = "all"):
-    # Feature disabled logic from original
-    await ctx.reply(_("<Title>Feature disabled</>\n\nSorry, this feature has been permanently disabled."))
-
 @registry.register("/admin_despawn", description=gettext_lazy("Admin despawn tool"), category="Admin")
 async def cmd_admin_despawn(ctx: CommandContext, category: str = "all"):
     if not ctx.player_info.get('bIsAdmin'):

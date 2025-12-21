@@ -7,6 +7,11 @@ from amc.mod_server import despawn_by_tag, despawn_player_vehicle, show_popup
 import asyncio
 from django.utils.translation import gettext as _, gettext_lazy
 
+@registry.register(["/despawn", "/d"], description=gettext_lazy("Despawn your vehicle"), category="Vehicle Management")
+async def cmd_despawn(ctx: CommandContext, category: str = "all"):
+    # Handled by server mod, we just register so it shows up on /help
+    pass
+
 @registry.register("/register_vehicles", description=gettext_lazy("Register your vehicles"), category="Vehicle Management")
 async def cmd_register_vehicles(ctx: CommandContext):
     vehicles = await register_player_vehicles(ctx.http_client_mod, ctx.character, ctx.player)
