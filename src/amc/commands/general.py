@@ -68,7 +68,7 @@ async def cmd_coords(ctx: CommandContext):
         loc = player_info['Location']
         await ctx.announce(f"{int(float(loc['X']))}, {int(float(loc['Y']))}, {int(float(loc['Z']))}")
 
-@registry.register("/shortcutcheck", description=gettext_lazy("Check if you are inside a forbidden shortcut zone"), category="General")
+# @registry.register("/shortcutcheck", description=gettext_lazy("Check if you are inside a forbidden shortcut zone"), category="General")
 async def cmd_shortcutcheck(ctx: CommandContext):
     in_shortcut = await CharacterLocation.objects.filter(
         Q(location__coveredby=gwangjin_shortcut) | Q(location__coveredby=migeum_shortcut),
