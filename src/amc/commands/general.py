@@ -120,7 +120,7 @@ async def cmd_rename(ctx: CommandContext, name: str):
 async def cmd_bot(ctx: CommandContext, prompt: str):
     await BotInvocationLog.objects.acreate(timestamp=ctx.timestamp, character=ctx.character, prompt=prompt)
 
-@registry.register(["/song.request", "/song_request"], description=gettext_lazy("Request a song for the radio"), category="General")
+@registry.register(["/song_request", "/songrequest"], description=gettext_lazy("Request a song for the radio"), category="General")
 async def cmd_song_request(ctx: CommandContext, song: str):
     await SongRequestLog.objects.acreate(timestamp=ctx.timestamp, character=ctx.character, song=song)
     if ctx.is_current_event:
