@@ -242,6 +242,7 @@ class VehicleKey(models.TextChoices):
   Tavan_Ambulance = "Tavan_Ambulance", "Tavan Ambulance"
   Brutus_Ambulance = "Brutus_Ambulance", "Brutus Ambulance"
   Crany = "Crany", "Crany"
+  Brutus_FireEngine = "Brutus_FireEngine", "Brutus Fire Engine"
 
 VehicleKeyByLabel = {label: value for value, label in VehicleKey.choices}
 
