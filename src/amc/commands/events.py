@@ -8,8 +8,9 @@ from amc.events import (
 from amc.utils import format_timedelta, format_in_local_tz, countdown
 from django.db.models import Exists, OuterRef
 from django.utils import timezone
+from django.utils.translation import gettext as _, gettext_lazy
 
-@registry.register("/staggered_start", description="Start event with staggered delay", category="Events")
+@registry.register("/staggered_start", description=gettext_lazy("Start event with staggered delay"), category="Events")
 async def cmd_staggered_start(ctx: CommandContext, delay: int):
     active_event = await (GameEvent.objects
         .filter(Exists(GameEventCharacter.objects.filter(game_event=OuterRef('pk'), character=ctx.character)))
@@ -20,7 +21,7 @@ async def cmd_staggered_start(ctx: CommandContext, delay: int):
         return
     await staggered_start(ctx.http_client, ctx.http_client_mod, active_event, player_id=ctx.player.unique_id, delay=float(delay))
 
-@registry.register("/auto_grid", description="Automatically grid players for event", category="Events")
+@registry.register("/auto_grid", description=gettext_lazy("Automatically grid players for event"), category="Events")
 async def cmd_auto_grid(ctx: CommandContext):
     active_event = await (GameEvent.objects
         .filter(Exists(GameEventCharacter.objects.filter(game_event=OuterRef('pk'), character=ctx.character)))
@@ -31,7 +32,7 @@ async def cmd_auto_grid(ctx: CommandContext):
         return
     await auto_starting_grid(ctx.http_client_mod, active_event)
 
-@registry.register("/results", description="See the results of active events", category="Events")
+@registry.register("/results", description=gettext_lazy("See the results of active events"), category="Events")
 async def cmd_results(ctx: CommandContext):
     active_event = await ScheduledEvent.objects.filter_active_at(ctx.timestamp).select_related('race_setup').afirst()
     if not active_event:
@@ -39,7 +40,7 @@ async def cmd_results(ctx: CommandContext):
         return
     await show_scheduled_event_results_popup(ctx.http_client_mod, active_event, character_guid=ctx.character.guid, player_id=str(ctx.player.unique_id))
 
-@registry.register("/setup_event", description="Creates an event properly", category="Events")
+@registry.register("/setup_event", description=gettext_lazy("Creates an event properly"), category="Events")
 async def cmd_setup_event(ctx: CommandContext, event_id: int = None):
     try:
         if event_id:
@@ -59,7 +60,7 @@ async def cmd_setup_event(ctx: CommandContext, event_id: int = None):
     
     await BotInvocationLog.objects.acreate(timestamp=ctx.timestamp, character=ctx.character, prompt="/setup_event")
 
-@registry.register("/events", description="List current and upcoming scheduled events", category="Events")
+@registry.register("/events", description=gettext_lazy("List current and upcoming scheduled events"), category="Events")
 async def cmd_events_list(ctx: CommandContext):
     events = []
     async for event in ScheduledEvent.objects.filter(end_time__gte=timezone.now()).order_by('start_time'):
@@ -71,6 +72,6 @@ Use <Highlight>/setup_event {event.id}</>
     
     await ctx.reply(f"[EVENTS]\n\n{'\n\n'.join(events)}")
 
-@registry.register("/countdown", description="Initiate a 5 second countdown", category="Events")
+@registry.register("/countdown", description=gettext_lazy("Initiate a 5 second countdown"), category="Events")
 async def cmd_countdown(ctx: CommandContext):
     asyncio.create_task(countdown(ctx.http_client))

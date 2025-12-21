@@ -2,8 +2,9 @@ from amc.command_framework import registry, CommandContext
 from amc.models import VehicleDecal
 from amc.mod_server import get_decal, set_decal
 from django.db.models import Q
+from django.utils.translation import gettext as _, gettext_lazy
 
-@registry.register("/decals", description="List your saved decals", category="Decals")
+@registry.register("/decals", description=gettext_lazy("List your saved decals"), category="Decals")
 async def cmd_decals(ctx: CommandContext):
     qs = VehicleDecal.objects.filter(player=ctx.player)
     decals = '\n'.join([
@@ -17,7 +18,7 @@ async def cmd_decals(ctx: CommandContext):
 <Bold>Your decals:</>
 {decals}""")
 
-@registry.register("/save_decal", description="Save your current vehicle decal", category="Decals")
+@registry.register("/save_decal", description=gettext_lazy("Save your current vehicle decal"), category="Decals")
 async def cmd_save_decal(ctx: CommandContext, decal_name: str):
     decal_config = await get_decal(ctx.http_client_mod, player_id=str(ctx.player.unique_id))
     hash_val = VehicleDecal.calculate_hash(decal_config)
@@ -38,7 +39,7 @@ ID: <Event>{hash_val[:8]}</>
 Apply with: <Highlight>/apply_decal {decal.name}</>
 See all: <Highlight>/decals</>""")
 
-@registry.register("/apply_decal", description="Apply a saved decal", category="Decals")
+@registry.register("/apply_decal", description=gettext_lazy("Apply a saved decal"), category="Decals")
 async def cmd_apply_decal(ctx: CommandContext, decal_name: str):
     try:
         decal = await VehicleDecal.objects.aget(

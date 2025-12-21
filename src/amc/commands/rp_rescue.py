@@ -12,8 +12,9 @@ from amc.vehicles import format_key_string
 from django.utils import timezone
 from datetime import timedelta
 from django.conf import settings
+from django.utils.translation import gettext as _, gettext_lazy
 
-@registry.register(["/rp_mode", "/rp"], description="Toggle Roleplay Mode", category="RP & Rescue")
+@registry.register(["/rp_mode", "/rp"], description=gettext_lazy("Toggle Roleplay Mode"), category="RP & Rescue")
 async def cmd_rp_mode(ctx: CommandContext, verification_code: str = None):
     is_rp_mode = await get_rp_mode(ctx.http_client_mod, ctx.character.guid)
     
@@ -21,7 +22,7 @@ async def cmd_rp_mode(ctx: CommandContext, verification_code: str = None):
         # Verify and Toggle
         code_gen, code_verified = with_verification_code((ctx.character.guid, is_rp_mode), verification_code)
         if not code_verified:
-            await ctx.reply(f"<Title>Code Incorrect</>\nTry: <Highlight>/rp_mode {code_gen.upper()}</>")
+            await ctx.reply(_("<Title>Code Incorrect</>\nTry: <Highlight>/rp_mode {code_gen}</>").format(code_gen=code_gen.upper()))
             return
         
         await despawn_player_vehicle(ctx.http_client_mod, ctx.player.unique_id)
@@ -46,20 +47,22 @@ async def cmd_rp_mode(ctx: CommandContext, verification_code: str = None):
             await set_character_name(ctx.http_client_mod, ctx.character.guid, new_name)
         
         await asyncio.sleep(1)
-        msg = "<Title>Roleplay Mode Enabled</>\n<EffectGood>Enabled!</>" if is_rp_mode else "<Title>Roleplay Mode Disabled</>"
+        msg = _("<Title>Roleplay Mode Enabled</>\n<EffectGood>Enabled!</>") if is_rp_mode else _("<Title>Roleplay Mode Disabled</>")
         await ctx.reply(msg)
 
     else:
         # Request Confirmation
-        code_gen, _ = with_verification_code((ctx.character.guid, is_rp_mode), "")
+        code_gen, _ignored = with_verification_code((ctx.character.guid, is_rp_mode), "")
         status = '<EffectGood>ON</>' if is_rp_mode else '<Warning>OFF</>'
-        notes = "To turn off, resend with code:" if is_rp_mode else "Enabling RP mode gives bonuses but risks cargo/vehicle loss on recovery.\n<Warning>All vehicles will despawn on toggle!</>"
-        await ctx.reply(f"<Title>Roleplay Mode</>\nStatus: {status}\n\n{notes}\n<Highlight>/rp_mode {code_gen.upper()}</>")
+        notes = _("To turn off, resend with code:") if is_rp_mode else _("Enabling RP mode gives bonuses but risks cargo/vehicle loss on recovery.\n<Warning>All vehicles will despawn on toggle!</>")
+        await ctx.reply(_("<Title>Roleplay Mode</>\nStatus: {status}\n\n{notes}\n<Highlight>/rp_mode {code_gen}</>").format(
+            status=status, notes=notes, code_gen=code_gen.upper()
+        ))
 
-@registry.register("/rescue", description="Calls for rescue service", category="RP & Rescue")
+@registry.register("/rescue", description=gettext_lazy("Calls for rescue service"), category="RP & Rescue")
 async def cmd_rescue(ctx: CommandContext, message: str = ""):
     if await RescueRequest.objects.filter(character=ctx.character, timestamp__gte=timezone.now() - timedelta(minutes=5)).aexists():
-        await ctx.reply("You have requested a rescue less than 5 minutes ago")
+        await ctx.reply(_("You have requested a rescue less than 5 minutes ago"))
         return
     
     # 1. Notify In-Game Rescuers
@@ -72,7 +75,9 @@ async def cmd_rescue(ctx: CommandContext, message: str = ""):
         if '[ARWRS]' in p.get('PlayerName', '') or '[DOT]' in p.get('PlayerName', ''): 
             asyncio.create_task(show_popup(
                 ctx.http_client_mod, 
-                f"<Title>Rescue Request</>\n<Event>{ctx.character.name}</> needs help!\nMsg: {message}\nVeh: {vehicle_names}",
+                _("<Title>Rescue Request</>\n<Event>{name}</> needs help!\nMsg: {message}\nVeh: {vehicle_names}").format(
+                    name=ctx.character.name, message=message, vehicle_names=vehicle_names
+                ),
                 character_guid=p.get('CharacterGuid'),
                 player_id=str(ctx.player.unique_id)
             ))
@@ -82,8 +87,10 @@ async def cmd_rescue(ctx: CommandContext, message: str = ""):
     rescue_request = await RescueRequest.objects.acreate(character=ctx.character, message=message)
     
     if ctx.is_current_event:
-        await ctx.announce(f"{ctx.character.name} needs a rescue! {vehicle_names}. /respond {rescue_request.id}")
-        await ctx.reply("<EffectGood>Request Sent</>\n" + ("Help is on the way." if sent else "Rescuers offline, notified Discord."))
+        await ctx.announce(_("{name} needs a rescue! {vehicle_names}. /respond {request_id}").format(
+            name=ctx.character.name, vehicle_names=vehicle_names, request_id=rescue_request.id
+        ))
+        await ctx.reply(_("<EffectGood>Request Sent</>\n") + (_("Help is on the way.") if sent else _("Rescuers offline, notified Discord.")))
 
     # 3. Discord Notification
     if ctx.discord_client:
@@ -92,7 +99,7 @@ async def cmd_rescue(ctx: CommandContext, message: str = ""):
             msg = await forward_to_discord(
                 ctx.discord_client,
                 settings.DISCORD_RESCUE_CHANNEL_ID,
-                f"@here **{ctx.character.name}** requested rescue.\nMsg: {message}",
+                _("@here **{name}** requested rescue.\nMsg: {message}").format(name=ctx.character.name, message=message),
                 escape_mentions=False
             )
             if msg:
@@ -100,19 +107,21 @@ async def cmd_rescue(ctx: CommandContext, message: str = ""):
                 await rescue_request.asave()
         asyncio.run_coroutine_threadsafe(send_discord(), ctx.discord_client.loop)
 
-@registry.register("/respond", description="Respond to a rescue request", category="RP & Rescue")
+@registry.register("/respond", description=gettext_lazy("Respond to a rescue request"), category="RP & Rescue")
 async def cmd_respond(ctx: CommandContext, rescue_id: int):
     try:
         rescue_request = await RescueRequest.objects.select_related('character').aget(pk=rescue_id)
     except RescueRequest.DoesNotExist:
-         try:
-             rescue_request = await RescueRequest.objects.select_related('character').aget(timestamp__gte=timezone.now() - timedelta(minutes=5))
-         except:
-             await ctx.reply("Invalid or expired rescue request.")
-             return
+        try:
+            rescue_request = await RescueRequest.objects.select_related('character').aget(timestamp__gte=timezone.now() - timedelta(minutes=5))
+        except:
+            await ctx.reply(_("Invalid or expired rescue request."))
+            return
 
     await rescue_request.responders.aadd(ctx.player)
-    await ctx.announce(f"{ctx.character.name} responded to {rescue_request.character.name}'s request!")
+    await ctx.announce(_("{responder} responded to {requester}'s request!").format(
+        responder=ctx.character.name, requester=rescue_request.character.name
+    ))
     
     # Discord Reaction
     if ctx.discord_client and rescue_request.discord_message_id:

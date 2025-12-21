@@ -480,6 +480,7 @@
         devShells.default = pkgs.mkShell {
           packages = [
             python
+            pkgs.gettext
             pkgs.uv
             pkgs.ruff
             pkgs.basedpyright

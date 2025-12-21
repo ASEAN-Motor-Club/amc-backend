@@ -793,42 +793,18 @@ class CommandsTestCase(TestCase):
              patch('amc.commands.finance.get_character_max_loan', new=AsyncMock(return_value=(1000, 'Ok'))), \
              patch('amc.commands.finance.register_player_take_loan', new=AsyncMock(return_value=(1100, 100))) as mock_take, \
              patch('amc.commands.finance.transfer_money', new=AsyncMock()) as mock_transfer, \
-             patch('amc.models.Delivery.objects.filter') as mock_del_filter: # Check added
+             patch('amc.models.Delivery.objects.filter') as mock_del_filter:
              
             # Case 1: No deliveries
             mock_del_filter.return_value.aexists = AsyncMock(return_value=False)
             await commands.cmd_loan(self.ctx, "500", "CODE")
-            self.ctx.announce.assert_called_with("You must have done at least one delivery") # Corrected assertion
-            
-            # Case 2: Deliveries exist
+            self.ctx.announce.assert_called_with("You must have done at least one delivery")
+
             mock_del_filter.return_value.aexists = AsyncMock(return_value=True)
-             
-            # 1. No code
-            await commands.cmd_loan(self.ctx, "500", "")
-            self.ctx.reply.assert_called()
-            
-            # 2. With code (simulate valid code check - simplified for test)
-            # The real command does explicit string match. We can't easily guess the signature here without mocking signer.
-            # But wait, code_expected is derived inside function.
-            # Let's mock Signer? Or just ensure we pass right code.
-            pass
-            
-            # Let's bypass the check by forcing verification_code match via code_expected logic? 
-            # Easier to just mock Signer or pass random string and assert failure then patch Signer sign
-            
-        with patch('amc.commands.finance.get_player_loan_balance', new=AsyncMock(return_value=0)), \
-             patch('amc.commands.finance.get_character_max_loan', new=AsyncMock(return_value=(1000, 'Ok'))), \
-             patch('amc.commands.finance.register_player_take_loan', new=AsyncMock(return_value=(1100, 100))) as mock_take, \
-             patch('amc.commands.finance.transfer_money', new=AsyncMock()) as mock_transfer, \
-             patch('amc.models.Delivery.objects.filter') as mock_del_filter: # FIX
-             
-             mock_del_filter.return_value.aexists = AsyncMock(return_value=True) # Deliveries exist
-             
-             from amc.utils import generate_verification_code
-             code = generate_verification_code((500, self.ctx.character.id))
-             
-             await commands.cmd_loan(self.ctx, "500", code)
-             mock_transfer.assert_called()
+            from amc.utils import generate_verification_code
+            code = generate_verification_code((500, self.ctx.character.id))
+            await commands.cmd_loan(self.ctx, "500", code)
+            mock_transfer.assert_called()
 
     async def test_cmd_thank(self):
         from amc import commands
@@ -1002,6 +978,83 @@ class CommandsTestCase(TestCase):
             await commands.cmd_repay_loan(self.ctx)
             mock_popup.assert_called()
             self.assertIn("Command Removed", mock_popup.call_args[0][1])
+
+    async def test_cmd_language_list(self):
+        from amc import commands
+        await commands.cmd_language(self.ctx)
+        self.ctx.reply.assert_called()
+        args, _ = self.ctx.reply.call_args
+        self.assertIn("Available languages", args[0])
+
+    async def test_cmd_language_set(self):
+        from amc import commands
+        await commands.cmd_language(self.ctx, "id")
+        await self.player.arefresh_from_db()
+        self.assertEqual(self.player.language, "id")
+        self.ctx.reply.assert_called()
+        args, _ = self.ctx.reply.call_args
+        self.assertIn("id", args[0])
+
+    async def test_registry_translation_override(self):
+        from amc.command_framework import registry
+        from django.utils import translation
+        
+        self.player.language = 'id'
+        await self.player.asave()
+        
+        current_lang_inside = None
+        
+        async def mock_cmd(ctx):
+            nonlocal current_lang_inside
+            current_lang_inside = translation.get_language()
+            
+        @registry.register("/test_lang")
+        async def test_lang_func(ctx):
+            await mock_cmd(ctx)
+            
+        try:
+            await registry.execute("/test_lang", self.ctx)
+            self.assertEqual(current_lang_inside, "id")
+        finally:
+            registry.commands = [c for c in registry.commands if c['name'] != "/test_lang"]
+
+    async def test_indonesian_translation_output(self):
+        from amc.command_framework import registry
+        
+        # Set player language to Indonesian
+        self.player.language = 'id'
+        await self.player.asave()
+        
+        # We need a command that returns a translated string.
+        # /thank when player not found returns "Player not found"
+        # In id: "Pemain tidak ditemukan"
+        
+        with patch('amc.commands.social.get_players2', new=AsyncMock(return_value=[])):
+            await registry.execute("/thank NoSuchPlayer", self.ctx)
+            
+            self.ctx.reply.assert_called()
+            args, _ = self.ctx.reply.call_args
+            # Verify the output is in Indonesian
+            self.assertEqual(args[0], "Pemain tidak ditemukan")
+
+    async def test_help_command_translation_output(self):
+        from amc.command_framework import registry
+        
+        self.player.language = 'id'
+        await self.player.asave()
+        
+        await registry.execute("/help", self.ctx)
+        
+        self.ctx.reply.assert_called()
+        args, _ = self.ctx.reply.call_args
+        msg = args[0]
+        
+        # Check for Indonesian translation of "Available Commands"
+        self.assertIn("Perintah Tersedia", msg)
+        
+        # Check for Indonesian translation of a command description, e.g. /register_vehicles
+        # "Register your vehicles" -> "Daftarkan kendaraan Anda"
+        self.assertIn("Daftarkan kendaraan Anda", msg)
 
 
 

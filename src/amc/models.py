@@ -57,6 +57,7 @@ class Player(models.Model):
   adminstrator = models.BooleanField(default=False)
   displayer = models.BooleanField(default=False, help_text="Livery artists, showcase etc")
   social_score = models.IntegerField(default=0)
+  language = models.CharField(max_length=10, default='en-gb', choices=[('en-gb', 'English'), ('id', 'Indonesian')])
   notes = models.TextField(blank=True)
 
   objects = models.Manager.from_queryset(PlayerQuerySet)()

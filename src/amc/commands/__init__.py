@@ -8,3 +8,4 @@ from .vehicles import *
 from .teleport import *
 from .finance import *
 from .social import *
+from .language import *

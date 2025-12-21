@@ -1,0 +1,903 @@
+# Indonesian translation for AMC Backend.
+# Copyright (C) 2025
+# This file is distributed under the same license as the AMC Backend package.
+#
+msgid ""
+msgstr ""
+"Project-Id-Version: \n"
+"Report-Msgid-Bugs-To: \n"
+"POT-Creation-Date: 2025-12-21 22:29+0700\n"
+"PO-Revision-Date: 2025-12-21 21:51+0700\n"
+"Last-Translator: \n"
+"Language-Team: Indonesian\n"
+"Language: id\n"
+"MIME-Version: 1.0\n"
+"Content-Type: text/plain; charset=UTF-8\n"
+"Content-Transfer-Encoding: 8bit\n"
+"Plural-Forms: nplurals=1; plural=0;\n"
+
+#: src/amc/admin.py:570
+#, python-format
+msgid "%d jobs was successfully created."
+msgid_plural "%d jobs were successfully created."
+msgstr[0] "%d pekerjaan berhasil dibuat."
+
+#: src/amc/command_framework.py:161
+#, python-brace-format
+msgid ""
+"<Title>Error</>\n"
+"{error}"
+msgstr ""
+"<Title>Kesalahan</>\n"
+"{error}"
+
+#: src/amc/commands/admin.py:16
+msgid "Despawn your vehicle"
+msgstr "Despawn kendaraan Anda"
+
+#: src/amc/commands/admin.py:19
+msgid ""
+"<Title>Feature disabled</>\n"
+"\n"
+"Sorry, this feature has been permanently disabled."
+msgstr ""
+"<Title>Fitur dinonaktifkan</>\n"
+"\n"
+"Maaf, fitur ini telah dinonaktifkan secara permanen."
+
+#: src/amc/commands/admin.py:21
+msgid "Admin despawn tool"
+msgstr "Alat despawn Admin"
+
+#: src/amc/commands/admin.py:24
+msgid ""
+"<Title>Feature disabled</>\n"
+"\n"
+"Sorry, this feature is temporarily unavailable"
+msgstr ""
+"<Title>Fitur dinonaktifkan</>\n"
+"\n"
+"Maaf, fitur ini untuk sementara tidak tersedia"
+
+#: src/amc/commands/admin.py:33
+msgid ""
+"<Title>Player vehicles despawned</>\n"
+"\n"
+msgstr ""
+"<Title>Kendaraan pemain telah di-despawn</>\n"
+"\n"
+
+#: src/amc/commands/admin.py:36
+msgid ""
+"<Title>Player not found</>\n"
+"\n"
+"Please make sure you typed the name correctly."
+msgstr ""
+"<Title>Pemain tidak ditemukan</>\n"
+"\n"
+"Pastikan Anda mengetik nama dengan benar."
+
+#: src/amc/commands/admin.py:41
+msgid "Spawn display vehicles"
+msgstr "Munculkan kendaraan pajangan"
+
+#: src/amc/commands/admin.py:57
+msgid "Spawn dealership vehicles"
+msgstr "Munculkan kendaraan dealer"
+
+#: src/amc/commands/admin.py:63
+msgid "Spawn world assets"
+msgstr "Munculkan aset dunia"
+
+#: src/amc/commands/admin.py:69
+msgid "Spawn garages"
+msgstr "Munculkan garasi"
+
+#: src/amc/commands/admin.py:77
+msgid "Spawn a single garage"
+msgstr "Munculkan satu garasi"
+
+#: src/amc/commands/admin.py:85
+#, python-brace-format
+msgid "Garage spawned! Tag: {tag}"
+msgstr "Garasi muncul! Tag: {tag}"
+
+#: src/amc/commands/admin.py:88
+msgid "Spawn a vehicle"
+msgstr "Munculkan kendaraan"
+
+#: src/amc/commands/admin.py:91
+msgid "Admin-only"
+msgstr "Khusus Admin"
+
+#: src/amc/commands/admin.py:95
+msgid ""
+"<Title>Spawn Vehicle</>\n"
+"\n"
+msgstr ""
+"<Title>Munculkan Kendaraan</>\n"
+"\n"
+
+#: src/amc/commands/admin.py:104
+msgid "Force exit vehicle (Admin)"
+msgstr "Paksa keluar kendaraan (Admin)"
+
+#: src/amc/commands/decals.py:7
+msgid "List your saved decals"
+msgstr "Lihat stiker tersimpan Anda"
+
+#: src/amc/commands/decals.py:21
+msgid "Save your current vehicle decal"
+msgstr "Simpan stiker kendaraan Anda saat ini"
+
+#: src/amc/commands/decals.py:42
+msgid "Apply a saved decal"
+msgstr "Terapkan stiker tersimpan"
+
+#: src/amc/commands/events.py:13
+msgid "Start event with staggered delay"
+msgstr "Mulai acara dengan penundaan bertahap"
+
+#: src/amc/commands/events.py:24
+msgid "Automatically grid players for event"
+msgstr "Atur grid pemain secara otomatis untuk acara"
+
+#: src/amc/commands/events.py:35
+msgid "See the results of active events"
+msgstr "Lihat hasil acara aktif"
+
+#: src/amc/commands/events.py:43
+msgid "Creates an event properly"
+msgstr "Membuat acara dengan benar"
+
+#: src/amc/commands/events.py:63
+msgid "List current and upcoming scheduled events"
+msgstr "Lihat acara terjadwal saat ini dan mendatang"
+
+#: src/amc/commands/events.py:75
+msgid "Initiate a 5 second countdown"
+msgstr "Mulai hitungan mundur 5 detik"
+
+#: src/amc/commands/finance.py:18
+msgid "Access your bank account"
+msgstr "Akses rekening bank Anda"
+
+#: src/amc/commands/finance.py:36
+msgid ""
+"<Title>Your Bank ASEAN Account</>\n"
+"\n"
+"<Bold>Balance:</> <Money>{balance:,}</>\n"
+"<Small>Daily (IRL) Interest Rate: 2.2% (offline), 4.4% (online).</>\n"
+"<Bold>Loans:</> <Money>{loan_balance:,}</>\n"
+"<Bold>Max Available Loan:</> <Money>{max_loan:,}</>\n"
+"<Small>{max_loan_reason}</>\n"
+"<Bold>Earnings Saving Rate:</> <Money>{saving_rate_pct:.0f}%</>\n"
+"<Small>Use /set_saving_rate [percentage] to automatically set aside your "
+"earnings into your account.</>\n"
+"\n"
+"Commands:\n"
+"<Highlight>/set_saving_rate [percentage]</> - Automatically set aside your "
+"earnings into your account\n"
+"<Highlight>/withdraw [amount]</> - Withdraw from your bank account\n"
+"<Highlight>/loan [amount]</> - Take out a loan\n"
+"\n"
+"How to Put Money in the Bank\n"
+"<Secondary>Use the /set_saving_rate command to set how much you want to "
+"save. It's 0 by default.</>\n"
+"<Secondary>You can only fill your bank account by saving your earnings on "
+"this server, not through direct deposits.</>\n"
+"\n"
+"How ASEAN Loans Works\n"
+"<Secondary>Our loans have a flat one-off 10% fee, and you only have to repay "
+"them when you make a profit.</>\n"
+"<Secondary>The repayment will range from 10% to 80% of your income, "
+"depending on the amount of loan you took.</>\n"
+"\n"
+"<Bold>Latest Transactions</>\n"
+"{transactions_str}\n"
+msgstr ""
+"<Title>Akun Bank ASEAN Anda</>\n"
+"\n"
+"<Bold>Saldo:</> <Money>{balance:,}</>\n"
+"<Small>Tingkat Bunga Harian (IRL): 2.2% (offline), 4.4% (online).</>\n"
+"<Bold>Pinjaman:</> <Money>{loan_balance:,}</>\n"
+"<Bold>Pinjaman Maksimal Tersedia:</> <Money>{max_loan:,}</>\n"
+"<Small>{max_loan_reason}</>\n"
+"<Bold>Tingkat Tabungan Penghasilan:</> <Money>{saving_rate_pct:.0f}%</>\n"
+"<Small>Gunakan /set_saving_rate [persentase] untuk menyisihkan penghasilan "
+"Anda ke akun Anda secara otomatis.</>\n"
+"\n"
+"Perintah:\n"
+"<Highlight>/set_saving_rate [persentase]</> - Menyisihkan penghasilan Anda "
+"ke akun Anda secara otomatis\n"
+"<Highlight>/withdraw [jumlah]</> - Menarik dari akun bank Anda\n"
+"<Highlight>/loan [jumlah]</> - Mengambil pinjaman\n"
+"\n"
+"Cara Menabung di Bank\n"
+"<Secondary>Gunakan perintah /set_saving_rate untuk menetapkan seberapa "
+"banyak yang ingin Anda simpan. Standarnya adalah 0.</>\n"
+"<Secondary>Anda hanya dapat mengisi akun bank dengan menabung penghasilan "
+"Anda di server ini, bukan melalui deposit langsung.</>\n"
+"\n"
+"Cara Kerja Pinjaman ASEAN\n"
+"<Secondary>Pinjaman kami memiliki biaya datar sekali bayar sebesar 10%, dan "
+"Anda hanya perlu melunasinya saat Anda mendapat keuntungan.</>\n"
+"<Secondary>Pembayaran kembali berkisar dari 10% hingga 80% dari pendapatan "
+"Anda, tergantung pada jumlah pinjaman yang Anda ambil.</>\n"
+"\n"
+"<Bold>Transaksi Terbaru</>\n"
+"{transactions_str}\n"
+
+#: src/amc/commands/finance.py:65
+msgid "Max available loan depends on your driver+trucking level"
+msgstr "Pinjaman maksimal tersedia tergantung pada level pengemudi+truk Anda"
+
+#: src/amc/commands/finance.py:70
+msgid "Donate money to another player"
+msgstr "Donasi uang ke pemain lain"
+
+#: src/amc/commands/finance.py:76
+#, python-brace-format
+msgid ""
+"<Title>Donation</>\n"
+"Confirm: <Highlight>/donate {amount} {code_expected}</>"
+msgstr ""
+"<Title>Donasi</>\n"
+"Konfirmasi: <Highlight>/donate {amount} {code_expected}</>"
+
+#: src/amc/commands/finance.py:83
+msgid "Donated {amount_int:,}!"
+msgstr "Mendonorkan {amount_int:,}!"
+
+#: src/amc/commands/finance.py:85
+msgid "Withdraw money from your account"
+msgstr "Tarik uang dari rekening Anda"
+
+#: src/amc/commands/finance.py:91
+#, python-brace-format
+msgid "Confirm large withdrawal: /withdraw {amount} {code_gen}"
+msgstr "Konfirmasi penarikan besar: /withdraw {amount} {code_gen}"
+
+#: src/amc/commands/finance.py:99
+msgid "Take out a loan"
+msgstr "Ajukan pinjaman"
+
+#: src/amc/commands/finance.py:102
+msgid "You must have done at least one delivery"
+msgstr "Anda harus telah melakukan setidaknya satu pengiriman"
+
+#: src/amc/commands/finance.py:116
+#, python-brace-format
+msgid ""
+"<Title>Loan</>\n"
+"Fee: {fee}\n"
+"Confirm: /loan {amount} {code_expected}"
+msgstr ""
+"<Title>Pinjaman</>\n"
+"Biaya: {fee}\n"
+"Konfirmasi: /loan {amount} {code_expected}"
+
+#: src/amc/commands/finance.py:123
+msgid "Loan Approved!"
+msgstr "Pinjaman Disetujui!"
+
+#: src/amc/commands/finance.py:125
+msgid "Set your automatic saving rate"
+msgstr "Atur tingkat tabungan otomatis Anda"
+
+#: src/amc/commands/finance.py:131
+#, python-format, python-brace-format
+msgid ""
+"<Title>Savings rate saved</>\n"
+"\n"
+"{rate:.0f}% of your earnings will automatically go into your bank account"
+msgstr ""
+"<Title>Tingkat tabungan disimpan</>\n"
+"\n"
+"{rate:.0f}% dari penghasilan Anda akan otomatis masuk ke akun bank Anda"
+
+#: src/amc/commands/finance.py:135
+#, python-brace-format
+msgid ""
+"<Title>Set savings rate failed</>\n"
+"\n"
+"{error}"
+msgstr ""
+"<Title>Gagal menetapkan tingkat tabungan</>\n"
+"\n"
+"{error}"
+
+#: src/amc/commands/finance.py:137
+msgid "Set your loan repayment rate"
+msgstr "Atur tingkat pembayaran pinjaman Anda"
+
+#: src/amc/commands/finance.py:143
+#, python-format, python-brace-format
+msgid ""
+"<Title>Loan repayment rate saved</>\n"
+"\n"
+"{rate:.0f}% of your earnings will automatically go repaying loans, if any"
+msgstr ""
+"<Title>Tingkat pembayaran pinjaman disimpan</>\n"
+"\n"
+"{rate:.0f}% dari penghasilan Anda akan otomatis digunakan untuk melunasi "
+"pinjaman, jika ada"
+
+#: src/amc/commands/finance.py:147
+#, python-brace-format
+msgid ""
+"<Title>Set loan repayment rate failed</>\n"
+"\n"
+"{error}"
+msgstr ""
+"<Title>Gagal menetapkan tingkat pembayaran pinjaman</>\n"
+"\n"
+"{error}"
+
+#: src/amc/commands/finance.py:149
+msgid "Toggle Universal Basic Income"
+msgstr "Alihkan Pendapatan Dasar Universal (UBI)"
+
+#: src/amc/commands/finance.py:155
+msgid "You will no longer receive a universal basic income"
+msgstr "Anda tidak akan lagi menerima pendapatan dasar universal (UBI)"
+
+#: src/amc/commands/finance.py:155
+msgid "You will start to receive a universal basic income"
+msgstr "Anda akan mulai menerima pendapatan dasar universal (UBI)"
+
+#: src/amc/commands/finance.py:159
+#, python-brace-format
+msgid ""
+"<Title>Toggle UBI failed</>\n"
+"\n"
+"{error}"
+msgstr ""
+"<Title>Gagal mengalihkan UBI</>\n"
+"\n"
+"{error}"
+
+#: src/amc/commands/finance.py:161
+msgid "Burn money from your account"
+msgstr "Bakar uang dari rekening Anda"
+
+#: src/amc/commands/finance.py:168
+#, python-brace-format
+msgid ""
+"<Title>Burn</>\n"
+"\n"
+"To prevent any mishap, please read the following:\n"
+"- This action is non-reversible\n"
+"- Please do not burn more than your wallet balance! You will end up with "
+"negative balance.\n"
+"\n"
+"If you wish to proceed, type the command again followed by the verification "
+"code:\n"
+"<Highlight>/burn {amount} {code_expected}</>"
+msgstr ""
+"<Title>Bakar</>\n"
+"\n"
+"Untuk mencegah kecelakaan, harap baca yang berikut:\n"
+"- Tindakan ini tidak dapat dibatalkan\n"
+"- Harap jangan membakar lebih dari saldo dompet Anda! Anda akan berakhir "
+"dengan saldo negatif.\n"
+"\n"
+"Jika Anda ingin melanjutkan, ketik perintah lagi diikuti dengan kode "
+"verifikasi:\n"
+"<Highlight>/burn {amount} {code_expected}</>"
+
+#: src/amc/commands/finance.py:182
+#, python-brace-format
+msgid ""
+"<Title>Burn</>\n"
+"\n"
+"Sorry, the verification code did not match, please try again:\n"
+"<Highlight>/burn {amount} {code_expected}</>"
+msgstr ""
+"<Title>Bakar</>\n"
+"\n"
+"Maaf, kode verifikasi tidak cocok, harap coba lagi:\n"
+"<Highlight>/burn {amount} {code_expected}</>"
+
+#: src/amc/commands/finance.py:196
+#, python-brace-format
+msgid ""
+"<Title>Burn failed</>\n"
+"\n"
+"{error}"
+msgstr ""
+"<Title>Gagal membakar</>\n"
+"\n"
+"{error}"
+
+#: src/amc/commands/finance.py:199
+msgid "Repay loan (Deprecated)"
+msgstr "Lunasi pinjaman (Tidak digunakan lagi)"
+
+#: src/amc/commands/finance.py:202
+msgid ""
+"<Title>Command Removed</>\n"
+"\n"
+"You will automatically repay your loan as you earn money on the server"
+msgstr ""
+"<Title>Perintah Dihapus</>\n"
+"\n"
+"Anda akan otomatis melunasi pinjaman saat Anda memperoleh penghasilan di "
+"server"
+
+#: src/amc/commands/general.py:14
+msgid "Show this help message"
+msgstr "Tampilkan pesan bantuan ini"
+
+#: src/amc/commands/general.py:24
+msgid ""
+"<Title>Available Commands</>\n"
+"\n"
+msgstr ""
+"<Title>Perintah Tersedia</>\n"
+"\n"
+
+#: src/amc/commands/general.py:36
+#, python-brace-format
+msgid ""
+"<Title>{cat}</>\n"
+"<Secondary></>\n"
+msgstr ""
+
+#: src/amc/commands/general.py:48
+#, python-brace-format
+msgid "<Secondary>Shorthand: {shorthands}</>"
+msgstr "<Secondary>Singkatan: {shorthands}</>"
+
+#: src/amc/commands/general.py:57
+msgid "List the awesome people who made this community possible"
+msgstr "Lihat orang-orang luar biasa yang memungkinkan komunitas ini"
+
+#: src/amc/commands/general.py:64
+msgid "See your current coordinates"
+msgstr "Lihat koordinat Anda saat ini"
+
+#: src/amc/commands/general.py:71
+msgid "Check if you are inside a forbidden shortcut zone"
+msgstr "Periksa apakah Anda berada di dalam zona jalan pintas terlarang"
+
+#: src/amc/commands/general.py:90
+msgid "Verify your account"
+msgstr "Verifikasi akun Anda"
+
+#: src/amc/commands/general.py:109
+msgid "Rename your character"
+msgstr "Ganti nama karakter Anda"
+
+#: src/amc/commands/general.py:119
+msgid "Ask the bot a question"
+msgstr "Tanya bot sebuah pertanyaan"
+
+#: src/amc/commands/general.py:123
+msgid "Request a song for the radio"
+msgstr "Minta lagu untuk radio"
+
+#: src/amc/commands/jobs.py:9
+msgid "List available server jobs"
+msgstr "Lihat pekerjaan server yang tersedia"
+
+#: src/amc/commands/jobs.py:22
+#, python-brace-format
+msgid "<Warning>Requires RP Mode</> (Yours: {status})"
+msgstr "<Warning>Membutuhkan Mode RP</> (Milik Anda: {status})"
+
+#: src/amc/commands/jobs.py:23
+#, python-brace-format
+msgid "<Secondary>Expiring in {time}</>"
+msgstr "<Secondary>Berakhir dalam {time}</>"
+
+#: src/amc/commands/jobs.py:24
+#, python-brace-format
+msgid "<Secondary>Cargo: {cargo_key}</>"
+msgstr "<Secondary>Kargo: {cargo_key}</>"
+
+#: src/amc/commands/jobs.py:28
+#, python-brace-format
+msgid ""
+"<Title>Delivery Jobs</>\n"
+"<Secondary>Complete jobs solo or with others!</>\n"
+"\n"
+"{jobs_str}\n"
+"\n"
+"<Title>RP Mode</>: {rp_status} (/rp_mode)\n"
+"<Title>Subsidies</>: Use /subsidies to view."
+msgstr ""
+"<Title>Pekerjaan Pengiriman</>\n"
+"<Secondary>Selesaikan pekerjaan sendiri atau bersama orang lain!</>\n"
+"\n"
+"{jobs_str}\n"
+"\n"
+"<Title>Mode RP</>: {rp_status} (/rp_mode)\n"
+"<Title>Subsidi</>: Gunakan /subsidies untuk melihat."
+
+#: src/amc/commands/jobs.py:39
+msgid "View job subsidies information"
+msgstr "Lihat informasi subsidi pekerjaan"
+
+#: src/amc/commands/language.py:4
+msgid "Set your language preference"
+msgstr "Atur preferensi bahasa Anda"
+
+#: src/amc/commands/language.py:15
+msgid ""
+"<Title>Language Settings</>\n"
+"Available languages:\n"
+"- <Highlight>en</> (English)\n"
+"- <Highlight>id</> (Indonesian)\n"
+"\n"
+"Usage: /language [en|id]"
+msgstr ""
+"<Title>Pengaturan Bahasa</>\n"
+"Bahasa yang tersedia:\n"
+"- <Highlight>en</> (Inggris)\n"
+"- <Highlight>id</> (Indonesia)\n"
+"\n"
+"Penggunaan: /language [en|id]"
+
+#: src/amc/commands/language.py:20
+msgid "Invalid language code. Use 'en' or 'id'."
+msgstr "Kode bahasa tidak valid. Gunakan 'en' atau 'id'."
+
+#: src/amc/commands/language.py:28
+#, python-brace-format
+msgid "Language set to {lang}"
+msgstr "Bahasa diatur ke {lang}"
+
+#: src/amc/commands/rp_rescue.py:17
+msgid "Toggle Roleplay Mode"
+msgstr "Alihkan Mode Roleplay"
+
+#: src/amc/commands/rp_rescue.py:25
+#, python-brace-format
+msgid ""
+"<Title>Code Incorrect</>\n"
+"Try: <Highlight>/rp_mode {code_gen}</>"
+msgstr ""
+"<Title>Kode Salah</>\n"
+"Coba: <Highlight>/rp_mode {code_gen}</>"
+
+#: src/amc/commands/rp_rescue.py:50
+msgid ""
+"<Title>Roleplay Mode Enabled</>\n"
+"<EffectGood>Enabled!</>"
+msgstr ""
+"<Title>Mode Roleplay Diaktifkan</>\n"
+"<EffectGood>Aktif!</>"
+
+#: src/amc/commands/rp_rescue.py:50
+msgid "<Title>Roleplay Mode Disabled</>"
+msgstr "<Title>Mode Roleplay Dinonaktifkan</>"
+
+#: src/amc/commands/rp_rescue.py:57
+msgid "To turn off, resend with code:"
+msgstr "Untuk mematikan, kirim ulang dengan kode:"
+
+#: src/amc/commands/rp_rescue.py:57
+msgid ""
+"Enabling RP mode gives bonuses but risks cargo/vehicle loss on recovery.\n"
+"<Warning>All vehicles will despawn on toggle!</>"
+msgstr ""
+"Mengaktifkan mode RP memberikan bonus tetapi berisiko kehilangan kargo/"
+"kendaraan saat pemulihan.\n"
+"<Warning>Semua kendaraan akan di-despawn saat beralih!</>"
+
+#: src/amc/commands/rp_rescue.py:58
+#, python-brace-format
+msgid ""
+"<Title>Roleplay Mode</>\n"
+"Status: {status}\n"
+"\n"
+"{notes}\n"
+"<Highlight>/rp_mode {code_gen}</>"
+msgstr ""
+"<Title>Mode Roleplay</>\n"
+"Status: {status}\n"
+"\n"
+"{notes}\n"
+"<Highlight>/rp_mode {code_gen}</>"
+
+#: src/amc/commands/rp_rescue.py:62
+msgid "Calls for rescue service"
+msgstr "Panggil layanan penyelamatan"
+
+#: src/amc/commands/rp_rescue.py:65
+msgid "You have requested a rescue less than 5 minutes ago"
+msgstr "Anda telah meminta penyelamatan kurang dari 5 menit yang lalu"
+
+#: src/amc/commands/rp_rescue.py:78
+#, python-brace-format
+msgid ""
+"<Title>Rescue Request</>\n"
+"<Event>{name}</> needs help!\n"
+"Msg: {message}\n"
+"Veh: {vehicle_names}"
+msgstr ""
+"<Title>Permintaan Penyelamatan</>\n"
+"<Event>{name}</> butuh bantuan!\n"
+"Pesan: {message}\n"
+"Kendaraan: {vehicle_names}"
+
+#: src/amc/commands/rp_rescue.py:90
+#, python-brace-format
+msgid "{name} needs a rescue! {vehicle_names}. /respond {request_id}"
+msgstr "{name} butuh penyelamatan! {vehicle_names}. /respond {request_id}"
+
+#: src/amc/commands/rp_rescue.py:93
+msgid "<EffectGood>Request Sent</>\n"
+msgstr "<EffectGood>Permintaan Terkirim</>\n"
+
+#: src/amc/commands/rp_rescue.py:93
+msgid "Help is on the way."
+msgstr "Bantuan sedang dalam perjalanan."
+
+#: src/amc/commands/rp_rescue.py:93
+msgid "Rescuers offline, notified Discord."
+msgstr "Penyelamat luring, sudah diberitahukan ke Discord."
+
+#: src/amc/commands/rp_rescue.py:102
+#, python-brace-format
+msgid ""
+"@here **{name}** requested rescue.\n"
+"Msg: {message}"
+msgstr ""
+"@here **{name}** meminta penyelamatan.\n"
+"Pesan: {message}"
+
+#: src/amc/commands/rp_rescue.py:110
+msgid "Respond to a rescue request"
+msgstr "Tanggapi permintaan penyelamatan"
+
+#: src/amc/commands/rp_rescue.py:118
+msgid "Invalid or expired rescue request."
+msgstr "Permintaan penyelamatan tidak valid atau kedaluwarsa."
+
+#: src/amc/commands/rp_rescue.py:122
+#, python-brace-format
+msgid "{responder} responded to {requester}'s request!"
+msgstr "{responder} menanggapi permintaan {requester}!"
+
+#: src/amc/commands/social.py:10
+msgid "Thank another player to increase their social score"
+msgstr "Berterima kasih kepada pemain lain untuk meningkatkan skor sosial mereka"
+
+#: src/amc/commands/social.py:18
+msgid "Player not found"
+msgstr "Pemain tidak ditemukan"
+
+#: src/amc/commands/social.py:24
+msgid "Player not found in DB"
+msgstr "Pemain tidak ditemukan di DB"
+
+#: src/amc/commands/social.py:28
+msgid "Already thanked recently."
+msgstr "Sudah diucapkan terima kasih baru-baru ini."
+
+#: src/amc/commands/social.py:35
+msgid "Thank sent"
+msgstr "Terima kasih terkirim"
+
+#: src/amc/commands/social.py:36
+#, python-brace-format
+msgid "{sender} thanked you"
+msgstr "{sender} mengucapkan terima kasih kepada Anda"
+
+#: src/amc/commands/teleport.py:8
+msgid "Teleport to coordinates (Admin Only)"
+msgstr "Teleportasi ke koordinat (Khusus Admin)"
+
+#: src/amc/commands/teleport.py:13
+msgid "Admin Only"
+msgstr "Khusus Admin"
+
+#: src/amc/commands/teleport.py:15
+msgid "Teleport to a location"
+msgstr "Teleportasi ke lokasi"
+
+#: src/amc/commands/teleport.py:45
+#, python-brace-format
+msgid ""
+"Teleport point not found\n"
+"Choose from one of the following locations:\n"
+"\n"
+"{locations}"
+msgstr ""
+"Titik teleportasi tidak ditemukan\n"
+"Pilih dari salah satu lokasi berikut:\n"
+"\n"
+"{locations}"
+
+#: src/amc/commands/teleport.py:62
+#, python-brace-format
+msgid ""
+"<Title>Teleport</>\n"
+"Usage: <Highlight>/tp [location]</>\n"
+"Choose from one of the following locations:\n"
+"\n"
+"{locations}"
+msgstr ""
+"<Title>Teleportasi</>\n"
+"Penggunaan: <Highlight>/tp [lokasi]</>\n"
+"Pilih dari salah satu lokasi berikut:\n"
+"\n"
+"{locations}"
+
+#: src/amc/commands/vehicles.py:10
+msgid "Register your vehicles"
+msgstr "Daftarkan kendaraan Anda"
+
+#: src/amc/commands/vehicles.py:14
+#, python-brace-format
+msgid ""
+"<Title>Vehicles Registered!</>\n"
+"\n"
+"{names}"
+msgstr ""
+"<Title>Kendaraan Terdaftar!</>\n"
+"\n"
+"{names}"
+
+#: src/amc/commands/vehicles.py:16
+msgid "Stop renting out your vehicle"
+msgstr "Berhenti menyewakan kendaraan Anda"
+
+#: src/amc/commands/vehicles.py:27
+msgid ""
+"<Title>Removing rentals</>\n"
+"Usage: /unrental, /unrental 2345, /unrental all"
+msgstr ""
+"<Title>Menghapus penyewaan</>\n"
+"Penggunaan: /unrental, /unrental 2345, /unrental all"
+
+#: src/amc/commands/vehicles.py:35
+msgid "Rentals removed"
+msgstr "Penyewaan dihapus"
+
+#: src/amc/commands/vehicles.py:37
+msgid "Mark vehicle as for rental"
+msgstr "Tandai kendaraan untuk disewakan"
+
+#: src/amc/commands/vehicles.py:44
+msgid ""
+"<Title>Rental System</>\n"
+"Only Corporation vehicles can be rented out."
+msgstr ""
+"<Title>Sistem Penyewaan</>\n"
+"Hanya kendaraan Perusahaan yang dapat disewakan."
+
+#: src/amc/commands/vehicles.py:53
+#, python-brace-format
+msgid ""
+"<Title>Marked as rental</>\n"
+"Players can /rent these:\n"
+"\n"
+"{names}"
+msgstr ""
+"<Title>Ditandai sebagai penyewaan</>\n"
+"Pemain dapat /rent ini:\n"
+"\n"
+"{names}"
+
+#: src/amc/commands/vehicles.py:55
+msgid "Rent a vehicle"
+msgstr "Sewa kendaraan"
+
+#: src/amc/commands/vehicles.py:70
+msgid ""
+"<Title>Rentals</>\n"
+"No rentals found."
+msgstr ""
+"<Title>Penyewaan</>\n"
+"Tidak ada penyewaan ditemukan."
+
+#: src/amc/commands/vehicles.py:77
+#, python-brace-format
+msgid ""
+"<Title>Available Rentals</>\n"
+"Type /rent [id] to rent.\n"
+"\n"
+"{names}"
+msgstr ""
+"<Title>Penyewaan Tersedia</>\n"
+"Ketik /rent [id] untuk menyewa.\n"
+"\n"
+"{names}"
+
+#: src/amc/commands/vehicles.py:86
+#, python-brace-format
+msgid "Brought to you by {company}"
+msgstr "Dipersembahkan oleh {company}"
+
+#: src/amc/commands/vehicles.py:88
+msgid "Rental not found"
+msgstr "Penyewaan tidak ditemukan"
+
+#: src/amc/commands/vehicles.py:90
+msgid "Sell a vehicle"
+msgstr "Jual kendaraan"
+
+#: src/amc/commands/vehicles.py:102
+msgid "Remove displayed vehicles"
+msgstr "Hapus kendaraan yang ditampilkan"
+
+#: src/amc/commands/vehicles.py:106 src/amc/commands/vehicles.py:136
+msgid "Admin-only command"
+msgstr "Perintah khusus Admin"
+
+#: src/amc/commands/vehicles.py:117
+msgid ""
+"<Title>Display System</>\n"
+"Use <Highlight>/undisplay </> to remove displayed vehicles."
+msgstr ""
+"<Title>Sistem Tampilan</>\n"
+"Gunakan <Highlight>/undisplay </> untuk menghapus kendaraan yang ditampilkan."
+
+#: src/amc/commands/vehicles.py:130
+msgid "Undisplay complete"
+msgstr "Penghapusan tampilan selesai"
+
+#: src/amc/commands/vehicles.py:132
+msgid "Permanently display a vehicle"
+msgstr "Tampilkan kendaraan secara permanen"
+
+#: src/amc/commands/vehicles.py:147
+msgid ""
+"<Title>Display System</>\n"
+"Use <Highlight>/display </> to permanently display a vehicle"
+msgstr ""
+"<Title>Sistem Tampilan</>\n"
+"Gunakan <Highlight>/display </> untuk menampilkan kendaraan secara permanen"
+
+#: src/amc/commands/vehicles.py:189
+msgid ""
+"\n"
+"<Title>Successfully marked as display</>\n"
+"\n"
+"Your vehicle will be automatically spawned here when the server starts!\n"
+"\n"
+"To change the position, you will need to do /display again with the same "
+"vehicle."
+msgstr ""
+"\n"
+"<Title>Berhasil ditandai sebagai tampilan</>\n"
+"\n"
+"Kendaraan Anda akan otomatis muncul di sini saat server dimulai!\n"
+"\n"
+"Untuk mengubah posisi, Anda perlu melakukan /display lagi dengan kendaraan "
+"yang sama."
+
+#: src/amc/models.py:681
+msgid "Company"
+msgstr "Perusahaan"
+
+#: src/amc/models.py:682
+msgid "Companies"
+msgstr "Perusahaan-perusahaan"
+
+#: src/amc/models.py:779
+msgid "Entered"
+msgstr "Masuk"
+
+#: src/amc/models.py:780
+msgid "Exited"
+msgstr "Keluar"
+
+#: src/amc/models.py:781
+msgid "Bought"
+msgstr "Dibeli"
+
+#: src/amc/models.py:782
+msgid "Sold"
+msgstr "Dijual"
+
+#: src/amc_backend/settings.py:145
+msgid "English"
+msgstr "Inggris"
+
+#: src/amc_backend/settings.py:146
+msgid "Indonesian"
+msgstr "Indonesia"

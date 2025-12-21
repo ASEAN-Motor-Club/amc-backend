@@ -3,15 +3,16 @@ from amc.command_framework import registry, CommandContext
 from amc.models import TeleportPoint
 from amc.mod_server import teleport_player, list_player_vehicles, show_popup
 from django.db.models import Q
+from django.utils.translation import gettext as _, gettext_lazy
 
-@registry.register(["/teleport", "/tp"], description="Teleport to coordinates (Admin Only)", category="Teleportation")
+@registry.register(["/teleport", "/tp"], description=gettext_lazy("Teleport to coordinates (Admin Only)"), category="Teleportation")
 async def cmd_tp_coords(ctx: CommandContext, x: int, y: int, z: int):
     if ctx.player_info.get('bIsAdmin'):
         await teleport_player(ctx.http_client_mod, ctx.player.unique_id, {'X': x, 'Y': y, 'Z': z}, no_vehicles=False)
     else:
-        await ctx.reply("Admin Only")
+        await ctx.reply(_("Admin Only"))
 
-@registry.register(["/teleport", "/tp"], description="Teleport to a location", category="Teleportation")
+@registry.register(["/teleport", "/tp"], description=gettext_lazy("Teleport to a location"), category="Teleportation")
 async def cmd_tp_name(ctx: CommandContext, name: str = ""):
     CORPS_WITH_TP = { "69FF57844F3F79D1F9665991B4006325" }
     player_info = ctx.player_info or {} 
@@ -41,7 +42,9 @@ async def cmd_tp_name(ctx: CommandContext, name: str = ""):
             loc_obj = teleport_point.location
             location = {'X': loc_obj.x, 'Y': loc_obj.y, 'Z': loc_obj.z}
         except TeleportPoint.DoesNotExist:
-            asyncio.create_task(show_popup(ctx.http_client_mod, f"Teleport point not found\nChoose from one of the following locations:\n\n{'\n'.join(tp_points_names)}", character_guid=ctx.character.guid, player_id=str(ctx.player.unique_id)))
+            asyncio.create_task(show_popup(ctx.http_client_mod, _("Teleport point not found\nChoose from one of the following locations:\n\n{locations}").format(
+                locations='\n'.join(tp_points_names)
+            ), character_guid=ctx.character.guid, player_id=str(ctx.player.unique_id)))
             return
     elif player_info.get('bIsAdmin') or (current_vehicle and current_vehicle.get('companyGuid') in CORPS_WITH_TP):
         # Teleport to Custom Waypoint
@@ -56,7 +59,9 @@ async def cmd_tp_name(ctx: CommandContext, name: str = ""):
     
     if not location:
         asyncio.create_task(
-            show_popup(ctx.http_client_mod, f"<Title>Teleport</>\nUsage: <Highlight>/tp [location]</>\nChoose from one of the following locations:\n\n{'\n'.join(tp_points_names)}", character_guid=ctx.character.guid, player_id=str(ctx.player.unique_id))
+            show_popup(ctx.http_client_mod, _("<Title>Teleport</>\nUsage: <Highlight>/tp [location]</>\nChoose from one of the following locations:\n\n{locations}").format(
+                locations='\n'.join(tp_points_names)
+            ), character_guid=ctx.character.guid, player_id=str(ctx.player.unique_id))
         )
         return
 
