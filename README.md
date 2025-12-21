@@ -17,13 +17,14 @@ You're assumed to have some familiarity with Django.
 
 ## Adding Slash Commands
 
-Slash commands are now handled via a registry system in `src/amc/commands.py`.
+Slash commands are now handled via a registry system in the `src/amc/commands/` package.
 
 To add a new command:
-1.  Open `src/amc/commands.py`.
-2.  Import `registry` and `CommandContext`.
-3.  Decorate your async function with `@registry.register("/yourcommand")` (or a list of aliases).
-4.  Your function should accept `ctx: CommandContext` as the first argument, followed by typed arguments for any capture groups.
+1.  Navigate to `src/amc/commands/`.
+2.  Choose an appropriate category file (e.g., `general.py`, `vehicles.py`) or create a new one.
+3.  Import `registry` and `CommandContext` from `amc.command_framework`.
+4.  Decorate your async function with `@registry.register("/yourcommand")` (or a list of aliases).
+5.  **Important**: If you created a new file, ensure you import it in `src/amc/commands/__init__.py` so it's registered.
 
 Example:
 ```python
@@ -32,5 +33,25 @@ async def cmd_greet(ctx: CommandContext, name: str):
     await ctx.reply(f"Hello, {name}!")
 ```
 
-**Testing:**
-Add a corresponding test case in `src/amc/tests_commands.py` to verify your command logic and mocking.
+## Running Tests
+
+We use `uv` and `nix` for dependency management and testing.
+
+**Prerequisites:**
+- Ensure you have `nix` installed and are in the dev shell (`nix develop`).
+
+**Running the Test Suite:**
+To run all tests (including the new integration tests):
+```sh
+$ uv run src/manage.py test
+```
+
+To run specifically the command tests:
+```sh
+$ uv run src/manage.py test amc.tests_commands
+```
+
+To run the integration tests for command routing:
+```sh
+$ uv run src/manage.py test amc.tests_integration_commands
+```
