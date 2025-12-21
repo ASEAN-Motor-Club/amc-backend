@@ -164,3 +164,42 @@ def with_verification_code(input, input_verification_code):
 
   return verification_code, input_verification_code.lower() == verification_code.lower()
 
+
+import discord
+from django.conf import settings
+from amc.game_server import announce
+
+async def forward_to_discord(client, channel_id, content, escape_mentions=True, **kwargs):
+  if not client.is_ready():
+    await client.wait_until_ready()
+
+  allowed_mentions = discord.AllowedMentions.all()
+  if escape_mentions:
+    content = discord.utils.escape_mentions(content)
+    allowed_mentions = discord.AllowedMentions.none()
+
+  channel = client.get_channel(int(channel_id))
+  if channel:
+    return await channel.send(content, allowed_mentions=allowed_mentions, **kwargs)
+
+async def add_discord_verified_role(client, discord_user_id, player_id):
+  guild = client.get_guild(settings.DISCORD_GUILD_ID)
+  if not guild:
+    raise Exception("Could not find a guild with that ID.")
+
+  member = guild.get_member(discord_user_id)
+  if not member:
+    raise Exception("Could not find a member with that ID.")
+
+  # Get the role object from the role ID
+  role = guild.get_role(settings.DISCORD_VERIFIED_ROLE_ID)
+  if not role:
+    raise Exception("Could not find a role with that ID.")
+
+  await member.add_roles(role, reason=f"Action performed by {player_id}")
+
+async def countdown(http_client, start=3, delay=2.0):
+  await announce('Get ready!', http_client)
+  for i in range(start, -1, -1):
+    await asyncio.sleep(delay)
+    await announce(str(i) if i > 0 else 'GO!!', http_client, clear_banner=False)
