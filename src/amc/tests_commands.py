@@ -224,13 +224,11 @@ class CommandsTestCase(TestCase):
 
     async def test_cmd_donate_flow(self):
         from amc import commands
-        from django.core.signing import Signer
+        from amc.utils import generate_verification_code
         
         self.ctx.character.id = 1
         amount = 500
-        signer = Signer()
-        signed = signer.sign((amount, self.ctx.character.id))
-        code = signed.replace('-', '').replace('_', '')[-4:]
+        code = generate_verification_code((amount, self.ctx.character.id))
         
         # 1. First call without code
         await commands.cmd_donate(self.ctx, "500", "")
@@ -483,15 +481,13 @@ class CommandsTestCase(TestCase):
 
     async def test_cmd_rp_mode_toggle_valid(self):
         from amc import commands
-        from django.core.signing import Signer
+        from amc.utils import generate_verification_code
         
         # Calculate valid code
-        signer = Signer()
         # The logic in commands.py uses: code_gen, code_verified = with_verification_code((ctx.character.guid, is_rp_mode), verification_code)
         # We need to match that.
         is_rp = False
-        signed = signer.sign((self.ctx.character.guid, is_rp))
-        code = signed.replace('-', '').replace('_', '')[-4:]
+        code = generate_verification_code((self.ctx.character.guid, is_rp))
         
         with patch('amc.commands.rp_rescue.get_rp_mode', new=AsyncMock(side_effect=[False, True])): # Initial -> After toggle
             with patch('amc.commands.rp_rescue.toggle_rp_session', new=AsyncMock()) as mock_toggle, \
@@ -822,15 +818,16 @@ class CommandsTestCase(TestCase):
             
         with patch('amc.commands.finance.get_player_loan_balance', new=AsyncMock(return_value=0)), \
              patch('amc.commands.finance.get_character_max_loan', new=AsyncMock(return_value=(1000, 'Ok'))), \
-             patch('django.core.signing.Signer.sign', return_value="1234"), \
              patch('amc.commands.finance.register_player_take_loan', new=AsyncMock(return_value=(1100, 100))) as mock_take, \
              patch('amc.commands.finance.transfer_money', new=AsyncMock()) as mock_transfer, \
              patch('amc.models.Delivery.objects.filter') as mock_del_filter: # FIX
              
              mock_del_filter.return_value.aexists = AsyncMock(return_value=True) # Deliveries exist
              
-             # The code expected from "1234" is "1234" (stripped) -> "1234"
-             await commands.cmd_loan(self.ctx, "500", "1234")
+             from amc.utils import generate_verification_code
+             code = generate_verification_code((500, self.ctx.character.id))
+             
+             await commands.cmd_loan(self.ctx, "500", code)
              mock_transfer.assert_called()
 
     async def test_cmd_thank(self):
@@ -982,12 +979,10 @@ class CommandsTestCase(TestCase):
              
     async def test_cmd_burn(self):
         from amc import commands
-        from django.core.signing import Signer
+        from amc.utils import generate_verification_code
         
         amount = 100
-        signer = Signer()
-        signed = signer.sign((amount, self.ctx.character.id))
-        code = signed.replace('-', '').replace('_', '')[-4:]
+        code = generate_verification_code((amount, self.ctx.character.id))
         
         with patch('amc.commands.finance.transfer_money', new=AsyncMock()) as mock_transfer, \
              patch('amc.commands.finance.show_popup', new=AsyncMock()) as mock_popup:

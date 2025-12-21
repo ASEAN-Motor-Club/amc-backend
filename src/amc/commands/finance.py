@@ -62,11 +62,9 @@ How ASEAN Loans Works
 @registry.register("/donate", description="Donate money to another player", category="Finance")
 async def cmd_donate(ctx: CommandContext, amount: str, verification_code: str = ""):
     amount_int = int(amount.replace(',', ''))
-    signer = Signer()
-    signed_obj = signer.sign((amount_int, ctx.character.id))
-    code_expected = signed_obj.replace('-', '').replace('_', '')[-4:]
+    code_expected, verified = with_verification_code((amount_int, ctx.character.id), verification_code)
     
-    if not verification_code or verification_code.lower() != code_expected.lower():
+    if not verified:
         await ctx.reply(f"<Title>Donation</>\nConfirm: <Highlight>/donate {amount} {code_expected.upper()}</>")
         return
 
@@ -97,10 +95,11 @@ async def cmd_loan(ctx: CommandContext, amount: str, verification_code: str = ""
     max_loan, _ = await get_character_max_loan(ctx.character)
     amount_int = min(amount_int, max_loan - loan_balance)
     
-    signer = Signer()
-    code_expected = signer.sign((amount_int, ctx.character.id)).replace('-', '').replace('_', '')[-4:]
+    amount_int = min(amount_int, max_loan - loan_balance)
     
-    if not verification_code or verification_code.lower() != code_expected.lower():
+    code_expected, verified = with_verification_code((amount_int, ctx.character.id), verification_code)
+
+    if not verified:
          fee = calc_loan_fee(amount_int, ctx.character, max_loan)
          await ctx.reply(f"<Title>Loan</>\nFee: {fee}\nConfirm: /loan {amount} {code_expected.upper()}")
          return
@@ -144,9 +143,7 @@ async def cmd_toggle_ubi(ctx: CommandContext):
 @registry.register("/burn", description="Burn money from your account", category="Finance")
 async def cmd_burn(ctx: CommandContext, amount: str, verification_code: str = ""):
     amount_int = int(amount.replace(',', ''))
-    signer = Signer()
-    signed_obj = signer.sign((amount_int, ctx.character.id))
-    code_expected = signed_obj.replace('-', '').replace('_', '')[-4:]
+    code_expected, verified = with_verification_code((amount_int, ctx.character.id), verification_code)
     
     if not verification_code:
         asyncio.create_task(
@@ -161,7 +158,7 @@ If you wish to proceed, type the command again followed by the verification code
 <Highlight>/burn {amount} {code_expected.upper()}</>""", character_guid=ctx.character.guid, player_id=str(ctx.player.unique_id))
         )
         return
-    elif verification_code.lower() != code_expected.lower():
+    elif not verified:
         asyncio.create_task(
             show_popup(ctx.http_client_mod, f"""\
 <Title>Burn</>

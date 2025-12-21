@@ -157,12 +157,28 @@ def get_time_difference_string(start_time: datetime, end_time: datetime) -> str:
 
     return f"{hours} hours, {minutes} minutes"
 
-def with_verification_code(input, input_verification_code):
-  signer = Signer()
-  signed_obj = signer.sign(input)
-  verification_code = signed_obj.replace('-', '').replace('_', '')[-4:]
+def generate_verification_code(input_data) -> str:
+    signer = Signer()
+    # Sign the input to ensure it's tied to our secret key and the input data
+    signed_obj = signer.sign(input_data)
+    
+    # Use SHA256 to get a good distribution
+    import hashlib
+    hash_object = hashlib.sha256(signed_obj.encode())
+    num = int(hash_object.hexdigest(), 16)
+    
+    # Safe alphabet excluding 0, O, 1, I, l
+    safe_alphabet = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789"
+    code = ""
+    for _ in range(4):
+        code += safe_alphabet[num % len(safe_alphabet)]
+        num //= len(safe_alphabet)
+        
+    return code
 
-  return verification_code, input_verification_code.lower() == verification_code.lower()
+def with_verification_code(input, input_verification_code):
+  code = generate_verification_code(input)
+  return code, input_verification_code.lower() == code.lower()
 
 
 import discord
