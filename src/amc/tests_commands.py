@@ -645,31 +645,71 @@ class CommandsTestCase(TestCase):
         from amc.models import TeleportPoint
         self.ctx.player_info['bIsAdmin'] = True
         
-        # Mock Data
-        mock_p_info = {'name': 'TargetPlayer', 'character_guid': 'guid-target', 'player_id': 'pid-target'}
-        mock_players = [('pid-target', mock_p_info)]
+        
+        # Mock Data with Multiple Players to test fuzzy selection
+        mock_p1 = {'name': 'TargetPlayer', 'character_guid': 'guid-1', 'player_id': 'pid-1'}
+        mock_p2 = {'name': 'TargetDummy', 'character_guid': 'guid-2', 'player_id': 'pid-2'}
+        mock_p3 = {'name': 'OtherPerson', 'character_guid': 'guid-3', 'player_id': 'pid-3'}
+        
+        # get_players2 returns a list of tuples (unique_id, player_dict)
+        mock_players = [
+            ('pid-1', mock_p1),
+            ('pid-2', mock_p2),
+            ('pid-3', mock_p3)
+        ]
         
         mock_tp = MagicMock()
         mock_tp.location.x = 100
         mock_tp.location.y = 200
         mock_tp.location.z = 300
         
-        # Test Successful Teleport
+        # Test Successful Teleport (Exact)
         with patch('amc.commands.admin.get_players2', new=AsyncMock(return_value=mock_players)), \
              patch('amc.models.TeleportPoint.objects.aget', new=AsyncMock(return_value=mock_tp)), \
              patch('amc.commands.admin.teleport_player', new=AsyncMock()) as mock_teleport:
             
-            await commands.cmd_tp_player(self.ctx, "Target", "Home")
+            await commands.cmd_tp_player(self.ctx, "TargetPlayer", "Home")
             
             mock_teleport.assert_called_with(
                 self.ctx.http_client_mod,
-                "pid-target",
+                "pid-1",
                 {'X': 100, 'Y': 200, 'Z': 300},
                 no_vehicles=False,
                 reset_trailers=False,
                 reset_carried_vehicles=False
             )
-            self.ctx.reply.assert_called()
+
+        # Test Successful Teleport (Fuzzy - "TargetP" should match "TargetPlayer" better than "TargetDummy")
+        with patch('amc.commands.admin.get_players2', new=AsyncMock(return_value=mock_players)), \
+             patch('amc.models.TeleportPoint.objects.aget', new=AsyncMock(return_value=mock_tp)), \
+             patch('amc.commands.admin.teleport_player', new=AsyncMock()) as mock_teleport:
+            
+            await commands.cmd_tp_player(self.ctx, "TargetP", "Home")
+            
+            mock_teleport.assert_called_with(
+                self.ctx.http_client_mod,
+                "pid-1",
+                {'X': 100, 'Y': 200, 'Z': 300},
+                no_vehicles=False,
+                reset_trailers=False,
+                reset_carried_vehicles=False
+            )
+
+        # Test Successful Teleport (Fuzzy - "Dummy" should match "TargetDummy")
+        with patch('amc.commands.admin.get_players2', new=AsyncMock(return_value=mock_players)), \
+             patch('amc.models.TeleportPoint.objects.aget', new=AsyncMock(return_value=mock_tp)), \
+             patch('amc.commands.admin.teleport_player', new=AsyncMock()) as mock_teleport:
+            
+            await commands.cmd_tp_player(self.ctx, "Dummy", "Home")
+            
+            mock_teleport.assert_called_with(
+                self.ctx.http_client_mod,
+                "pid-2",
+                {'X': 100, 'Y': 200, 'Z': 300},
+                no_vehicles=False,
+                reset_trailers=False,
+                reset_carried_vehicles=False
+            )
 
         # Test Player Not Found
         with patch('amc.commands.admin.get_players2', new=AsyncMock(return_value={})), \

@@ -106,6 +106,8 @@ async def cmd_exit(ctx: CommandContext, target_player_name: str):
         if target_guid:
             await force_exit_vehicle(ctx.http_client_mod, target_guid)
 
+from amc.utils import fuzzy_find_player
+
 @registry.register("/tp_player", description=gettext_lazy("Teleport a player to a location (Admin)"), category="Admin")
 async def cmd_tp_player(ctx: CommandContext, target_player_name: str, location_name: str):
     if not ctx.player_info.get('bIsAdmin'):
@@ -114,7 +116,7 @@ async def cmd_tp_player(ctx: CommandContext, target_player_name: str, location_n
 
     # Find the target player
     players = await get_players2(ctx.http_client)
-    target_pid = next((pid for pid, p in players if p.get('name', '').startswith(target_player_name)), None)
+    target_pid = fuzzy_find_player(players, target_player_name)
 
     if not target_pid:
         asyncio.create_task(show_popup(ctx.http_client_mod, _("<Title>Player not found</>\n\nPlease make sure you typed the name correctly."), character_guid=ctx.character.guid, player_id=str(ctx.player.unique_id)))

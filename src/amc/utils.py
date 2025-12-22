@@ -1,6 +1,52 @@
 import asyncio
 from datetime import datetime, timedelta
 from zoneinfo import ZoneInfo
+import difflib
+from typing import List, Tuple, Optional
+
+def fuzzy_find_player(players: List[Tuple[str, dict]], name_query: str) -> Optional[str]:
+    """
+    Finds a player ID by name using fuzzy search.
+    Prioritizes exact matches (case-insensitive), then best matches based on similarity.
+    
+    Args:
+        players: List of tuples (unique_id, player_data_dict)
+        name_query: The name to search for
+        
+    Returns:
+        The player's unique_id if found, else None
+    """
+    if not name_query:
+        return None
+        
+    name_query_lower = name_query.lower()
+    
+    # 1. Exact match (case-insensitive)
+    for pid, p_data in players:
+        p_name = p_data.get('name', '')
+        if p_name.lower() == name_query_lower:
+            return pid
+            
+    # 2. Fuzzy match
+    best_pid = None
+    best_ratio = 0.0
+    
+    for pid, p_data in players:
+        p_name = p_data.get('name', '')
+        # Basic check to avoid matching wildly different lengths excessively if needed, 
+        # but SequenceMatcher handles it well usually.
+        ratio = difflib.SequenceMatcher(None, name_query_lower, p_name.lower()).ratio()
+        
+        if ratio > best_ratio:
+            best_ratio = ratio
+            best_pid = pid
+            
+    # Use a threshold to avoid completely irrelevant matches
+    if best_ratio > 0.6:
+        return best_pid
+        
+    return None
+
 from django.utils import timezone
 from django.core.signing import Signer
 
