@@ -1,7 +1,7 @@
 import asyncio
 from amc.command_framework import registry, CommandContext
 from amc.mod_server import (
-    despawn_player_vehicle, show_popup, despawn_by_tag,
+    show_popup, despawn_by_tag,
     spawn_garage, spawn_assets, spawn_vehicle,
     force_exit_vehicle, get_players as get_players_mod,
     teleport_player
@@ -15,25 +15,6 @@ from amc.models import (
 from amc.enums import VehicleKey
 from django.utils.translation import gettext as _, gettext_lazy
 
-@registry.register("/admin_despawn", description=gettext_lazy("Admin despawn tool"), category="Admin")
-async def cmd_admin_despawn(ctx: CommandContext, category: str = "all"):
-    if not ctx.player_info.get('bIsAdmin'):
-        asyncio.create_task(show_popup(ctx.http_client_mod, _("<Title>Feature disabled</>\n\nSorry, this feature is temporarily unavailable"), character_guid=ctx.character.guid, player_id=str(ctx.player.unique_id)))
-        return
-    
-    if category != "all" and category != "others":
-        players = await get_players2(ctx.http_client)
-        target_guid = next((p.get('character_guid') for pid, p in players if p.get('name', '').startswith(category)), None)
-        
-        if target_guid:
-            await despawn_player_vehicle(ctx.http_client_mod, target_guid, category='others')
-            asyncio.create_task(show_popup(ctx.http_client_mod, _("<Title>Player vehicles despawned</>\n\n"), character_guid=ctx.character.guid, player_id=str(ctx.player.unique_id)))
-            return
-        else:
-             asyncio.create_task(show_popup(ctx.http_client_mod, _("<Title>Player not found</>\n\nPlease make sure you typed the name correctly."), character_guid=ctx.character.guid, player_id=str(ctx.player.unique_id)))
-             return
-
-    await despawn_player_vehicle(ctx.http_client_mod, ctx.player.unique_id, category=category)
 
 @registry.register("/spawn_displays", description=gettext_lazy("Spawn display vehicles"), category="Admin")
 async def cmd_spawn_displays(ctx: CommandContext, display_id: int = None):

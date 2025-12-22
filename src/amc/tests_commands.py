@@ -1,9 +1,7 @@
 from django.test import SimpleTestCase, TestCase
 from unittest.mock import AsyncMock, MagicMock, patch
 from dataclasses import dataclass
-from typing import Any
-import re
-from datetime import datetime, timedelta
+from datetime import timedelta
 from django.utils import timezone
 from amc.command_framework import registry, CommandContext, CommandRegistry
 from amc import commands  # Ensure commands are registered
@@ -598,47 +596,6 @@ class CommandsTestCase(TestCase):
              self.ctx.announce.assert_called()
 
     # --- Admin & Spawning Tests ---
-
-    async def test_cmd_despawn_admin(self):
-        from amc import commands
-        # Currently feature disabled in commands code, but let's test what it does
-        await commands.cmd_despawn(self.ctx)
-        self.ctx.reply.assert_called_with("<Title>Feature disabled</>\n\nSorry, this feature has been permanently disabled.")
-
-    async def test_cmd_admin_despawn(self):
-        from amc import commands
-        self.ctx.player_info['bIsAdmin'] = True
-        
-        # Test 'all'
-        with patch('amc.commands.admin.despawn_player_vehicle', new=AsyncMock()) as mock_despawn:
-            await commands.cmd_admin_despawn(self.ctx, "all")
-            mock_despawn.assert_called_with(self.ctx.http_client_mod, str(self.ctx.player.unique_id), category="all")
-
-        # Test specific player (Found)
-        mock_p_info = {'name': 'Target', 'character_guid': 'guid-1', 'player_id': 'pid-1'}
-        with patch('amc.commands.admin.despawn_player_vehicle', new=AsyncMock()) as mock_despawn, \
-             patch('amc.commands.admin.get_players2', new=AsyncMock(return_value=[(1, mock_p_info)])), \
-             patch('amc.commands.admin.show_popup', new=AsyncMock()) as mock_popup:
-            
-            await commands.cmd_admin_despawn(self.ctx, "Target")
-            mock_despawn.assert_called_with(self.ctx.http_client_mod, 'guid-1', category='others')
-            mock_popup.assert_called()
-
-        # Test specific player (Not Found)
-        with patch('amc.commands.admin.get_players2', new=AsyncMock(return_value=[])), \
-             patch('amc.commands.admin.show_popup', new=AsyncMock()) as mock_popup:
-            
-            await commands.cmd_admin_despawn(self.ctx, "Ghost")
-            mock_popup.assert_called()
-            self.assertIn("Player not found", mock_popup.call_args[0][1])
-
-    async def test_cmd_admin_despawn_not_admin(self):
-        from amc import commands
-        self.ctx.player_info['bIsAdmin'] = False
-        with patch('amc.commands.admin.show_popup', new=AsyncMock()) as mock_popup:
-             await commands.cmd_admin_despawn(self.ctx)
-             mock_popup.assert_called()
-             self.assertIn("Feature disabled", mock_popup.call_args[0][1])
 
     async def test_cmd_tp_player(self):
         from amc import commands
