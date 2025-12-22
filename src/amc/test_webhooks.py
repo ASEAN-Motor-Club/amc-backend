@@ -169,20 +169,7 @@ class ProcessEventTests(TestCase):
       }
     }
     
-    # Normal subsidy is 0 for basic cargo usually unless configured? 
-    # Let's check get_subsidy_for_cargo logic. It returns (0, something) by default if not specialized.
-    # Actually `get_subsidy_for_cargo` in `amc.subsidies` probably returns 0.
-    # But in `webhook.py`: `delivery_subsidy = (subsidy * 1.5) + (payment * quantity * 0.5)` if is_rp_mode.
-    # subsidy comes from get_subsidy_for_cargo. If that is 0, then:
-    # delivery_subsidy = 0 + (10000 * 1 * 0.5) = 5000.
-    
     payment, subsidy = await process_event(event, player, character, is_rp_mode=True, treasury_balance=100_000)
-    
-    # Total payment return from process_event is `log.payment + subsidy`?
-    # In webhook.py: `total_payment += sum([log.payment for log in logs]) + subsidy`
-    # log.payment is 10000.
-    # subsidy (calculated above) should be 5000.
-    # So expected total_payment = 15000.
     
     self.assertEqual(subsidy, 5000)
     self.assertEqual(payment, 15000)
@@ -225,10 +212,6 @@ class ProcessEventTests(TestCase):
           'PlayerId': str(player.unique_id),
         }
       }
-      
-      # We need to mock http_client to verify on_delivery_job_fulfilled calls announce?
-      # Actually `on_delivery_job_fulfilled` is called via asyncio.create_task. 
-      # We just want to check if job.quantity_fulfilled increased.
       
       await process_event(event, player, character)
       
@@ -336,33 +319,6 @@ class ProcessEventsTests(TestCase):
     discord_client = AsyncMock()
     
     events = [{
-      'hook': "ServerCargoArrived", # Note: process_events expects short hook names or handles full ones? 
-      # Looking at webhook.py: Match key[1]... logic strips nothing, it just matches.
-      # But process_events in webhook.py does: `match key[1]: case "ServerCargoArrived":`
-      # In the original test, the hook was full path: "/Script/MotorTown.MotorTownPlayerController:ServerCargoArrived"
-      # But process_events grouping key_fn is: (player_id, event['hook'])
-      # WAIT. `event['hook']` in original test IS the full string.
-      # Does `process_events` handle the full string in the match?
-      # No, `case "ServerCargoArrived":` will ONLY match the exact string "ServerCargoArrived".
-      # So if the input event has "/Script/...", it will fall to `case _: aggregated_events.extend(group_events)`.
-      # Then later `process_event` is called.
-      # inside `process_event`: `match event['hook']: case "ServerCargoArrived":`.
-      # So strict matching is mandated.
-      # The original test used full paths but maybe the logic in `process_event` or `process_events` handled it?
-      # Let's check `webhook.py` content again.
-      # Line 195: `case "ServerCargoArrived":`
-      # Line 353: `case "ServerCargoArrived":`
-      # So the hook string MUST be exactly "ServerCargoArrived" for it to hit those cases.
-      # The original test passed full strings?
-      # Looking at original code...
-      # Line 30: 'hook': "/Script/MotorTown.MotorTownPlayerController:ServerCargoArrived"
-      # But `process_event` (singular) uses `match event['hook']`.
-      # If `process_event` matches explicitly "ServerCargoArrived", then the original test with full path string WOULD FAIL to match that case unless `process_event` has logic to strip it or I misread matching.
-      # Python `match` is exact.
-      # So the original test MIGHT BE WRONG or the code expects just the short name now?
-      # Let's assume the code expects short names based on the match cases.
-      # I will use short names in my new events.
-      # Use short names in this test to be safe and consistent with code reading.
       'hook': "ServerCargoArrived",
       'timestamp': int(time.time()),
       'data': {
@@ -412,12 +368,6 @@ class ProcessEventsTests(TestCase):
       }
     }]
     
-    # We need dummy delivery points or it will fail?
-    # `process_cargo_log` tries to find `DeliveryPoint`.
-    # It does `await DeliveryPoint.objects.filter(...).afirst()`. If not found, it's None.
-    # `ServerCargoArrivedLog` allows null points? `sender_point` and `destination_point` are ForeignKey.
-    # Looking at `models.py` (not shown fully) but usually they might be nullable or it might error.
-    # Ideally created points.
     await DeliveryPoint.objects.acreate(guid="1", name="mine", type="mine", coord=Point(0,0,0))
     await DeliveryPoint.objects.acreate(guid="2", name="factory", type="factory", coord=Point(1000,1000,0))
 
@@ -428,18 +378,8 @@ class ProcessEventsTests(TestCase):
       3
     )
     
-    # Verify discord embedding was called if discord_client is passed (and code supports it)
-    # logic: `if discord_client: asyncio.create_task(post_discord_delivery_embed(...))`
-    # Since it's a create_task, we might not see it awaited unless we wait.
-    # But we can check if it was attempted?
-    # `post_discord_delivery_embed` calls `jobs_cog.post_delivery_embed`.
-    # discord_client.get_cog('JobsCog') needs to return a mock.
-    
     mock_jobs_cog = MagicMock()
     mock_jobs_cog.post_delivery_embed = AsyncMock()
     discord_client.get_cog.return_value = mock_jobs_cog
     
-    # Run again to capture discord call
     await process_events(events[:1], http_client, http_client_mod, discord_client)
-    # give loop a chance? creates_task usually schedules it.
-    # Testing asyncio.create_task side effects is tricky without gathering them.
