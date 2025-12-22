@@ -137,6 +137,10 @@
               type = lib.types.nullOr lib.types.path;
               default = null;
             };
+            extraBindMounts = lib.mkOption {
+              type = lib.types.attrsOf lib.types.anything;
+              default = {};
+            };
             backendSettings = lib.mkOption {
               type = lib.types.submodule backendOptionsSubmodule;
               default = {};
@@ -177,8 +181,10 @@
             containers.amc-backend = {
               autoStart = true;
               restartIfChanged = false;
-              bindMounts."/etc/ssh/ssh_host_ed25519_key".isReadOnly = true;
-              bindMounts.${cfg.necesseFifoPath}.isReadOnly = false;
+              bindMounts = {
+                "/etc/ssh/ssh_host_ed25519_key".isReadOnly = true;
+                ${cfg.necesseFifoPath}.isReadOnly = false;
+              } // cfg.extraBindMounts;
               config = { config, pkgs, ... }: {
                 imports = [
                   self.nixosModules.backend
