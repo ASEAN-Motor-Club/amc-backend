@@ -6,7 +6,7 @@ from amc.mod_server import (
     force_exit_vehicle, get_players as get_players_mod,
     teleport_player
 )
-from amc.game_server import get_players2
+from amc.game_server import get_players
 from amc.vehicles import spawn_registered_vehicle
 from amc.models import (
     CharacterVehicle, VehicleDealership, WorldText, WorldObject, Garage,
@@ -96,7 +96,7 @@ async def cmd_tp_player(ctx: CommandContext, target_player_name: str, location_n
         return
 
     # Find the target player
-    players = await get_players2(ctx.http_client)
+    players = await get_players(ctx.http_client)
     target_pid = fuzzy_find_player(players, target_player_name)
 
     if not target_pid:

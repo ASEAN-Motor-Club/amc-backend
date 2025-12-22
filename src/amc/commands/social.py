@@ -2,7 +2,7 @@ import asyncio
 from amc.command_framework import registry, CommandContext
 from amc.models import Character, Thank, Player
 from amc.mod_server import send_system_message
-from amc.game_server import get_players2
+from amc.game_server import get_players
 from datetime import timedelta
 from django.db.models import F
 from django.utils.translation import gettext as _, gettext_lazy
@@ -11,7 +11,7 @@ from django.utils.translation import gettext as _, gettext_lazy
 async def cmd_thank(ctx: CommandContext, target_player_name: str):
     if target_player_name == ctx.character.name: return
     
-    players = await get_players2(ctx.http_client)
+    players = await get_players(ctx.http_client)
     target_guid = next((p['character_guid'] for pid, p in players if p['name'].startswith(target_player_name)), None)
     
     if not target_guid:

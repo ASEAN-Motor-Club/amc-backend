@@ -608,7 +608,7 @@ class CommandsTestCase(TestCase):
         mock_p2 = {'name': 'TargetDummy', 'character_guid': 'guid-2', 'player_id': 'pid-2'}
         mock_p3 = {'name': 'OtherPerson', 'character_guid': 'guid-3', 'player_id': 'pid-3'}
         
-        # get_players2 returns a list of tuples (unique_id, player_dict)
+        # get_players returns a list of tuples (unique_id, player_dict)
         mock_players = [
             ('pid-1', mock_p1),
             ('pid-2', mock_p2),
@@ -621,7 +621,7 @@ class CommandsTestCase(TestCase):
         mock_tp.location.z = 300
         
         # Test Successful Teleport (Exact)
-        with patch('amc.commands.admin.get_players2', new=AsyncMock(return_value=mock_players)), \
+        with patch('amc.commands.admin.get_players', new=AsyncMock(return_value=mock_players)), \
              patch('amc.models.TeleportPoint.objects.aget', new=AsyncMock(return_value=mock_tp)), \
              patch('amc.commands.admin.teleport_player', new=AsyncMock()) as mock_teleport:
             
@@ -637,7 +637,7 @@ class CommandsTestCase(TestCase):
             )
 
         # Test Successful Teleport (Fuzzy - "TargetP" should match "TargetPlayer" better than "TargetDummy")
-        with patch('amc.commands.admin.get_players2', new=AsyncMock(return_value=mock_players)), \
+        with patch('amc.commands.admin.get_players', new=AsyncMock(return_value=mock_players)), \
              patch('amc.models.TeleportPoint.objects.aget', new=AsyncMock(return_value=mock_tp)), \
              patch('amc.commands.admin.teleport_player', new=AsyncMock()) as mock_teleport:
             
@@ -653,7 +653,7 @@ class CommandsTestCase(TestCase):
             )
 
         # Test Successful Teleport (Fuzzy - "Dummy" should match "TargetDummy")
-        with patch('amc.commands.admin.get_players2', new=AsyncMock(return_value=mock_players)), \
+        with patch('amc.commands.admin.get_players', new=AsyncMock(return_value=mock_players)), \
              patch('amc.models.TeleportPoint.objects.aget', new=AsyncMock(return_value=mock_tp)), \
              patch('amc.commands.admin.teleport_player', new=AsyncMock()) as mock_teleport:
             
@@ -669,7 +669,7 @@ class CommandsTestCase(TestCase):
             )
 
         # Test Player Not Found
-        with patch('amc.commands.admin.get_players2', new=AsyncMock(return_value={})), \
+        with patch('amc.commands.admin.get_players', new=AsyncMock(return_value={})), \
              patch('amc.commands.admin.show_popup', new=AsyncMock()) as mock_popup:
             
             await commands.cmd_tp_player(self.ctx, "Ghost", "Home")
@@ -677,7 +677,7 @@ class CommandsTestCase(TestCase):
             self.assertIn("Player not found", mock_popup.call_args[0][1])
 
         # Test Location Not Found
-        with patch('amc.commands.admin.get_players2', new=AsyncMock(return_value=mock_players)), \
+        with patch('amc.commands.admin.get_players', new=AsyncMock(return_value=mock_players)), \
              patch('amc.models.TeleportPoint.objects.aget', side_effect=TeleportPoint.DoesNotExist), \
              patch('amc.commands.admin.show_popup', new=AsyncMock()) as mock_popup:
             
@@ -903,7 +903,7 @@ class CommandsTestCase(TestCase):
         mock_p = {'name': 'Other', 'character_guid': 'guid2'}
         mock_char = MagicMock()
         
-        with patch('amc.commands.social.get_players2', new=AsyncMock(return_value=[(1, mock_p)])), \
+        with patch('amc.commands.social.get_players', new=AsyncMock(return_value=[(1, mock_p)])), \
              patch('amc.models.Character.objects.aget', new=AsyncMock(return_value=mock_char)), \
              patch('amc.models.Thank.objects.filter') as mock_t_filter, \
              patch('amc.models.Thank.objects.acreate', new=AsyncMock()) as mock_create:
@@ -1121,7 +1121,7 @@ class CommandsTestCase(TestCase):
         # /thank when player not found returns "Player not found"
         # In id: "Pemain tidak ditemukan"
         
-        with patch('amc.commands.social.get_players2', new=AsyncMock(return_value=[])):
+        with patch('amc.commands.social.get_players', new=AsyncMock(return_value=[])):
             await registry.execute("/thank NoSuchPlayer", self.ctx)
             
             self.ctx.reply.assert_called()

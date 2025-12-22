@@ -15,7 +15,7 @@ def create_player_autocomplete(session, max_num=25):
         name__icontains=current
       )
       .select_related('player')
-      .filter(player__unique_id__in=[int(player_id) for player_id, player_name in players])
+      .filter(player__unique_id__in=[int(player_id) for player_id, _ in players])
       .with_last_login()
       .order_by('name', '-last_login')
     )
@@ -24,7 +24,7 @@ def create_player_autocomplete(session, max_num=25):
         name__icontains=current
       )
       .select_related('player')
-      .exclude(player__unique_id__in=[int(player_id) for player_id, player_name in players])
+      .exclude(player__unique_id__in=[int(player_id) for player_id, _ in players])
       .with_last_login()
       .order_by('name', '-last_login')
     )

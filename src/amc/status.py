@@ -1,12 +1,12 @@
 import psutil
 from amc.mod_server import get_status, set_config, list_player_vehicles, teleport_player
-from amc.game_server import get_players2, announce
+from amc.game_server import get_players, announce
 from amc.models import ServerStatus, CharacterLocation
 
 async def monitor_server_status(ctx):
   status = await get_status(ctx['http_client_mod'])
   try:
-    players = await get_players2(ctx['http_client'])
+    players = await get_players(ctx['http_client'])
   except Exception as e:
     print(f"Failed to get players: {e}")
     players = []
@@ -21,7 +21,7 @@ async def monitor_server_status(ctx):
 async def monitor_server_condition(ctx):
   status = await get_status(ctx['http_client_mod'])
   try:
-    players = await get_players2(ctx['http_client'])
+    players = await get_players(ctx['http_client'])
   except Exception as e:
     print(f"Failed to get players: {e}")
     players = []
@@ -56,7 +56,7 @@ async def monitor_server_condition(ctx):
 
 async def monitor_rp_mode(ctx):
   try:
-    players = await get_players2(ctx['http_client'])
+    players = await get_players(ctx['http_client'])
   except Exception as e:
     print(f"Failed to get players: {e}")
     players = []

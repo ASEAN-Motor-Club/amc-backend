@@ -60,7 +60,7 @@ from amc.models import (
   WorldText,
   WorldObject,
 )
-from amc.game_server import announce, get_players, get_players2, kick_player
+from amc.game_server import announce, get_players, kick_player
 from amc.utils import forward_to_discord, countdown, add_discord_verified_role
 from amc.mod_server import (
   show_popup,
@@ -465,8 +465,8 @@ Not everyone likes to be roughed up!
       player_id = None
       if http_client:
         players = await get_players(http_client)
-        for p_id, p_name in players:
-          if player_name == p_name:
+        for p_id, p_data in players:
+          if player_name == p_data['name']:
             player_id = p_id
             break
       if player_id is None:

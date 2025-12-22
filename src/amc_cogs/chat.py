@@ -18,7 +18,7 @@ class ChatCog(commands.Cog):
       try:
         player = await Player.objects.aget(discord_user_id=message.author.id)
         online_players = await get_players(self.bot.http_client_game)
-        online_players_by_id = dict(online_players)
+        online_players_by_id = {str(uid): data['name'] for uid, data in online_players}
         if str(player.unique_id) in online_players_by_id:
           await send_message_as_player(self.bot.http_client_mod, message.content, str(player.unique_id))
           return

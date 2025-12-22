@@ -375,7 +375,8 @@ This notice was issued by Officer {interaction.user.display_name}. If you wish t
       players = []
 
     resp = "# Player Vehicles\n\n"
-    for player_id, player_name in players:
+    for player_id, player_data in players:
+      player_name = player_data['name']
       player_vehicles = await list_player_vehicles(self.bot.http_client_mod, player_id)
 
       resp += f"""

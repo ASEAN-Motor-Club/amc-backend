@@ -19,15 +19,6 @@ async def game_api_request(session, url, method='get', password='', params={}):
 async def get_players(session, password=''):
   data = await game_api_request(session, "/player/list")
   players = [
-    (player['unique_id'], player['name'])
-    for player in data['data'].values()
-    if player is not None
-  ]
-  return players
-
-async def get_players2(session, password=''):
-  data = await game_api_request(session, "/player/list")
-  players = [
     (player['unique_id'], player)
     for player in data['data'].values()
     if player is not None
@@ -36,7 +27,7 @@ async def get_players2(session, password=''):
 
 async def is_player_online(player_id, session, password=''):
   players = await get_players(session, password)
-  player_ids = {str(player_id) for player_id, player_name in players}
+  player_ids = {str(player_id) for player_id, _ in players}
   return str(player_id) in player_ids
 
 

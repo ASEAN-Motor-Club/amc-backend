@@ -5,7 +5,7 @@ from amc.models import (
   Character,
   CharacterLocation,
 )
-from amc.game_server import get_players2
+from amc.game_server import get_players
 from amc.mod_server import transfer_money
 from amc_finance.services import send_fund_to_player_wallet
 
@@ -19,7 +19,7 @@ async def handout_ubi(ctx):
   http_client_mod = ctx.get('http_client_mod')
   now = timezone.now()
 
-  players = await get_players2(http_client)
+  players = await get_players(http_client)
   for player_id, player in players:
     character = await Character.objects.aget(guid=player['character_guid'])
     if not character.driver_level or character.reject_ubi:
