@@ -5,6 +5,7 @@ from amc.vehicles import (
 )
 from amc.mod_server import despawn_by_tag, despawn_player_vehicle, show_popup
 import asyncio
+import itertools
 from django.utils.translation import gettext as _, gettext_lazy
 
 @registry.register(["/despawn", "/d"], description=gettext_lazy("Despawn your vehicle"), category="Vehicle Management")
@@ -75,10 +76,17 @@ async def cmd_rent(ctx: CommandContext, vehicle_id: str = ""):
             await ctx.reply(_("<Title>Rentals</>\nNo rentals found."))
             return
 
-        names = '\n'.join([
-            f"<Small>#{v.id} - {v.config['VehicleName']}</>" 
-            for v in vehicles
-        ])
+        # Group by company
+        vehicles.sort(key=lambda v: v.config.get('CompanyName', 'Independent'))
+        
+        lines = []
+        for company, group in itertools.groupby(vehicles, key=lambda v: v.config.get('CompanyName', 'Independent')):
+            lines.append(f"<Bold>{company}</>")
+            for v in group:
+                lines.append(f" <Small>#{v.id} - {v.config['VehicleName']}</>")
+            lines.append("")
+
+        names = '\n'.join(lines)
         await ctx.reply(_("<Title>Available Rentals</>\nType /rent [id] to rent.\n\n{names}").format(names=names))
     else:
         # Spawn logic

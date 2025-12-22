@@ -10,6 +10,53 @@ from amc import commands  # Ensure commands are registered
 from amc.models import Character, Player
 # Import other models as needed for mocking or actual DB tests if we go that route
 
+class RentGroupingTestCase(SimpleTestCase):
+    def setUp(self):
+        self.ctx = MagicMock(spec=CommandContext)
+        self.ctx.reply = AsyncMock()
+        self.ctx.announce = AsyncMock()
+        self.ctx.http_client_mod = MagicMock()
+        self.ctx.character = MagicMock()
+        self.ctx.player = MagicMock()
+        self.ctx.player_info = {}
+
+    async def test_cmd_rent_grouping(self):
+        from amc import commands
+        
+        # Create mock vehicles with different companies
+        v1 = MagicMock()
+        v1.id = 1
+        v1.config = {'CompanyName': 'Alpha Corp', 'VehicleName': 'Car A'}
+        
+        v2 = MagicMock()
+        v2.id = 2
+        v2.config = {'CompanyName': 'Beta Inc', 'VehicleName': 'Car B'}
+        
+        v3 = MagicMock()
+        v3.id = 3
+        v3.config = {'CompanyName': 'Alpha Corp', 'VehicleName': 'Car C'}
+
+        # Mock objects.filter to return these
+        # We need to mock VehicleName formatting call inside cmd_rent if used?
+        # Actually cmd_rent reads vehicle_id.strip() or lists all.
+        
+        with patch('amc.models.CharacterVehicle.objects.filter') as mock_filter:
+            mock_filter.return_value.__aiter__.return_value = [v1, v2, v3]
+            
+            await commands.cmd_rent(self.ctx, "")
+            
+            self.ctx.reply.assert_called()
+            output = self.ctx.reply.call_args[0][0]
+            
+            # Check for company headers
+            self.assertIn("Alpha Corp", output)
+            self.assertIn("Beta Inc", output)
+            
+            # Check for vehicle listings
+            self.assertIn("Car A", output)
+            self.assertIn("Car B", output)
+
+
 class CommandRegistryTestCase(SimpleTestCase):
     def setUp(self):
         self.registry = CommandRegistry()
