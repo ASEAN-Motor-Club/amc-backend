@@ -43,9 +43,97 @@ from amc.models import (
   DeliveryJob,
 )
 from amc.utils import lowercase_first_char_in_keys
+from amc.save_file import get_world, get_character as get_save_character, get_housings, DATA_PATH
+import os
 
 POSITION_UPDATE_RATE = 1
 POSITION_UPDATE_SLEEP = 1.0 / POSITION_UPDATE_RATE
+
+app_router = Router()
+
+@app_router.get('/world/', response=dict)
+def world(request):
+    return {
+      **get_world(),
+      'character': get_save_character(),
+    }
+
+@app_router.get('/housing/', response=dict)
+def housing(request):
+    return {
+      **get_housings(get_world()),
+    }
+
+@app_router.get('/active_events', response=dict)
+def list_active_events(request):
+    events = []
+    # Use DATA_PATH for /srv/www content
+    event_infos_path = os.path.join(DATA_PATH, 'event_infos')
+    if not os.path.exists(event_infos_path):
+        return {'active_events': []}
+
+    for filename in os.listdir(event_infos_path):
+        filepath = os.path.join(event_infos_path, filename)
+        if not os.path.isfile(filepath):
+            continue
+        file_modified_time = datetime.fromtimestamp(os.path.getmtime(filepath))
+        if file_modified_time < datetime.now() - timedelta(seconds=30):
+            continue
+
+        with open(filepath) as f:
+          event = json.load(f)
+        events.append(event['event'])
+
+    return {
+      'active_events': events,
+    }
+
+def load_jsonl(file_path):
+    data = []
+    try:
+        with open(file_path, 'r') as f:
+            for line in f:
+                try:
+                    data.append(json.loads(line))
+                except json.JSONDecodeError:
+                    pass
+    except FileNotFoundError:
+        pass
+    return data
+
+@app_router.get('/route_info/{route_hash}/laps/{laps}', response=dict)
+def route_info(request, route_hash: str, laps: int):
+    laps = int(laps)
+    with open(os.path.join(DATA_PATH, 'routes', f"{route_hash}.json")) as f:
+      route = json.load(f)
+    results = load_jsonl(os.path.join(DATA_PATH, 'route_infos', f"{route_hash}-{laps}.json"))
+
+    best_results_per_player = {}
+    for result in results:
+      participants = result['participants']
+      participant_times = result['participant_times']
+      for participant in participants:
+        participant['last_modified'] = result['last_modified']
+        # event_hash, _ = result['filename'].split('.') # Filename not present in stored logic?
+        # participant['event_hash'] = event_hash 
+        if participant['disqualified'] or not participant['finished']:
+          continue
+        unique_id = participant['unique_id']
+        starting_time = participant_times.get(unique_id, [[0.0]])[0][0]
+        end_time = participant['last_section_time']
+        if end_time > starting_time:
+          participant['net_time'] = end_time - starting_time
+        else:
+          participant['net_time'] = end_time
+
+        if unique_id not in best_results_per_player or best_results_per_player[unique_id]['net_time'] > participant['net_time']:
+          best_results_per_player[unique_id] = participant
+
+    return {
+      'route': route,
+      'best_times': sorted(best_results_per_player.values(), key=lambda p: p['net_time'])
+    }
+
 
 players_router = Router()
 
