@@ -640,6 +640,54 @@ class CommandsTestCase(TestCase):
              mock_popup.assert_called()
              self.assertIn("Feature disabled", mock_popup.call_args[0][1])
 
+    async def test_cmd_tp_player(self):
+        from amc import commands
+        from amc.models import TeleportPoint
+        self.ctx.player_info['bIsAdmin'] = True
+        
+        # Mock Data
+        mock_p_info = {'name': 'TargetPlayer', 'character_guid': 'guid-target', 'player_id': 'pid-target'}
+        mock_players = [('pid-target', mock_p_info)]
+        
+        mock_tp = MagicMock()
+        mock_tp.location.x = 100
+        mock_tp.location.y = 200
+        mock_tp.location.z = 300
+        
+        # Test Successful Teleport
+        with patch('amc.commands.admin.get_players2', new=AsyncMock(return_value=mock_players)), \
+             patch('amc.models.TeleportPoint.objects.aget', new=AsyncMock(return_value=mock_tp)), \
+             patch('amc.commands.admin.teleport_player', new=AsyncMock()) as mock_teleport:
+            
+            await commands.cmd_tp_player(self.ctx, "Target", "Home")
+            
+            mock_teleport.assert_called_with(
+                self.ctx.http_client_mod,
+                "pid-target",
+                {'X': 100, 'Y': 200, 'Z': 300},
+                no_vehicles=False,
+                reset_trailers=False,
+                reset_carried_vehicles=False
+            )
+            self.ctx.reply.assert_called()
+
+        # Test Player Not Found
+        with patch('amc.commands.admin.get_players2', new=AsyncMock(return_value={})), \
+             patch('amc.commands.admin.show_popup', new=AsyncMock()) as mock_popup:
+            
+            await commands.cmd_tp_player(self.ctx, "Ghost", "Home")
+            mock_popup.assert_called()
+            self.assertIn("Player not found", mock_popup.call_args[0][1])
+
+        # Test Location Not Found
+        with patch('amc.commands.admin.get_players2', new=AsyncMock(return_value=mock_players)), \
+             patch('amc.models.TeleportPoint.objects.aget', side_effect=TeleportPoint.DoesNotExist), \
+             patch('amc.commands.admin.show_popup', new=AsyncMock()) as mock_popup:
+            
+            await commands.cmd_tp_player(self.ctx, "Target", "InvalidLoc")
+            mock_popup.assert_called()
+            self.assertIn("Teleport point not found", mock_popup.call_args[0][1])
+
     async def test_cmd_spawn_displays(self):
         from amc import commands
         self.ctx.player_info['bIsAdmin'] = True

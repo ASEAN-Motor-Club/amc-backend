@@ -3,12 +3,14 @@ from amc.command_framework import registry, CommandContext
 from amc.mod_server import (
     despawn_player_vehicle, show_popup, despawn_by_tag,
     spawn_garage, spawn_assets, spawn_vehicle,
-    force_exit_vehicle, get_players as get_players_mod
+    force_exit_vehicle, get_players as get_players_mod,
+    teleport_player
 )
 from amc.game_server import get_players2
 from amc.vehicles import spawn_registered_vehicle
 from amc.models import (
-    CharacterVehicle, VehicleDealership, WorldText, WorldObject, Garage
+    CharacterVehicle, VehicleDealership, WorldText, WorldObject, Garage,
+    TeleportPoint
 )
 from amc.enums import VehicleKey
 from django.utils.translation import gettext as _, gettext_lazy
@@ -103,3 +105,41 @@ async def cmd_exit(ctx: CommandContext, target_player_name: str):
         target_guid = next((p['CharacterGuid'] for p in players if p['PlayerName'] == target_player_name), None)
         if target_guid:
             await force_exit_vehicle(ctx.http_client_mod, target_guid)
+
+@registry.register("/tp_player", description=gettext_lazy("Teleport a player to a location (Admin)"), category="Admin")
+async def cmd_tp_player(ctx: CommandContext, target_player_name: str, location_name: str):
+    if not ctx.player_info.get('bIsAdmin'):
+        await ctx.reply(_("Admin-only"))
+        return
+
+    # Find the target player
+    players = await get_players2(ctx.http_client)
+    target_pid = next((pid for pid, p in players if p.get('name', '').startswith(target_player_name)), None)
+
+    if not target_pid:
+        asyncio.create_task(show_popup(ctx.http_client_mod, _("<Title>Player not found</>\n\nPlease make sure you typed the name correctly."), character_guid=ctx.character.guid, player_id=str(ctx.player.unique_id)))
+        return
+    
+    # Find the location
+    try:
+        teleport_point = await TeleportPoint.objects.aget(name__iexact=location_name)
+        loc_obj = teleport_point.location
+        location = {'X': loc_obj.x, 'Y': loc_obj.y, 'Z': loc_obj.z}
+    except TeleportPoint.DoesNotExist:
+        tp_points = TeleportPoint.objects.filter(character__isnull=True).order_by('name')
+        tp_points_names = [tp.name async for tp in tp_points]
+        asyncio.create_task(show_popup(ctx.http_client_mod, _("Teleport point not found\nChoose from one of the following locations:\n\n{locations}").format(
+            locations='\n'.join(tp_points_names)
+        ), character_guid=ctx.character.guid, player_id=str(ctx.player.unique_id)))
+        return
+
+    # Teleport
+    await teleport_player(
+        ctx.http_client_mod,
+        str(target_pid),
+        location,
+        no_vehicles=False, # Admins might want to move vehicles too, or maybe not. Defaulting to False (move vehicle) as it's often useful.
+        reset_trailers=False,
+        reset_carried_vehicles=False,
+    )
+    await ctx.reply(_("Teleported {player} to {location}").format(player=target_player_name, location=location_name))
