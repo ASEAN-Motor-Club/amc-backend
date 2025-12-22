@@ -1056,6 +1056,40 @@ class CommandsTestCase(TestCase):
         # "Register your vehicles" -> "Daftarkan kendaraan Anda"
         self.assertIn("Daftarkan kendaraan Anda", msg)
 
+    async def test_cmd_help_shows_all_for_admin(self):
+        from amc import commands
+        self.ctx.player_info['bIsAdmin'] = True
+        
+        mock_commands = [
+            {'name': '/general', 'aliases': ['/general'], 'description': 'Gen', 'category': 'General'},
+            {'name': '/admin', 'aliases': ['/admin'], 'description': 'Adm', 'category': 'Admin'}
+        ]
+        
+        with patch('amc.command_framework.registry.commands', mock_commands):
+            await commands.cmd_help(self.ctx)
+            
+            self.ctx.reply.assert_called()
+            output = self.ctx.reply.call_args[0][0]
+            self.assertIn("/general", output)
+            self.assertIn("/admin", output)
+
+    async def test_cmd_help_hides_admin_for_non_admin(self):
+        from amc import commands
+        self.ctx.player_info['bIsAdmin'] = False
+        
+        mock_commands = [
+            {'name': '/general', 'aliases': ['/general'], 'description': 'Gen', 'category': 'General'},
+            {'name': '/admin', 'aliases': ['/admin'], 'description': 'Adm', 'category': 'Admin'}
+        ]
+        
+        with patch('amc.command_framework.registry.commands', mock_commands):
+            await commands.cmd_help(self.ctx)
+            
+            self.ctx.reply.assert_called()
+            output = self.ctx.reply.call_args[0][0]
+            self.assertIn("/general", output)
+            self.assertNotIn("/admin", output)
+
 
 
 
