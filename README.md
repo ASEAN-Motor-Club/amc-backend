@@ -19,6 +19,72 @@ You're assumed to have some familiarity with Django.
 
 Slash commands are now handled via a registry system in the `src/amc/commands/` package.
 
+## Usage as NixOS Container
+
+The flake exposes a `nixosModules.containers` module that allows you to run the backend as a systemd-nspawn container on NixOS.
+
+### Configuration
+
+Import the module in your NixOS configuration:
+
+```nix
+{
+  inputs.amc-backend.url = "path:amc-backend";
+  # ...
+  outputs = { self, nixpkgs, amc-backend, ... }: {
+    nixosConfigurations.my-server = nixpkgs.lib.nixosSystem {
+      modules = [
+        amc-backend.nixosModules.containers
+        # ...
+      ];
+    };
+  };
+}
+```
+
+Configure the service:
+
+```nix
+services.amc-backend-containers = {
+  enable = true;
+  fqdn = "api.aseanmotorclub.com"; # The public domain name
+  port = 9000; # Internal port for the container API
+  relpPort = 2514; # Port for log ingestion
+  
+  # Path to the Necesse server named pipe for IPC
+  necesseFifoPath = "/run/necesse-server/server.fifo"; 
+  
+  # Secret file containing env vars (see environmentFile option in systemd)
+  secretFile = ./secrets/backend.age; 
+  
+  # List of allowed hosts for Django's ALLOWED_HOSTS
+  allowedHosts = [ 
+    "localhost"
+    "api.aseanmotorclub.com"
+  ];
+
+  # Extra bind mounts for the container
+  extraBindMounts = {
+     "/some/host/path".isReadOnly = true;
+  };
+
+  # Configuration for the inner django service
+  backendSettings = {
+    workers = 4;
+    environment = {
+       DEBUG = "False";
+       # ... other environment variables
+    };
+  };
+};
+```
+
+This will:
+1. Create a `amc-backend` container running the Django API and a Redis instance.
+2. Create key `amc-log-listener` container for log ingestion.
+3. Configure Nginx on the host to proxy requests to the container.
+
+
 To add a new command:
 1.  Navigate to `src/amc/commands/`.
 2.  Choose an appropriate category file (e.g., `general.py`, `vehicles.py`) or create a new one.
