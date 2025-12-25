@@ -1192,7 +1192,7 @@ class MinistryElection(models.Model):
     return self.Phase.FINALIZED
 
   def __str__(self):
-    return f"Ministry Election {self.id} ({self.get_phase_display()})"
+    return f"Ministry Election {self.id}"
 
 
 @final
@@ -1602,3 +1602,13 @@ class SubsidyRule(models.Model):
 
   def __str__(self):
     return f"{self.name} ({self.priority})"
+
+
+@final
+class MinistryDashboard(models.Model):
+    """
+    Dummy model to expose the Ministry Dashboard in the Django Admin.
+    """
+    class Meta:
+        managed = False
+        verbose_name_plural = "Ministry Dashboard"

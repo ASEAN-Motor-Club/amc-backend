@@ -1,0 +1,226 @@
+{% extends "admin/base_site.html" %}
+{% load i18n admin_urls static admin_list %}
+
+{% block extrastyle %}
+{{ block.super }}
+<link rel="stylesheet" type="text/css" href="{% static " admin/css/changelists.css" %}">
+<style>
+    .dashboard-container {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: 20px;
+        padding: 20px;
+    }
+
+    .dashboard-card {
+        background: var(--body-bg);
+        border: 1px solid var(--hairline-color);
+        border-radius: 4px;
+        padding: 15px;
+        box-shadow: 0 1px 2px rgba(0, 0, 0, 0.05);
+    }
+
+    .card-header {
+        font-size: 1.2em;
+        font-weight: bold;
+        margin-bottom: 10px;
+        border-bottom: 1px solid var(--hairline-color);
+        padding-bottom: 5px;
+    }
+
+    .stat-row {
+        display: flex;
+        justify-content: space-between;
+        margin-bottom: 8px;
+    }
+
+    .stat-value {
+        font-weight: 600;
+    }
+
+    .budget-bar-container {
+        background-color: #eee;
+        border-radius: 4px;
+        height: 20px;
+        width: 100%;
+        margin-top: 10px;
+        overflow: hidden;
+    }
+
+    .budget-bar {
+        background-color: #447e9b;
+        height: 100%;
+        transition: width 0.3s;
+    }
+
+    .full-width {
+        grid-column: 1 / -1;
+    }
+
+    .action-button {
+        display: inline-block;
+        padding: 8px 15px;
+        background: var(--button-bg);
+        color: var(--button-fg);
+        text-decoration: none;
+        border-radius: 4px;
+        font-weight: bold;
+    }
+
+    .action-button:hover {
+        background: var(--button-hover-bg);
+    }
+
+    table.dashboard-table {
+        width: 100%;
+        border-collapse: collapse;
+    }
+
+    table.dashboard-table th,
+    table.dashboard-table td {
+        text-align: left;
+        padding: 8px;
+        border-bottom: 1px solid var(--hairline-color);
+    }
+</style>
+{% endblock %}
+
+{% block content %}
+<div id="content-main">
+    <h1>{{ title }}</h1>
+
+    <div class="dashboard-container">
+        <!-- Overview Card -->
+        <div class="dashboard-card">
+            <div class="card-header">Term Overview</div>
+            {% if ministry_term %}
+            <div class="stat-row">
+                <span>Minister:</span>
+                <span class="stat-value">{{ ministry_term.minister.discord_name }}</span>
+            </div>
+            <div class="stat-row">
+                <span>Term Start:</span>
+                <span class="stat-value">{{ ministry_term.start_date|date:"Y-m-d H:i" }}</span>
+            </div>
+            <div class="stat-row">
+                <span>Term End:</span>
+                <span class="stat-value">{{ ministry_term.end_date|date:"Y-m-d H:i" }}</span>
+            </div>
+            <div class="stat-row">
+                <span>Performance:</span>
+                <span class="stat-value">{{ ministry_term.created_jobs_count }} Jobs Created / {{
+                    ministry_term.expired_jobs_count }} Expired</span>
+            </div>
+            {% else %}
+            <p>No active term found.</p>
+            {% endif %}
+        </div>
+
+        <!-- Budget Card -->
+        <div class="dashboard-card">
+            <div class="card-header">Budget</div>
+            {% if ministry_term %}
+            <div class="stat-row">
+                <span>Current Budget:</span>
+                <span class="stat-value" style="color: green;">${{ ministry_term.current_budget|floatformat:2
+                    }}</span>
+            </div>
+            <div class="stat-row">
+                <span>Total Spent:</span>
+                <span class="stat-value" style="color: red;">${{ ministry_term.total_spent|floatformat:2
+                    }}</span>
+            </div>
+            <div class="budget-bar-container">
+                <!-- Simple calculation for visual bar representing remaining budget percentage relative to initial -->
+                <div class="budget-bar"
+                    style="width: {% widthratio ministry_term.current_budget ministry_term.initial_budget 100 %}%;">
+                </div>
+            </div>
+            <div style="text-align: center; font-size: 0.8em; margin-top: 4px;">
+                {% widthratio ministry_term.current_budget ministry_term.initial_budget 100 %}% Remaining
+            </div>
+            {% else %}
+            <p>N/A</p>
+            {% endif %}
+        </div>
+
+        <!-- Subsidies Section -->
+        <div class="dashboard-card full-width">
+            <div class="card-header" style="display: flex; justify-content: space-between; align-items: center;">
+                <span>Active Subsidies (Top 5)</span>
+                <a href="{% url 'admin:amc_subsidyrule_changelist' %}" class="action-button"
+                    style="font-size: 0.8em;">Manage All</a>
+            </div>
+            {% if subsidies %}
+            <table class="dashboard-table">
+                <thead>
+                    <tr>
+                        <th>Name</th>
+                        <th>Reward</th>
+                        <th>Allocated</th>
+                        <th>Spent</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for subsidy in subsidies %}
+                    <tr>
+                        <td><a href="{% url 'admin:amc_subsidyrule_change' subsidy.pk %}">{{ subsidy.name }}</a></td>
+                        <td>
+                            {% if subsidy.reward_type == 'PERCENTAGE' %}
+                            {{ subsidy.reward_value|floatformat:0 }}%
+                            {% else %}
+                            ${{ subsidy.reward_value|floatformat:0 }}
+                            {% endif %}
+                        </td>
+                        <td>${{ subsidy.allocation|floatformat:0 }}</td>
+                        <td>${{ subsidy.spent|floatformat:0 }}</td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+            {% else %}
+            <p>No active subsidies.</p>
+            {% endif %}
+        </div>
+
+        <!-- Jobs Section -->
+        <div class="dashboard-card full-width">
+            <div class="card-header" style="display: flex; justify-content: space-between; align-items: center;">
+                <span>Recent Ministry Jobs</span>
+                <a href="{% url 'admin:amc_deliveryjob_add' %}" class="action-button" style="font-size: 0.8em;">Create
+                    Job</a>
+            </div>
+            {% if recent_jobs %}
+            <table class="dashboard-table">
+                <thead>
+                    <tr>
+                        <th>Job Name</th>
+                        <th>Progress</th>
+                        <th>Bonus</th>
+                        <th>Status</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for job in recent_jobs %}
+                    <tr>
+                        <td><a href="{% url 'admin:amc_deliveryjob_change' job.pk %}">{{ job.name }}</a></td>
+                        <td>{{ job.quantity_fulfilled }} / {{ job.quantity_requested }}</td>
+                        <td>${{ job.completion_bonus|floatformat:0 }}</td>
+                        <td>
+                            {% if job.fulfilled %}
+                            <span style="color: green;">Finished</span>
+                            {% else %}
+                            <span style="color: orange;">Active</span>
+                            {% endif %}
+                        </td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+            {% else %}
+            <p>No recent jobs found for this term.</p>
+            {% endif %}
+        </div>
+    </div>
+</div>
+{% endblock %}

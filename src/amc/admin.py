@@ -13,6 +13,7 @@ from django.db.models.functions import RowNumber
 from django.contrib import messages
 from django.utils.translation import ngettext
 from django.contrib.postgres.aggregates import ArrayAgg
+from django.template.response import TemplateResponse
 from .models import (
   Player,
   Ticket,
@@ -61,6 +62,7 @@ from .models import (
   MinistryCandidacy,
   MinistryVote,
   MinistryTerm,
+  MinistryDashboard,
 )
 from amc_finance.services import send_fund_to_player
 from amc_finance.admin import AccountInlineAdmin
@@ -755,3 +757,32 @@ class MinistryTermAdmin(admin.ModelAdmin):
   search_fields = ['minister__discord_name', 'minister__unique_id']
   readonly_fields = ['created_jobs_count', 'expired_jobs_count', 'total_spent']
 
+
+@admin.register(MinistryDashboard)
+class MinistryDashboardAdmin(admin.ModelAdmin):
+    change_list_template = "admin/amc/ministrydashboard/change_list.html"
+
+    def changelist_view(self, request, extra_context=None):
+        # 1. Fetch current term
+        now = timezone.now()
+        current_term = MinistryTerm.objects.filter(is_active=True).first()
+
+        # 2. Subsidies
+        subsidies = SubsidyRule.objects.filter(active=True).order_by('-priority')[:5]
+
+        # 3. Recent Jobs
+        # Jobs funded by this term (if exists) 
+        if current_term:
+            recent_jobs = DeliveryJob.objects.filter(funding_term=current_term).order_by('-requested_at')[:5]
+        else:
+            recent_jobs = DeliveryJob.objects.none()
+
+        context = {
+            **self.admin_site.each_context(request),
+            'title': "Ministry of Commerce Dashboard",
+            'ministry_term': current_term,
+            'subsidies': subsidies,
+            'recent_jobs': recent_jobs,
+            **(extra_context or {}),
+        }
+        return TemplateResponse(request, self.change_list_template, context)
