@@ -8,7 +8,7 @@ from amc.events import (
 from amc.utils import format_timedelta, format_in_local_tz, countdown
 from django.db.models import Exists, OuterRef
 from django.utils import timezone
-from django.utils.translation import gettext_lazy
+from django.utils.translation import gettext as _, gettext_lazy
 
 @registry.register("/staggered_start", description=gettext_lazy("Start event with staggered delay"), category="Events")
 async def cmd_staggered_start(ctx: CommandContext, delay: int):

@@ -1,5 +1,6 @@
 import os
 import json
+import itertools
 from Crypto.Cipher import AES
 
 KEY = b"66c5fd51a70e5e232cd236bd6895f802"

@@ -1,12 +1,19 @@
+import re
 import asyncio
+import discord
 import random
+import itertools
+from decimal import Decimal
+from datetime import timedelta
 from django.utils import timezone
 from django.db import connection
-from django.db.models import Exists, OuterRef
+from django.db.models import Exists, OuterRef, Q, F
 from django.contrib.gis.geos import Point
 from django.conf import settings
+from django.core.signing import Signer
 from asgiref.sync import sync_to_async
 from amc.models import ServerLog
+from amc.enums import VehicleKey
 from amc.server_logs import (
   parse_log_line,
   LogEvent,
@@ -26,42 +33,86 @@ from amc.server_logs import (
   UnknownLogEntry,
 )
 from amc.models import (
+  Player,
   Team,
   Character,
+  CharacterLocation,
   PlayerStatusLog,
   PlayerChatLog,
   PlayerVehicleLog,
   PlayerRestockDepotLog,
+  BotInvocationLog,
+  SongRequestLog,
   Company,
+  ScheduledEvent,
+  GameEventCharacter,
+  GameEvent,
+  TeleportPoint,
   VehicleDealership,
+  Thank,
+  Delivery,
+  DeliveryJob,
   DeliveryPoint,
+  VehicleDecal,
+  RescueRequest,
   CharacterVehicle,
   Garage,
   WorldText,
   WorldObject,
 )
 from amc.game_server import announce, get_players, kick_player
-from amc.utils import forward_to_discord
+from amc.utils import forward_to_discord, countdown, add_discord_verified_role
 from amc.mod_server import (
   show_popup,
+  send_system_message,
+  transfer_money,
   teleport_player,
   get_player,
+  get_players as get_players_mod,
+  despawn_player_vehicle,
   toggle_rp_session,
   get_rp_mode,
+  get_decal,
+  set_decal,
   set_character_name,
+  force_exit_vehicle,
+  spawn_vehicle,
+  list_player_vehicles,
   set_world_vehicle_decal,
   spawn_assets,
+  despawn_by_tag,
   spawn_garage,
 )
+from amc.auth import verify_player
 from amc.mailbox import send_player_messages
-from amc.utils import (
-  delay,
+from amc.events import (
+  setup_event,
+  show_scheduled_event_results_popup,
+  staggered_start,
+  auto_starting_grid,
 )
+from amc.locations import gwangjin_shortcut, migeum_shortcut
+from amc.utils import (
+  format_in_local_tz,
+  format_timedelta,
+  delay,
+  get_time_difference_string,
+  with_verification_code,
+)
+from amc.subsidies import DEFAULT_SAVING_RATE, SUBSIDIES_TEXT
 from amc_finance.services import (
+  register_player_withdrawal,
+  register_player_take_loan,
+  get_player_bank_balance,
+  get_player_loan_balance,
+  get_character_max_loan,
+  calc_loan_fee,
+  get_character_total_donations,
   player_donation,
 )
+from amc_finance.models import Account, LedgerEntry
 from amc.webhook import on_player_profit
-from amc.vehicles import spawn_registered_vehicle
+from amc.vehicles import register_player_vehicles, format_vehicle_part_game, spawn_registered_vehicle, format_key_string
 
 
 def get_welcome_message(last_login, player_name):
@@ -218,6 +269,7 @@ async def process_log_event(event: LogEvent, http_client=None, http_client_mod=N
 
       # --- New Command Framework ---
       from amc.command_framework import registry, CommandContext
+      import amc.commands # implementation side effects
       
       cmd_ctx = CommandContext(
           timestamp=timestamp,

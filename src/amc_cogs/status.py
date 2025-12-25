@@ -90,8 +90,8 @@ class StatusCog(commands.Cog):
       # 2. Robust Data Fetching (Wrapped in try/except for stability)
       try:
         active_players = await get_players(self.bot.http_client_game)
-      except Exception:
-        logger.exception("Failed to fetch players")
+      except Exception as e:
+        logger.exception(f"Failed to fetch players")
         active_players = []
 
       count = len(active_players)
@@ -104,8 +104,8 @@ class StatusCog(commands.Cog):
         
         self.fps_data = [status.fps for status in fetched_statuses]
         self.memory_data = [status.used_memory / 1073741824 for status in fetched_statuses]
-      except Exception:
-        logger.exception("Failed to fetch DB status")
+      except Exception as e:
+        logger.exception(f"Failed to fetch DB status")
         # Keep old data if DB fails
         if not hasattr(self, 'fps_data'):
           self.fps_data = []
@@ -170,8 +170,8 @@ class StatusCog(commands.Cog):
       else:
         self.last_embed_message = await channel.send(embed=embed, file=graph_file)
 
-    except Exception:
-      logger.exception("🔥 Status Loop Iteration Failed Unrecoverably")
+    except Exception as e:
+      logger.exception(f"🔥 Status Loop Iteration Failed Unrecoverably")
 
   @update_status_embed.before_loop
   async def before_update_status_embed(self):

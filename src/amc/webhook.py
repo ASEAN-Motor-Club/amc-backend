@@ -9,7 +9,7 @@ from django.db import transaction
 from asgiref.sync import sync_to_async
 from django.db.models import F, Q
 from amc.game_server import announce
-from amc.mod_server import get_webhook_events2, show_popup, get_rp_mode
+from amc.mod_server import get_webhook_events2, show_popup, get_rp_mode, despawn_player_vehicle
 from amc.subsidies import (
   repay_loan_for_profit,
   set_aside_player_savings,
