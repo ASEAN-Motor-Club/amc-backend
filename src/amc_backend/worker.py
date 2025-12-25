@@ -26,6 +26,8 @@ bot_task_handle = None
 global loop
 
 def run_blocking_bot():
+  import discord
+  discord.utils.setup_logging(root=False)
   try:
     discord_client.run(settings.DISCORD_TOKEN)
   except Exception as e:

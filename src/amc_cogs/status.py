@@ -1,3 +1,4 @@
+import logging
 import asyncio
 import discord
 import io
@@ -11,6 +12,7 @@ from django.conf import settings
 from amc.game_server import get_players
 from amc.models import Character, ServerStatus
 
+logger = logging.getLogger(__name__)
 
 class StatusCog(commands.Cog):
   def __init__(
@@ -89,7 +91,7 @@ class StatusCog(commands.Cog):
       try:
         active_players = await get_players(self.bot.http_client_game)
       except Exception as e:
-        print(f"Failed to fetch players: {e}")
+        logger.exception(f"Failed to fetch players")
         active_players = []
 
       count = len(active_players)
@@ -103,7 +105,7 @@ class StatusCog(commands.Cog):
         self.fps_data = [status.fps for status in fetched_statuses]
         self.memory_data = [status.used_memory / 1073741824 for status in fetched_statuses]
       except Exception as e:
-        print(f"Failed to fetch DB status: {e}")
+        logger.exception(f"Failed to fetch DB status")
         # Keep old data if DB fails
         if not hasattr(self, 'fps_data'):
           self.fps_data = []
@@ -136,7 +138,7 @@ class StatusCog(commands.Cog):
       # Player List
       if active_players:
         players_str = "\n".join([
-          discord.utils.escape_markdown(p[1]) for p in active_players
+          discord.utils.escape_markdown(p[1].get('name', '?')) for p in active_players
         ])
         if len(players_str) > 1000:
             players_str = players_str[:1000] + "... (truncated)"
@@ -163,14 +165,13 @@ class StatusCog(commands.Cog):
           self.last_embed_message = await channel.send(embed=embed, file=graph_file)
         except discord.Forbidden:
           # Message found, but we can't edit it (e.g., permissions changed or logic error)
-          print("Forbidden to edit message. Sending new one.")
+          logger.exception("Forbidden to edit message. Sending new one.")
           self.last_embed_message = await channel.send(embed=embed, file=graph_file)
       else:
         self.last_embed_message = await channel.send(embed=embed, file=graph_file)
 
     except Exception as e:
-      # Final catch-all to log any unhandled error and prevent silent death
-      print(f"🔥 Status Loop Iteration Failed Unrecoverably: {e}")
+      logger.exception(f"🔥 Status Loop Iteration Failed Unrecoverably")
 
   @update_status_embed.before_loop
   async def before_update_status_embed(self):
