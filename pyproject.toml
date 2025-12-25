@@ -29,7 +29,7 @@ dependencies = [
 amc-manage = "manage:main"
 
 [build-system]
-requires = ["hatchling"]
+requires = ["hatchling", "editables"]
 build-backend = "hatchling.build"
 
 [tool.taskipy.tasks]

@@ -438,6 +438,10 @@
           sourcePreference = "wheel";
         };
 
+        editableOverlay = workspace.mkEditablePyprojectOverlay {
+          root = "$REPO_ROOT";
+        };
+
         pyprojectOverrides = final: prev: {
         };
 
@@ -479,17 +483,18 @@
               env DJANGO_STATIC_ROOT="$out" python src/manage.py collectstatic --noinput
             '';
           };
+          
+          virtualenv = (pythonSet.overrideScope editableOverlay).mkVirtualEnv "amc-backend-dev-env" workspace.deps.all;
+
       in {
         packages.default = pythonSet.mkVirtualEnv "amc-backend-env" workspace.deps.default;
         packages.scripts = pythonSet.mkVirtualEnv "amc-scripts-env"  { scripts = []; };
         packages.staticRoot = staticRoot;
         devShells.default = pkgs.mkShell {
           packages = [
-            python
+            virtualenv
             pkgs.gettext
             pkgs.uv
-            pkgs.ruff
-            pkgs.basedpyright
             pkgs.jq
             pkgs.nil
             pkgs.alejandra
@@ -505,6 +510,7 @@
 
               # Prevent uv from managing Python downloads
               UV_PYTHON_DOWNLOADS = "never";
+              UV_NO_SYNC = "1";
               # Force uv to use nixpkgs Python interpreter
               UV_PYTHON = python.interpreter;
               SPATIALITE_LIBRARY_PATH = "${pkgs.libspatialite}/lib/libspatialite.dylib";
@@ -517,6 +523,7 @@
             };
           shellHook = ''
             unset PYTHONPATH
+            export REPO_ROOT=$(git rev-parse --show-toplevel)
           '';
         };
       };

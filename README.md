@@ -2,16 +2,22 @@
 
 ## Dev environment
 
+This project uses [Nix](https://nixos.org/) for reproducible development environments.
+
+1.  **Install Nix:** If you don't have Nix installed, follow the instructions at [nix.dev](https://nix.dev/install-nix.html).
+2.  **Enter the environment:**
+    *   **Option A (Manual):** Run `nix develop` in the project root. This will drop you into a shell with all dependencies installed.
+    *   **Option B (Automatic - Recommended):** Install [direnv](https://direnv.net/) and hook it into your shell. Then run `direnv allow` in the project root. The environment will automatically load when you cd into the directory.
+
+Once in the environment:
 ```sh
-$ nix --version # If you don't have hix, install Nix on your system (https://nix.dev/install-nix.html)
-$ nix develop # If you want to skip this step, look into `nix-direnv`)
-$ uv run backend/manage.py migrate # creates db and runs migrations
-$ uv run backend/manage.py runserver
+$ backend/manage.py migrate # creates db and runs migrations
+$ backend/manage.py runserver
 ```
 
 ## Django project
 You're assumed to have some familiarity with Django.
-- Please create migrations with `uv run backend/manage.py makemigrations` when you make changes to `**/models.py`.
+- Please create migrations with `backend/manage.py makemigrations` when you make changes to `**/models.py`.
 - API is served with `django-ninja`
 
 
@@ -109,15 +115,15 @@ We use `uv` and `nix` for dependency management and testing.
 **Running the Test Suite:**
 To run all tests (including the new integration tests):
 ```sh
-$ uv run src/manage.py test
+$ src/manage.py test
 ```
 
 To run specifically the command tests:
 ```sh
-$ uv run src/manage.py test amc.tests_commands
+$ src/manage.py test amc.tests_commands
 ```
 
 To run the integration tests for command routing:
 ```sh
-$ uv run src/manage.py test amc.tests_integration_commands
+$ src/manage.py test amc.tests_integration_commands
 ```
