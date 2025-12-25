@@ -68,6 +68,7 @@ members = [
 [dependency-groups]
 dev = [
     "basedpyright>=1.29.5",
+    "django-stubs>=5.2.8",
     "pyrefly>=0.46.1",
     "ruff>=0.14.10",
     "taskipy>=1.14.1",
