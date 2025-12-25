@@ -39,16 +39,21 @@ async def get_subsidies_text():
             
         text += f"<Bold>{cargo_str}</> - <Money>{reward_str}</>\n"
         
-        # Secondary info (Areas)
-        sources = [a async for a in rule.source_areas.all()]
-        destinations = [a async for a in rule.destination_areas.all()]
+        # Secondary info (Areas & Points)
+        source_areas = [a async for a in rule.source_areas.all()]
+        source_points = [p async for p in rule.source_delivery_points.all()]
+        all_sources = source_areas + source_points
         
-        if sources:
-            source_names = ", ".join([a.name for a in sources])
+        dest_areas = [a async for a in rule.destination_areas.all()]
+        dest_points = [p async for p in rule.destination_delivery_points.all()]
+        all_dests = dest_areas + dest_points
+        
+        if all_sources:
+            source_names = ", ".join([obj.name for obj in all_sources])
             text += f"<Secondary>From: {source_names}</>\n"
             
-        if destinations:
-            dest_names = ", ".join([a.name for a in destinations])
+        if all_dests:
+            dest_names = ", ".join([obj.name for obj in all_dests])
             text += f"<Secondary>To: {dest_names}</>\n"
             
     return text
@@ -225,15 +230,17 @@ async def get_subsidy_for_cargo(cargo, treasury_balance=None):
             subsidy_factor = subsidy_amount / cargo.payment
 
       # Ministry Allocation Check
-      remaining = best_rule.allocation - best_rule.spent
-      if remaining <= 0:
-          subsidy_amount = 0
-          subsidy_factor = 0
-      elif subsidy_amount > remaining:
-          subsidy_amount = int(remaining)
-          # Recalculate factor for reporting
-          if cargo.payment > 0:
-              subsidy_factor = subsidy_amount / cargo.payment
+      # Skipping for now
+      # TODO: Refactor, move this payment scaling responbility to the parent
+      # remaining = best_rule.allocation - best_rule.spent
+      # if remaining <= 0:
+      #     subsidy_amount = 0
+      #     subsidy_factor = 0
+      # elif subsidy_amount > remaining:
+      #     subsidy_amount = int(remaining)
+      #     # Recalculate factor for reporting
+      #     if cargo.payment > 0:
+      #         subsidy_factor = subsidy_amount / cargo.payment
 
   # Treasury Cap Logic
   if treasury_balance is not None and subsidy_amount > 0:

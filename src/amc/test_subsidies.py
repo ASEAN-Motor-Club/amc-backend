@@ -2,7 +2,7 @@ from django.test import TestCase
 from django.contrib.gis.geos import Point, Polygon
 from decimal import Decimal
 from amc.models import SubsidyRule, SubsidyArea, Cargo, DeliveryPoint
-from amc.subsidies import get_subsidy_for_cargo
+from amc.subsidies import get_subsidy_for_cargo, get_subsidies_text
 from unittest.mock import MagicMock
 
 class SubsidyLogicTest(TestCase):
@@ -185,7 +185,9 @@ class SubsidyLogicTest(TestCase):
         
         self.assertIn("Any Cargo", text) # From r3
         self.assertIn("1000 coins", text)
-        self.assertIn("From: Gwangjin Area", text)
+        self.assertIn("From: Gwangjin Area, In Point", text) # Note: order depends on query results but logically both should be there
+                                                             # Since we concat areas then points, Gwangjin Area is first.
+
 
     async def test_delivery_point_matching(self):
         # Rule: Source = point_in
