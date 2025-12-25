@@ -7,7 +7,7 @@
 <style>
     .dashboard-container {
         display: grid;
-        grid-template-columns: 1fr 1fr;
+        grid-template-columns: repeat(auto-fit, minmax(400px, 1fr));
         gap: 20px;
         padding: 20px;
     }
@@ -15,42 +15,49 @@
     .dashboard-card {
         background: var(--body-bg);
         border: 1px solid var(--hairline-color);
-        border-radius: 4px;
-        padding: 15px;
-        box-shadow: 0 1px 2px rgba(0, 0, 0, 0.05);
+        border-radius: 8px;
+        padding: 20px;
+        box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+        display: flex;
+        flex-direction: column;
     }
 
     .card-header {
-        font-size: 1.2em;
-        font-weight: bold;
-        margin-bottom: 10px;
-        border-bottom: 1px solid var(--hairline-color);
-        padding-bottom: 5px;
+        font-size: 1.1em;
+        font-weight: 700;
+        margin-bottom: 20px;
+        padding-bottom: 10px;
+        border-bottom: 2px solid var(--primary-color, #79aec8);
+        color: var(--body-fg);
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
     }
 
     .stat-row {
         display: flex;
         justify-content: space-between;
-        margin-bottom: 8px;
+        margin-bottom: 12px;
+        font-size: 0.95em;
     }
 
     .stat-value {
-        font-weight: 600;
+        font-weight: 700;
     }
 
     .budget-bar-container {
-        background-color: #eee;
-        border-radius: 4px;
-        height: 20px;
+        background-color: var(--secondary-bg, #eee);
+        border-radius: 10px;
+        height: 12px;
         width: 100%;
-        margin-top: 10px;
+        margin-top: 15px;
         overflow: hidden;
     }
 
     .budget-bar {
-        background-color: #447e9b;
+        background-color: var(--primary-color, #447e9b);
         height: 100%;
-        transition: width 0.3s;
+        transition: width 0.5s ease-in-out;
     }
 
     .full-width {
@@ -59,36 +66,53 @@
 
     .action-button {
         display: inline-block;
-        padding: 8px 15px;
-        background: var(--button-bg);
-        color: var(--button-fg);
+        padding: 6px 12px;
+        background: #79aec8;
+        color: white;
         text-decoration: none;
         border-radius: 4px;
         font-weight: bold;
+        font-size: 0.85em;
+        transition: background 0.2s;
     }
 
     .action-button:hover {
-        background: var(--button-hover-bg);
+        background: #609ab6;
+        color: white;
     }
 
     table.dashboard-table {
         width: 100%;
         border-collapse: collapse;
+        margin-top: 10px;
     }
 
     table.dashboard-table th,
     table.dashboard-table td {
         text-align: left;
-        padding: 8px;
+        padding: 12px 8px;
         border-bottom: 1px solid var(--hairline-color);
     }
+
+    table.dashboard-table th {
+        color: var(--secondary-fg, #666);
+        font-weight: 600;
+        font-size: 0.85em;
+        text-transform: uppercase;
+        letter-spacing: 0.05em;
+    }
+
+    .chart-container {
+        position: relative;
+        height: 250px;
+        width: 100%;
+    }
 </style>
+<script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
 {% endblock %}
 
 {% block content %}
 <div id="content-main">
-    <h1>{{ title }}</h1>
-
     <div class="dashboard-container">
         <!-- Overview Card -->
         <div class="dashboard-card">
@@ -118,38 +142,79 @@
 
         <!-- Budget Card -->
         <div class="dashboard-card">
-            <div class="card-header">Budget</div>
+            <div class="card-header">Current Budget</div>
             {% if ministry_term %}
             <div class="stat-row">
                 <span>Current Budget:</span>
-                <span class="stat-value" style="color: green;">${{ ministry_term.current_budget|floatformat:2
+                <span class="stat-value" style="color: #28a745;">${{ ministry_term.current_budget|floatformat:2
                     }}</span>
             </div>
             <div class="stat-row">
                 <span>Total Spent:</span>
-                <span class="stat-value" style="color: red;">${{ ministry_term.total_spent|floatformat:2
-                    }}</span>
+                <span class="stat-value" style="color: #dc3545;">${{ ministry_term.total_spent|floatformat:2 }}</span>
             </div>
             <div class="budget-bar-container">
-                <!-- Simple calculation for visual bar representing remaining budget percentage relative to initial -->
                 <div class="budget-bar"
                     style="width: {% widthratio ministry_term.current_budget ministry_term.initial_budget 100 %}%;">
                 </div>
             </div>
-            <div style="text-align: center; font-size: 0.8em; margin-top: 4px;">
-                {% widthratio ministry_term.current_budget ministry_term.initial_budget 100 %}% Remaining
+            <div style="text-align: center; font-size: 0.8em; margin-top: 8px; color: #666;">
+                {% widthratio ministry_term.current_budget ministry_term.initial_budget 100 %}% Remaining of ${{
+                ministry_term.initial_budget|floatformat:0 }}
             </div>
             {% else %}
             <p>N/A</p>
             {% endif %}
         </div>
 
+        <!-- Time Series Graphs -->
+        <div class="dashboard-card">
+            <div class="card-header">Government Spending</div>
+            <div class="chart-container">
+                <canvas id="spendingChart"></canvas>
+            </div>
+        </div>
+
+        <div class="dashboard-card">
+            <div class="card-header">Ministerial Budget Trend</div>
+            <div class="chart-container">
+                <canvas id="budgetChart"></canvas>
+            </div>
+        </div>
+
+        <div class="dashboard-card">
+            <div class="card-header">Player Activity</div>
+            <div class="chart-container">
+                <canvas id="playersChart"></canvas>
+            </div>
+        </div>
+
+        <div class="dashboard-card">
+            <div class="card-header">Government Revenue</div>
+            <div class="chart-container">
+                <canvas id="incomeChart"></canvas>
+            </div>
+        </div>
+
+        <div class="dashboard-card">
+            <div class="card-header">Government Treasury</div>
+            <div class="chart-container">
+                <canvas id="treasuryChart"></canvas>
+            </div>
+        </div>
+
+        <div class="dashboard-card">
+            <div class="card-header">Job Success vs Failure</div>
+            <div class="chart-container">
+                <canvas id="jobsChart"></canvas>
+            </div>
+        </div>
+
         <!-- Subsidies Section -->
         <div class="dashboard-card full-width">
-            <div class="card-header" style="display: flex; justify-content: space-between; align-items: center;">
+            <div class="card-header">
                 <span>Active Subsidies (Top 5)</span>
-                <a href="{% url 'admin:amc_subsidyrule_changelist' %}" class="action-button"
-                    style="font-size: 0.8em;">Manage All</a>
+                <a href="{% url 'admin:amc_subsidyrule_changelist' %}" class="action-button">Manage All</a>
             </div>
             {% if subsidies %}
             <table class="dashboard-table">
@@ -167,7 +232,7 @@
                         <td><a href="{% url 'admin:amc_subsidyrule_change' subsidy.pk %}">{{ subsidy.name }}</a></td>
                         <td>
                             {% if subsidy.reward_type == 'PERCENTAGE' %}
-                            {{ subsidy.reward_value|floatformat:0 }}%
+                            {{ subsidy.reward_percentage }}%
                             {% else %}
                             ${{ subsidy.reward_value|floatformat:0 }}
                             {% endif %}
@@ -185,10 +250,9 @@
 
         <!-- Jobs Section -->
         <div class="dashboard-card full-width">
-            <div class="card-header" style="display: flex; justify-content: space-between; align-items: center;">
+            <div class="card-header">
                 <span>Recent Ministry Jobs</span>
-                <a href="{% url 'admin:amc_deliveryjob_add' %}" class="action-button" style="font-size: 0.8em;">Create
-                    Job</a>
+                <a href="{% url 'admin:amc_deliveryjob_add' %}" class="action-button">Create Job</a>
             </div>
             {% if recent_jobs %}
             <table class="dashboard-table">
@@ -205,12 +269,12 @@
                     <tr>
                         <td><a href="{% url 'admin:amc_deliveryjob_change' job.pk %}">{{ job.name }}</a></td>
                         <td>{{ job.quantity_fulfilled }} / {{ job.quantity_requested }}</td>
-                        <td>${{ job.completion_bonus|floatformat:0 }}</td>
+                        <td>{{ job.bonus_percentage }}%</td>
                         <td>
                             {% if job.fulfilled %}
-                            <span style="color: green;">Finished</span>
+                            <span style="color: #28a745; font-weight: bold;">Finished</span>
                             {% else %}
-                            <span style="color: orange;">Active</span>
+                            <span style="color: #fd7e14; font-weight: bold;">Active</span>
                             {% endif %}
                         </td>
                     </tr>
@@ -223,4 +287,176 @@
         </div>
     </div>
 </div>
+
+<script>
+    document.addEventListener('DOMContentLoaded', function () {
+        const stats = JSON.parse('{{ dashboard_stats|escapejs }}');
+        const labels = stats.labels;
+
+        const commonOptions = {
+            responsive: true,
+            maintainAspectRatio: false,
+            plugins: {
+                legend: {
+                    position: 'bottom',
+                    labels: {
+                        boxWidth: 12,
+                        padding: 15,
+                        font: { size: 11 }
+                    }
+                }
+            },
+            scales: {
+                y: {
+                    beginAtZero: true,
+                    grid: { color: 'rgba(0,0,0,0.05)' }
+                },
+                x: {
+                    grid: { display: false },
+                    ticks: {
+                        maxRotation: 0,
+                        autoSkip: true,
+                        maxTicksLimit: 7
+                    }
+                }
+            }
+        };
+
+        // 1. Spending Chart
+        new Chart(document.getElementById('spendingChart'), {
+            type: 'bar',
+            data: {
+                labels: labels,
+                datasets: [
+                    {
+                        label: 'Subsidies',
+                        data: stats.spending_subsidies,
+                        backgroundColor: 'rgba(255, 99, 132, 0.7)',
+                    },
+                    {
+                        label: 'Job Bonuses',
+                        data: stats.spending_jobs,
+                        backgroundColor: 'rgba(54, 162, 235, 0.7)',
+                    },
+                    {
+                        label: 'Other Expenses',
+                        data: stats.spending_other,
+                        backgroundColor: 'rgba(153, 102, 255, 0.7)',
+                    }
+                ]
+            },
+            options: {
+                ...commonOptions,
+                scales: {
+                    ...commonOptions.scales,
+                    x: { ...commonOptions.scales.x, stacked: true },
+                    y: { ...commonOptions.scales.y, stacked: true }
+                }
+            }
+        });
+
+        // 2. Budget Chart
+        new Chart(document.getElementById('budgetChart'), {
+            type: 'line',
+            data: {
+                labels: labels,
+                datasets: [{
+                    label: 'Budget Balance',
+                    data: stats.budget_balance,
+                    borderColor: '#28a745',
+                    backgroundColor: 'rgba(40, 167, 69, 0.1)',
+                    fill: true,
+                    tension: 0.3
+                }]
+            },
+            options: commonOptions
+        });
+
+        // 3. Players Chart
+        new Chart(document.getElementById('playersChart'), {
+            type: 'line',
+            data: {
+                labels: labels,
+                datasets: [
+                    {
+                        label: 'Unique Players (DAU)',
+                        data: stats.active_players_dau,
+                        borderColor: '#007bff',
+                        backgroundColor: 'rgba(0, 123, 255, 0.1)',
+                        fill: true,
+                        tension: 0.3
+                    },
+                    {
+                        label: 'Peak Concurrent',
+                        data: stats.active_players_peak,
+                        borderColor: '#ffc107',
+                        backgroundColor: 'rgba(255, 193, 7, 0.1)',
+                        fill: true,
+                        tension: 0.3
+                    }
+                ]
+            },
+            options: commonOptions
+        });
+
+        // 4. Income Chart
+        new Chart(document.getElementById('incomeChart'), {
+            type: 'bar',
+            data: {
+                labels: labels,
+                datasets: [
+                    {
+                        label: 'Donations',
+                        data: stats.income_donations,
+                        backgroundColor: 'rgba(75, 192, 192, 0.7)',
+                    },
+                    {
+                        label: 'Other Income',
+                        data: stats.income_other,
+                        backgroundColor: 'rgba(255, 206, 86, 0.7)',
+                    }
+                ]
+            },
+            options: commonOptions
+        });
+
+        // 5. Treasury Chart
+        new Chart(document.getElementById('treasuryChart'), {
+            type: 'line',
+            data: {
+                labels: labels,
+                datasets: [{
+                    label: 'Treasury Funds',
+                    data: stats.treasury_balance,
+                    borderColor: '#6f42c1',
+                    backgroundColor: 'rgba(111, 66, 193, 0.1)',
+                    fill: true,
+                    tension: 0.3
+                }]
+            },
+            options: commonOptions
+        });
+
+        // 6. Jobs Success vs Failure Chart
+        new Chart(document.getElementById('jobsChart'), {
+            type: 'bar',
+            data: {
+                labels: labels,
+                datasets: [
+                    {
+                        label: 'Successful',
+                        data: stats.jobs_success,
+                        backgroundColor: 'rgba(40, 167, 69, 0.7)',
+                    },
+                    {
+                        label: 'Failed',
+                        data: stats.jobs_failed,
+                        backgroundColor: 'rgba(220, 53, 69, 0.7)',
+                    }
+                ]
+            },
+            options: commonOptions
+        });
+    });
+</script>
 {% endblock %}

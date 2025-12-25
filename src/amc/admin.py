@@ -66,6 +66,7 @@ from .models import (
 )
 from amc_finance.services import send_fund_to_player
 from amc_finance.admin import AccountInlineAdmin
+from amc.dashboard_services import get_ministry_dashboard_stats
 from django.contrib.gis.db import models as gis_models
 from .widgets import AMCOpenLayersWidget
 from django.urls import path
@@ -768,14 +769,22 @@ class MinistryDashboardAdmin(admin.ModelAdmin):
         current_term = MinistryTerm.objects.filter(is_active=True).first()
 
         # 2. Subsidies
-        subsidies = SubsidyRule.objects.filter(active=True).order_by('-priority')[:5]
+        subsidies = list(SubsidyRule.objects.filter(active=True).order_by('-priority')[:5])
+        for subsidy in subsidies:
+            if subsidy.reward_type == SubsidyRule.RewardType.PERCENTAGE:
+                subsidy.reward_percentage = int(subsidy.reward_value * 100)
 
         # 3. Recent Jobs
         # Jobs funded by this term (if exists) 
         if current_term:
-            recent_jobs = DeliveryJob.objects.filter(funding_term=current_term).order_by('-requested_at')[:5]
+            recent_jobs = list(DeliveryJob.objects.filter(funding_term=current_term).order_by('-requested_at')[:5])
+            for job in recent_jobs:
+                job.bonus_percentage = int(job.bonus_multiplier * 100)
         else:
-            recent_jobs = DeliveryJob.objects.none()
+            recent_jobs = []
+
+        # 4. Charts Data
+        stats = get_ministry_dashboard_stats(term=current_term, days=30)
 
         context = {
             **self.admin_site.each_context(request),
@@ -783,6 +792,7 @@ class MinistryDashboardAdmin(admin.ModelAdmin):
             'ministry_term': current_term,
             'subsidies': subsidies,
             'recent_jobs': recent_jobs,
+            'dashboard_stats': json.dumps(stats),
             **(extra_context or {}),
         }
         return TemplateResponse(request, self.change_list_template, context)
