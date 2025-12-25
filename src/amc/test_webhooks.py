@@ -1,4 +1,5 @@
 import time
+import asyncio
 from datetime import timedelta
 from unittest.mock import patch, MagicMock, AsyncMock
 from django.test import TestCase
@@ -13,8 +14,9 @@ from amc.models import (
   ServerTowRequestArrivedLog,
   DeliveryJob,
   ServerSignContractLog,
-  Character,
   CharacterLocation,
+  PlayerStatusLog,
+  Delivery,
 )
 from django.utils import timezone
 
@@ -146,14 +148,10 @@ class ProcessEventTests(TestCase):
     await CharacterLocation.objects.acreate(character=character, location=Point(0,0,0), vehicle_key="TestVehicle")
     
     # Needs points for delivery creation
-    mine = await DeliveryPoint.objects.acreate(guid="1", name="mine", type="mine", coord=Point(0,0,0))
-    factory = await DeliveryPoint.objects.acreate(guid="2", name="factory", type="factory", coord=Point(1000,1000,0))
+    await DeliveryPoint.objects.acreate(guid="1", name="mine", type="mine", coord=Point(0,0,0))
+    await DeliveryPoint.objects.acreate(guid="2", name="factory", type="factory", coord=Point(1000,1000,0))
 
     event = {
-      'hook': "ServerCargoArrived", # Using simplified hook name for process_event internal logic match if needed, but integration uses full string. process_event uses exact string from event['hook'].
-      # Wait, process_events does grouping and passes individual events. 
-      # The hook in process_event match is "ServerCargoArrived". 
-      # In the original file, it matches `case "ServerCargoArrived":`.
       'hook': "ServerCargoArrived", 
       'timestamp': int(time.time()),
       'data': {
@@ -383,3 +381,552 @@ class ProcessEventsTests(TestCase):
     discord_client.get_cog.return_value = mock_jobs_cog
     
     await process_events(events[:1], http_client, http_client_mod, discord_client)
+
+
+@patch('amc.webhook.get_rp_mode', new_callable=AsyncMock)
+@patch('amc.webhook.get_treasury_fund_balance', new_callable=AsyncMock)
+@patch('amc.webhook.announce', new_callable=AsyncMock)
+@patch('amc.webhook.show_popup', new_callable=AsyncMock)
+class ExtraWebhookTests(TestCase):
+    async def test_cargo_aggregation_same_event(self, mock_show_popup, mock_announce, mock_get_treasury, mock_get_rp_mode):
+        # Test that multiple cargos in one event are aggregated correctly
+        mock_get_rp_mode.return_value = False
+        mock_get_treasury.return_value = 100_000
+        
+        player = await sync_to_async(PlayerFactory)()
+        character = await sync_to_async(CharacterFactory)(player=player, guid="test-char-1")
+        from amc.models import PlayerStatusLog
+        await PlayerStatusLog.objects.acreate(
+            character=character,
+            timespan=(timezone.now() - timedelta(minutes=5), timezone.now())
+        )
+        await CharacterLocation.objects.acreate(character=character, location=Point(0,0,0), vehicle_key="TestVehicle")
+        
+        await DeliveryPoint.objects.acreate(guid="s1", name="S1", type="generic", coord=Point(0,0,0))
+        await DeliveryPoint.objects.acreate(guid="d1", name="D1", type="generic", coord=Point(100,100,0))
+        
+        events = [{
+            'hook': "ServerCargoArrived",
+            'timestamp': int(time.time()),
+            'data': {
+                'CharacterGuid': str(character.guid),
+                'Cargos': [
+                    {
+                        'Net_CargoKey': 'apples',
+                        'Net_Payment': 1000,
+                        'Net_Weight': 10.0,
+                        'Net_Damage': 0.0,
+                        'Net_SenderAbsoluteLocation': {'X': 0, 'Y': 0, 'Z': 0},
+                        'Net_DestinationLocation': {'X': 100, 'Y': 100, 'Z': 0},
+                    },
+                    {
+                        'Net_CargoKey': 'apples',
+                        'Net_Payment': 1000,
+                        'Net_Weight': 10.0,
+                        'Net_Damage': 0.0,
+                        'Net_SenderAbsoluteLocation': {'X': 0, 'Y': 0, 'Z': 0},
+                        'Net_DestinationLocation': {'X': 100, 'Y': 100, 'Z': 0},
+                    }
+                ]
+            }
+        }]
+        
+        await process_events(events)
+        
+        # Should have 2 logs in ServerCargoArrivedLog but only 1 Delivery record (aggregated)
+        self.assertEqual(await ServerCargoArrivedLog.objects.acount(), 2)
+        self.assertEqual(await Delivery.objects.filter(character=character).acount(), 1)
+        delivery = await Delivery.objects.afirst()
+        self.assertEqual(delivery.quantity, 2)
+        self.assertEqual(delivery.payment, 2000)
+
+    async def test_shortcut_usage(self, mock_show_popup, mock_announce, mock_get_treasury, mock_get_rp_mode):
+        # Test that subsidy is zeroed if shortcut was used
+        mock_get_rp_mode.return_value = False
+        mock_get_treasury.return_value = 100_000
+        
+        player = await sync_to_async(PlayerFactory)()
+        character = await sync_to_async(CharacterFactory)(player=player, guid="test-char-shortcut")
+        await CharacterLocation.objects.acreate(character=character, location=Point(0,0,0), vehicle_key="TestVehicle")
+        
+        # Point inside gwangjin_shortcut
+        await CharacterLocation.objects.acreate(
+            character=character, 
+            location=Point(359285, 892222, -3519),
+            timestamp=timezone.now()
+        )
+        
+        await DeliveryPoint.objects.acreate(guid="s1", name="S1", type="generic", coord=Point(0,0,0))
+        await DeliveryPoint.objects.acreate(guid="d1", name="D1", type="generic", coord=Point(100,100,0))
+        
+        event = {
+            'hook': "ServerCargoArrived",
+            'timestamp': int(time.time()),
+            'data': {
+                'CharacterGuid': str(character.guid),
+                'Cargos': [{
+                    'Net_CargoKey': 'apples',
+                    'Net_Payment': 1000,
+                    'Net_Weight': 10.0,
+                    'Net_Damage': 0.0,
+                    'Net_SenderAbsoluteLocation': {'X': 0, 'Y': 0, 'Z': 0},
+                    'Net_DestinationLocation': {'X': 100, 'Y': 100, 'Z': 0},
+                }]
+            }
+        }
+        
+        # get_subsidy_for_cargo usually returns some subsidy. 
+        # Let's ensure it would have a subsidy usually.
+        payment, subsidy = await process_event(event, player, character)
+        
+        # With shortcut used, subsidy should be 0 and payment should not include it
+        self.assertEqual(subsidy, 0)
+        # The logic in process_events (plural) is:
+        # if used_shortcut:
+        #   total_payment -= total_subsidy
+        #   total_subsidy = 0
+        
+        # Let's test via process_events to see the zeroing
+        await CharacterLocation.objects.all().adelete()
+        await PlayerStatusLog.objects.acreate(
+            character=character,
+            timespan=(timezone.now() - timedelta(minutes=5), timezone.now())
+        )
+        await CharacterLocation.objects.acreate(
+            character=character, 
+            location=Point(359285, 892222, -3519),
+            timestamp=timezone.now()
+        )
+        
+        # We need mock_get_rp_mode for process_events
+        player_profits = []
+        with patch('amc.webhook.on_player_profits', new_callable=AsyncMock) as mock_profits:
+            await process_events([event], http_client_mod=MagicMock())
+            # Yield to background tasks if any
+            await asyncio.sleep(0)
+            player_profits = mock_profits.call_args[0][0]
+            
+        # player_profits format: (character, total_subsidy, total_payment)
+        char, total_subsidy, total_payment = player_profits[0]
+        self.assertEqual(total_subsidy, 0)
+
+    async def test_cargo_dumped(self, mock_show_popup, mock_announce, mock_get_treasury, mock_get_rp_mode):
+        mock_get_rp_mode.return_value = False
+        player = await sync_to_async(PlayerFactory)()
+        character = await sync_to_async(CharacterFactory)(player=player, guid="test-char-dumped")
+        await CharacterLocation.objects.acreate(character=character, location=Point(0,0,0), vehicle_key="TestVehicle")
+        
+        from amc.models import PlayerStatusLog
+        await PlayerStatusLog.objects.acreate(
+            character=character,
+            timespan=(timezone.now() - timedelta(minutes=5), timezone.now())
+        )
+        
+        event = {
+            'hook': "ServerCargoDumped",
+            'timestamp': int(time.time()),
+            'data': {
+                'PlayerId': str(player.unique_id),
+                'Cargo': {
+                    'Net_CargoKey': 'trash',
+                    'Net_Payment': 500,
+                    'Net_Weight': 50.0,
+                    'Net_Damage': 0.1,
+                }
+            }
+        }
+        
+        await process_events([event])
+        
+        self.assertEqual(await ServerCargoArrivedLog.objects.acount(), 1)
+        log = await ServerCargoArrivedLog.objects.afirst()
+        self.assertEqual(log.cargo_key, 'trash')
+        self.assertEqual(log.payment, 500)
+
+    async def test_vehicle_reset_rp_mode(self, mock_show_popup, mock_announce, mock_get_treasury, mock_get_rp_mode):
+        mock_get_rp_mode.return_value = True
+        player = await sync_to_async(PlayerFactory)()
+        # Set last_login far enough in the past
+        character = await sync_to_async(CharacterFactory)(
+            player=player,
+            guid="test-char-rp"
+        )
+        await CharacterLocation.objects.acreate(character=character, location=Point(0,0,0), vehicle_key="TestVehicle")
+        from amc.models import PlayerStatusLog
+        await PlayerStatusLog.objects.acreate(
+            character=character,
+            timespan=(timezone.now() - timedelta(minutes=5), timezone.now())
+        )
+        
+        event = {
+            'hook': "ServerResetVehicleAt",
+            'timestamp': int(time.time()),
+            'data': {
+                'CharacterGuid': str(character.guid),
+            }
+        }
+        
+        await process_events([event])
+        mock_announce.assert_called()
+        self.assertIn("despawned", mock_announce.call_args[0][0])
+
+    async def test_rp_mode_subsidy_fix(self, mock_show_popup, mock_announce, mock_get_treasury, mock_get_rp_mode):
+        mock_get_rp_mode.return_value = True
+        mock_get_treasury.return_value = 100_000
+        
+        player = await sync_to_async(PlayerFactory)()
+        character = await sync_to_async(CharacterFactory)(player=player, guid="test-char-rp-fix")
+        await CharacterLocation.objects.acreate(character=character, location=Point(0,0,0), vehicle_key="TestVehicle")
+        
+        p1 = await DeliveryPoint.objects.acreate(guid="s1", name="S1", type="generic", coord=Point(0,0,0))
+        p2 = await DeliveryPoint.objects.acreate(guid="d1", name="D1", type="generic", coord=Point(100,100,0))
+
+        event = {
+            'hook': "ServerCargoArrived",
+            'timestamp': int(time.time()),
+            'data': {
+                'CharacterGuid': str(character.guid),
+                'Cargos': [
+                    {
+                        'Net_CargoKey': 'apples',
+                        'Net_Payment': 1000,
+                        'Net_Weight': 10.0,
+                        'Net_Damage': 0.0,
+                        'Net_SenderAbsoluteLocation': {'X': 0, 'Y': 0, 'Z': 0},
+                        'Net_DestinationLocation': {'X': 100, 'Y': 100, 'Z': 0},
+                    },
+                    {
+                        'Net_CargoKey': 'oranges',
+                        'Net_Payment': 1000,
+                        'Net_Weight': 10.0,
+                        'Net_Damage': 0.0,
+                        'Net_SenderAbsoluteLocation': {'X': 0, 'Y': 0, 'Z': 0},
+                        'Net_DestinationLocation': {'X': 100, 'Y': 100, 'Z': 0},
+                    }
+                ]
+            }
+        }
+        
+        await process_events([event], http_client=MagicMock())
+        
+        deliveries = [d async for d in Delivery.objects.filter(character=character).order_by('id')]
+        self.assertEqual(len(deliveries), 2)
+        
+        d1 = deliveries[0]
+        d2 = deliveries[1]
+        
+        self.assertAlmostEqual(d1.subsidy, d2.subsidy, delta=1.0)
+
+    @patch('amc.webhook.send_fund_to_player', new_callable=AsyncMock)
+    async def test_proportional_job_rewards(self, mock_send_fund, mock_show_popup, mock_announce, mock_get_treasury, mock_get_rp_mode):
+        from amc.webhook import on_delivery_job_fulfilled
+        
+        p1 = await sync_to_async(PlayerFactory)()
+        c1 = await sync_to_async(CharacterFactory)(player=p1, name="Alice")
+        p2 = await sync_to_async(PlayerFactory)()
+        c2 = await sync_to_async(CharacterFactory)(player=p2, name="Bob")
+        
+        job = await DeliveryJob.objects.acreate(
+            name="Community Goal",
+            quantity_requested=10,
+            quantity_fulfilled=10,
+            completion_bonus=10000,
+            bonus_multiplier=1.0, # Added missing field
+            expired_at=timezone.now() + timedelta(days=1),
+        )
+        
+        # Alice delivered 7, Bob delivered 3
+        await Delivery.objects.acreate(character=c1, job=job, quantity=7, timestamp=timezone.now(), payment=0, subsidy=0)
+        await Delivery.objects.acreate(character=c2, job=job, quantity=3, timestamp=timezone.now(), payment=0, subsidy=0)
+        
+        await on_delivery_job_fulfilled(job, MagicMock())
+        
+        # Check Alice reward: 7/10 * 10000 = 7000
+        # Check Bob reward: 3/10 * 10000 = 3000
+        
+        # send_fund_to_player(reward, character_obj, "Job Completion")
+        fund_calls = mock_send_fund.call_args_list
+        results = {call[0][1].id: call[0][0] for call in fund_calls}
+        
+        self.assertEqual(results[c1.id], 7000)
+        self.assertEqual(results[c2.id], 3000)
+
+    async def test_missing_character_skip(self, mock_show_popup, mock_announce, mock_get_treasury, mock_get_rp_mode):
+        # Test that events for non-existent characters are skipped
+        event = {
+            'hook': "ServerCargoArrived",
+            'timestamp': int(time.time()),
+            'data': {
+                'CharacterGuid': 'non-existent-guid',
+                'PlayerId': '9999999',
+                'Cargos': []
+            }
+        }
+        
+        # Should not raise exception
+        await process_events([event])
+        self.assertEqual(await ServerCargoArrivedLog.objects.acount(), 0)
+
+    async def test_process_event_exception_triggers_popup(self, mock_show_popup, mock_announce, mock_get_treasury, mock_get_rp_mode):
+        # Test that an exception in process_event triggers a popup
+        player = await sync_to_async(PlayerFactory)()
+        character = await sync_to_async(CharacterFactory)(player=player, guid="test-char-exception")
+        await CharacterLocation.objects.acreate(character=character, location=Point(0,0,0), vehicle_key="TestVehicle")
+        
+        from amc.models import PlayerStatusLog
+        await PlayerStatusLog.objects.acreate(
+            character=character,
+            timespan=(timezone.now() - timedelta(minutes=5), timezone.now())
+        )
+        
+        event = {
+            'hook': "ServerCargoArrived",
+            'timestamp': int(time.time()),
+            'data': {
+                'CharacterGuid': str(character.guid),
+                'Cargos': [{}] # This will cause an error in process_cargo_log (missing keys)
+            }
+        }
+        
+        with self.assertRaises(Exception):
+            await process_events([event], http_client_mod=MagicMock())
+        
+        # Yield to allow the background task (show_popup) to run
+        await asyncio.sleep(0.1)
+        
+        mock_show_popup.assert_called()
+        self.assertIn("Webhook failed", mock_show_popup.call_args[0][1])
+
+    @patch('amc.webhook.on_delivery_job_fulfilled')
+    async def test_over_delivery_job_completion(self, mock_on_fulfilled, mock_show_popup, mock_announce, mock_get_treasury, mock_get_rp_mode):
+        mock_get_rp_mode.return_value = False
+        mock_get_treasury.return_value = 100_000
+        
+        player = await sync_to_async(PlayerFactory)()
+        character = await sync_to_async(CharacterFactory)(player=player, guid="test-char-over")
+        await CharacterLocation.objects.acreate(character=character, location=Point(0,0,0), vehicle_key="TestVehicle")
+        
+        p1 = await DeliveryPoint.objects.acreate(guid="s_over", name="S_Over", type="generic", coord=Point(0,0,0))
+        p2 = await DeliveryPoint.objects.acreate(guid="d_over", name="D_Over", type="generic", coord=Point(100,100,0))
+        
+        # 1. Create a job with 29/30 fulfilled
+        job = await DeliveryJob.objects.acreate(
+            name="Over Delivery Job",
+            # Cargo key must match the event
+            cargo_key="apples",
+            quantity_requested=30,
+            quantity_fulfilled=29,
+            completion_bonus=10000,
+            bonus_multiplier=1.0,
+            expired_at=timezone.now() + timedelta(days=1),
+        )
+        await job.source_points.aadd(p1)
+        await job.destination_points.aadd(p2)
+        
+        # 2. Create dummy delivery for the 29 items so on_delivery_job_fulfilled can find them
+        # (Though we are mocking on_delivery_job_fulfilled, so strictly speaking we verify it is CALLED.
+        # But for correctness of the system state, let's create them)
+        await Delivery.objects.acreate(
+            character=character, 
+            job=job, 
+            quantity=29, 
+            timestamp=timezone.now(), 
+            payment=0, 
+            subsidy=0,
+            cargo_key="apples",
+            sender_point=p1,
+            destination_point=p2
+        )
+        
+        # 3. Simulate existing delivery filling it to 29? 
+        # Actually the job.quantity_fulfilled is 29. The Delivery rows support it. All good.
+        
+        # 4. Arrive with 10 more items
+        event = {
+            'hook': "ServerCargoArrived",
+            'timestamp': int(time.time()),
+            'data': {
+                'CharacterGuid': str(character.guid),
+                'Cargos': []
+            }
+        }
+        # Create 10 cargos
+        for _ in range(10):
+            event['data']['Cargos'].append({
+                'Net_CargoKey': 'apples',
+                'Net_Payment': 100,
+                'Net_Weight': 10.0,
+                'Net_Damage': 0.0,
+                'Net_SenderAbsoluteLocation': {'X': 0, 'Y': 0, 'Z': 0},
+                'Net_DestinationLocation': {'X': 100, 'Y': 100, 'Z': 0},
+            })
+            
+        await process_events([event], http_client=MagicMock())
+        
+        # 5. Verify logic
+        await job.arefresh_from_db()
+        self.assertEqual(job.quantity_fulfilled, 30, "Job should be capped at 30 fulfilled")
+        
+        # Verify on_delivery_job_fulfilled called exactly once
+        self.assertEqual(mock_on_fulfilled.call_count, 1)
+
+    @patch('amc.webhook.on_delivery_job_fulfilled')
+    async def test_multi_job_completion(self, mock_on_fulfilled, mock_show_popup, mock_announce, mock_get_treasury, mock_get_rp_mode):
+        mock_get_rp_mode.return_value = False
+        mock_get_treasury.return_value = 100_000
+        
+        player = await sync_to_async(PlayerFactory)()
+        character = await sync_to_async(CharacterFactory)(player=player, guid="test-char-multi")
+        await CharacterLocation.objects.acreate(character=character, location=Point(0,0,0), vehicle_key="TestVehicle")
+        
+        p1 = await DeliveryPoint.objects.acreate(guid="s_multi", name="S_Multi", type="generic", coord=Point(0,0,0))
+        p2 = await DeliveryPoint.objects.acreate(guid="d_multi", name="D_Multi", type="generic", coord=Point(100,100,0))
+        
+        # Job A: Apples
+        job_a = await DeliveryJob.objects.acreate(
+            name="Job A",
+            cargo_key="apples",
+            quantity_requested=10,
+            quantity_fulfilled=9,
+            completion_bonus=5000,
+            bonus_multiplier=1.0,
+            expired_at=timezone.now() + timedelta(days=1),
+        )
+        await job_a.source_points.aadd(p1)
+        await job_a.destination_points.aadd(p2)
+        
+        # Job B: Oranges
+        job_b = await DeliveryJob.objects.acreate(
+            name="Job B",
+            cargo_key="oranges",
+            quantity_requested=10,
+            quantity_fulfilled=9,
+            completion_bonus=6000,
+            bonus_multiplier=1.0,
+            expired_at=timezone.now() + timedelta(days=1),
+        )
+        await job_b.source_points.aadd(p1)
+        await job_b.destination_points.aadd(p2)
+        
+        # Event with 1 Apple and 1 Orange
+        # Both should complete their respective jobs.
+        event = {
+            'hook': "ServerCargoArrived",
+            'timestamp': int(time.time()),
+            'data': {
+                'CharacterGuid': str(character.guid),
+                'Cargos': [
+                    {
+                        'Net_CargoKey': 'apples',
+                        'Net_Payment': 100,
+                        'Net_Weight': 10.0,
+                        'Net_Damage': 0.0,
+                        'Net_SenderAbsoluteLocation': {'X': 0, 'Y': 0, 'Z': 0},
+                        'Net_DestinationLocation': {'X': 100, 'Y': 100, 'Z': 0},
+                    },
+                    {
+                        'Net_CargoKey': 'oranges',
+                        'Net_Payment': 100,
+                        'Net_Weight': 10.0,
+                        'Net_Damage': 0.0,
+                        'Net_SenderAbsoluteLocation': {'X': 0, 'Y': 0, 'Z': 0},
+                        'Net_DestinationLocation': {'X': 100, 'Y': 100, 'Z': 0},
+                    }
+                ]
+            }
+        }
+            
+        await process_events([event], http_client=MagicMock())
+        
+        await job_a.arefresh_from_db()
+        await job_b.arefresh_from_db()
+        
+        self.assertEqual(job_a.quantity_fulfilled, 10, "Job A should be fulfilled")
+        self.assertEqual(job_b.quantity_fulfilled, 10, "Job B should be fulfilled")
+        
+        # Verify on_delivery_job_fulfilled called TWICE (once for each job)
+        # Note: on_delivery_job_fulfilled(job, client)
+        self.assertEqual(mock_on_fulfilled.call_count, 2, "Both jobs should trigger completion hook")
+        
+        
+        # Optional: check args to ensure both jobs were passed
+        called_jobs = {call.args[0].id for call in mock_on_fulfilled.call_args_list}
+        self.assertEqual(called_jobs, {job_a.id, job_b.id})
+
+    @patch('amc.webhook.send_fund_to_player', new_callable=AsyncMock)
+    async def test_job_completion_rewards_integration(self, mock_send_fund, mock_show_popup, mock_announce, mock_get_treasury, mock_get_rp_mode):
+        # This test DOES NOT mock on_delivery_job_fulfilled.
+        # It verifies that the whole flow results in money being sent.
+        mock_get_rp_mode.return_value = False
+        mock_get_treasury.return_value = 100_000
+        
+        player = await sync_to_async(PlayerFactory)()
+        character = await sync_to_async(CharacterFactory)(player=player, guid="test-char-reward")
+        await CharacterLocation.objects.acreate(character=character, location=Point(0,0,0), vehicle_key="TestVehicle")
+        
+        p1 = await DeliveryPoint.objects.acreate(guid="s_rew", name="S_Rew", type="generic", coord=Point(0,0,0))
+        p2 = await DeliveryPoint.objects.acreate(guid="d_rew", name="D_Rew", type="generic", coord=Point(100,100,0))
+        
+        job = await DeliveryJob.objects.acreate(
+            name="Reward Job",
+            cargo_key="gold",
+            quantity_requested=10,
+            quantity_fulfilled=9,
+            completion_bonus=10000,
+            bonus_multiplier=1.0,
+            expired_at=timezone.now() + timedelta(days=1),
+        )
+        await job.source_points.aadd(p1)
+        await job.destination_points.aadd(p2)
+        
+        # Helper to create existing delivery
+        await Delivery.objects.acreate(
+            character=character, 
+            job=job, 
+            quantity=9, 
+            timestamp=timezone.now(), 
+            payment=0, 
+            subsidy=0, 
+            cargo_key="gold",
+            sender_point=p1,
+            destination_point=p2
+        )
+        
+        event = {
+            'hook': "ServerCargoArrived",
+            'timestamp': int(time.time()),
+            'data': {
+                'CharacterGuid': str(character.guid),
+                'Cargos': [{
+                    'Net_CargoKey': 'gold',
+                    'Net_Payment': 100,
+                    'Net_Weight': 10.0,
+                    'Net_Damage': 0.0,
+                    'Net_SenderAbsoluteLocation': {'X': 0, 'Y': 0, 'Z': 0},
+                    'Net_DestinationLocation': {'X': 100, 'Y': 100, 'Z': 0},
+                }]
+            }
+        }
+        
+        # We need to allow on_delivery_job_fulfilled to actually run, so we need to ensure it's imported
+        # and NOT patched in this specific test method (or rather, we test the side effect: send_fund_to_player).
+        # However, the CLASS might have patches. 
+        # The class ExtraWebhookTests has patches on: get_rp_mode, get_treasury, announce, show_popup.
+        # It DOES NOT patch on_delivery_job_fulfilled.
+        
+        await process_events([event], http_client=MagicMock())
+        
+        # Wait for background tasks
+        await asyncio.sleep(0.1)
+        
+        await job.arefresh_from_db()
+        self.assertIsNotNone(job.fulfilled_at)
+        
+        # Verify money was sent. 
+        # Total contribution: 9 (existing) + 1 (new) = 10.
+        # Reward = 10000.
+        # Alice (character) should get 10000.
+        
+        self.assertEqual(mock_send_fund.call_count, 1, "Should send funds exactly once")
+        self.assertEqual(mock_send_fund.call_args[0][0], 10000, "Should send 10000 reward")
+
