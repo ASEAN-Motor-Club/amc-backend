@@ -153,14 +153,17 @@ async def get_subsidy_for_cargo(cargo, treasury_balance=None):
 
   # 2. Source Area Filter
   if cargo.sender_point and cargo.sender_point.coord:
-      # Match rules that have NO source requirement OR source area contains point
+      # Match rules that have NO source requirement 
+      # OR source area contains point
+      # OR source delivery point is within 1m
       rules = rules.filter(
-          Q(source_areas__isnull=True) | Q(source_areas__polygon__contains=cargo.sender_point.coord)
+          Q(source_areas__isnull=True, source_delivery_points__isnull=True) |
+          Q(source_areas__polygon__contains=cargo.sender_point.coord) |
+          Q(source_delivery_points__coord__dwithin=(cargo.sender_point.coord, 1.0))
       )
   else:
-      # If unknown source, only allow rules with NO source requirement?
-      # Or should we be lenient? Strict seems safer to avoid exploitation.
-      rules = rules.filter(source_areas__isnull=True)
+      # If unknown source, only allow rules with NO source requirement
+      rules = rules.filter(source_areas__isnull=True, source_delivery_points__isnull=True)
 
   # 3. Destination Area Filter
   # Special case: 'TrashBag' | 'Trash_Big' logic in old code used dynamic point distance. 
@@ -183,10 +186,12 @@ async def get_subsidy_for_cargo(cargo, treasury_balance=None):
 
   if destination_coord:
       rules = rules.filter(
-          Q(destination_areas__isnull=True) | Q(destination_areas__polygon__contains=destination_coord)
+          Q(destination_areas__isnull=True, destination_delivery_points__isnull=True) | 
+          Q(destination_areas__polygon__contains=destination_coord) |
+          Q(destination_delivery_points__coord__dwithin=(destination_coord, 1.0))
       )
   else:
-      rules = rules.filter(destination_areas__isnull=True)
+      rules = rules.filter(destination_areas__isnull=True, destination_delivery_points__isnull=True)
 
   # 4. On Time Check
   is_on_time = cargo.data.get('Net_TimeLeftSeconds', 0) > 0

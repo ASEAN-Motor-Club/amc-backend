@@ -179,3 +179,89 @@ class SubsidyLogicTest(TestCase):
         self.assertIn("Any Cargo", text) # From r3
         self.assertIn("1000 coins", text)
         self.assertIn("From: Gwangjin Area", text)
+
+    async def test_delivery_point_matching(self):
+        # Rule: Source = point_in
+        rule = await SubsidyRule.objects.acreate(
+            name="Point Rule",
+            reward_type=SubsidyRule.RewardType.PERCENTAGE,
+            reward_value=Decimal("2.50"),
+            priority=10
+        )
+        await rule.source_delivery_points.aadd(self.point_in)
+
+        # Test exact match
+        mock_cargo = MagicMock()
+        mock_cargo.cargo_key = "Coal"
+        mock_cargo.payment = 1000
+        mock_cargo.sender_point = self.point_in
+        # Create a mock sender point that has coord
+        # We need to simulate the sender_point object having a coord attribute
+        # self.point_in is a global object, so it works.
+        
+        mock_cargo.destination_point = None
+        mock_cargo.data = {}
+        mock_cargo.damage = 0.0
+
+        amount, factor = await get_subsidy_for_cargo(mock_cargo)
+        self.assertEqual(factor, 2.5)
+
+        # Test nearby match (<1m)
+        # Create a point slightly offset
+        nearby_point = Point(self.point_in.coord.x + 0.5, self.point_in.coord.y, 0, srid=3857)
+        # We can't easily modify self.point_in, but we can mock the cargo's sender_point
+        mock_sender = MagicMock()
+        mock_sender.coord = nearby_point
+        mock_cargo.sender_point = mock_sender
+        
+        amount, factor = await get_subsidy_for_cargo(mock_cargo)
+        self.assertEqual(factor, 2.5)
+        
+        # Test far match (>1m)
+        far_point = Point(self.point_in.coord.x + 2.0, self.point_in.coord.y, 0, srid=3857)
+        mock_sender.coord = far_point
+        amount, factor = await get_subsidy_for_cargo(mock_cargo)
+        self.assertEqual(factor, 0.0)
+
+    async def test_fallback_logic(self):
+        # Rule: Source = point_in OR Gwangjin Area
+        rule = await SubsidyRule.objects.acreate(
+            name="Fallback Rule",
+            reward_type=SubsidyRule.RewardType.PERCENTAGE,
+            reward_value=Decimal("3.00"),
+            priority=10
+        )
+        await rule.source_delivery_points.aadd(self.point_in)
+        await rule.source_areas.aadd(self.area_gwangjin)
+
+        # Case 1: Match Point
+        mock_cargo = MagicMock()
+        mock_cargo.cargo_key = "Coal"
+        mock_cargo.payment = 1000
+        mock_cargo.sender_point = self.point_in
+        mock_cargo.destination_point = None
+        mock_cargo.data = {}
+        mock_cargo.damage = 0.0
+        
+        amount, factor = await get_subsidy_for_cargo(mock_cargo)
+        self.assertEqual(factor, 3.0)
+
+        # Case 2: Match Area (but not point)
+        # Use a point inside Gwangjin (0,0 to 10,10) but far from point_in (5,5)
+        # Point(1, 1) is in area, distance to (5,5) is > 1m
+        point_in_area = Point(1, 1, 0, srid=3857)
+        mock_sender = MagicMock()
+        mock_sender.coord = point_in_area
+        mock_cargo.sender_point = mock_sender
+        
+        amount, factor = await get_subsidy_for_cargo(mock_cargo)
+        self.assertEqual(factor, 3.0)
+        
+        # Case 3: No Match
+        point_outside = Point(20, 20, 0, srid=3857)
+        mock_sender.coord = point_outside
+        mock_cargo.sender_point = mock_sender
+        
+        amount, factor = await get_subsidy_for_cargo(mock_cargo)
+        self.assertEqual(factor, 0.0)
+

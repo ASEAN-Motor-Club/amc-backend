@@ -1465,6 +1465,8 @@ class SubsidyRule(models.Model):
   cargos = models.ManyToManyField('Cargo', blank=True, help_text="If empty, applies to ALL cargos")
   source_areas = models.ManyToManyField(SubsidyArea, related_name='source_rules', blank=True)
   destination_areas = models.ManyToManyField(SubsidyArea, related_name='destination_rules', blank=True)
+  source_delivery_points = models.ManyToManyField('DeliveryPoint', related_name='source_subsidy_rules', blank=True)
+  destination_delivery_points = models.ManyToManyField('DeliveryPoint', related_name='destination_subsidy_rules', blank=True)
   requires_on_time = models.BooleanField(default=False)
 
   # Rewards
