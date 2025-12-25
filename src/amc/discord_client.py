@@ -11,6 +11,7 @@ from amc_cogs.status import StatusCog
 from amc_cogs.jobs import JobsCog
 from amc_cogs.roleplay import RoleplayCog
 from amc_cogs.commerce import CommerceCog
+from amc_cogs.leaderboard import LeaderboardCog
 
 class AMCDiscordBot(commands.Bot):
   def __init__(self, *args, **kwargs):
@@ -31,6 +32,7 @@ class AMCDiscordBot(commands.Bot):
     await self.add_cog(JobsCog(self), guild=guild)
     await self.add_cog(RoleplayCog(self), guild=guild)
     await self.add_cog(CommerceCog(self), guild=guild)
+    await self.add_cog(LeaderboardCog(self), guild=guild)
     await self.tree.sync(guild=guild)
 
 
