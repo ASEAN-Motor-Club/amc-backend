@@ -54,6 +54,12 @@ packages = [
   "src/locale",
 ]
 
+[tool.pyrefly]
+project-includes = [
+    "**/*.py*",
+    "**/*.ipynb",
+]
+
 [tool.uv.workspace]
 members = [
     "packages/scripts",
@@ -62,6 +68,8 @@ members = [
 [dependency-groups]
 dev = [
     "basedpyright>=1.29.5",
+    "pyrefly>=0.46.1",
+    "ruff>=0.14.10",
     "taskipy>=1.14.1",
 ]
 
