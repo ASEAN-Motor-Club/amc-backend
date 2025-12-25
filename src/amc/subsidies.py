@@ -219,14 +219,21 @@ async def get_subsidy_for_cargo(cargo, treasury_balance=None):
           subsidy_amount = int(int(cargo.payment) * subsidy_factor)
       else:
           # Flat Amount
-          # How to handle "factor" for flat amount? 
-          # Old logic returned (subsidy, subsidy_factor).
-          # Factor was used for reporting "300%".
-          # For flat amount, factor is ambiguous. Maybe 0 or calculated ratio?
           subsidy_amount = int(factor)
           # Recalculate effective factor for display?
           if cargo.payment > 0:
             subsidy_factor = subsidy_amount / cargo.payment
+
+      # Ministry Allocation Check
+      remaining = best_rule.allocation - best_rule.spent
+      if remaining <= 0:
+          subsidy_amount = 0
+          subsidy_factor = 0
+      elif subsidy_amount > remaining:
+          subsidy_amount = int(remaining)
+          # Recalculate factor for reporting
+          if cargo.payment > 0:
+              subsidy_factor = subsidy_amount / cargo.payment
 
   # Treasury Cap Logic
   if treasury_balance is not None and subsidy_amount > 0:
@@ -250,7 +257,7 @@ async def get_subsidy_for_cargo(cargo, treasury_balance=None):
     subsidy_amount = min(subsidy_amount, int(treasury_balance))
     subsidy_factor = effective_factor
 
-  return subsidy_amount, subsidy_factor
+  return subsidy_amount, subsidy_factor, best_rule
 
 
 def get_passenger_subsidy(passenger):

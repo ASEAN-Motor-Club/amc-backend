@@ -32,6 +32,7 @@ This ensures Nix rebuilds the environment with the new dependencies.
 You're assumed to have some familiarity with Django.
 - Please create migrations with `backend/manage.py makemigrations` when you make changes to `**/models.py`.
 - API is served with `django-ninja`
+- Detailed documentation for the **[Ministry of Commerce System](docs/ministry_system.md)** can be found in the `docs` folder.
 
 
 ## Adding Slash Commands

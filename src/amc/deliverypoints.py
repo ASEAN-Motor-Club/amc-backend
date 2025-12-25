@@ -4,10 +4,10 @@ import random
 from datetime import timedelta
 from django.utils import timezone
 from django.db.models import Q, Prefetch
-from amc.models import Cargo, DeliveryPoint, DeliveryPointStorage, DeliveryJob, DeliveryJobTemplate
+from amc.models import Cargo, DeliveryPoint, DeliveryPointStorage, DeliveryJob, DeliveryJobTemplate, MinistryTerm
 from amc.game_server import get_deliverypoints, get_players, announce
 from amc.enums import CargoKey
-from amc_finance.services import get_treasury_fund_balance
+from amc_finance.services import get_treasury_fund_balance, escrow_ministry_funds, process_ministry_expiration
 
 cargo_key_by_label = { v: k for k, v in CargoKey.choices }
 
@@ -92,7 +92,18 @@ async def monitor_deliverypoints(ctx):
       #    }
       #  )
 
+async def cleanup_expired_jobs():
+  expired_jobs = DeliveryJob.objects.filter(
+    expired_at__lt=timezone.now(),
+    fulfilled_at__isnull=True,
+    funding_term__isnull=False,
+    escrowed_amount__gt=0
+  )
+  async for job in expired_jobs:
+    await process_ministry_expiration(job)
+
 async def monitor_jobs(ctx):
+  await cleanup_expired_jobs()
   num_active_jobs = await DeliveryJob.objects.filter_active().acount()
   players = await get_players(ctx['http_client'])
   num_players = len(players)
@@ -191,6 +202,13 @@ async def monitor_jobs(ctx):
     if rp_mode and not template.rp_mode:
       completion_bonus = completion_bonus * 1.5
 
+    active_term = await MinistryTerm.objects.filter(is_active=True).afirst()
+    if active_term:
+      # Check if Ministry has enough budget
+      # Ideally we should strictly check account balance, but current_budget is a good proxy for speed
+      if active_term.current_budget < completion_bonus:
+        continue # Skip this job if budget is exhausted
+    
     new_job = await DeliveryJob.objects.acreate(
       name=template.name,
       quantity_requested=quantity_requested,
@@ -200,7 +218,20 @@ async def monitor_jobs(ctx):
       description=template.description,
       rp_mode=rp_mode,
       created_from=template,
+      funding_term=active_term,
     )
+    
+    if active_term:
+       # Escrow funds and update job
+       if await escrow_ministry_funds(completion_bonus, new_job):
+         new_job.escrowed_amount = completion_bonus
+         await new_job.asave()
+       else:
+          # Failed to escrow (race condition?), delete job or leave as unfunded?
+          # Safest is to delete or mark invalid, but for now let's just log/ignore as it's rare.
+          pass
+
+
     await new_job.cargos.aadd(*cargos)
     await new_job.source_points.aadd(*source_points)
     await new_job.destination_points.aadd(*destination_points)

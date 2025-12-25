@@ -17,18 +17,25 @@ from amc.subsidies import (
   get_passenger_subsidy,
   subsidise_player,
 )
-from amc_finance.services import send_fund_to_player, get_treasury_fund_balance
+from amc_finance.services import (
+    send_fund_to_player,
+    get_treasury_fund_balance,
+    process_ministry_completion,
+    record_ministry_subsidy_spend,
+)
 from amc.models import (
-  Player,
-  ServerCargoArrivedLog,
-  ServerSignContractLog,
-  ServerPassengerArrivedLog,
-  ServerTowRequestArrivedLog,
-  Delivery,
-  DeliveryPoint,
-  DeliveryJob,
-  Character,
-  CharacterLocation,
+    Player,
+    ServerCargoArrivedLog,
+    ServerSignContractLog,
+    ServerPassengerArrivedLog,
+    ServerTowRequestArrivedLog,
+    Delivery,
+    DeliveryPoint,
+    DeliveryJob,
+    Character,
+    CharacterLocation,
+    MinistryTerm,
+    SubsidyRule,
 )
 from amc.locations import gwangjin_shortcut
 
@@ -104,6 +111,11 @@ async def on_delivery_job_fulfilled(job, http_client):
 
     contributors_str = ', '.join(contributors_names)
     message = f"\"{job.name}\" Completed! +${completion_bonus:,} has been deposited into your bank accounts. Thanks to: {contributors_str}"
+    
+    # Ministry Rebate Logic
+    if job.funding_term_id:
+      await process_ministry_completion(job, completion_bonus)
+
     asyncio.create_task(announce(message, http_client, color="90EE90"))
 
 
@@ -182,7 +194,9 @@ async def handle_cargo_dumped(event, player, timestamp):
     damage=cargo['Net_Damage'],
     data=event['data'],
   )
-  subsidy, _ = await get_subsidy_for_cargo(log)
+  subsidy, _, rule = await get_subsidy_for_cargo(log)
+  if rule and subsidy > 0:
+      await SubsidyRule.objects.filter(pk=rule.pk).aupdate(spent=F('spent') + subsidy)
   return log.payment + subsidy, subsidy
 
 
@@ -339,7 +353,8 @@ async def handle_cargo_arrived(
   is_rp_mode,
   used_shortcut,
   http_client,
-  discord_client
+  discord_client,
+  active_term=None
 ):
   valid_cargos = []
   for cargo in event['data']['Cargos']:
@@ -372,8 +387,13 @@ async def handle_cargo_arrived(
     payment = group_list[0].payment
     delivery_source = group_list[0].sender_point
     delivery_destination = group_list[0].destination_point
-    single_subsidy = await get_subsidy_for_cargo(group_list[0], treasury_balance=treasury_balance)
-    cargo_subsidy = single_subsidy[0] * quantity
+    cargo_subsidy_res = await get_subsidy_for_cargo(group_list[0], treasury_balance=treasury_balance)
+    cargo_subsidy = cargo_subsidy_res[0] * quantity
+    rule = cargo_subsidy_res[2]
+    if rule and cargo_subsidy > 0:
+        await SubsidyRule.objects.filter(pk=rule.pk).aupdate(spent=F('spent') + cargo_subsidy)
+        if active_term:
+            await record_ministry_subsidy_spend(cargo_subsidy, active_term.id)
     cargo_name = group_list[0].get_cargo_key_display()
 
     job = await (DeliveryJob.objects
@@ -505,6 +525,7 @@ async def process_events(events, http_client=None, http_client_mod=None, discord
   player_profits = []
 
   treasury_balance = await get_treasury_fund_balance()
+  active_term = await MinistryTerm.objects.filter(is_active=True).afirst()
   for character_guid, es in grouped_player_events:
     if not character_guid:
       continue
@@ -550,7 +571,8 @@ async def process_events(events, http_client=None, http_client_mod=None, discord
           treasury_balance,
           http_client,
           http_client_mod,
-          discord_client
+          discord_client,
+          active_term=active_term
         )
         total_payment += payment
         total_subsidy += subsidy
@@ -631,7 +653,7 @@ def atomic_process_delivery(job_id, quantity, delivery_data):
 
 
 
-async def process_event(event, player, character, is_rp_mode=False, used_shortcut=False, treasury_balance=None, http_client=None, http_client_mod=None, discord_client=None):
+async def process_event(event, player, character, is_rp_mode=False, used_shortcut=False, treasury_balance=None, http_client=None, http_client_mod=None, discord_client=None, active_term=None):
   print(event)
   total_payment = 0
   subsidy = 0
@@ -657,7 +679,8 @@ async def process_event(event, player, character, is_rp_mode=False, used_shortcu
         is_rp_mode,
         used_shortcut,
         http_client,
-        discord_client
+        discord_client,
+        active_term=active_term
       )
       total_payment += payment
 

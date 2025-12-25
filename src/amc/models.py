@@ -1139,6 +1139,85 @@ class DeliveryJobTemplate(models.Model):
     return self.name
 
 @final
+class MinistryTerm(models.Model):
+  minister = models.ForeignKey(Player, on_delete=models.CASCADE, related_name='ministry_terms')
+  start_date = models.DateTimeField()
+  end_date = models.DateTimeField()
+  initial_budget = models.DecimalField(max_digits=16, decimal_places=2)
+  current_budget = models.DecimalField(max_digits=16, decimal_places=2)
+  total_spent = models.DecimalField(max_digits=16, decimal_places=2, default=0)
+  is_active = models.BooleanField(default=True)
+  
+  # Anti-Embezzlement Audit
+  created_jobs_count = models.IntegerField(default=0)
+  expired_jobs_count = models.IntegerField(default=0)
+
+  class Meta:
+    constraints = [
+      models.CheckConstraint(
+        condition=Q(start_date__lt=F('end_date')),
+        name='ministry_term_start_before_end'
+      )
+    ]
+
+  @override
+  def __str__(self):
+    return f"Ministry Term ({self.start_date.date()} - {self.end_date.date()})"
+
+
+@final
+class MinistryElection(models.Model):
+  class Phase(models.TextChoices):
+    CANDIDACY = 'CANDIDACY', 'Candidacy'
+    POLLING = 'POLLING', 'Polling'
+    FINALIZED = 'FINALIZED', 'Finalized'
+
+  created_at = models.DateTimeField(auto_now_add=True)
+  candidacy_end_at = models.DateTimeField()
+  poll_end_at = models.DateTimeField()
+  winner = models.ForeignKey(Player, on_delete=models.SET_NULL, null=True, blank=True, related_name='elections_won')
+  term_created = models.OneToOneField('MinistryTerm', on_delete=models.SET_NULL, null=True, blank=True, related_name='election')
+  is_processed = models.BooleanField(default=False)
+
+  @property
+  def phase(self):
+    now = timezone.now()
+    if self.winner_id or self.term_created_id:
+      return self.Phase.FINALIZED
+    if now < self.candidacy_end_at:
+      return self.Phase.CANDIDACY
+    if now < self.poll_end_at:
+      return self.Phase.POLLING
+    return self.Phase.FINALIZED
+
+  def __str__(self):
+    return f"Ministry Election {self.id} ({self.get_phase_display()})"
+
+
+@final
+class MinistryCandidacy(models.Model):
+  election = models.ForeignKey(MinistryElection, on_delete=models.CASCADE, related_name='candidates')
+  candidate = models.ForeignKey(Player, on_delete=models.CASCADE, related_name='ministry_candidacies')
+  created_at = models.DateTimeField(auto_now_add=True)
+  manifesto = models.TextField(blank=True)
+
+  class Meta:
+    unique_together = ('election', 'candidate')
+    verbose_name_plural = "Ministry Candidacies"
+
+
+@final
+class MinistryVote(models.Model):
+  election = models.ForeignKey(MinistryElection, on_delete=models.CASCADE, related_name='votes')
+  voter = models.ForeignKey(Player, on_delete=models.CASCADE, related_name='ministry_votes')
+  candidate = models.ForeignKey(MinistryCandidacy, on_delete=models.CASCADE, related_name='votes')
+  created_at = models.DateTimeField(auto_now_add=True)
+
+  class Meta:
+    unique_together = ('election', 'voter')
+
+
+@final
 class DeliveryJob(models.Model):
   name = models.CharField(max_length=200, null=True, help_text="Give the job a name so it can be identified")
   cargo_key = models.CharField(max_length=200, db_index=True, choices=CargoKey, null=True, blank=True) # deprecated, use `cargos` instead
@@ -1156,6 +1235,11 @@ class DeliveryJob(models.Model):
   description = models.TextField(blank=True, null=True)
   rp_mode = models.BooleanField(default=False, help_text="Requires the job to be done in RP mode")
   created_from = models.ForeignKey(DeliveryJobTemplate, models.SET_NULL, null=True, blank=True, related_name="jobs")
+  
+  # Ministry Funding
+  funding_term = models.ForeignKey(MinistryTerm, models.SET_NULL, null=True, blank=True, related_name='funded_jobs')
+  escrowed_amount = models.PositiveIntegerField(default=0, help_text="Amount sequestered from Ministry budget")
+
   fulfilled = models.GeneratedField(
     expression=GreaterThanOrEqual(F('quantity_fulfilled'), F('quantity_requested')),
     output_field=models.BooleanField(),
@@ -1510,6 +1594,10 @@ class SubsidyRule(models.Model):
   reward_type = models.CharField(max_length=20, choices=RewardType)
   reward_value = models.DecimalField(max_digits=12, decimal_places=2, help_text="Percentage (e.g. 3.0 for 300%) or Flat Amount")
   scales_with_damage = models.BooleanField(default=False, help_text="If true, multiplies reward by health %")
+
+  # Ministry Budget Tracking
+  allocation = models.DecimalField(max_digits=16, decimal_places=2, default=0, help_text="Ministry allocated budget for this rule")
+  spent = models.DecimalField(max_digits=16, decimal_places=2, default=0, help_text="Amount spent from the allocation")
 
   def __str__(self):
     return f"{self.name} ({self.priority})"

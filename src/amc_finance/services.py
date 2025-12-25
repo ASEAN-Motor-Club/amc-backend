@@ -639,3 +639,287 @@ async def make_treasury_bank_deposit(amount, description):
   )
 
 
+async def allocate_ministry_budget(amount, term):
+  treasury_fund, _ = await Account.objects.aget_or_create(
+    account_type=Account.AccountType.ASSET,
+    book=Account.Book.GOVERNMENT,
+    character=None,
+    name='Treasury Fund',
+  )
+  ministry_budget, _ = await Account.objects.aget_or_create(
+    account_type=Account.AccountType.ASSET,
+    book=Account.Book.GOVERNMENT,
+    character=None, # Ministry is an org, not a character account
+    name='Ministry of Commerce Budget',
+  )
+
+  await sync_to_async(create_journal_entry)(
+    timezone.now(),
+    f"Ministry Budget Allocation - Term {term.id}",
+    None,
+    [
+      {
+        'account': treasury_fund,
+        'debit': 0,
+        'credit': amount,
+      },
+      {
+        'account': ministry_budget,
+        'debit': amount,
+        'credit': 0,
+      },
+    ]
+  )
+  
+  # Sync model
+  from amc.models import MinistryTerm
+  term.current_budget = ministry_budget.balance # Should be updated by journal entry logic but we read it back or trust the flow
+  # Since create_journal_entry updates balance in-memory on the account object, we can use that if returned, but here we re-fetch or assume correctness. 
+  # Actually, create_journal_entry updates the passed account objects.
+  # Since create_journal_entry updates the passed account objects with F expressions, we must refresh.
+  await ministry_budget.arefresh_from_db()
+  term.current_budget = ministry_budget.balance
+  await term.asave()
+
+
+async def escrow_ministry_funds(amount, job):
+  ministry_budget, _ = await Account.objects.aget_or_create(
+    account_type=Account.AccountType.ASSET,
+    book=Account.Book.GOVERNMENT,
+    character=None,
+    name='Ministry of Commerce Budget',
+  )
+  ministry_escrow, _ = await Account.objects.aget_or_create(
+    account_type=Account.AccountType.ASSET,
+    book=Account.Book.GOVERNMENT,
+    character=None,
+    name='Ministry of Commerce Escrow',
+  )
+  
+  if ministry_budget.balance < amount:
+    return False
+
+  await sync_to_async(create_journal_entry)(
+    timezone.now(),
+    f"Job Escrow - {job.id}",
+    None,
+    [
+      {
+        'account': ministry_budget,
+        'debit': 0,
+        'credit': amount,
+      },
+      {
+        'account': ministry_escrow,
+        'debit': amount,
+        'credit': 0,
+      },
+    ]
+  )
+  
+  # Update Funding Term Budget
+  if job.funding_term_id:
+    from amc.models import MinistryTerm
+    term = await MinistryTerm.objects.aget(id=job.funding_term_id)
+    await ministry_budget.arefresh_from_db()
+    term.current_budget = ministry_budget.balance
+    term.created_jobs_count = F('created_jobs_count') + 1
+    await term.asave()
+
+  return True
+
+
+async def process_ministry_completion(job, bonus_amount):
+  """
+  Handles the Ministry side of job completion:
+  1. Clears Escrow (Funds moved to Expense)
+  2. Receives Performance Grant (Rebate)
+  """
+  ministry_escrow, _ = await Account.objects.aget_or_create(
+    account_type=Account.AccountType.ASSET,
+    book=Account.Book.GOVERNMENT,
+    character=None,
+    name='Ministry of Commerce Escrow',
+  )
+  ministry_expense, _ = await Account.objects.aget_or_create(
+    account_type=Account.AccountType.EXPENSE,
+    book=Account.Book.GOVERNMENT,
+    character=None,
+    name='Ministry of Commerce Expenses',
+  )
+  
+  # 1. Clear Escrow -> Expense
+  # We move the *escrowed* amount (which should equal bonus_amount usually, but let's use job.escrowed_amount)
+  escrowed = job.escrowed_amount
+  
+  await sync_to_async(create_journal_entry)(
+    timezone.now(),
+    f"Job Completion Escrow Clear - {job.id}",
+    None,
+    [
+      {
+        'account': ministry_escrow,
+        'debit': 0,
+        'credit': escrowed,
+      },
+      {
+        'account': ministry_expense,
+        'debit': escrowed,
+        'credit': 0,
+      },
+    ]
+  )
+
+  # 2. Performance Grant (20% Rebate)
+  rebate_amount = int(escrowed * 0.20)
+  if rebate_amount > 0:
+    ministry_budget, _ = await Account.objects.aget_or_create(
+      account_type=Account.AccountType.ASSET,
+      book=Account.Book.GOVERNMENT,
+      character=None,
+      name='Ministry of Commerce Budget',
+    )
+    treasury_revenue, _ = await Account.objects.aget_or_create(
+      account_type=Account.AccountType.REVENUE,
+      book=Account.Book.GOVERNMENT,
+      character=None,
+      name='Treasury Revenue',
+    )
+    
+    await sync_to_async(create_journal_entry)(
+      timezone.now(),
+      f"Performance Grant (Rebate) - {job.id}",
+      None,
+      [
+        {
+          'account': treasury_revenue,
+          'debit': 0,
+          'credit': rebate_amount,
+        },
+        {
+          'account': ministry_budget,
+          'debit': rebate_amount, # Asset increases with Debit
+          'credit': 0,
+        },
+      ]
+    )
+    
+    if job.funding_term_id:
+       from amc.models import MinistryTerm
+       term = await MinistryTerm.objects.aget(id=job.funding_term_id)
+       await ministry_budget.arefresh_from_db()
+       term.current_budget = ministry_budget.balance
+       term.total_spent = F('total_spent') + (escrowed - rebate_amount)
+       await term.asave()
+
+
+async def process_ministry_expiration(job):
+  """
+  Handles Ministry Job Expiration:
+  - 50% Refunded to Budget
+  - 50% Burned (Expense)
+  - 100% Cleared from Escrow
+  """
+  ministry_budget, _ = await Account.objects.aget_or_create(
+    account_type=Account.AccountType.ASSET,
+    book=Account.Book.GOVERNMENT,
+    character=None,
+    name='Ministry of Commerce Budget',
+  )
+  ministry_escrow, _ = await Account.objects.aget_or_create(
+    account_type=Account.AccountType.ASSET,
+    book=Account.Book.GOVERNMENT,
+    character=None,
+    name='Ministry of Commerce Escrow',
+  )
+  ministry_expense, _ = await Account.objects.aget_or_create(
+    account_type=Account.AccountType.EXPENSE,
+    book=Account.Book.GOVERNMENT,
+    character=None,
+    name='Ministry of Commerce Expenses',
+  )
+  
+  escrowed = job.escrowed_amount
+  refund_amount = int(escrowed * 0.50)
+  burn_amount = escrowed - refund_amount
+  
+  await sync_to_async(create_journal_entry)(
+    timezone.now(),
+    f"Job Expiration Refund/Burn - {job.id}",
+    None,
+    [
+      {
+        'account': ministry_escrow,
+        'debit': 0,
+        'credit': escrowed,
+      },
+      {
+        'account': ministry_budget,
+        'debit': refund_amount,
+        'credit': 0,
+      },
+      {
+        'account': ministry_expense,
+        'debit': burn_amount,
+        'credit': 0,
+      },
+    ]
+  )
+
+  if job.funding_term_id:
+      from amc.models import MinistryTerm
+      term = await MinistryTerm.objects.aget(id=job.funding_term_id)
+      await ministry_budget.arefresh_from_db()
+      term.current_budget = ministry_budget.balance
+      term.expired_jobs_count = F('expired_jobs_count') + 1
+      term.total_spent = F('total_spent') + burn_amount
+      await term.asave()
+
+  # Clear escrow on job to prevent double refund
+  job.escrowed_amount = 0
+  await job.asave(update_fields=['escrowed_amount'])
+
+async def record_ministry_subsidy_spend(amount, term_id):
+  """
+  Records Ministry subsidy spend:
+  1. Dr. Ministry Expense / Cr. Ministry Budget
+  2. Updates term.current_budget and term.total_spent
+  """
+  ministry_budget, _ = await Account.objects.aget_or_create(
+    account_type=Account.AccountType.ASSET,
+    book=Account.Book.GOVERNMENT,
+    character=None,
+    name='Ministry of Commerce Budget',
+  )
+  ministry_expense, _ = await Account.objects.aget_or_create(
+    account_type=Account.AccountType.EXPENSE,
+    book=Account.Book.GOVERNMENT,
+    character=None,
+    name='Ministry of Commerce Expenses',
+  )
+  
+  await sync_to_async(create_journal_entry)(
+    timezone.now(),
+    "Ministry Subsidy Payment",
+    None,
+    [
+      {
+        'account': ministry_budget,
+        'debit': 0,
+        'credit': amount,
+      },
+      {
+        'account': ministry_expense,
+        'debit': amount,
+        'credit': 0,
+      },
+    ]
+  )
+  
+  if term_id:
+    from amc.models import MinistryTerm
+    term = await MinistryTerm.objects.aget(id=term_id)
+    await ministry_budget.arefresh_from_db()
+    term.current_budget = ministry_budget.balance
+    term.total_spent = F('total_spent') + amount
+    await term.asave()

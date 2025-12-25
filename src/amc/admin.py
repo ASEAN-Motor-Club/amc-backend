@@ -55,7 +55,12 @@ from .models import (
   WorldObject,
   SubsidyArea,
   SubsidyRule,
+  SubsidyRule,
   DeliveryJobTemplate,
+  MinistryElection,
+  MinistryCandidacy,
+  MinistryVote,
+  MinistryTerm,
 )
 from amc_finance.services import send_fund_to_player
 from amc_finance.admin import AccountInlineAdmin
@@ -676,6 +681,10 @@ class SubsidyRuleAdmin(admin.ModelAdmin):
         (None, {
             'fields': ('name', 'active', 'priority', 'reward_type', 'reward_value', 'scales_with_damage', 'requires_on_time')
         }),
+        ('Ministry Budget', {
+            'fields': ('allocation', 'spent'),
+            'description': "Track the Ministry's allocated budget for this subsidy."
+        }),
         ('Requirements', {
             'fields': ('cargos',),
              'classes': ('collapse',),
@@ -719,4 +728,30 @@ class SubsidyRuleAdmin(admin.ModelAdmin):
                 
             return HttpResponse("Ordered")
         return HttpResponse("Method not allowed", status=405)
+
+@admin.register(MinistryElection)
+class MinistryElectionAdmin(admin.ModelAdmin):
+  list_display = ['id', 'created_at', 'candidacy_end_at', 'poll_end_at', 'winner', 'phase', 'is_processed']
+  list_filter = ['winner', 'is_processed']
+
+  def phase(self, obj):
+    return obj.get_phase_display()
+
+@admin.register(MinistryCandidacy)
+class MinistryCandidacyAdmin(admin.ModelAdmin):
+  list_display = ['id', 'election', 'candidate', 'created_at']
+  list_filter = ['election']
+  search_fields = ['candidate__discord_name', 'candidate__unique_id']
+
+@admin.register(MinistryVote)
+class MinistryVoteAdmin(admin.ModelAdmin):
+  list_display = ['id', 'election', 'voter', 'candidate', 'created_at']
+  list_filter = ['election']
+
+@admin.register(MinistryTerm)
+class MinistryTermAdmin(admin.ModelAdmin):
+  list_display = ['id', 'minister', 'start_date', 'end_date', 'initial_budget', 'current_budget', 'is_active']
+  list_filter = ['is_active', 'minister']
+  search_fields = ['minister__discord_name', 'minister__unique_id']
+  readonly_fields = ['created_jobs_count', 'expired_jobs_count', 'total_spent']
 
