@@ -60,6 +60,8 @@ from amc_finance.services import send_fund_to_player
 from amc_finance.admin import AccountInlineAdmin
 from django.contrib.gis.db import models as gis_models
 from .widgets import AMCOpenLayersWidget
+from django.urls import path
+from django.http import HttpResponse
 
 
 class CharacterInlineAdmin(admin.TabularInline):
@@ -663,4 +665,55 @@ class SubsidyRuleAdmin(admin.ModelAdmin):
     list_filter = ['active', 'reward_type', 'scales_with_damage', 'requires_on_time']
     search_fields = ['name']
     filter_horizontal = ['cargos', 'source_areas', 'destination_areas']
+    autocomplete_fields = ['source_delivery_points', 'destination_delivery_points']
+    change_list_template = 'admin/amc/subsidyrule/change_list.html'
+    ordering = ['-priority']
+
+    fieldsets = (
+        (None, {
+            'fields': ('name', 'active', 'priority', 'reward_type', 'reward_value', 'scales_with_damage', 'requires_on_time')
+        }),
+        ('Requirements', {
+            'fields': ('cargos',),
+             'classes': ('collapse',),
+        }),
+        ('Source', {
+            'fields': ('source_areas', 'source_delivery_points'),
+            'classes': ('collapse',),
+            'description': "Leave empty to apply to ANY source."
+        }),
+        ('Destination', {
+             'fields': ('destination_areas', 'destination_delivery_points'),
+             'classes': ('collapse',),
+             'description': "Leave empty to apply to ANY destination."
+        }),
+    )
+
+    def get_urls(self):
+        urls = super().get_urls()
+        custom_urls = [
+            path('reorder/', self.admin_site.admin_view(self.reorder_view), name='subsidy-rule-reorder'),
+        ]
+        return custom_urls + urls
+
+    def reorder_view(self, request):
+        if request.method == "POST":
+            ids = request.POST.getlist('ids[]')
+            if not ids:
+                # Fallback if HTMX/JS sends it differently (e.g. without [])
+                ids = request.POST.getlist('ids')
+            
+            if not ids:
+                 return HttpResponse("No IDs provided", status=400)
+            
+            # Higher priority = top of list
+            # List comes in as [top_id, second_id, ...]
+            # So top_id gets highest number.
+            
+            count = len(ids)
+            for index, id in enumerate(ids):
+                SubsidyRule.objects.filter(pk=id).update(priority=count - index)
+                
+            return HttpResponse("Ordered")
+        return HttpResponse("Method not allowed", status=405)
 

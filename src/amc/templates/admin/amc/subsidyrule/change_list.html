@@ -1,0 +1,124 @@
+{% extends "admin/change_list.html" %}
+{% load i18n static %}
+
+{% block extrahead %}
+{{ block.super }}
+<script src="https://unpkg.com/htmx.org@1.9.10"></script>
+<style>
+    .draggable-row {
+        cursor: move;
+    }
+
+    .draggable-row.dragging {
+        opacity: 0.5;
+        background-color: #f0f0f0;
+    }
+
+    .drag-over {
+        border-top: 2px solid #417690;
+    }
+</style>
+{% endblock %}
+
+{% block result_list %}
+<div id="subsidy-rule-list" hx-headers='{"X-CSRFToken": "{{ csrf_token }}"}'>
+    {{ block.super }}
+</div>
+
+<script>
+    document.addEventListener('DOMContentLoaded', function () {
+        const resultList = document.querySelector('#result_list tbody');
+        if (!resultList) return;
+
+        let draggedItem = null;
+
+        // Make rows draggable
+        const rows = resultList.querySelectorAll('tr');
+        rows.forEach(row => {
+            row.setAttribute('draggable', true);
+            row.classList.add('draggable-row');
+
+            // Add ID data attribute if not present (assuming first column is action checkbox, second is link to edit which has ID)
+            // Actually, best to rely on a specific data attribute populated by the ModelAdmin
+            // We'll assume the ModelAdmin puts the ID in a way we can find, or we can parse it from the edit link.
+            // But a cleaner way is to inject it. For now, let's try to find the checkbox value.
+            const checkbox = row.querySelector('.action-select');
+            if (checkbox) {
+                row.dataset.id = checkbox.value;
+            }
+        });
+
+        resultList.addEventListener('dragstart', function (e) {
+            draggedItem = e.target.closest('tr');
+            if (draggedItem) {
+                e.dataTransfer.effectAllowed = 'move';
+                e.dataTransfer.setData('text/html', draggedItem.innerHTML); // Not really used but required for FF
+                draggedItem.classList.add('dragging');
+            }
+        });
+
+        resultList.addEventListener('dragend', function (e) {
+            if (draggedItem) {
+                draggedItem.classList.remove('dragging');
+                draggedItem = null;
+
+                // Remove drag-over classes
+                const rows = resultList.querySelectorAll('tr');
+                rows.forEach(row => row.classList.remove('drag-over'));
+
+                // Save new order
+                saveOrder();
+            }
+        });
+
+        resultList.addEventListener('dragover', function (e) {
+            e.preventDefault(); // Necessary to allow dropping
+            e.dataTransfer.dropEffect = 'move';
+
+            const targetRow = e.target.closest('tr');
+            if (targetRow && targetRow !== draggedItem) {
+                targetRow.classList.add('drag-over');
+            }
+        });
+
+        resultList.addEventListener('dragleave', function (e) {
+            const targetRow = e.target.closest('tr');
+            if (targetRow) {
+                targetRow.classList.remove('drag-over');
+            }
+        });
+
+        resultList.addEventListener('drop', function (e) {
+            e.preventDefault();
+            const targetRow = e.target.closest('tr');
+
+            if (targetRow && draggedItem && targetRow !== draggedItem) {
+                // Determine insert position (before or after)
+                const rect = targetRow.getBoundingClientRect();
+                const next = (e.clientY - rect.top) / (rect.bottom - rect.top) > 0.5;
+
+                targetRow.parentNode.insertBefore(draggedItem, next ? targetRow.nextSibling : targetRow);
+            }
+        });
+
+        function saveOrder() {
+            const rows = resultList.querySelectorAll('tr');
+            const ids = Array.from(rows).map(row => row.dataset.id).filter(id => id);
+
+            if (ids.length > 0) {
+                htmx.ajax('POST', 'reorder/', {
+                    values: { ids: ids },
+                    swap: 'none',
+                    headers: { 'X-CSRFToken': '{{ csrf_token }}' }
+                }).then(() => {
+                    // Optional: Show success message
+                    console.log('Order saved');
+                }).catch(err => {
+                    console.error('Error saving order', err);
+                    alert('Failed to save new order.');
+                });
+            }
+        }
+    });
+</script>
+{% endblock %}
