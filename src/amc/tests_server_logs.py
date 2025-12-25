@@ -197,6 +197,7 @@ class ProcessLogEventTestCase(TestCase):
     self.character = Character.objects.create(
       name="test",
       player=self.player,
+      guid="test_guid"
     )
 
   async def test_player_chat_message(self):

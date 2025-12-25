@@ -1,4 +1,6 @@
 from django.test import SimpleTestCase
+from django.utils import translation
+from django.utils.translation import gettext as _
 from unittest.mock import MagicMock, AsyncMock
 from amc.command_framework import CommandRegistry, CommandContext
 import asyncio
@@ -8,6 +10,8 @@ class TestCommandFramework(SimpleTestCase):
         self.registry = CommandRegistry()
         self.ctx = MagicMock(spec=CommandContext)
         self.ctx.reply = AsyncMock()
+        self.ctx.player = MagicMock()
+        self.ctx.player.language = 'en-gb'
 
     async def _execute_command(self, command_str):
         # Helper to execute command since SimpleTestCase doesn't support async methods directly efficiently 

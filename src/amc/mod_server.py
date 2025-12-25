@@ -184,6 +184,8 @@ async def get_status(session):
     return data['data']
 
 async def get_rp_mode(session, player_id):
+  if not session:
+    return False
   async with session.get(f'/rp_sessions/{player_id}') as resp:
     if resp.status != 200:
       return False

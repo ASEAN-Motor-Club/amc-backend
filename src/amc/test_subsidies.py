@@ -34,7 +34,8 @@ class SubsidyLogicTest(TestCase):
             name="Coal Subsidy",
             reward_type=SubsidyRule.RewardType.PERCENTAGE,
             reward_value=Decimal("1.50"),
-            priority=10
+            priority=10,
+            allocation=Decimal("1000000")
         )
         await rule.cargos.aadd(self.cargo_coal)
         
@@ -47,13 +48,13 @@ class SubsidyLogicTest(TestCase):
         mock_cargo.data = {}
         mock_cargo.damage = 0.0
 
-        amount, factor = await get_subsidy_for_cargo(mock_cargo)
+        amount, factor, rule = await get_subsidy_for_cargo(mock_cargo)
         self.assertEqual(factor, 1.5)
         self.assertEqual(amount, 1500)
 
         # Test Burger (should not match)
         mock_cargo.cargo_key = "Burger_01_Signature"
-        amount, factor = await get_subsidy_for_cargo(mock_cargo)
+        amount, factor, rule = await get_subsidy_for_cargo(mock_cargo)
         self.assertEqual(amount, 0)
     
     async def test_source_area_restriction(self):
@@ -62,7 +63,8 @@ class SubsidyLogicTest(TestCase):
             name="Gwangjin Export",
             reward_type=SubsidyRule.RewardType.PERCENTAGE,
             reward_value=Decimal("2.00"),
-            priority=10
+            priority=10,
+            allocation=Decimal("1000000")
         )
         await rule.source_areas.aadd(self.area_gwangjin)
         
@@ -75,12 +77,12 @@ class SubsidyLogicTest(TestCase):
         mock_cargo.data = {}
         mock_cargo.damage = 0.0
 
-        amount, factor = await get_subsidy_for_cargo(mock_cargo)
+        amount, factor, rule = await get_subsidy_for_cargo(mock_cargo)
         self.assertEqual(factor, 2.0)
 
         # Test from OUT point
         mock_cargo.sender_point = self.point_out
-        amount, factor = await get_subsidy_for_cargo(mock_cargo)
+        amount, factor, rule = await get_subsidy_for_cargo(mock_cargo)
         self.assertEqual(amount, 0) # No match
 
     async def test_priority(self):
@@ -89,7 +91,8 @@ class SubsidyLogicTest(TestCase):
             name="Global Low",
             reward_type=SubsidyRule.RewardType.PERCENTAGE,
             reward_value=Decimal("1.10"),
-            priority=1
+            priority=1,
+            allocation=Decimal("1000000")
         )
         
         # High priority specific rule: 2.0
@@ -97,7 +100,8 @@ class SubsidyLogicTest(TestCase):
             name="Specific High",
             reward_type=SubsidyRule.RewardType.PERCENTAGE,
             reward_value=Decimal("2.00"),
-            priority=10
+            priority=10,
+            allocation=Decimal("1000000")
         )
         await r2.cargos.aadd(self.cargo_coal)
         
@@ -109,7 +113,7 @@ class SubsidyLogicTest(TestCase):
         mock_cargo.data = {}
         mock_cargo.damage = 0.0
 
-        amount, factor = await get_subsidy_for_cargo(mock_cargo)
+        amount, factor, rule = await get_subsidy_for_cargo(mock_cargo)
         self.assertEqual(factor, 2.0) # High priority wins
 
     async def test_damage_scaling(self):
@@ -119,7 +123,8 @@ class SubsidyLogicTest(TestCase):
             reward_type=SubsidyRule.RewardType.PERCENTAGE,
             reward_value=Decimal("2.00"),
             priority=10,
-            scales_with_damage=True
+            scales_with_damage=True,
+            allocation=Decimal("1000000")
         )
         
         mock_cargo = MagicMock()
@@ -130,7 +135,7 @@ class SubsidyLogicTest(TestCase):
         mock_cargo.data = {}
         mock_cargo.damage = 0.1 # 10% damage
 
-        amount, factor = await get_subsidy_for_cargo(mock_cargo)
+        amount, factor, rule = await get_subsidy_for_cargo(mock_cargo)
         # Expected: 2.0 * (1.0 - 0.1) = 1.8
         self.assertAlmostEqual(factor, 1.8)
         self.assertEqual(amount, 1800)
@@ -144,7 +149,8 @@ class SubsidyLogicTest(TestCase):
             reward_type=SubsidyRule.RewardType.PERCENTAGE,
             reward_value=Decimal("3.00"),
             active=True,
-            priority=10
+            priority=10,
+            allocation=Decimal("1000000")
         )
         await r1.cargos.aadd(self.cargo_burger)
         
@@ -163,7 +169,8 @@ class SubsidyLogicTest(TestCase):
             reward_type=SubsidyRule.RewardType.FLAT,
             reward_value=Decimal("1000"),
             active=True,
-            priority=5
+            priority=5,
+            allocation=Decimal("1000000")
         )
         await r3.source_areas.aadd(self.area_gwangjin)
         
@@ -186,7 +193,8 @@ class SubsidyLogicTest(TestCase):
             name="Point Rule",
             reward_type=SubsidyRule.RewardType.PERCENTAGE,
             reward_value=Decimal("2.50"),
-            priority=10
+            priority=10,
+            allocation=Decimal("1000000")
         )
         await rule.source_delivery_points.aadd(self.point_in)
 
@@ -203,7 +211,7 @@ class SubsidyLogicTest(TestCase):
         mock_cargo.data = {}
         mock_cargo.damage = 0.0
 
-        amount, factor = await get_subsidy_for_cargo(mock_cargo)
+        amount, factor, rule = await get_subsidy_for_cargo(mock_cargo)
         self.assertEqual(factor, 2.5)
 
         # Test nearby match (<1m)
@@ -214,13 +222,13 @@ class SubsidyLogicTest(TestCase):
         mock_sender.coord = nearby_point
         mock_cargo.sender_point = mock_sender
         
-        amount, factor = await get_subsidy_for_cargo(mock_cargo)
+        amount, factor, rule = await get_subsidy_for_cargo(mock_cargo)
         self.assertEqual(factor, 2.5)
         
         # Test far match (>1m)
         far_point = Point(self.point_in.coord.x + 2.0, self.point_in.coord.y, 0, srid=3857)
         mock_sender.coord = far_point
-        amount, factor = await get_subsidy_for_cargo(mock_cargo)
+        amount, factor, rule = await get_subsidy_for_cargo(mock_cargo)
         self.assertEqual(factor, 0.0)
 
     async def test_fallback_logic(self):
@@ -229,7 +237,8 @@ class SubsidyLogicTest(TestCase):
             name="Fallback Rule",
             reward_type=SubsidyRule.RewardType.PERCENTAGE,
             reward_value=Decimal("3.00"),
-            priority=10
+            priority=10,
+            allocation=Decimal("1000000")
         )
         await rule.source_delivery_points.aadd(self.point_in)
         await rule.source_areas.aadd(self.area_gwangjin)
@@ -243,7 +252,7 @@ class SubsidyLogicTest(TestCase):
         mock_cargo.data = {}
         mock_cargo.damage = 0.0
         
-        amount, factor = await get_subsidy_for_cargo(mock_cargo)
+        amount, factor, rule = await get_subsidy_for_cargo(mock_cargo)
         self.assertEqual(factor, 3.0)
 
         # Case 2: Match Area (but not point)
@@ -254,7 +263,7 @@ class SubsidyLogicTest(TestCase):
         mock_sender.coord = point_in_area
         mock_cargo.sender_point = mock_sender
         
-        amount, factor = await get_subsidy_for_cargo(mock_cargo)
+        amount, factor, rule = await get_subsidy_for_cargo(mock_cargo)
         self.assertEqual(factor, 3.0)
         
         # Case 3: No Match
@@ -262,6 +271,6 @@ class SubsidyLogicTest(TestCase):
         mock_sender.coord = point_outside
         mock_cargo.sender_point = mock_sender
         
-        amount, factor = await get_subsidy_for_cargo(mock_cargo)
+        amount, factor, rule = await get_subsidy_for_cargo(mock_cargo)
         self.assertEqual(factor, 0.0)
 

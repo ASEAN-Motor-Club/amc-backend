@@ -18,6 +18,8 @@ async def game_api_request(session, url, method='get', password='', params={}):
 
 async def get_players(session, password=''):
   data = await game_api_request(session, "/player/list")
+  if 'data' not in data:
+    return []
   players = [
     (player['unique_id'], player)
     for player in data['data'].values()

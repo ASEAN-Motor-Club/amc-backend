@@ -37,6 +37,7 @@ from amc.models import (
 
 class PlayersAPITest(TestCase):
   def setUp(self):
+    self.maxDiff = None
     self.client = TestAsyncClient(players_router)
 
   async def test_get_player(self):

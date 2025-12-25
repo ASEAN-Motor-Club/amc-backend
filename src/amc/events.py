@@ -194,7 +194,7 @@ async def process_event(event):
       }
     )
 
-    if game_event.state == 2 and game_event_character.section_index >= 0 and game_event_character.laps >= 1:
+    if game_event.state >= 2 and game_event_character.section_index >= 0 and game_event_character.laps >= 1:
       laps = game_event_character.laps - 1
       section_index = game_event_character.section_index
       await LapSectionTime.objects.aupdate_or_create(

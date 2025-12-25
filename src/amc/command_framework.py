@@ -2,8 +2,9 @@ import re
 import inspect
 import logging
 import asyncio
+from django.utils import translation
 from typing import Callable, Any, get_type_hints, Dict, List, Union, Optional
-from django.utils.translation import gettext as _
+from django.utils.translation import gettext as _, gettext_lazy
 from dataclasses import dataclass
 
 logger = logging.getLogger(__name__)
@@ -149,15 +150,21 @@ class CommandRegistry:
                         continue 
 
                 # Execute
-                from django.utils import translation
                 try:
-                    lang = getattr(ctx.player, 'language', 'en-gb')
+                    lang = 'en-gb'
+                    if ctx.player and hasattr(ctx.player, 'language') and isinstance(ctx.player.language, str):
+                        lang = ctx.player.language
+
                     with translation.override(lang):
                         await func(ctx, **processed_kwargs)
                     return True
                 except Exception as e:
                     logger.exception(f"Error executing command {cmd_data['name']}")
-                    with translation.override(getattr(ctx.player, 'language', 'en-gb')):
+                    lang = 'en-gb'
+                    if ctx.player and hasattr(ctx.player, 'language') and isinstance(ctx.player.language, str):
+                        lang = ctx.player.language
+
+                    with translation.override(lang):
                         await ctx.reply(_("<Title>Error</>\n{error}").format(error=str(e)))
                     return True
         return False

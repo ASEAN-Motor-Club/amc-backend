@@ -803,6 +803,7 @@ class PlayerVehicleLog(models.Model):
         raise ValueError('Unknown vehicle log event')
 
   class Meta:
+    ordering = ['-timestamp']
     constraints = [
       models.UniqueConstraint(
         fields=['timestamp', 'character', 'vehicle', 'action'],

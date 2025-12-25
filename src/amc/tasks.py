@@ -398,22 +398,24 @@ Not everyone likes to be roughed up!
           asyncio.create_task(
             announce(f'Failed to greet player: {e}', http_client)
           )
-      await process_login_event(character.id, timestamp)
-      asyncio.create_task(send_player_messages(http_client_mod, player))
+      if character:
+        await process_login_event(character.id, timestamp)
+        asyncio.create_task(send_player_messages(http_client_mod, player))
 
-      is_rp_mode = await get_rp_mode(http_client_mod, character.guid)
-      if character.rp_mode and not is_rp_mode:
-        asyncio.create_task(toggle_rp_session(http_client_mod, character.guid))
-        is_rp_mode = True
+        if http_client_mod:
+          is_rp_mode = await get_rp_mode(http_client_mod, character.guid)
+          if character.rp_mode and not is_rp_mode:
+            asyncio.create_task(toggle_rp_session(http_client_mod, character.guid))
+            is_rp_mode = True
 
-      new_name = character.name
-      if is_rp_mode and '[RP]' not in new_name:
-        new_name = f"{new_name}[RP]"
-      elif not is_rp_mode and '[RP]' in new_name:
-        new_name = character.name.replace('[RP]', '')
+          new_name = character.name
+          if is_rp_mode and '[RP]' not in new_name:
+            new_name = f"{new_name}[RP]"
+          elif not is_rp_mode and '[RP]' in new_name:
+            new_name = character.name.replace('[RP]', '')
 
-      if new_name != character.name:
-        asyncio.create_task(set_character_name(http_client_mod, character.guid, new_name))
+          if new_name != character.name:
+            asyncio.create_task(set_character_name(http_client_mod, character.guid, new_name))
 
       if discord_client and ctx.get('startup_time') and timestamp > ctx.get('startup_time'):
         forward_message = (
@@ -427,7 +429,8 @@ Not everyone likes to be roughed up!
         guid__isnull=False,
         player__unique_id=player_id
       ).order_by('-last_login').afirst()
-      await process_logout_event(character.id, timestamp)
+      if character:
+        await process_logout_event(character.id, timestamp)
       if discord_client and ctx.get('startup_time') and timestamp > ctx.get('startup_time'):
         forward_message = (
           settings.DISCORD_GAME_CHAT_CHANNEL_ID,
