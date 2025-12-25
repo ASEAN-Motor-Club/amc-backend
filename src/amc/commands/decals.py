@@ -2,7 +2,7 @@ from amc.command_framework import registry, CommandContext
 from amc.models import VehicleDecal
 from amc.mod_server import get_decal, set_decal
 from django.db.models import Q
-from django.utils.translation import gettext as _, gettext_lazy
+from django.utils.translation import gettext_lazy
 
 @registry.register("/decals", description=gettext_lazy("List your saved decals"), category="Decals")
 async def cmd_decals(ctx: CommandContext):

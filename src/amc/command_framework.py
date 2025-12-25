@@ -1,8 +1,7 @@
 import re
 import inspect
 import logging
-import asyncio
-from typing import Callable, Any, get_type_hints, Dict, List, Union, Optional
+from typing import Callable, Any, get_type_hints, Dict, List, Union
 from django.utils.translation import gettext as _
 from dataclasses import dataclass
 
