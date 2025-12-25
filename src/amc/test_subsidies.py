@@ -173,6 +173,7 @@ class SubsidyLogicTest(TestCase):
             allocation=Decimal("1000000")
         )
         await r3.source_areas.aadd(self.area_gwangjin)
+        await r3.source_delivery_points.aadd(self.point_in)
         
         text = await get_subsidies_text()
         
@@ -188,6 +189,26 @@ class SubsidyLogicTest(TestCase):
         self.assertIn("From: Gwangjin Area, In Point", text) # Note: order depends on query results but logically both should be there
                                                              # Since we concat areas then points, Gwangjin Area is first.
 
+    async def test_get_subsidies_text_points_only(self):
+        # Create rule with ONLY points, no areas
+        r_points = await SubsidyRule.objects.acreate(
+            name="Points Only Rule",
+            reward_type=SubsidyRule.RewardType.FLAT,
+            reward_value=Decimal("500"),
+            active=True,
+            priority=10,
+            allocation=Decimal("1000000")
+        )
+        await r_points.source_delivery_points.aadd(self.point_in)
+        await r_points.destination_delivery_points.aadd(self.point_out)
+        
+        text = await get_subsidies_text()
+        
+        self.assertIn("500 coins", text)
+        
+        # Verify that our specific points are listed
+        self.assertIn("From: In Point", text)
+        self.assertIn("To: Out Point", text)
 
     async def test_delivery_point_matching(self):
         # Rule: Source = point_in
