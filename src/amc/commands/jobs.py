@@ -22,6 +22,13 @@ async def cmd_jobs(ctx: CommandContext):
             title += "\n" + _("<Warning>Requires RP Mode</> (Yours: {status})").format(status='<EffectGood>ON</>' if is_rp_mode else '<Warning>OFF</>')
         title += "\n" + _("<Secondary>Expiring in {time}</>").format(time=get_time_difference_string(ctx.timestamp, job.expired_at))
         title += "\n" + _("<Secondary>Cargo: {cargo_key}</>").format(cargo_key=cargo_key)
+        
+        if source_points := list(job.source_points.all()):
+            title += "\n" + _("<Secondary>ONLY from: {points}</>").format(points=', '.join([p.name for p in source_points]))
+        
+        if destination_points := list(job.destination_points.all()):
+             title += "\n" + _("<Secondary>ONLY to: {points}</>").format(points=', '.join([p.name for p in destination_points]))
+             
         jobs_str_list.append(title)
 
     jobs_str = "\n\n".join(jobs_str_list)

@@ -8,7 +8,7 @@ msgid ""
 msgstr ""
 "Project-Id-Version: PACKAGE VERSION\n"
 "Report-Msgid-Bugs-To: \n"
-"POT-Creation-Date: 2025-12-21 23:00+0700\n"
+"POT-Creation-Date: 2025-12-24 11:28+0700\n"
 "PO-Revision-Date: YEAR-MO-DA HO:MI+ZONE\n"
 "Last-Translator: FULL NAME <EMAIL@ADDRESS>\n"
 "Language-Team: LANGUAGE <LL@li.org>\n"
@@ -18,13 +18,13 @@ msgstr ""
 "Content-Transfer-Encoding: 8bit\n"
 "Plural-Forms: nplurals=1; plural=0;\n"
 
-#: src/amc/admin.py:570
+#: amc/admin.py:570
 #, python-format
 msgid "%d jobs was successfully created."
 msgid_plural "%d jobs were successfully created."
 msgstr[0] "成功创建了 %d 个任务。"
 
-#: src/amc/command_framework.py:161
+#: amc/command_framework.py:161
 #, python-brace-format
 msgid ""
 "<Title>Error</>\n"
@@ -33,43 +33,58 @@ msgstr ""
 "<Title>错误</>\n"
 "{error}"
 
-#: src/amc/commands/admin.py:16
-msgid "Despawn your vehicle"
-msgstr "移除你的车辆"
+#: amc/commands/admin.py:19
+msgid "Spawn display vehicles"
+msgstr "生成展示车辆"
 
-#: src/amc/commands/admin.py:19
+#: amc/commands/admin.py:35
+msgid "Spawn dealership vehicles"
+msgstr "生成经销商车辆"
+
+#: amc/commands/admin.py:41
+msgid "Spawn world assets"
+msgstr "生成世界资产"
+
+#: amc/commands/admin.py:47
+msgid "Spawn garages"
+msgstr "生成车库"
+
+#: amc/commands/admin.py:55
+msgid "Spawn a single garage"
+msgstr "生成单个车库"
+
+#: amc/commands/admin.py:63
+#, python-brace-format
+msgid "Garage spawned! Tag: {tag}"
+msgstr "车库已生成！标签: {tag}"
+
+#: amc/commands/admin.py:66
+msgid "Spawn a vehicle"
+msgstr "生成车辆"
+
+#: amc/commands/admin.py:69 amc/commands/admin.py:95
+msgid "Admin-only"
+msgstr "仅限管理员"
+
+#: amc/commands/admin.py:73
 msgid ""
-"<Title>Feature disabled</>\n"
-"\n"
-"Sorry, this feature has been permanently disabled."
-msgstr ""
-"<Title>功能已禁用</>\n"
-"\n"
-"抱歉，此功能已被永久禁用。"
-
-#: src/amc/commands/admin.py:21
-msgid "Admin despawn tool"
-msgstr "管理员移除工具"
-
-#: src/amc/commands/admin.py:24
-msgid ""
-"<Title>Feature disabled</>\n"
-"\n"
-"Sorry, this feature is temporarily unavailable"
-msgstr ""
-"<Title>功能已禁用</>\n"
-"\n"
-"抱歉，此功能暂时不可用"
-
-#: src/amc/commands/admin.py:33
-msgid ""
-"<Title>Player vehicles despawned</>\n"
+"<Title>Spawn Vehicle</>\n"
 "\n"
 msgstr ""
-"<Title>玩家车辆已移除</>\n"
+"<Title>生成车辆</>\n"
 "\n"
 
-#: src/amc/commands/admin.py:36
+#: amc/commands/admin.py:82
+msgid "Force exit vehicle (Admin)"
+msgstr "强制离开车辆 (管理员)"
+
+#: amc/commands/admin.py:92
+#, fuzzy
+#| msgid "Teleport to a location"
+msgid "Teleport a player to a location (Admin)"
+msgstr "传送至地点"
+
+#: amc/commands/admin.py:103
 msgid ""
 "<Title>Player not found</>\n"
 "\n"
@@ -79,92 +94,66 @@ msgstr ""
 "\n"
 "请确保名字拼写正确。"
 
-#: src/amc/commands/admin.py:41
-msgid "Spawn display vehicles"
-msgstr "生成展示车辆"
-
-#: src/amc/commands/admin.py:57
-msgid "Spawn dealership vehicles"
-msgstr "生成经销商车辆"
-
-#: src/amc/commands/admin.py:63
-msgid "Spawn world assets"
-msgstr "生成世界资产"
-
-#: src/amc/commands/admin.py:69
-msgid "Spawn garages"
-msgstr "生成车库"
-
-#: src/amc/commands/admin.py:77
-msgid "Spawn a single garage"
-msgstr "生成单个车库"
-
-#: src/amc/commands/admin.py:85
+#: amc/commands/admin.py:114 amc/commands/teleport.py:45
 #, python-brace-format
-msgid "Garage spawned! Tag: {tag}"
-msgstr "车库已生成！标签: {tag}"
-
-#: src/amc/commands/admin.py:88
-msgid "Spawn a vehicle"
-msgstr "生成车辆"
-
-#: src/amc/commands/admin.py:91
-msgid "Admin-only"
-msgstr "仅限管理员"
-
-#: src/amc/commands/admin.py:95
 msgid ""
-"<Title>Spawn Vehicle</>\n"
+"Teleport point not found\n"
+"Choose from one of the following locations:\n"
 "\n"
+"{locations}"
 msgstr ""
-"<Title>生成车辆</>\n"
+"未找到传送点\n"
+"请从以下位置中选择:\n"
 "\n"
+"{locations}"
 
-#: src/amc/commands/admin.py:104
-msgid "Force exit vehicle (Admin)"
-msgstr "强制离开车辆 (管理员)"
+#: amc/commands/admin.py:128
+#, fuzzy, python-brace-format
+#| msgid "Teleport to a location"
+msgid "Teleported {player} to {location}"
+msgstr "传送至地点"
 
-#: src/amc/commands/decals.py:7
+#: amc/commands/decals.py:7
 msgid "List your saved decals"
 msgstr "列出已保存的贴纸"
 
-#: src/amc/commands/decals.py:21
+#: amc/commands/decals.py:21
 msgid "Save your current vehicle decal"
 msgstr "保存当前车辆贴纸"
 
-#: src/amc/commands/decals.py:42
+#: amc/commands/decals.py:42
 msgid "Apply a saved decal"
 msgstr "应用已保存的贴纸"
 
-#: src/amc/commands/events.py:13
+#: amc/commands/events.py:13
 msgid "Start event with staggered delay"
 msgstr "以交错延迟开始活动"
 
-#: src/amc/commands/events.py:24
+#: amc/commands/events.py:24
 msgid "Automatically grid players for event"
 msgstr "自动为活动安排玩家位置"
 
-#: src/amc/commands/events.py:35
+#: amc/commands/events.py:35
 msgid "See the results of active events"
 msgstr "查看当前活动结果"
 
-#: src/amc/commands/events.py:43
+#: amc/commands/events.py:43
 msgid "Creates an event properly"
 msgstr "正确创建活动"
 
-#: src/amc/commands/events.py:63
+#: amc/commands/events.py:63
 msgid "List current and upcoming scheduled events"
 msgstr "列出当前和即将开始的计划活动"
 
-#: src/amc/commands/events.py:75
+#: amc/commands/events.py:75
 msgid "Initiate a 5 second countdown"
 msgstr "开始 5 秒倒计时"
 
-#: src/amc/commands/finance.py:18
+#: amc/commands/finance.py:18
 msgid "Access your bank account"
 msgstr "访问你的银行账户"
 
-#: src/amc/commands/finance.py:36
+#: amc/commands/finance.py:36
 msgid ""
 "<Title>Your Bank ASEAN Account</>\n"
 "\n"
@@ -224,15 +213,15 @@ msgstr ""
 "<Bold>最近交易</>\n"
 "{transactions_str}\n"
 
-#: src/amc/commands/finance.py:65
+#: amc/commands/finance.py:65
 msgid "Max available loan depends on your driver+trucking level"
 msgstr "最大可用贷款取决于你的驾驶+货运等级"
 
-#: src/amc/commands/finance.py:70
+#: amc/commands/finance.py:70
 msgid "Donate money to another player"
 msgstr "向另一位玩家捐赠资金"
 
-#: src/amc/commands/finance.py:76
+#: amc/commands/finance.py:76
 #, python-brace-format
 msgid ""
 "<Title>Donation</>\n"
@@ -241,28 +230,28 @@ msgstr ""
 "<Title>捐赠</>\n"
 "确认: <Highlight>/donate {amount} {code_expected}</>"
 
-#: src/amc/commands/finance.py:83
+#: amc/commands/finance.py:83
 msgid "Donated {amount_int:,}!"
 msgstr "已捐赠 {amount_int:,}！"
 
-#: src/amc/commands/finance.py:85
+#: amc/commands/finance.py:85
 msgid "Withdraw money from your account"
 msgstr "从账户提款"
 
-#: src/amc/commands/finance.py:91
+#: amc/commands/finance.py:91
 #, python-brace-format
 msgid "Confirm large withdrawal: /withdraw {amount} {code_gen}"
 msgstr "确认大额提款: /withdraw {amount} {code_gen}"
 
-#: src/amc/commands/finance.py:99
+#: amc/commands/finance.py:99
 msgid "Take out a loan"
 msgstr "贷款"
 
-#: src/amc/commands/finance.py:102
+#: amc/commands/finance.py:102
 msgid "You must have done at least one delivery"
 msgstr "你必须至少完成过一次运送"
 
-#: src/amc/commands/finance.py:116
+#: amc/commands/finance.py:116
 #, python-brace-format
 msgid ""
 "<Title>Loan</>\n"
@@ -273,16 +262,20 @@ msgstr ""
 "费用: {fee}\n"
 "确认: /loan {amount} {code_expected}"
 
-#: src/amc/commands/finance.py:123
+#: amc/commands/finance.py:123
 msgid "Loan Approved!"
 msgstr "贷款已批准！"
 
-#: src/amc/commands/finance.py:125
+#: amc/commands/finance.py:125
 msgid "Set your automatic saving rate"
 msgstr "设置自动储蓄率"
 
-#: src/amc/commands/finance.py:131
-#, python-brace-format
+#: amc/commands/finance.py:131
+#, fuzzy, python-format, python-brace-format
+#| msgid ""
+#| "<Title>Savings rate saved</>\n"
+#| "\n"
+#| "{rate:.0f}% of your earnings will automatically go into your bank account"
 msgid ""
 "<Title>Savings rate saved</>\n"
 "\n"
@@ -292,7 +285,7 @@ msgstr ""
 "\n"
 "你收入的 {rate:.0f}% 将自动存入你的银行账户"
 
-#: src/amc/commands/finance.py:135
+#: amc/commands/finance.py:135
 #, python-brace-format
 msgid ""
 "<Title>Set savings rate failed</>\n"
@@ -303,12 +296,16 @@ msgstr ""
 "\n"
 "{error}"
 
-#: src/amc/commands/finance.py:137
+#: amc/commands/finance.py:137
 msgid "Set your loan repayment rate"
 msgstr "设置你的贷款还款率"
 
-#: src/amc/commands/finance.py:143
-#, python-brace-format
+#: amc/commands/finance.py:143
+#, fuzzy, python-format, python-brace-format
+#| msgid ""
+#| "<Title>Loan repayment rate saved</>\n"
+#| "\n"
+#| "{rate:.0f}% of your earnings will automatically go repaying loans, if any"
 msgid ""
 "<Title>Loan repayment rate saved</>\n"
 "\n"
@@ -318,7 +315,7 @@ msgstr ""
 "\n"
 "你收入的 {rate:.0f}% 将自动用于偿还贷款（如果有）"
 
-#: src/amc/commands/finance.py:147
+#: amc/commands/finance.py:147
 #, python-brace-format
 msgid ""
 "<Title>Set loan repayment rate failed</>\n"
@@ -329,19 +326,19 @@ msgstr ""
 "\n"
 "{error}"
 
-#: src/amc/commands/finance.py:149
+#: amc/commands/finance.py:149
 msgid "Toggle Universal Basic Income"
 msgstr "切换全民基本收入 (UBI)"
 
-#: src/amc/commands/finance.py:155
+#: amc/commands/finance.py:155
 msgid "You will no longer receive a universal basic income"
 msgstr "你将不再收到全民基本收入"
 
-#: src/amc/commands/finance.py:155
+#: amc/commands/finance.py:155
 msgid "You will start to receive a universal basic income"
 msgstr "你将开始收到全民基本收入"
 
-#: src/amc/commands/finance.py:159
+#: amc/commands/finance.py:159
 #, python-brace-format
 msgid ""
 "<Title>Toggle UBI failed</>\n"
@@ -352,11 +349,11 @@ msgstr ""
 "\n"
 "{error}"
 
-#: src/amc/commands/finance.py:161
+#: amc/commands/finance.py:161
 msgid "Burn money from your account"
 msgstr "销毁账户资金"
 
-#: src/amc/commands/finance.py:168
+#: amc/commands/finance.py:168
 #, python-brace-format
 msgid ""
 "<Title>Burn</>\n"
@@ -379,7 +376,7 @@ msgstr ""
 "如果你希望继续，请再次输入命令并跟上验证码:\n"
 "<Highlight>/burn {amount} {code_expected}</>"
 
-#: src/amc/commands/finance.py:182
+#: amc/commands/finance.py:182
 #, python-brace-format
 msgid ""
 "<Title>Burn</>\n"
@@ -392,7 +389,7 @@ msgstr ""
 "抱歉，验证码不匹配，请重试:\n"
 "<Highlight>/burn {amount} {code_expected}</>"
 
-#: src/amc/commands/finance.py:196
+#: amc/commands/finance.py:196
 #, python-brace-format
 msgid ""
 "<Title>Burn failed</>\n"
@@ -403,11 +400,11 @@ msgstr ""
 "\n"
 "{error}"
 
-#: src/amc/commands/finance.py:199
+#: amc/commands/finance.py:199
 msgid "Repay loan (Deprecated)"
 msgstr "还款（已弃用）"
 
-#: src/amc/commands/finance.py:202
+#: amc/commands/finance.py:202
 msgid ""
 "<Title>Command Removed</>\n"
 "\n"
@@ -417,11 +414,11 @@ msgstr ""
 "\n"
 "当你在服务器上赚钱时，会自动偿还贷款"
 
-#: src/amc/commands/general.py:14
+#: amc/commands/general.py:14
 msgid "Show this help message"
 msgstr "显示此帮助信息"
 
-#: src/amc/commands/general.py:24
+#: amc/commands/general.py:30
 msgid ""
 "<Title>Available Commands</>\n"
 "\n"
@@ -429,7 +426,7 @@ msgstr ""
 "<Title>可用命令</>\n"
 "\n"
 
-#: src/amc/commands/general.py:36
+#: amc/commands/general.py:42
 #, python-brace-format
 msgid ""
 "<Title>{cat}</>\n"
@@ -438,59 +435,65 @@ msgstr ""
 "<Title>{cat}</>\n"
 "<Secondary></>\n"
 
-#: src/amc/commands/general.py:48
+#: amc/commands/general.py:54
 #, python-brace-format
 msgid "<Secondary>Shorthand: {shorthands}</>"
 msgstr "<Secondary>快捷方式: {shorthands}</>"
 
-#: src/amc/commands/general.py:57
+#: amc/commands/general.py:63
 msgid "List the awesome people who made this community possible"
 msgstr "列出使这个社区成为可能的杰出人物"
 
-#: src/amc/commands/general.py:64
+#: amc/commands/general.py:70
 msgid "See your current coordinates"
 msgstr "查看当前坐标"
 
-#: src/amc/commands/general.py:71
-msgid "Check if you are inside a forbidden shortcut zone"
-msgstr "检查你是否处于禁止的捷径区域内"
-
-#: src/amc/commands/general.py:90
+#: amc/commands/general.py:96
 msgid "Verify your account"
 msgstr "验证你的账户"
 
-#: src/amc/commands/general.py:109
+#: amc/commands/general.py:115
 msgid "Rename your character"
 msgstr "重命名你的角色"
 
-#: src/amc/commands/general.py:119
+#: amc/commands/general.py:125
 msgid "Ask the bot a question"
 msgstr "向机器人提问"
 
-#: src/amc/commands/general.py:123
+#: amc/commands/general.py:129
 msgid "Request a song for the radio"
 msgstr "请求电台歌曲"
 
-#: src/amc/commands/jobs.py:9
+#: amc/commands/jobs.py:9
 msgid "List available server jobs"
 msgstr "列出可用的服务器任务"
 
-#: src/amc/commands/jobs.py:22
+#: amc/commands/jobs.py:22
 #, python-brace-format
 msgid "<Warning>Requires RP Mode</> (Yours: {status})"
 msgstr "<Warning>需要角色扮演 (RP) 模式</> (当前状态: {status})"
 
-#: src/amc/commands/jobs.py:23
+#: amc/commands/jobs.py:23
 #, python-brace-format
 msgid "<Secondary>Expiring in {time}</>"
 msgstr "<Secondary>{time} 后过期</>"
 
-#: src/amc/commands/jobs.py:24
+#: amc/commands/jobs.py:24
 #, python-brace-format
 msgid "<Secondary>Cargo: {cargo_key}</>"
 msgstr "<Secondary>货物: {cargo_key}</>"
 
-#: src/amc/commands/jobs.py:28
+#: amc/commands/jobs.py:27
+#, python-brace-format
+msgid "<Secondary>ONLY from: {points}</>"
+msgstr "<Secondary>仅来自: {points}</>"
+
+#: amc/commands/jobs.py:30
+#, python-brace-format
+msgid "<Secondary>ONLY to: {points}</>"
+msgstr "<Secondary>仅前往: {points}</>"
+
+#: amc/commands/jobs.py:35
 #, python-brace-format
 msgid ""
 "<Title>Delivery Jobs</>\n"
@@ -509,15 +512,15 @@ msgstr ""
 "<Title>RP 模式</>: {rp_status} (/rp_mode)\n"
 "<Title>补贴</>: 使用 /subsidies 查看。"
 
-#: src/amc/commands/jobs.py:39
+#: amc/commands/jobs.py:46
 msgid "View job subsidies information"
 msgstr "查看任务补贴信息"
 
-#: src/amc/commands/language.py:4
+#: amc/commands/language.py:4
 msgid "Set your language preference"
 msgstr "设置你的语言偏好"
 
-#: src/amc/commands/language.py:19
+#: amc/commands/language.py:19
 msgid ""
 "<Title>Language Settings</>\n"
 "Available languages:\n"
@@ -535,20 +538,20 @@ msgstr ""
 "\n"
 "用法: /language [en|id|zh]"
 
-#: src/amc/commands/language.py:24
+#: amc/commands/language.py:24
 msgid "Invalid language code. Use 'en', 'id', or 'zh'."
 msgstr "无效的语言代码。请使用 'en'、'id' 或 'zh'。"
 
-#: src/amc/commands/language.py:32
+#: amc/commands/language.py:32
 #, python-brace-format
 msgid "Language set to {lang}"
 msgstr "语言已设置为 {lang}"
 
-#: src/amc/commands/rp_rescue.py:17
+#: amc/commands/rp_rescue.py:17
 msgid "Toggle Roleplay Mode"
 msgstr "切换角色扮演 (RP) 模式"
 
-#: src/amc/commands/rp_rescue.py:25
+#: amc/commands/rp_rescue.py:25
 #, python-brace-format
 msgid ""
 "<Title>Code Incorrect</>\n"
@@ -557,7 +560,7 @@ msgstr ""
 "<Title>代码错误</>\n"
 "请尝试: <Highlight>/rp_mode {code_gen}</>"
 
-#: src/amc/commands/rp_rescue.py:50
+#: amc/commands/rp_rescue.py:50
 msgid ""
 "<Title>Roleplay Mode Enabled</>\n"
 "<EffectGood>Enabled!</>"
@@ -565,15 +568,15 @@ msgstr ""
 "<Title>角色扮演 (RP) 模式已启用</>\n"
 "<EffectGood>已启用！</>"
 
-#: src/amc/commands/rp_rescue.py:50
+#: amc/commands/rp_rescue.py:50
 msgid "<Title>Roleplay Mode Disabled</>"
 msgstr "<Title>角色扮演 (RP) 模式已禁用</Title>"
 
-#: src/amc/commands/rp_rescue.py:57
+#: amc/commands/rp_rescue.py:57
 msgid "To turn off, resend with code:"
 msgstr "如需关闭，请带上代码重新发送:"
 
-#: src/amc/commands/rp_rescue.py:57
+#: amc/commands/rp_rescue.py:57
 msgid ""
 "Enabling RP mode gives bonuses but risks cargo/vehicle loss on recovery.\n"
 "<Warning>All vehicles will despawn on toggle!</>"
@@ -581,7 +584,7 @@ msgstr ""
 "启用 RP 模式会提供奖励，但在恢复时有丢失货物/车辆的风险。\n"
 "<Warning>切换时所有车辆都将消失！</>"
 
-#: src/amc/commands/rp_rescue.py:58
+#: amc/commands/rp_rescue.py:58
 #, python-brace-format
 msgid ""
 "<Title>Roleplay Mode</>\n"
@@ -596,15 +599,15 @@ msgstr ""
 "{notes}\n"
 "<Highlight>/rp_mode {code_gen}</>"
 
-#: src/amc/commands/rp_rescue.py:62
+#: amc/commands/rp_rescue.py:62
 msgid "Calls for rescue service"
 msgstr "呼叫救援服务"
 
-#: src/amc/commands/rp_rescue.py:65
+#: amc/commands/rp_rescue.py:65
 msgid "You have requested a rescue less than 5 minutes ago"
 msgstr "你在不到 5 分钟前刚刚请求过救援"
 
-#: src/amc/commands/rp_rescue.py:78
+#: amc/commands/rp_rescue.py:78
 #, python-brace-format
 msgid ""
 "<Title>Rescue Request</>\n"
@@ -617,24 +620,24 @@ msgstr ""
 "留言: {message}\n"
 "车辆: {vehicle_names}"
 
-#: src/amc/commands/rp_rescue.py:90
+#: amc/commands/rp_rescue.py:90
 #, python-brace-format
 msgid "{name} needs a rescue! {vehicle_names}. /respond {request_id}"
 msgstr "{name} 需要救援！{vehicle_names}。 /respond {request_id}"
 
-#: src/amc/commands/rp_rescue.py:93
+#: amc/commands/rp_rescue.py:93
 msgid "<EffectGood>Request Sent</>\n"
 msgstr "<EffectGood>请求已发送</>\n"
 
-#: src/amc/commands/rp_rescue.py:93
+#: amc/commands/rp_rescue.py:93
 msgid "Help is on the way."
 msgstr "救援正在路上。"
 
-#: src/amc/commands/rp_rescue.py:93
+#: amc/commands/rp_rescue.py:93
 msgid "Rescuers offline, notified Discord."
 msgstr "救援人员离线，已通知 Discord。"
 
-#: src/amc/commands/rp_rescue.py:102
+#: amc/commands/rp_rescue.py:102
 #, python-brace-format
 msgid ""
 "@here **{name}** requested rescue.\n"
@@ -643,70 +646,57 @@ msgstr ""
 "@here **{name}** 请求救援。\n"
 "留言: {message}"
 
-#: src/amc/commands/rp_rescue.py:110
+#: amc/commands/rp_rescue.py:110
 msgid "Respond to a rescue request"
 msgstr "响应救援请求"
 
-#: src/amc/commands/rp_rescue.py:118
+#: amc/commands/rp_rescue.py:118
 msgid "Invalid or expired rescue request."
 msgstr "无效或已过期的救援请求。"
 
-#: src/amc/commands/rp_rescue.py:122
+#: amc/commands/rp_rescue.py:122
 #, python-brace-format
 msgid "{responder} responded to {requester}'s request!"
 msgstr "{responder} 响应了 {requester} 的请求！"
 
-#: src/amc/commands/social.py:10
+#: amc/commands/social.py:10
 msgid "Thank another player to increase their social score"
 msgstr "感谢另一位玩家以提高其社交评分"
 
-#: src/amc/commands/social.py:18
+#: amc/commands/social.py:18
 msgid "Player not found"
 msgstr "未找到玩家"
 
-#: src/amc/commands/social.py:24
+#: amc/commands/social.py:24
 msgid "Player not found in DB"
 msgstr "数据库中未找到玩家"
 
-#: src/amc/commands/social.py:28
+#: amc/commands/social.py:28
 msgid "Already thanked recently."
 msgstr "最近已经感谢过了。"
 
-#: src/amc/commands/social.py:35
+#: amc/commands/social.py:35
 msgid "Thank sent"
 msgstr "感谢已发送"
 
-#: src/amc/commands/social.py:36
+#: amc/commands/social.py:36
 #, python-brace-format
 msgid "{sender} thanked you"
 msgstr "{sender} 感谢了你"
 
-#: src/amc/commands/teleport.py:8
+#: amc/commands/teleport.py:8
 msgid "Teleport to coordinates (Admin Only)"
 msgstr "传送至坐标 (仅限管理员)"
 
-#: src/amc/commands/teleport.py:13
+#: amc/commands/teleport.py:13
 msgid "Admin Only"
 msgstr "仅限管理员"
 
-#: src/amc/commands/teleport.py:15
+#: amc/commands/teleport.py:15
 msgid "Teleport to a location"
 msgstr "传送至地点"
 
-#: src/amc/commands/teleport.py:45
-#, python-brace-format
-msgid ""
-"Teleport point not found\n"
-"Choose from one of the following locations:\n"
-"\n"
-"{locations}"
-msgstr ""
-"未找到传送点\n"
-"请从以下位置中选择:\n"
-"\n"
-"{locations}"
-
-#: src/amc/commands/teleport.py:62
+#: amc/commands/teleport.py:62
 #, python-brace-format
 msgid ""
 "<Title>Teleport</>\n"
@@ -721,11 +711,15 @@ msgstr ""
 "\n"
 "{locations}"
 
-#: src/amc/commands/vehicles.py:10
+#: amc/commands/vehicles.py:11
+msgid "Despawn your vehicle"
+msgstr "移除你的车辆"
+
+#: amc/commands/vehicles.py:16
 msgid "Register your vehicles"
 msgstr "登记你的车辆"
 
-#: src/amc/commands/vehicles.py:14
+#: amc/commands/vehicles.py:20
 #, python-brace-format
 msgid ""
 "<Title>Vehicles Registered!</>\n"
@@ -736,11 +730,11 @@ msgstr ""
 "\n"
 "{names}"
 
-#: src/amc/commands/vehicles.py:16
+#: amc/commands/vehicles.py:22
 msgid "Stop renting out your vehicle"
 msgstr "停止出租你的车辆"
 
-#: src/amc/commands/vehicles.py:27
+#: amc/commands/vehicles.py:33
 msgid ""
 "<Title>Removing rentals</>\n"
 "Usage: /unrental, /unrental 2345, /unrental all"
@@ -748,15 +742,15 @@ msgstr ""
 "<Title>移除租赁</>\n"
 "用法: /unrental, /unrental 2345, /unrental all"
 
-#: src/amc/commands/vehicles.py:35
+#: amc/commands/vehicles.py:41
 msgid "Rentals removed"
 msgstr "租赁已移除"
 
-#: src/amc/commands/vehicles.py:37
+#: amc/commands/vehicles.py:43
 msgid "Mark vehicle as for rental"
 msgstr "标记车辆为可出租"
 
-#: src/amc/commands/vehicles.py:44
+#: amc/commands/vehicles.py:50
 msgid ""
 "<Title>Rental System</>\n"
 "Only Corporation vehicles can be rented out."
@@ -764,7 +758,7 @@ msgstr ""
 "<Title>租赁系统</>\n"
 "只有公司车辆可以出租。"
 
-#: src/amc/commands/vehicles.py:53
+#: amc/commands/vehicles.py:59
 #, python-brace-format
 msgid ""
 "<Title>Marked as rental</>\n"
@@ -777,11 +771,11 @@ msgstr ""
 "\n"
 "{names}"
 
-#: src/amc/commands/vehicles.py:55
+#: amc/commands/vehicles.py:61
 msgid "Rent a vehicle"
 msgstr "租用车辆"
 
-#: src/amc/commands/vehicles.py:70
+#: amc/commands/vehicles.py:76
 msgid ""
 "<Title>Rentals</>\n"
 "No rentals found."
@@ -789,7 +783,7 @@ msgstr ""
 "<Title>租赁</>\n"
 "未找到可租用的车辆。"
 
-#: src/amc/commands/vehicles.py:77
+#: amc/commands/vehicles.py:90
 #, python-brace-format
 msgid ""
 "<Title>Available Rentals</>\n"
@@ -802,28 +796,28 @@ msgstr ""
 "\n"
 "{names}"
 
-#: src/amc/commands/vehicles.py:86
+#: amc/commands/vehicles.py:99
 #, python-brace-format
 msgid "Brought to you by {company}"
 msgstr "由 {company} 为你提供"
 
-#: src/amc/commands/vehicles.py:88
+#: amc/commands/vehicles.py:101
 msgid "Rental not found"
 msgstr "未找到此租赁项"
 
-#: src/amc/commands/vehicles.py:90
+#: amc/commands/vehicles.py:103
 msgid "Sell a vehicle"
 msgstr "出售车辆"
 
-#: src/amc/commands/vehicles.py:102
+#: amc/commands/vehicles.py:115
 msgid "Remove displayed vehicles"
 msgstr "移除展示车辆"
 
-#: src/amc/commands/vehicles.py:106 src/amc/commands/vehicles.py:136
+#: amc/commands/vehicles.py:119 amc/commands/vehicles.py:149
 msgid "Admin-only command"
 msgstr "仅限管理员命令"
 
-#: src/amc/commands/vehicles.py:117
+#: amc/commands/vehicles.py:130
 msgid ""
 "<Title>Display System</>\n"
 "Use <Highlight>/undisplay </> to remove displayed vehicles."
@@ -831,15 +825,15 @@ msgstr ""
 "<Title>展示系统</>\n"
 "使用 <Highlight>/undisplay </> 移除展示中的车辆。"
 
-#: src/amc/commands/vehicles.py:130
+#: amc/commands/vehicles.py:143
 msgid "Undisplay complete"
 msgstr "取消展示完成"
 
-#: src/amc/commands/vehicles.py:132
+#: amc/commands/vehicles.py:145
 msgid "Permanently display a vehicle"
 msgstr "永久展示一辆车"
 
-#: src/amc/commands/vehicles.py:147
+#: amc/commands/vehicles.py:160
 msgid ""
 "<Title>Display System</>\n"
 "Use <Highlight>/display </> to permanently display a vehicle"
@@ -847,7 +841,7 @@ msgstr ""
 "<Title>展示系统</>\n"
 "使用 <Highlight>/display </> 永久展示一辆车"
 
-#: src/amc/commands/vehicles.py:189
+#: amc/commands/vehicles.py:202
 msgid ""
 "\n"
 "<Title>Successfully marked as display</>\n"
@@ -864,38 +858,69 @@ msgstr ""
 "\n"
 "如需更改位置，你需要对同一辆车再次运行 /display 命令。"
 
-#: src/amc/models.py:681
+#: amc/models.py:681
 msgid "Company"
 msgstr "公司"
 
-#: src/amc/models.py:682
+#: amc/models.py:682
 msgid "Companies"
 msgstr "公司"
 
-#: src/amc/models.py:779
+#: amc/models.py:779
 msgid "Entered"
 msgstr "已进入"
 
-#: src/amc/models.py:780
+#: amc/models.py:780
 msgid "Exited"
 msgstr "已退出"
 
-#: src/amc/models.py:781
+#: amc/models.py:781
 msgid "Bought"
 msgstr "已购买"
 
-#: src/amc/models.py:782
+#: amc/models.py:782
 msgid "Sold"
 msgstr "已售出"
 
-#: src/amc_backend/settings.py:145
+#: amc_backend/settings.py:145
 msgid "English"
 msgstr "英语"
 
-#: src/amc_backend/settings.py:146
+#: amc_backend/settings.py:146
 msgid "Indonesian"
 msgstr "印尼语"
 
-#: src/amc_backend/settings.py:147
+#: amc_backend/settings.py:147
 msgid "Simplified Chinese"
 msgstr "简体中文"
+
+#~ msgid ""
+#~ "<Title>Feature disabled</>\n"
+#~ "\n"
+#~ "Sorry, this feature has been permanently disabled."
+#~ msgstr ""
+#~ "<Title>功能已禁用</>\n"
+#~ "\n"
+#~ "抱歉，此功能已被永久禁用。"
+
+#~ msgid "Admin despawn tool"
+#~ msgstr "管理员移除工具"
+
+#~ msgid ""
+#~ "<Title>Feature disabled</>\n"
+#~ "\n"
+#~ "Sorry, this feature is temporarily unavailable"
+#~ msgstr ""
+#~ "<Title>功能已禁用</>\n"
+#~ "\n"
+#~ "抱歉，此功能暂时不可用"
+
+#~ msgid ""
+#~ "<Title>Player vehicles despawned</>\n"
+#~ "\n"
+#~ msgstr ""
+#~ "<Title>玩家车辆已移除</>\n"
+#~ "\n"
+
+#~ msgid "Check if you are inside a forbidden shortcut zone"
+#~ msgstr "检查你是否处于禁止的捷径区域内"

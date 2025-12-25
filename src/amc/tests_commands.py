@@ -411,11 +411,18 @@ class CommandsTestCase(TestCase):
             mock_qs.prefetch_related.return_value.__aiter__.return_value = [mock_job]
             mock_filter.return_value = mock_qs
             
+            sp_mock = MagicMock(spec=['name']); sp_mock.name = 'Source A'
+            dp_mock = MagicMock(spec=['name']); dp_mock.name = 'Dest B'
+            mock_job.source_points.all.return_value = [sp_mock]
+            mock_job.destination_points.all.return_value = [dp_mock]
+
             with patch('amc.commands.jobs.get_rp_mode', new=AsyncMock(return_value=False)):
                  await commands.cmd_jobs(self.ctx)
                  self.ctx.reply.assert_called()
                  args, _ = self.ctx.reply.call_args
                  self.assertIn("Test Job", args[0])
+                 self.assertIn("Source A", args[0])
+                 self.assertIn("Dest B", args[0])
 
     async def test_cmd_subsidies(self):
         from amc import commands

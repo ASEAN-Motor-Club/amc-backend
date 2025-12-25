@@ -6,7 +6,7 @@ msgid ""
 msgstr ""
 "Project-Id-Version: \n"
 "Report-Msgid-Bugs-To: \n"
-"POT-Creation-Date: 2025-12-21 22:29+0700\n"
+"POT-Creation-Date: 2025-12-24 11:28+0700\n"
 "PO-Revision-Date: 2025-12-21 21:51+0700\n"
 "Last-Translator: \n"
 "Language-Team: Indonesian\n"
@@ -16,13 +16,13 @@ msgstr ""
 "Content-Transfer-Encoding: 8bit\n"
 "Plural-Forms: nplurals=1; plural=0;\n"
 
-#: src/amc/admin.py:570
+#: amc/admin.py:570
 #, python-format
 msgid "%d jobs was successfully created."
 msgid_plural "%d jobs were successfully created."
 msgstr[0] "%d pekerjaan berhasil dibuat."
 
-#: src/amc/command_framework.py:161
+#: amc/command_framework.py:161
 #, python-brace-format
 msgid ""
 "<Title>Error</>\n"
@@ -31,43 +31,58 @@ msgstr ""
 "<Title>Kesalahan</>\n"
 "{error}"
 
-#: src/amc/commands/admin.py:16
-msgid "Despawn your vehicle"
-msgstr "Despawn kendaraan Anda"
+#: amc/commands/admin.py:19
+msgid "Spawn display vehicles"
+msgstr "Munculkan kendaraan pajangan"
 
-#: src/amc/commands/admin.py:19
+#: amc/commands/admin.py:35
+msgid "Spawn dealership vehicles"
+msgstr "Munculkan kendaraan dealer"
+
+#: amc/commands/admin.py:41
+msgid "Spawn world assets"
+msgstr "Munculkan aset dunia"
+
+#: amc/commands/admin.py:47
+msgid "Spawn garages"
+msgstr "Munculkan garasi"
+
+#: amc/commands/admin.py:55
+msgid "Spawn a single garage"
+msgstr "Munculkan satu garasi"
+
+#: amc/commands/admin.py:63
+#, python-brace-format
+msgid "Garage spawned! Tag: {tag}"
+msgstr "Garasi muncul! Tag: {tag}"
+
+#: amc/commands/admin.py:66
+msgid "Spawn a vehicle"
+msgstr "Munculkan kendaraan"
+
+#: amc/commands/admin.py:69 amc/commands/admin.py:95
+msgid "Admin-only"
+msgstr "Khusus Admin"
+
+#: amc/commands/admin.py:73
 msgid ""
-"<Title>Feature disabled</>\n"
-"\n"
-"Sorry, this feature has been permanently disabled."
-msgstr ""
-"<Title>Fitur dinonaktifkan</>\n"
-"\n"
-"Maaf, fitur ini telah dinonaktifkan secara permanen."
-
-#: src/amc/commands/admin.py:21
-msgid "Admin despawn tool"
-msgstr "Alat despawn Admin"
-
-#: src/amc/commands/admin.py:24
-msgid ""
-"<Title>Feature disabled</>\n"
-"\n"
-"Sorry, this feature is temporarily unavailable"
-msgstr ""
-"<Title>Fitur dinonaktifkan</>\n"
-"\n"
-"Maaf, fitur ini untuk sementara tidak tersedia"
-
-#: src/amc/commands/admin.py:33
-msgid ""
-"<Title>Player vehicles despawned</>\n"
+"<Title>Spawn Vehicle</>\n"
 "\n"
 msgstr ""
-"<Title>Kendaraan pemain telah di-despawn</>\n"
+"<Title>Munculkan Kendaraan</>\n"
 "\n"
 
-#: src/amc/commands/admin.py:36
+#: amc/commands/admin.py:82
+msgid "Force exit vehicle (Admin)"
+msgstr "Paksa keluar kendaraan (Admin)"
+
+#: amc/commands/admin.py:92
+#, fuzzy
+#| msgid "Teleport to a location"
+msgid "Teleport a player to a location (Admin)"
+msgstr "Teleportasi ke lokasi"
+
+#: amc/commands/admin.py:103
 msgid ""
 "<Title>Player not found</>\n"
 "\n"
@@ -77,92 +92,66 @@ msgstr ""
 "\n"
 "Pastikan Anda mengetik nama dengan benar."
 
-#: src/amc/commands/admin.py:41
-msgid "Spawn display vehicles"
-msgstr "Munculkan kendaraan pajangan"
-
-#: src/amc/commands/admin.py:57
-msgid "Spawn dealership vehicles"
-msgstr "Munculkan kendaraan dealer"
-
-#: src/amc/commands/admin.py:63
-msgid "Spawn world assets"
-msgstr "Munculkan aset dunia"
-
-#: src/amc/commands/admin.py:69
-msgid "Spawn garages"
-msgstr "Munculkan garasi"
-
-#: src/amc/commands/admin.py:77
-msgid "Spawn a single garage"
-msgstr "Munculkan satu garasi"
-
-#: src/amc/commands/admin.py:85
+#: amc/commands/admin.py:114 amc/commands/teleport.py:45
 #, python-brace-format
-msgid "Garage spawned! Tag: {tag}"
-msgstr "Garasi muncul! Tag: {tag}"
-
-#: src/amc/commands/admin.py:88
-msgid "Spawn a vehicle"
-msgstr "Munculkan kendaraan"
-
-#: src/amc/commands/admin.py:91
-msgid "Admin-only"
-msgstr "Khusus Admin"
-
-#: src/amc/commands/admin.py:95
 msgid ""
-"<Title>Spawn Vehicle</>\n"
+"Teleport point not found\n"
+"Choose from one of the following locations:\n"
 "\n"
+"{locations}"
 msgstr ""
-"<Title>Munculkan Kendaraan</>\n"
+"Titik teleportasi tidak ditemukan\n"
+"Pilih dari salah satu lokasi berikut:\n"
 "\n"
+"{locations}"
 
-#: src/amc/commands/admin.py:104
-msgid "Force exit vehicle (Admin)"
-msgstr "Paksa keluar kendaraan (Admin)"
+#: amc/commands/admin.py:128
+#, fuzzy, python-brace-format
+#| msgid "Teleport to a location"
+msgid "Teleported {player} to {location}"
+msgstr "Teleportasi ke lokasi"
 
-#: src/amc/commands/decals.py:7
+#: amc/commands/decals.py:7
 msgid "List your saved decals"
 msgstr "Lihat stiker tersimpan Anda"
 
-#: src/amc/commands/decals.py:21
+#: amc/commands/decals.py:21
 msgid "Save your current vehicle decal"
 msgstr "Simpan stiker kendaraan Anda saat ini"
 
-#: src/amc/commands/decals.py:42
+#: amc/commands/decals.py:42
 msgid "Apply a saved decal"
 msgstr "Terapkan stiker tersimpan"
 
-#: src/amc/commands/events.py:13
+#: amc/commands/events.py:13
 msgid "Start event with staggered delay"
 msgstr "Mulai acara dengan penundaan bertahap"
 
-#: src/amc/commands/events.py:24
+#: amc/commands/events.py:24
 msgid "Automatically grid players for event"
 msgstr "Atur grid pemain secara otomatis untuk acara"
 
-#: src/amc/commands/events.py:35
+#: amc/commands/events.py:35
 msgid "See the results of active events"
 msgstr "Lihat hasil acara aktif"
 
-#: src/amc/commands/events.py:43
+#: amc/commands/events.py:43
 msgid "Creates an event properly"
 msgstr "Membuat acara dengan benar"
 
-#: src/amc/commands/events.py:63
+#: amc/commands/events.py:63
 msgid "List current and upcoming scheduled events"
 msgstr "Lihat acara terjadwal saat ini dan mendatang"
 
-#: src/amc/commands/events.py:75
+#: amc/commands/events.py:75
 msgid "Initiate a 5 second countdown"
 msgstr "Mulai hitungan mundur 5 detik"
 
-#: src/amc/commands/finance.py:18
+#: amc/commands/finance.py:18
 msgid "Access your bank account"
 msgstr "Akses rekening bank Anda"
 
-#: src/amc/commands/finance.py:36
+#: amc/commands/finance.py:36
 msgid ""
 "<Title>Your Bank ASEAN Account</>\n"
 "\n"
@@ -228,15 +217,15 @@ msgstr ""
 "<Bold>Transaksi Terbaru</>\n"
 "{transactions_str}\n"
 
-#: src/amc/commands/finance.py:65
+#: amc/commands/finance.py:65
 msgid "Max available loan depends on your driver+trucking level"
 msgstr "Pinjaman maksimal tersedia tergantung pada level pengemudi+truk Anda"
 
-#: src/amc/commands/finance.py:70
+#: amc/commands/finance.py:70
 msgid "Donate money to another player"
 msgstr "Donasi uang ke pemain lain"
 
-#: src/amc/commands/finance.py:76
+#: amc/commands/finance.py:76
 #, python-brace-format
 msgid ""
 "<Title>Donation</>\n"
@@ -245,28 +234,28 @@ msgstr ""
 "<Title>Donasi</>\n"
 "Konfirmasi: <Highlight>/donate {amount} {code_expected}</>"
 
-#: src/amc/commands/finance.py:83
+#: amc/commands/finance.py:83
 msgid "Donated {amount_int:,}!"
 msgstr "Mendonorkan {amount_int:,}!"
 
-#: src/amc/commands/finance.py:85
+#: amc/commands/finance.py:85
 msgid "Withdraw money from your account"
 msgstr "Tarik uang dari rekening Anda"
 
-#: src/amc/commands/finance.py:91
+#: amc/commands/finance.py:91
 #, python-brace-format
 msgid "Confirm large withdrawal: /withdraw {amount} {code_gen}"
 msgstr "Konfirmasi penarikan besar: /withdraw {amount} {code_gen}"
 
-#: src/amc/commands/finance.py:99
+#: amc/commands/finance.py:99
 msgid "Take out a loan"
 msgstr "Ajukan pinjaman"
 
-#: src/amc/commands/finance.py:102
+#: amc/commands/finance.py:102
 msgid "You must have done at least one delivery"
 msgstr "Anda harus telah melakukan setidaknya satu pengiriman"
 
-#: src/amc/commands/finance.py:116
+#: amc/commands/finance.py:116
 #, python-brace-format
 msgid ""
 "<Title>Loan</>\n"
@@ -277,15 +266,15 @@ msgstr ""
 "Biaya: {fee}\n"
 "Konfirmasi: /loan {amount} {code_expected}"
 
-#: src/amc/commands/finance.py:123
+#: amc/commands/finance.py:123
 msgid "Loan Approved!"
 msgstr "Pinjaman Disetujui!"
 
-#: src/amc/commands/finance.py:125
+#: amc/commands/finance.py:125
 msgid "Set your automatic saving rate"
 msgstr "Atur tingkat tabungan otomatis Anda"
 
-#: src/amc/commands/finance.py:131
+#: amc/commands/finance.py:131
 #, python-format, python-brace-format
 msgid ""
 "<Title>Savings rate saved</>\n"
@@ -296,7 +285,7 @@ msgstr ""
 "\n"
 "{rate:.0f}% dari penghasilan Anda akan otomatis masuk ke akun bank Anda"
 
-#: src/amc/commands/finance.py:135
+#: amc/commands/finance.py:135
 #, python-brace-format
 msgid ""
 "<Title>Set savings rate failed</>\n"
@@ -307,11 +296,11 @@ msgstr ""
 "\n"
 "{error}"
 
-#: src/amc/commands/finance.py:137
+#: amc/commands/finance.py:137
 msgid "Set your loan repayment rate"
 msgstr "Atur tingkat pembayaran pinjaman Anda"
 
-#: src/amc/commands/finance.py:143
+#: amc/commands/finance.py:143
 #, python-format, python-brace-format
 msgid ""
 "<Title>Loan repayment rate saved</>\n"
@@ -323,7 +312,7 @@ msgstr ""
 "{rate:.0f}% dari penghasilan Anda akan otomatis digunakan untuk melunasi "
 "pinjaman, jika ada"
 
-#: src/amc/commands/finance.py:147
+#: amc/commands/finance.py:147
 #, python-brace-format
 msgid ""
 "<Title>Set loan repayment rate failed</>\n"
@@ -334,19 +323,19 @@ msgstr ""
 "\n"
 "{error}"
 
-#: src/amc/commands/finance.py:149
+#: amc/commands/finance.py:149
 msgid "Toggle Universal Basic Income"
 msgstr "Alihkan Pendapatan Dasar Universal (UBI)"
 
-#: src/amc/commands/finance.py:155
+#: amc/commands/finance.py:155
 msgid "You will no longer receive a universal basic income"
 msgstr "Anda tidak akan lagi menerima pendapatan dasar universal (UBI)"
 
-#: src/amc/commands/finance.py:155
+#: amc/commands/finance.py:155
 msgid "You will start to receive a universal basic income"
 msgstr "Anda akan mulai menerima pendapatan dasar universal (UBI)"
 
-#: src/amc/commands/finance.py:159
+#: amc/commands/finance.py:159
 #, python-brace-format
 msgid ""
 "<Title>Toggle UBI failed</>\n"
@@ -357,11 +346,11 @@ msgstr ""
 "\n"
 "{error}"
 
-#: src/amc/commands/finance.py:161
+#: amc/commands/finance.py:161
 msgid "Burn money from your account"
 msgstr "Bakar uang dari rekening Anda"
 
-#: src/amc/commands/finance.py:168
+#: amc/commands/finance.py:168
 #, python-brace-format
 msgid ""
 "<Title>Burn</>\n"
@@ -386,7 +375,7 @@ msgstr ""
 "verifikasi:\n"
 "<Highlight>/burn {amount} {code_expected}</>"
 
-#: src/amc/commands/finance.py:182
+#: amc/commands/finance.py:182
 #, python-brace-format
 msgid ""
 "<Title>Burn</>\n"
@@ -399,7 +388,7 @@ msgstr ""
 "Maaf, kode verifikasi tidak cocok, harap coba lagi:\n"
 "<Highlight>/burn {amount} {code_expected}</>"
 
-#: src/amc/commands/finance.py:196
+#: amc/commands/finance.py:196
 #, python-brace-format
 msgid ""
 "<Title>Burn failed</>\n"
@@ -410,11 +399,11 @@ msgstr ""
 "\n"
 "{error}"
 
-#: src/amc/commands/finance.py:199
+#: amc/commands/finance.py:199
 msgid "Repay loan (Deprecated)"
 msgstr "Lunasi pinjaman (Tidak digunakan lagi)"
 
-#: src/amc/commands/finance.py:202
+#: amc/commands/finance.py:202
 msgid ""
 "<Title>Command Removed</>\n"
 "\n"
@@ -425,11 +414,11 @@ msgstr ""
 "Anda akan otomatis melunasi pinjaman saat Anda memperoleh penghasilan di "
 "server"
 
-#: src/amc/commands/general.py:14
+#: amc/commands/general.py:14
 msgid "Show this help message"
 msgstr "Tampilkan pesan bantuan ini"
 
-#: src/amc/commands/general.py:24
+#: amc/commands/general.py:30
 msgid ""
 "<Title>Available Commands</>\n"
 "\n"
@@ -437,66 +426,72 @@ msgstr ""
 "<Title>Perintah Tersedia</>\n"
 "\n"
 
-#: src/amc/commands/general.py:36
+#: amc/commands/general.py:42
 #, python-brace-format
 msgid ""
 "<Title>{cat}</>\n"
 "<Secondary></>\n"
 msgstr ""
 
-#: src/amc/commands/general.py:48
+#: amc/commands/general.py:54
 #, python-brace-format
 msgid "<Secondary>Shorthand: {shorthands}</>"
 msgstr "<Secondary>Singkatan: {shorthands}</>"
 
-#: src/amc/commands/general.py:57
+#: amc/commands/general.py:63
 msgid "List the awesome people who made this community possible"
 msgstr "Lihat orang-orang luar biasa yang memungkinkan komunitas ini"
 
-#: src/amc/commands/general.py:64
+#: amc/commands/general.py:70
 msgid "See your current coordinates"
 msgstr "Lihat koordinat Anda saat ini"
 
-#: src/amc/commands/general.py:71
-msgid "Check if you are inside a forbidden shortcut zone"
-msgstr "Periksa apakah Anda berada di dalam zona jalan pintas terlarang"
-
-#: src/amc/commands/general.py:90
+#: amc/commands/general.py:96
 msgid "Verify your account"
 msgstr "Verifikasi akun Anda"
 
-#: src/amc/commands/general.py:109
+#: amc/commands/general.py:115
 msgid "Rename your character"
 msgstr "Ganti nama karakter Anda"
 
-#: src/amc/commands/general.py:119
+#: amc/commands/general.py:125
 msgid "Ask the bot a question"
 msgstr "Tanya bot sebuah pertanyaan"
 
-#: src/amc/commands/general.py:123
+#: amc/commands/general.py:129
 msgid "Request a song for the radio"
 msgstr "Minta lagu untuk radio"
 
-#: src/amc/commands/jobs.py:9
+#: amc/commands/jobs.py:9
 msgid "List available server jobs"
 msgstr "Lihat pekerjaan server yang tersedia"
 
-#: src/amc/commands/jobs.py:22
+#: amc/commands/jobs.py:22
 #, python-brace-format
 msgid "<Warning>Requires RP Mode</> (Yours: {status})"
 msgstr "<Warning>Membutuhkan Mode RP</> (Milik Anda: {status})"
 
-#: src/amc/commands/jobs.py:23
+#: amc/commands/jobs.py:23
 #, python-brace-format
 msgid "<Secondary>Expiring in {time}</>"
 msgstr "<Secondary>Berakhir dalam {time}</>"
 
-#: src/amc/commands/jobs.py:24
+#: amc/commands/jobs.py:24
 #, python-brace-format
 msgid "<Secondary>Cargo: {cargo_key}</>"
 msgstr "<Secondary>Kargo: {cargo_key}</>"
 
-#: src/amc/commands/jobs.py:28
+#: amc/commands/jobs.py:27
+#, python-brace-format
+msgid "<Secondary>ONLY from: {points}</>"
+msgstr "<Secondary>HANYA dari: {points}</>"
+
+#: amc/commands/jobs.py:30
+#, python-brace-format
+msgid "<Secondary>ONLY to: {points}</>"
+msgstr "<Secondary>HANYA ke: {points}</>"
+
+#: amc/commands/jobs.py:35
 #, python-brace-format
 msgid ""
 "<Title>Delivery Jobs</>\n"
@@ -515,22 +510,31 @@ msgstr ""
 "<Title>Mode RP</>: {rp_status} (/rp_mode)\n"
 "<Title>Subsidi</>: Gunakan /subsidies untuk melihat."
 
-#: src/amc/commands/jobs.py:39
+#: amc/commands/jobs.py:46
 msgid "View job subsidies information"
 msgstr "Lihat informasi subsidi pekerjaan"
 
-#: src/amc/commands/language.py:4
+#: amc/commands/language.py:4
 msgid "Set your language preference"
 msgstr "Atur preferensi bahasa Anda"
 
-#: src/amc/commands/language.py:15
+#: amc/commands/language.py:19
+#, fuzzy
+#| msgid ""
+#| "<Title>Language Settings</>\n"
+#| "Available languages:\n"
+#| "- <Highlight>en</> (English)\n"
+#| "- <Highlight>id</> (Indonesian)\n"
+#| "\n"
+#| "Usage: /language [en|id]"
 msgid ""
 "<Title>Language Settings</>\n"
 "Available languages:\n"
 "- <Highlight>en</> (English)\n"
 "- <Highlight>id</> (Indonesian)\n"
+"- <Highlight>zh</> (Simplified Chinese)\n"
 "\n"
-"Usage: /language [en|id]"
+"Usage: /language [en|id|zh]"
 msgstr ""
 "<Title>Pengaturan Bahasa</>\n"
 "Bahasa yang tersedia:\n"
@@ -539,20 +543,22 @@ msgstr ""
 "\n"
 "Penggunaan: /language [en|id]"
 
-#: src/amc/commands/language.py:20
-msgid "Invalid language code. Use 'en' or 'id'."
+#: amc/commands/language.py:24
+#, fuzzy
+#| msgid "Invalid language code. Use 'en' or 'id'."
+msgid "Invalid language code. Use 'en', 'id', or 'zh'."
 msgstr "Kode bahasa tidak valid. Gunakan 'en' atau 'id'."
 
-#: src/amc/commands/language.py:28
+#: amc/commands/language.py:32
 #, python-brace-format
 msgid "Language set to {lang}"
 msgstr "Bahasa diatur ke {lang}"
 
-#: src/amc/commands/rp_rescue.py:17
+#: amc/commands/rp_rescue.py:17
 msgid "Toggle Roleplay Mode"
 msgstr "Alihkan Mode Roleplay"
 
-#: src/amc/commands/rp_rescue.py:25
+#: amc/commands/rp_rescue.py:25
 #, python-brace-format
 msgid ""
 "<Title>Code Incorrect</>\n"
@@ -561,7 +567,7 @@ msgstr ""
 "<Title>Kode Salah</>\n"
 "Coba: <Highlight>/rp_mode {code_gen}</>"
 
-#: src/amc/commands/rp_rescue.py:50
+#: amc/commands/rp_rescue.py:50
 msgid ""
 "<Title>Roleplay Mode Enabled</>\n"
 "<EffectGood>Enabled!</>"
@@ -569,15 +575,15 @@ msgstr ""
 "<Title>Mode Roleplay Diaktifkan</>\n"
 "<EffectGood>Aktif!</>"
 
-#: src/amc/commands/rp_rescue.py:50
+#: amc/commands/rp_rescue.py:50
 msgid "<Title>Roleplay Mode Disabled</>"
 msgstr "<Title>Mode Roleplay Dinonaktifkan</>"
 
-#: src/amc/commands/rp_rescue.py:57
+#: amc/commands/rp_rescue.py:57
 msgid "To turn off, resend with code:"
 msgstr "Untuk mematikan, kirim ulang dengan kode:"
 
-#: src/amc/commands/rp_rescue.py:57
+#: amc/commands/rp_rescue.py:57
 msgid ""
 "Enabling RP mode gives bonuses but risks cargo/vehicle loss on recovery.\n"
 "<Warning>All vehicles will despawn on toggle!</>"
@@ -586,7 +592,7 @@ msgstr ""
 "kendaraan saat pemulihan.\n"
 "<Warning>Semua kendaraan akan di-despawn saat beralih!</>"
 
-#: src/amc/commands/rp_rescue.py:58
+#: amc/commands/rp_rescue.py:58
 #, python-brace-format
 msgid ""
 "<Title>Roleplay Mode</>\n"
@@ -601,15 +607,15 @@ msgstr ""
 "{notes}\n"
 "<Highlight>/rp_mode {code_gen}</>"
 
-#: src/amc/commands/rp_rescue.py:62
+#: amc/commands/rp_rescue.py:62
 msgid "Calls for rescue service"
 msgstr "Panggil layanan penyelamatan"
 
-#: src/amc/commands/rp_rescue.py:65
+#: amc/commands/rp_rescue.py:65
 msgid "You have requested a rescue less than 5 minutes ago"
 msgstr "Anda telah meminta penyelamatan kurang dari 5 menit yang lalu"
 
-#: src/amc/commands/rp_rescue.py:78
+#: amc/commands/rp_rescue.py:78
 #, python-brace-format
 msgid ""
 "<Title>Rescue Request</>\n"
@@ -622,24 +628,24 @@ msgstr ""
 "Pesan: {message}\n"
 "Kendaraan: {vehicle_names}"
 
-#: src/amc/commands/rp_rescue.py:90
+#: amc/commands/rp_rescue.py:90
 #, python-brace-format
 msgid "{name} needs a rescue! {vehicle_names}. /respond {request_id}"
 msgstr "{name} butuh penyelamatan! {vehicle_names}. /respond {request_id}"
 
-#: src/amc/commands/rp_rescue.py:93
+#: amc/commands/rp_rescue.py:93
 msgid "<EffectGood>Request Sent</>\n"
 msgstr "<EffectGood>Permintaan Terkirim</>\n"
 
-#: src/amc/commands/rp_rescue.py:93
+#: amc/commands/rp_rescue.py:93
 msgid "Help is on the way."
 msgstr "Bantuan sedang dalam perjalanan."
 
-#: src/amc/commands/rp_rescue.py:93
+#: amc/commands/rp_rescue.py:93
 msgid "Rescuers offline, notified Discord."
 msgstr "Penyelamat luring, sudah diberitahukan ke Discord."
 
-#: src/amc/commands/rp_rescue.py:102
+#: amc/commands/rp_rescue.py:102
 #, python-brace-format
 msgid ""
 "@here **{name}** requested rescue.\n"
@@ -648,70 +654,58 @@ msgstr ""
 "@here **{name}** meminta penyelamatan.\n"
 "Pesan: {message}"
 
-#: src/amc/commands/rp_rescue.py:110
+#: amc/commands/rp_rescue.py:110
 msgid "Respond to a rescue request"
 msgstr "Tanggapi permintaan penyelamatan"
 
-#: src/amc/commands/rp_rescue.py:118
+#: amc/commands/rp_rescue.py:118
 msgid "Invalid or expired rescue request."
 msgstr "Permintaan penyelamatan tidak valid atau kedaluwarsa."
 
-#: src/amc/commands/rp_rescue.py:122
+#: amc/commands/rp_rescue.py:122
 #, python-brace-format
 msgid "{responder} responded to {requester}'s request!"
 msgstr "{responder} menanggapi permintaan {requester}!"
 
-#: src/amc/commands/social.py:10
+#: amc/commands/social.py:10
 msgid "Thank another player to increase their social score"
-msgstr "Berterima kasih kepada pemain lain untuk meningkatkan skor sosial mereka"
+msgstr ""
+"Berterima kasih kepada pemain lain untuk meningkatkan skor sosial mereka"
 
-#: src/amc/commands/social.py:18
+#: amc/commands/social.py:18
 msgid "Player not found"
 msgstr "Pemain tidak ditemukan"
 
-#: src/amc/commands/social.py:24
+#: amc/commands/social.py:24
 msgid "Player not found in DB"
 msgstr "Pemain tidak ditemukan di DB"
 
-#: src/amc/commands/social.py:28
+#: amc/commands/social.py:28
 msgid "Already thanked recently."
 msgstr "Sudah diucapkan terima kasih baru-baru ini."
 
-#: src/amc/commands/social.py:35
+#: amc/commands/social.py:35
 msgid "Thank sent"
 msgstr "Terima kasih terkirim"
 
-#: src/amc/commands/social.py:36
+#: amc/commands/social.py:36
 #, python-brace-format
 msgid "{sender} thanked you"
 msgstr "{sender} mengucapkan terima kasih kepada Anda"
 
-#: src/amc/commands/teleport.py:8
+#: amc/commands/teleport.py:8
 msgid "Teleport to coordinates (Admin Only)"
 msgstr "Teleportasi ke koordinat (Khusus Admin)"
 
-#: src/amc/commands/teleport.py:13
+#: amc/commands/teleport.py:13
 msgid "Admin Only"
 msgstr "Khusus Admin"
 
-#: src/amc/commands/teleport.py:15
+#: amc/commands/teleport.py:15
 msgid "Teleport to a location"
 msgstr "Teleportasi ke lokasi"
 
-#: src/amc/commands/teleport.py:45
-#, python-brace-format
-msgid ""
-"Teleport point not found\n"
-"Choose from one of the following locations:\n"
-"\n"
-"{locations}"
-msgstr ""
-"Titik teleportasi tidak ditemukan\n"
-"Pilih dari salah satu lokasi berikut:\n"
-"\n"
-"{locations}"
-
-#: src/amc/commands/teleport.py:62
+#: amc/commands/teleport.py:62
 #, python-brace-format
 msgid ""
 "<Title>Teleport</>\n"
@@ -726,11 +720,15 @@ msgstr ""
 "\n"
 "{locations}"
 
-#: src/amc/commands/vehicles.py:10
+#: amc/commands/vehicles.py:11
+msgid "Despawn your vehicle"
+msgstr "Despawn kendaraan Anda"
+
+#: amc/commands/vehicles.py:16
 msgid "Register your vehicles"
 msgstr "Daftarkan kendaraan Anda"
 
-#: src/amc/commands/vehicles.py:14
+#: amc/commands/vehicles.py:20
 #, python-brace-format
 msgid ""
 "<Title>Vehicles Registered!</>\n"
@@ -741,11 +739,11 @@ msgstr ""
 "\n"
 "{names}"
 
-#: src/amc/commands/vehicles.py:16
+#: amc/commands/vehicles.py:22
 msgid "Stop renting out your vehicle"
 msgstr "Berhenti menyewakan kendaraan Anda"
 
-#: src/amc/commands/vehicles.py:27
+#: amc/commands/vehicles.py:33
 msgid ""
 "<Title>Removing rentals</>\n"
 "Usage: /unrental, /unrental 2345, /unrental all"
@@ -753,15 +751,15 @@ msgstr ""
 "<Title>Menghapus penyewaan</>\n"
 "Penggunaan: /unrental, /unrental 2345, /unrental all"
 
-#: src/amc/commands/vehicles.py:35
+#: amc/commands/vehicles.py:41
 msgid "Rentals removed"
 msgstr "Penyewaan dihapus"
 
-#: src/amc/commands/vehicles.py:37
+#: amc/commands/vehicles.py:43
 msgid "Mark vehicle as for rental"
 msgstr "Tandai kendaraan untuk disewakan"
 
-#: src/amc/commands/vehicles.py:44
+#: amc/commands/vehicles.py:50
 msgid ""
 "<Title>Rental System</>\n"
 "Only Corporation vehicles can be rented out."
@@ -769,7 +767,7 @@ msgstr ""
 "<Title>Sistem Penyewaan</>\n"
 "Hanya kendaraan Perusahaan yang dapat disewakan."
 
-#: src/amc/commands/vehicles.py:53
+#: amc/commands/vehicles.py:59
 #, python-brace-format
 msgid ""
 "<Title>Marked as rental</>\n"
@@ -782,11 +780,11 @@ msgstr ""
 "\n"
 "{names}"
 
-#: src/amc/commands/vehicles.py:55
+#: amc/commands/vehicles.py:61
 msgid "Rent a vehicle"
 msgstr "Sewa kendaraan"
 
-#: src/amc/commands/vehicles.py:70
+#: amc/commands/vehicles.py:76
 msgid ""
 "<Title>Rentals</>\n"
 "No rentals found."
@@ -794,7 +792,7 @@ msgstr ""
 "<Title>Penyewaan</>\n"
 "Tidak ada penyewaan ditemukan."
 
-#: src/amc/commands/vehicles.py:77
+#: amc/commands/vehicles.py:90
 #, python-brace-format
 msgid ""
 "<Title>Available Rentals</>\n"
@@ -807,28 +805,28 @@ msgstr ""
 "\n"
 "{names}"
 
-#: src/amc/commands/vehicles.py:86
+#: amc/commands/vehicles.py:99
 #, python-brace-format
 msgid "Brought to you by {company}"
 msgstr "Dipersembahkan oleh {company}"
 
-#: src/amc/commands/vehicles.py:88
+#: amc/commands/vehicles.py:101
 msgid "Rental not found"
 msgstr "Penyewaan tidak ditemukan"
 
-#: src/amc/commands/vehicles.py:90
+#: amc/commands/vehicles.py:103
 msgid "Sell a vehicle"
 msgstr "Jual kendaraan"
 
-#: src/amc/commands/vehicles.py:102
+#: amc/commands/vehicles.py:115
 msgid "Remove displayed vehicles"
 msgstr "Hapus kendaraan yang ditampilkan"
 
-#: src/amc/commands/vehicles.py:106 src/amc/commands/vehicles.py:136
+#: amc/commands/vehicles.py:119 amc/commands/vehicles.py:149
 msgid "Admin-only command"
 msgstr "Perintah khusus Admin"
 
-#: src/amc/commands/vehicles.py:117
+#: amc/commands/vehicles.py:130
 msgid ""
 "<Title>Display System</>\n"
 "Use <Highlight>/undisplay </> to remove displayed vehicles."
@@ -836,15 +834,15 @@ msgstr ""
 "<Title>Sistem Tampilan</>\n"
 "Gunakan <Highlight>/undisplay </> untuk menghapus kendaraan yang ditampilkan."
 
-#: src/amc/commands/vehicles.py:130
+#: amc/commands/vehicles.py:143
 msgid "Undisplay complete"
 msgstr "Penghapusan tampilan selesai"
 
-#: src/amc/commands/vehicles.py:132
+#: amc/commands/vehicles.py:145
 msgid "Permanently display a vehicle"
 msgstr "Tampilkan kendaraan secara permanen"
 
-#: src/amc/commands/vehicles.py:147
+#: amc/commands/vehicles.py:160
 msgid ""
 "<Title>Display System</>\n"
 "Use <Highlight>/display </> to permanently display a vehicle"
@@ -852,7 +850,7 @@ msgstr ""
 "<Title>Sistem Tampilan</>\n"
 "Gunakan <Highlight>/display </> untuk menampilkan kendaraan secara permanen"
 
-#: src/amc/commands/vehicles.py:189
+#: amc/commands/vehicles.py:202
 msgid ""
 "\n"
 "<Title>Successfully marked as display</>\n"
@@ -870,34 +868,69 @@ msgstr ""
 "Untuk mengubah posisi, Anda perlu melakukan /display lagi dengan kendaraan "
 "yang sama."
 
-#: src/amc/models.py:681
+#: amc/models.py:681
 msgid "Company"
 msgstr "Perusahaan"
 
-#: src/amc/models.py:682
+#: amc/models.py:682
 msgid "Companies"
 msgstr "Perusahaan-perusahaan"
 
-#: src/amc/models.py:779
+#: amc/models.py:779
 msgid "Entered"
 msgstr "Masuk"
 
-#: src/amc/models.py:780
+#: amc/models.py:780
 msgid "Exited"
 msgstr "Keluar"
 
-#: src/amc/models.py:781
+#: amc/models.py:781
 msgid "Bought"
 msgstr "Dibeli"
 
-#: src/amc/models.py:782
+#: amc/models.py:782
 msgid "Sold"
 msgstr "Dijual"
 
-#: src/amc_backend/settings.py:145
+#: amc_backend/settings.py:145
 msgid "English"
 msgstr "Inggris"
 
-#: src/amc_backend/settings.py:146
+#: amc_backend/settings.py:146
 msgid "Indonesian"
 msgstr "Indonesia"
+
+#: amc_backend/settings.py:147
+msgid "Simplified Chinese"
+msgstr ""
+
+#~ msgid ""
+#~ "<Title>Feature disabled</>\n"
+#~ "\n"
+#~ "Sorry, this feature has been permanently disabled."
+#~ msgstr ""
+#~ "<Title>Fitur dinonaktifkan</>\n"
+#~ "\n"
+#~ "Maaf, fitur ini telah dinonaktifkan secara permanen."
+
+#~ msgid "Admin despawn tool"
+#~ msgstr "Alat despawn Admin"
+
+#~ msgid ""
+#~ "<Title>Feature disabled</>\n"
+#~ "\n"
+#~ "Sorry, this feature is temporarily unavailable"
+#~ msgstr ""
+#~ "<Title>Fitur dinonaktifkan</>\n"
+#~ "\n"
+#~ "Maaf, fitur ini untuk sementara tidak tersedia"
+
+#~ msgid ""
+#~ "<Title>Player vehicles despawned</>\n"
+#~ "\n"
+#~ msgstr ""
+#~ "<Title>Kendaraan pemain telah di-despawn</>\n"
+#~ "\n"
+
+#~ msgid "Check if you are inside a forbidden shortcut zone"
+#~ msgstr "Periksa apakah Anda berada di dalam zona jalan pintas terlarang"
