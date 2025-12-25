@@ -15,6 +15,19 @@ $ backend/manage.py migrate # creates db and runs migrations
 $ backend/manage.py runserver
 ```
 
+### Managing Dependencies
+
+Since the development environment is managed by Nix (via `uv2nix`), changes to `pyproject.toml` or `uv.lock` are not immediately reflected in the environment.
+
+To add a new dependency:
+
+1.  **Add the package:** Run `uv add <package_name>`. This updates `pyproject.toml` and `uv.lock`.
+2.  **Update the environment:**
+    *   If using `direnv`: Run `direnv reload`.
+    *   If using `nix develop`: Exit the generic shell and run `nix develop` again.
+
+This ensures Nix rebuilds the environment with the new dependencies.
+
 ## Django project
 You're assumed to have some familiarity with Django.
 - Please create migrations with `backend/manage.py makemigrations` when you make changes to `**/models.py`.
