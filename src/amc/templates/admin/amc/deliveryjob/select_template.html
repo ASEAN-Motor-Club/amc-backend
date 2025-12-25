@@ -1,0 +1,38 @@
+{% extends "admin/base_site.html" %}
+{% load i18n static %}
+
+{% block content %}
+<div id="content-main">
+    <h1>Create Delivery Job</h1>
+
+    <div style="display: flex; gap: 2rem; margin-top: 2rem;">
+        <div
+            style="flex: 1; padding: 1.5rem; background: var(--body-bg); border: 1px solid var(--hairline-color); border-radius: 4px;">
+            <h2>{% trans "Create from Template" %}</h2>
+            <p>{% trans "Select an existing template to pre-fill the job details." %}</p>
+
+            <form action="" method="get">
+                <div class="form-row">
+                    <select name="template" style="width: 100%; padding: 8px; margin-bottom: 1rem;">
+                        <option value="">{% trans "Select a template..." %}</option>
+                        {% for template in templates %}
+                        <option value="{{ template.id }}">{{ template.name }}</option>
+                        {% endfor %}
+                    </select>
+                </div>
+                <button type="submit" class="button button-primary">{% trans "Continue with Template" %}</button>
+            </form>
+        </div>
+
+        <div
+            style="flex: 1; padding: 1.5rem; background: var(--body-bg); border: 1px solid var(--hairline-color); border-radius: 4px;">
+            <h2>{% trans "Create from Scratch" %}</h2>
+            <p>{% trans "Start with a blank form." %}</p>
+            <form action="" method="get">
+                <input type="hidden" name="scratch" value="1">
+                <button type="submit" class="button">{% trans "Create Blank Job" %}</button>
+            </form>
+        </div>
+    </div>
+</div>
+{% endblock %}

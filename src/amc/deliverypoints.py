@@ -4,7 +4,7 @@ import random
 from datetime import timedelta
 from django.utils import timezone
 from django.db.models import Q, Prefetch
-from amc.models import Cargo, DeliveryPoint, DeliveryPointStorage, DeliveryJob
+from amc.models import Cargo, DeliveryPoint, DeliveryPointStorage, DeliveryJob, DeliveryJobTemplate
 from amc.game_server import get_deliverypoints, get_players, announce
 from amc.enums import CargoKey
 from amc_finance.services import get_treasury_fund_balance
@@ -104,8 +104,7 @@ async def monitor_jobs(ctx):
   if num_active_jobs >= max_active_jobs:
     return
 
-  job_templates = (DeliveryJob.objects
-    .filter(template=True)
+  job_templates = (DeliveryJobTemplate.objects
     .exclude_has_conflicting_active_job()
     .exclude_recently_posted()
     .prefetch_related(
@@ -115,18 +114,20 @@ async def monitor_jobs(ctx):
     )
     .order_by('?')
   )
-  async for job in job_templates:
-    cargos = job.cargos.all()
-    source_points = job.source_points.all()
-    destination_points = job.destination_points.all()
+  
+  async for template in job_templates:
+
+    cargos = template.cargos.all()
+    source_points = template.source_points.all()
+    destination_points = template.destination_points.all()
 
     non_type_cargos = [c for c in cargos if 'T::' not in c.key]
     destination_storages = DeliveryPointStorage.objects.filter(
-      Q(cargo=job.cargo_key) | Q(cargo__in=non_type_cargos) | Q(cargo__type__in=cargos),
+      Q(cargo__in=non_type_cargos) | Q(cargo__type__in=cargos),
       delivery_point__in=destination_points,
     ).annotate_default_capacity()
     source_storages = DeliveryPointStorage.objects.filter(
-      Q(cargo=job.cargo_key) | Q(cargo__in=non_type_cargos) | Q(cargo__type__in=cargos),
+      Q(cargo__in=non_type_cargos) | Q(cargo__type__in=cargos),
       delivery_point__in=source_points,
     ).annotate_default_capacity()
 
@@ -143,11 +144,11 @@ async def monitor_jobs(ctx):
     source_amount = sum([amount for amount, capacity in source_storage_capacities])
     source_capacity = sum([capacity for amount, capacity in source_storage_capacities])
 
-    quantity_requested = job.quantity_requested
-    if job.expected_player_count_for_quantity:
+    quantity_requested = template.default_quantity
+    if template.expected_player_count_for_quantity:
       quantity_requested = min(
         quantity_requested,
-        int(quantity_requested * num_players / job.expected_player_count_for_quantity)
+        int(quantity_requested * num_players / template.expected_player_count_for_quantity)
       )
 
     if destination_capacity == 0:
@@ -174,37 +175,37 @@ async def monitor_jobs(ctx):
 
     if not is_destination_empty or not is_source_enough:
       continue
-    chance = job.job_posting_probability * max(10, num_players) / 2000 / (5 + num_active_jobs * 2)
+      
+    chance = template.job_posting_probability * max(10, num_players) / 2000 / (5 + num_active_jobs * 2)
     if not source_points and not destination_points:
       chance = chance / (24 * 3)
 
     if random.random() > chance:
       continue
 
-    rp_mode =  job.rp_mode or random.random() < 0.15 
-    bonus_multiplier = round(job.bonus_multiplier * random.uniform(0.8, 1.2), 2)
+    rp_mode =  template.rp_mode or random.random() < 0.15 
+    bonus_multiplier = round(template.bonus_multiplier * random.uniform(0.8, 1.2), 2)
     bonus_multiplier = bonus_multiplier * treasury_health
-    completion_bonus = int(job.completion_bonus * quantity_requested / job.quantity_requested * random.uniform(0.7, 1.3))
+    completion_bonus = int(template.completion_bonus * quantity_requested / template.default_quantity * random.uniform(0.7, 1.3))
     completion_bonus = int(treasury_health * completion_bonus)
-    if rp_mode and not job.rp_mode:
+    if rp_mode and not template.rp_mode:
       completion_bonus = completion_bonus * 1.5
 
     new_job = await DeliveryJob.objects.acreate(
-      name=job.name,
-      cargo_key=job.cargo_key,
+      name=template.name,
       quantity_requested=quantity_requested,
-      expired_at=timezone.now() + timedelta(hours=job.template_job_period_hours),
+      expired_at=timezone.now() + timedelta(hours=template.duration_hours),
       bonus_multiplier=bonus_multiplier,
       completion_bonus=completion_bonus,
-      description=job.description,
+      description=template.description,
       rp_mode=rp_mode,
-      base_template=job,
+      created_from=template,
     )
     await new_job.cargos.aadd(*cargos)
     await new_job.source_points.aadd(*source_points)
     await new_job.destination_points.aadd(*destination_points)
     asyncio.create_task(
-      announce(f"New job posting! {job.name} - {completion_bonus:,} bonus on completion. See /jobs for more details", ctx['http_client'])
+      announce(f"New job posting! {template.name} - {completion_bonus:,} bonus on completion. See /jobs for more details", ctx['http_client'])
     )
     break
 

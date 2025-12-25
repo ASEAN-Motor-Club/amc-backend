@@ -1097,6 +1097,47 @@ class DeliveryJobQuerySet(models.QuerySet):
 
 
 
+
+class DeliveryJobTemplateQuerySet(models.QuerySet):
+  def exclude_has_conflicting_active_job(self):
+    return self.exclude(Exists(
+      DeliveryJob.objects.filter_active().filter(
+        created_from=OuterRef('pk')
+      )
+    ))
+
+  def exclude_recently_posted(self, hours_since=12):
+    # Matches logic in DeliveryJobQuerySet.exclude_recently_posted but adapted for created_from
+    return self.exclude(Exists(
+      DeliveryJob.objects.filter(
+        created_from=OuterRef('pk'),
+        requested_at__gte=timezone.now() - timedelta(hours=hours_since),
+      )
+    ))
+
+@final
+class DeliveryJobTemplate(models.Model):
+  name = models.CharField(max_length=200, help_text="Give the template a name")
+  description = models.TextField(blank=True, null=True)
+  cargos = models.ManyToManyField('Cargo', related_name='job_templates', blank=True, help_text="Use either Cargo Key or this field for multiple cargo types")
+  source_points = models.ManyToManyField('DeliveryPoint', related_name='job_templates_out', blank=True)
+  destination_points = models.ManyToManyField('DeliveryPoint', related_name='job_templates_in', blank=True)
+  
+  default_quantity = models.PositiveIntegerField(help_text="Default quantity requested")
+  bonus_multiplier = models.FloatField(default=1.0)
+  completion_bonus = models.PositiveIntegerField(default=50000)
+  rp_mode = models.BooleanField(default=False, help_text="Requires the job to be done in RP mode")
+  
+  # Template specific settings
+  expected_player_count_for_quantity = models.PositiveIntegerField(null=True, blank=True, help_text="When player count is lower than this, quantity will be scaled down")
+  job_posting_probability = models.FloatField(default=1.0, help_text="The probability at which the job is posted. Defaults to 100% (1.0)")
+  duration_hours = models.FloatField(default=5.0, help_text="The number of hours to complete the job")
+
+  objects = models.Manager.from_queryset(DeliveryJobTemplateQuerySet)()
+
+  def __str__(self):
+    return self.name
+
 @final
 class DeliveryJob(models.Model):
   name = models.CharField(max_length=200, null=True, help_text="Give the job a name so it can be identified")
@@ -1113,12 +1154,8 @@ class DeliveryJob(models.Model):
   destination_points = models.ManyToManyField('DeliveryPoint', related_name='jobs_in', blank=True)
   discord_message_id = models.PositiveBigIntegerField(null=True, blank=True, help_text="For bot use only, leave blank")
   description = models.TextField(blank=True, null=True)
-  template = models.BooleanField(default=False, help_text="If true this will be used to create future jobs")
   rp_mode = models.BooleanField(default=False, help_text="Requires the job to be done in RP mode")
-  base_template = models.ForeignKey('self', models.SET_NULL, null=True, blank=True, help_text="The template this job was created from", related_name="job_postings")
-  expected_player_count_for_quantity = models.PositiveIntegerField(null=True, blank=True, help_text="When player count is lower than this, quantity will be scaled down")
-  job_posting_probability = models.FloatField(default=1.0, help_text="The probability at which the job is posted. Defaults to 100% (1.0)")
-  template_job_period_hours = models.FloatField(default=5.0, help_text="(For job templates only) The number of hours to complete the job")
+  created_from = models.ForeignKey(DeliveryJobTemplate, models.SET_NULL, null=True, blank=True, related_name="jobs")
   fulfilled = models.GeneratedField(
     expression=GreaterThanOrEqual(F('quantity_fulfilled'), F('quantity_requested')),
     output_field=models.BooleanField(),

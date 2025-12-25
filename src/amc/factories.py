@@ -3,6 +3,7 @@ import uuid
 from django.utils import timezone
 from django.contrib.gis.geos import Point
 from datetime import timedelta
+import factory
 from factory import (
   SubFactory,
   Faker,
@@ -19,9 +20,10 @@ from .models import (
   GameEventCharacter,
   Championship,
   ChampionshipPoint,
-  DeliveryJob,
   DeliveryPoint,
   Cargo,
+  DeliveryJobTemplate,
+  DeliveryJob,
 )
 
 class CharacterFactory(DjangoModelFactory):
@@ -121,4 +123,34 @@ class DeliveryJobFactory(DjangoModelFactory):
   quantity_requested = LazyAttribute(lambda _: random.randint(1, 1000))
   bonus_multiplier = LazyAttribute(lambda _: random.random())
   expired_at = LazyAttribute(lambda _: timezone.now() + timedelta(hours=random.randint(2, 8)))
+
+class DeliveryJobTemplateFactory(DjangoModelFactory):
+  class Meta:
+    model = DeliveryJobTemplate
+
+  name = Faker('bs')
+  default_quantity = LazyAttribute(lambda _: random.randint(1, 1000))
+  bonus_multiplier = LazyAttribute(lambda _: random.random())
+  duration_hours = LazyAttribute(lambda _: random.randint(2, 8))
+
+  @factory.post_generation
+  def cargos(self, create, extracted, **kwargs):
+    if not create:
+        return
+    if extracted:
+        self.cargos.add(*extracted)
+
+  @factory.post_generation
+  def source_points(self, create, extracted, **kwargs):
+    if not create:
+        return
+    if extracted:
+        self.source_points.add(*extracted)
+
+  @factory.post_generation
+  def destination_points(self, create, extracted, **kwargs):
+    if not create:
+        return
+    if extracted:
+        self.destination_points.add(*extracted)
 

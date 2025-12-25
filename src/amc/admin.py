@@ -55,6 +55,7 @@ from .models import (
   WorldObject,
   SubsidyArea,
   SubsidyRule,
+  DeliveryJobTemplate,
 )
 from amc_finance.services import send_fund_to_player
 from amc_finance.admin import AccountInlineAdmin
@@ -62,6 +63,7 @@ from django.contrib.gis.db import models as gis_models
 from .widgets import AMCOpenLayersWidget
 from django.urls import path
 from django.http import HttpResponse
+from django.shortcuts import render
 
 
 class CharacterInlineAdmin(admin.TabularInline):
@@ -490,9 +492,15 @@ class CargoAdmin(admin.ModelAdmin):
   list_select_related = ['type']
   inlines = [CargoInlineAdmin]
 
+@admin.register(DeliveryJobTemplate)
+class DeliveryJobTemplateAdmin(admin.ModelAdmin):
+  list_display = ['name', 'default_quantity', 'completion_bonus', 'rp_mode', 'job_posting_probability']
+  search_fields = ['name', 'description']
+  filter_horizontal = ['cargos', 'source_points', 'destination_points']
+
 @admin.register(DeliveryJob)
 class DeliveryJobAdmin(admin.ModelAdmin):
-  list_display = ['id', 'name', 'completion_bonus', 'finished', 'requested_at', 'template', 'postable', 'num_posted']
+  list_display = ['id', 'name', 'completion_bonus', 'finished', 'requested_at', 'postable']
   ordering = ['-requested_at']
   search_fields = [
     'name',
@@ -502,10 +510,9 @@ class DeliveryJobAdmin(admin.ModelAdmin):
     'destination_points__name',
   ]
   autocomplete_fields = ['source_points', 'destination_points', 'cargos']
-  readonly_fields = ['discord_message_id', 'base_template']
+  readonly_fields = ['discord_message_id', 'quantity_fulfilled', 'finished']
   save_as = True
-  actions = ['create_job_from_template']
-  list_filter = ['template', 'cargos']
+  list_filter = ['cargos']
   fieldsets = [
     (None, {
       "fields": [
@@ -516,6 +523,7 @@ class DeliveryJobAdmin(admin.ModelAdmin):
         'destination_points',
         'expired_at',
         'rp_mode',
+        'created_from',
       ]
     }),
     ("Payout", {
@@ -523,9 +531,6 @@ class DeliveryJobAdmin(admin.ModelAdmin):
     }),
     ("Description", {
       "fields": ['description']
-    }),
-    ("Job Template", {
-      "fields": ['template', 'expected_player_count_for_quantity', 'job_posting_probability', 'template_job_period_hours', 'base_template']
     }),
     ("Discord integration", {
       "fields": ['discord_message_id']
@@ -540,48 +545,46 @@ class DeliveryJobAdmin(admin.ModelAdmin):
   def postable(self, job):
     return async_to_sync(job.is_postable)()
 
-  @admin.display()
-  def num_posted(self, job):
-    return job.num_posted
-
   def get_queryset(self, request):
     qs = super().get_queryset(request)
     return (qs
       .annotate_active()
       .prefetch_related('source_points', 'destination_points', 'cargos')
-      .annotate(
-        num_posted=Count('job_postings', distinct=True)
-      )
     )
 
-  @admin.action(description="Create job from template")
-  def create_job_from_template(self, request, queryset):
-    created = 0
-    for job in queryset.prefetch_related('cargos', 'source_points', 'destination_points').filter(template=True):
-      new_job = DeliveryJob.objects.create(
-        name=job.name,
-        cargo_key=job.cargo_key,
-        quantity_requested=job.quantity_requested,
-        expired_at=timezone.now() + timedelta(hours=5),
-        bonus_multiplier=job.bonus_multiplier,
-        completion_bonus=job.completion_bonus,
-        description=job.description,
-      )
-      new_job.cargos.add(*job.cargos.all())
-      new_job.source_points.add(*job.source_points.all())
-      new_job.destination_points.add(*job.destination_points.all())
-      created += 1
+  def add_view(self, request, form_url='', extra_context=None):
+    if request.method == 'GET' and 'template' not in request.GET and 'scratch' not in request.GET:
+        context = {
+            **self.admin_site.each_context(request),
+            'templates': DeliveryJobTemplate.objects.all(),
+            'title': "Create Delivery Job",
+        }
+        return render(request, 'admin/amc/deliveryjob/select_template.html', context)
 
-    self.message_user(
-      request,
-      ngettext(
-        "%d jobs was successfully created.",
-        "%d jobs were successfully created.",
-        created,
-      )
-      % created,
-      messages.SUCCESS,
-    )
+    return super().add_view(request, form_url, extra_context)
+
+  def get_changeform_initial_data(self, request):
+      initial = super().get_changeform_initial_data(request)
+      if 'template' in request.GET:
+          try:
+              template = DeliveryJobTemplate.objects.get(pk=request.GET['template'])
+              initial.update({
+                  'name': template.name,
+                  'description': template.description,
+                  'quantity_requested': template.default_quantity,
+                  'bonus_multiplier': template.bonus_multiplier,
+                  'completion_bonus': template.completion_bonus,
+                  'rp_mode': template.rp_mode,
+                  'created_from': template,
+                  'cargos': template.cargos.all(),
+                  'source_points': template.source_points.all(),
+                  'destination_points': template.destination_points.all(),
+                  'expired_at': timezone.now() + timedelta(hours=template.duration_hours),
+              })
+          except DeliveryJobTemplate.DoesNotExist:
+              pass
+      return initial
+
 
 
 @admin.register(Delivery)
