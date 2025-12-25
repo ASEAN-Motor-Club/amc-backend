@@ -59,7 +59,13 @@ class CommerceCog(commands.Cog):
         self.manage_elections_task.cancel()
 
     async def get_announcement_channel(self):
-        return self.bot.get_channel(self.channel_id)
+        channel = self.bot.get_channel(self.channel_id)
+        if not channel and self.channel_id:
+            try:
+                channel = await self.bot.fetch_channel(self.channel_id)
+            except discord.HTTPException as e:
+                print(f"Error fetching announcement channel {self.channel_id}: {e}")
+        return channel
 
     @tasks.loop(minutes=30)
     async def manage_elections_task(self):

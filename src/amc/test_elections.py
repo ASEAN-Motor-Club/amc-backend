@@ -42,6 +42,15 @@ class ElectionTestCase(TestCase):
         self.assertIsNotNone(election)
         self.assertEqual(election.phase, MinistryElection.Phase.CANDIDACY)
         
+        # Verify announcement for election start
+        channel.send.assert_called()
+        args, kwargs = channel.send.call_args
+        embed = kwargs.get('embed')
+        self.assertIsNotNone(embed)
+        self.assertIn("Minister of Commerce", embed.title)
+        self.assertIn("new election", embed.description)
+        channel.send.reset_mock()
+        
         # Helper to create mocked interaction
         def create_interaction(user_id):
             intr = MagicMock()
@@ -102,6 +111,14 @@ class ElectionTestCase(TestCase):
         # Step 6: Process finalized election via task
         with patch('django.utils.timezone.now', return_value=election.poll_end_at + timedelta(hours=1)):
             await cog.manage_elections_task()
+        
+        # Verify announcement for election result
+        channel.send.assert_called()
+        args, kwargs = channel.send.call_args
+        embed = kwargs.get('embed')
+        self.assertIsNotNone(embed)
+        self.assertIn("Election Results", embed.title)
+        self.assertIn("Congratulations", embed.description)
             
         election = await MinistryElection.objects.select_related('winner').aget(pk=election.pk)
         self.assertEqual(election.winner, player1) # Player 1 should win with 1 vote (vs 0 for player 2)

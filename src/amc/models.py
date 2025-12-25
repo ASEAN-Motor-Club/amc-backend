@@ -1192,7 +1192,7 @@ class MinistryElection(models.Model):
     return self.Phase.FINALIZED
 
   def __str__(self):
-    return f"Ministry Election {self.id}"
+    return f"Ministry Election {self.id} ({self.phase.label})"
 
 
 @final

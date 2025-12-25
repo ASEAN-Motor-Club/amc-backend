@@ -737,7 +737,7 @@ class MinistryElectionAdmin(admin.ModelAdmin):
   list_filter = ['winner', 'is_processed']
 
   def phase(self, obj):
-    return obj.get_phase_display()
+    return obj.phase.label
 
 @admin.register(MinistryCandidacy)
 class MinistryCandidacyAdmin(admin.ModelAdmin):
