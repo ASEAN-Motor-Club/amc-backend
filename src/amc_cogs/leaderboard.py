@@ -32,6 +32,7 @@ class LeaderboardCog(commands.Cog):
             Delivery.objects.filter(timestamp__gte=start_date)
             .values("character__name")
             .annotate(total=Sum(F("payment") + F("subsidy")))
+            .filter(total__gt=0)
             .order_by("-total")[:10]
         )
         revenue = [
@@ -46,6 +47,7 @@ class LeaderboardCog(commands.Cog):
             )
             .values("character__name")
             .annotate(total=Count("id"))
+            .filter(total__gt=0)
             .order_by("-total")[:10]
         )
         vehicles = [
@@ -58,6 +60,7 @@ class LeaderboardCog(commands.Cog):
             PlayerStatusLog.objects.filter(timespan__startswith__gte=start_date)
             .values("character__name")
             .annotate(total=Sum("duration"))
+            .filter(total__gt=timedelta(0))
             .order_by("-total")[:10]
         )
         active = [
@@ -73,6 +76,7 @@ class LeaderboardCog(commands.Cog):
             PlayerRestockDepotLog.objects.filter(timestamp__gte=start_date)
             .values("character__name")
             .annotate(total=Count("id"))
+            .filter(total__gt=0)
             .order_by("-total")[:10]
         )
         restocks = [
@@ -89,7 +93,7 @@ class LeaderboardCog(commands.Cog):
 
     def format_leaderboard(self, title, data, unit="", is_money=False):
         if not data:
-            return f"**{title}**\nNo data yet."
+            return "No data yet."
         
         lines = []
         for i, item in enumerate(data, 1):
@@ -99,11 +103,12 @@ class LeaderboardCog(commands.Cog):
             elif unit == "h":
                 val_str = f"{val:.1f}h"
             else:
-                val_str = f"{val:,}"
+                val_str = f"{val:,}{unit}"
             
-            lines.append(f"{i}. **{item['name']}** - {val_str}{unit}")
+            lines.append(f"{i}. {item['name']} - {val_str}")
         
-        return f"**{title}**\n" + "\n".join(lines)
+        header = f"{title}\n" if title else ""
+        return header + "\n".join(lines)
 
     async def create_leaderboard_embeds(self):
         data_24h = await self.get_leaderboard_data(1)
