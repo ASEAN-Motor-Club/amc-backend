@@ -2,7 +2,7 @@ from amc.command_framework import registry, CommandContext
 from amc.models import DeliveryJob, BotInvocationLog
 from amc.mod_server import get_rp_mode
 from amc.utils import get_time_difference_string
-from amc.subsidies import SUBSIDIES_TEXT
+from amc.subsidies import get_subsidies_text
 from django.db.models import F
 from django.utils.translation import gettext as _, gettext_lazy
 
@@ -14,7 +14,7 @@ async def cmd_jobs(ctx: CommandContext):
         expired_at__gte=ctx.timestamp,
     ).prefetch_related('source_points', 'destination_points', 'cargos')
 
-    jobs_str_list = []
+    jobs_str_list: list[str] = []
     async for job in jobs:
         cargo_key = job.get_cargo_key_display() if job.cargo_key else ', '.join([c.label for c in job.cargos.all()])
         title = f"({job.quantity_fulfilled}/{job.quantity_requested}) {job.name} · <EffectGood>{job.bonus_multiplier*100:.0f}%</> · <Money>{job.completion_bonus:,}</>"
@@ -45,5 +45,5 @@ async def cmd_jobs(ctx: CommandContext):
 
 @registry.register("/subsidies", description=gettext_lazy("View job subsidies information"), category="Jobs")
 async def cmd_subsidies(ctx: CommandContext):
-    await ctx.reply(SUBSIDIES_TEXT)
+    await ctx.reply(await get_subsidies_text())
     await BotInvocationLog.objects.acreate(timestamp=ctx.timestamp, character=ctx.character, prompt="subsidies")

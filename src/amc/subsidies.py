@@ -1,8 +1,9 @@
 import asyncio
 from decimal import Decimal
+from django.db.models import Q
 from django.contrib.gis.geos import Point
 from amc.mod_server import show_popup, transfer_money
-from amc.models import ServerPassengerArrivedLog
+from amc.models import ServerPassengerArrivedLog, SubsidyRule, Cargo
 from amc_finance.services import (
   send_fund_to_player_wallet,
   get_character_max_loan,
@@ -11,39 +12,50 @@ from amc_finance.services import (
   register_player_deposit,
 )
 
-SUBSIDIES_TEXT = """<Title>ASEAN Server Subsidies</>
-<Warning>Using the Gwangjin shortcut will disqualify you from subsidies for 1 hour</>
+async def get_subsidies_text():
+    text = "<Title>ASEAN Server Subsidies</>\n\n"
+    
+    rules = SubsidyRule.objects.filter(active=True).order_by('-priority')
+    
+    async for rule in rules:
+        # Build Reward String
+        if rule.reward_type == SubsidyRule.RewardType.PERCENTAGE:
+            reward_str = f"{int(rule.reward_value * 100)}%"
+        else:
+            reward_str = f"{int(rule.reward_value)} coins"
+            
+        if rule.scales_with_damage:
+             reward_str += " (Reduces with damage)"
+        if rule.requires_on_time:
+             reward_str += " (Must be on time)"
 
-<Bold>Depot Restocking</> <Money>10,000</> coins
+        # Build Cargo String
+        cargos = [c async for c in rule.cargos.all()]
+        if cargos:
+            cargo_names_list = [c.label for c in cargos]
+            cargo_str = ", ".join(cargo_names_list)
+        else:
+            cargo_str = "Any Cargo"
+            
+        text += f"<Bold>{cargo_str}</> - <Money>{reward_str}</>\n"
+        
+        # Secondary info (Areas)
+        sources = [a async for a in rule.source_areas.all()]
+        destinations = [a async for a in rule.destination_areas.all()]
+        
+        if sources:
+            source_names = ", ".join([a.name for a in sources])
+            text += f"<Secondary>From: {source_names}</>\n"
+            
+        if destinations:
+            dest_names = ", ".join([a.name for a in destinations])
+            text += f"<Secondary>To: {dest_names}</>\n"
+            
+    return text
 
-<Bold>Burger, Pizza, Live Fish</> - <Money>300%</> (Must be on time)
-<Bold>Airline Meal Pallets</> - <Money>200%</> (Must be on time)
-<Bold>12ft Oak Log</> - <Money>250%</> (Reduces with damage)
-<Bold>Coal & Iron Ore</> - <Money>150%</>
-<Secondary>ONLY from Gwangjin Coal/Iron mines to Gwangjin Storages</>
-<Bold>Planks</> - <Money>250%</>
-<Secondary>ONLY from Gwangjin Plank Storage to Gwangjin Coal/Iron mines, Migeum Oak 1/2/3</>
-<Bold>Fuel</> - <Money>150%</>
-<Secondary>ONLY from Migeum Log Warehouse to Migeum Oak 1/2/3</>
-<Secondary>ONLY from Gwangjin Fuel Storage to Gwangjin Coal/Iron mines</>
-<Bold>Water Bottle Pallets</> - <Money>200 - 300%</>
-<Secondary>To Gwangjin and Ara Supermarket - 300%</>
-<Secondary>To other Supermarkets - 200%</>
-<Bold>Meat Boxes</> - <Money>200%</> <Secondary>ONLY to Supermarkets</>
-<Bold>Trash</> - <Money>100 - 250%</>
-<Secondary>Gwangjin: 250% | Ara: 200% | Default: 100%</>
+SUBSIDIES_TEXT = "Use await get_subsidies_text()"
 
-<Bold>To Gwangjin Supermarket</> - <Money>300%</>
-<Secondary>Any cargo not already listed above</>
-
-<Bold>Towing/Wrecker Jobs</>
-Normal - <Money>2,000 + 50%</>
-Flipped - <Money>2,000 + 100%</>
-
-<Bold>Taxi</> - <Money>2,000 + 50%</>
-"""
 cargo_names = {
-
   'MeatBox': 'Meat Box',
   'BottlePallete': 'Water Bottle Pallete',
   'Burger_01_Signature': 'Signature Burger',
@@ -120,95 +132,121 @@ async def set_aside_player_savings(character, payment, session):
     raise e
 
 
-def get_subsidy_for_cargos(cargos, treasury_balance=None):
-  return sum([
-    get_subsidy_for_cargo(cargo, treasury_balance)[0]
-    for cargo in cargos
-  ])
+async def get_subsidy_for_cargos(cargos, treasury_balance=None):
+  total = 0
+  for cargo in cargos:
+      result = await get_subsidy_for_cargo(cargo, treasury_balance)
+      total += result[0]
+  return total
 
-def get_subsidy_for_cargo(cargo, treasury_balance=None):
-  subsidy_factor = 0.0
-  sender_name = None
-  destination_name = None
-  if cargo.sender_point:
-    sender_name = cargo.sender_point.name
-  if cargo.destination_point:
-    destination_name = cargo.destination_point.name
+async def get_subsidy_for_cargo(cargo, treasury_balance=None):
+  rules = SubsidyRule.objects.filter(active=True).order_by('-priority')
 
-  match cargo.cargo_key:
-    case 'Burger_01_Signature' | 'Pizza_01_Premium' | 'LiveFish_01':
-      if cargo.data.get('Net_TimeLeftSeconds', 0) > 0:
-        subsidy_factor = 3.0
-    case 'AirlineMealPallet':
-      if cargo.data.get('Net_TimeLeftSeconds', 0) > 0:
-        subsidy_factor = 2.0
-    case 'Log_Oak_12ft':
-      subsidy_factor = 2.5 * (1.0 - cargo.damage)
-    case 'Coal' | 'Iron Ore':
-      match sender_name:
-        case 'Gwangjin Coal' | 'Gwangjin Iron Ore Mine':
-          match destination_name:
-            case 'Gwangjin Iron Ore Storage' | 'Gwangjin Coal Storage':
-              subsidy_factor = 1.5
-    case 'WoodPlank_14ft_5t' | 'Fuel':
-      match sender_name:
-        case 'Gwangjin Plank Storage':
-          match destination_name:
-            case 'Gwangjin Iron Ore Mine' | 'Gwangjin Coal' | 'Migeum Oak 1' | 'Migeum Oak 2' | 'Migeum Oak 3':
-              subsidy_factor = 2.5
-        case 'Gwangjin Fuel Storage':
-          match destination_name:
-            case 'Gwangjin Iron Ore Mine' | 'Gwangjin Coal':
-              subsidy_factor = 1.5
-        case 'Migeum Log Warehouse':
-          match destination_name:
-            case 'Migeum Oak 1' | 'Migeum Oak 2' | 'Migeum Oak 3':
-              subsidy_factor = 1.5
-    case 'BottlePallete':
-      match destination_name:
-        case 'Gwangjin Supermarket' | 'Ara Supermarket':
-          subsidy_factor = 3.0
-        case _:
-          if 'Supermarket' in destination_name:
-            subsidy_factor = 2.0
-          else:
-            subsidy_factor = 0.0
-    case 'MeatBox':
-      if 'Supermarket' in destination_name:
-        subsidy_factor = 2.0
-      else:
-        subsidy_factor = 0.0
-    case 'TrashBag' | 'Trash_Big':
-      subsidy_factor = 1.0
-      if destination_location := cargo.data.get('Net_DestinationLocation'):
-        destination_location = Point(
+  # 1. Cargo Key Filter
+  # Cargo type hierarchy checking is tricky in a single query if not explicitly linked.
+  # For now, we assume simple key match or explicit Cargo object link.
+  # cargo.cargo_key is a string. `SubsidyRule.cargos` is a ManyToMany to `Cargo`.
+  # We should match rules where cargos IS NULL OR cargos__key = cargo.cargo_key
+  rules = rules.filter(
+      Q(cargos__isnull=True) | Q(cargos__key=cargo.cargo_key)
+  )
+
+  # 2. Source Area Filter
+  if cargo.sender_point and cargo.sender_point.coord:
+      # Match rules that have NO source requirement OR source area contains point
+      rules = rules.filter(
+          Q(source_areas__isnull=True) | Q(source_areas__polygon__contains=cargo.sender_point.coord)
+      )
+  else:
+      # If unknown source, only allow rules with NO source requirement?
+      # Or should we be lenient? Strict seems safer to avoid exploitation.
+      rules = rules.filter(source_areas__isnull=True)
+
+  # 3. Destination Area Filter
+  # Special case: 'TrashBag' | 'Trash_Big' logic in old code used dynamic point distance. 
+  # We assume new system uses predefined areas for Trash too.
+  destination_coord = None
+  if cargo.destination_point and cargo.destination_point.coord:
+      destination_coord = cargo.destination_point.coord
+  elif destination_location := cargo.data.get('Net_DestinationLocation'):
+       # Handle dynamic destinations (e.g. Trash logic provided explicit coords in data)
+       # Note: Coords in data are likely raw game coords. We need to respect SRID=3857.
+       # Assuming input is consistent with DeliveryPoint (srid=3857) or needs casting?
+       # Old code: Point(x,y,z) implied srid0 or default. Now we are strict.
+       # Constructing point with srid=3857 is safe if we assume same coordinate system.
+       destination_coord = Point(
           destination_location['X'],
           destination_location['Y'],
           destination_location['Z'],
-        )
-        ara = Point(**{"x": 329486.94, "y": 1293697.78, "z": -18594.89})
-        if destination_location.distance(ara) < 1_800_00:
-          subsidy_factor = 2.0
-        gwangjin = Point(318700.36, 816972.24, -1636.26)
-        if destination_location.distance(gwangjin) < 2_000_00:
-          subsidy_factor = 2.5
-    case _:
-      subsidy_factor = 0.0
+          srid=3857
+       )
 
-  match destination_name:
-    case 'Gwangjin Supermarket':
-      if subsidy_factor == 0.0:
-        subsidy_factor = 3.0
-    case 'Gwangjin Supermarket Gas Station':
-      if subsidy_factor == 0.0:
-        subsidy_factor = 3.0
+  if destination_coord:
+      rules = rules.filter(
+          Q(destination_areas__isnull=True) | Q(destination_areas__polygon__contains=destination_coord)
+      )
+  else:
+      rules = rules.filter(destination_areas__isnull=True)
 
-  subsidy = int(int(cargo.payment) * subsidy_factor)
-  if treasury_balance is not None:
-    subsidy_factor = min(subsidy_factor, subsidy_factor * int(treasury_balance) / 50_000_000)
-    subsidy = min(int(int(cargo.payment) * subsidy_factor), int(treasury_balance))
+  # 4. On Time Check
+  is_on_time = cargo.data.get('Net_TimeLeftSeconds', 0) > 0
+  if not is_on_time:
+      rules = rules.exclude(requires_on_time=True)
 
-  return subsidy, subsidy_factor
+  # Evaluate first match
+  # Because of the complexity of the query (DISTINCT might be needed due to joins?), 
+  # we iterate or take first.
+  # Using .distinct() to avoid duplicate rule returned largely due to M2M joins.
+  best_rule = await rules.distinct().afirst()
+
+  subsidy_factor = 0.0
+  subsidy_amount = 0
+
+  if best_rule:
+      factor = float(best_rule.reward_value)
+      if best_rule.reward_type == SubsidyRule.RewardType.PERCENTAGE:
+          subsidy_factor = factor
+          # Scale with damage
+          if best_rule.scales_with_damage:
+               damage = cargo.damage if cargo.damage is not None else 0.0
+               subsidy_factor *= (1.0 - damage)
+          
+          subsidy_amount = int(int(cargo.payment) * subsidy_factor)
+      else:
+          # Flat Amount
+          # How to handle "factor" for flat amount? 
+          # Old logic returned (subsidy, subsidy_factor).
+          # Factor was used for reporting "300%".
+          # For flat amount, factor is ambiguous. Maybe 0 or calculated ratio?
+          subsidy_amount = int(factor)
+          # Recalculate effective factor for display?
+          if cargo.payment > 0:
+            subsidy_factor = subsidy_amount / cargo.payment
+
+  # Treasury Cap Logic
+  if treasury_balance is not None and subsidy_amount > 0:
+    # Cap based on treasury health (legacy logic preserved)
+    # "subsidy_factor = min(subsidy_factor, subsidy_factor * int(treasury_balance) / 50_000_000)"
+    # This logic seems to scale down the subsidy if treasury is low?
+    # If treasury < 50M, factor reduces linearly?
+    # let's duplicate the logic exactly.
+    
+    current_factor = subsidy_factor
+    scaling = int(treasury_balance) / 50_000_000
+    effective_factor = min(current_factor, current_factor * scaling)
+    
+    # Recalculate amount based on effective factor?
+    # Or just cap the amount? 
+    # Old code: 
+    # subsidy = min(int(int(cargo.payment) * subsidy_factor), int(treasury_balance))
+    # Wait, old code line 208 updates subsidy_factor!
+    
+    subsidy_amount = int(int(cargo.payment) * effective_factor)
+    subsidy_amount = min(subsidy_amount, int(treasury_balance))
+    subsidy_factor = effective_factor
+
+  return subsidy_amount, subsidy_factor
+
 
 def get_passenger_subsidy(passenger):
   match passenger.passenger_type:

@@ -6,6 +6,8 @@ from django.contrib import admin
 from django.utils import timezone
 from django.utils.safestring import mark_safe
 from django.conf import settings
+from django.contrib.gis.db import models
+from django import forms
 from django.db.models import F, Count, Window
 from django.db.models.functions import RowNumber
 from django.contrib import messages
@@ -51,9 +53,13 @@ from .models import (
   Garage,
   WorldText,
   WorldObject,
+  SubsidyArea,
+  SubsidyRule,
 )
 from amc_finance.services import send_fund_to_player
 from amc_finance.admin import AccountInlineAdmin
+from django.contrib.gis.db import models as gis_models
+from .widgets import AMCOpenLayersWidget
 
 
 class CharacterInlineAdmin(admin.TabularInline):
@@ -622,4 +628,39 @@ class WorldTextAdmin(admin.ModelAdmin):
 @admin.register(WorldObject)
 class WorldObjectAdmin(admin.ModelAdmin):
   list_display = ['id', 'asset_path']
+
+
+@admin.register(SubsidyArea)
+class SubsidyAreaAdmin(admin.ModelAdmin):
+    list_display = ['name']
+    search_fields = ['name']
+
+    class Media:
+        js = (
+            "https://cdn.jsdelivr.net/npm/ol@v7.2.2/dist/ol.js",
+            "amc/js/OLMapWidget.js",
+        )
+        css = {
+            "all": (
+                "https://cdn.jsdelivr.net/npm/ol@v7.2.2/ol.css",
+                "gis/css/ol3.css",
+            )
+        }
+
+    def get_form(self, request, obj=None, **kwargs):
+        defaults = {
+            'widgets': {
+                'polygon': AMCOpenLayersWidget,
+            }
+        }
+        defaults.update(kwargs)
+        return super().get_form(request, obj, **defaults)
+
+
+@admin.register(SubsidyRule)
+class SubsidyRuleAdmin(admin.ModelAdmin):
+    list_display = ['name', 'active', 'priority', 'reward_type', 'reward_value']
+    list_filter = ['active', 'reward_type', 'scales_with_damage', 'requires_on_time']
+    search_fields = ['name']
+    filter_horizontal = ['cargos', 'source_areas', 'destination_areas']
 

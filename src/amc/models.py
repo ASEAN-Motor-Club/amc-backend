@@ -869,7 +869,7 @@ class DeliveryPoint(models.Model):
   guid = models.CharField(max_length=200, primary_key=True)
   name = models.CharField(max_length=200)
   type = models.CharField(max_length=200)
-  coord = models.PointField(srid=0, dim=3)
+  coord = models.PointField(srid=3857, dim=3)
   data = models.JSONField(null=True, blank=True)
   last_updated = models.DateTimeField(editable=False, auto_now=True, null=True)
 
@@ -1100,7 +1100,7 @@ class DeliveryJobQuerySet(models.QuerySet):
 @final
 class DeliveryJob(models.Model):
   name = models.CharField(max_length=200, null=True, help_text="Give the job a name so it can be identified")
-  cargo_key = models.CharField(max_length=200, db_index=True, choices=CargoKey, null=True, blank=True)
+  cargo_key = models.CharField(max_length=200, db_index=True, choices=CargoKey, null=True, blank=True) # deprecated, use `cargos` instead
   quantity_requested = models.PositiveIntegerField()
   quantity_fulfilled = models.PositiveIntegerField(default=0)
   requested_at = models.DateTimeField(auto_now_add=True)
@@ -1440,3 +1440,37 @@ class WorldObject(models.Model):
         }
     }
 
+
+@final
+class SubsidyArea(models.Model):
+  name = models.CharField(max_length=200)
+  polygon = models.PolygonField(srid=3857, dim=2)
+  description = models.TextField(blank=True)
+
+  def __str__(self):
+    return self.name
+
+
+@final
+class SubsidyRule(models.Model):
+  class RewardType(models.TextChoices):
+    PERCENTAGE = 'PERCENTAGE', _('Percentage')
+    FLAT = 'FLAT', _('Flat Amount')
+
+  name = models.CharField(max_length=200)
+  active = models.BooleanField(default=True)
+  priority = models.IntegerField(default=0, help_text="Higher number = evaluated first")
+  
+  # Conditions
+  cargos = models.ManyToManyField('Cargo', blank=True, help_text="If empty, applies to ALL cargos")
+  source_areas = models.ManyToManyField(SubsidyArea, related_name='source_rules', blank=True)
+  destination_areas = models.ManyToManyField(SubsidyArea, related_name='destination_rules', blank=True)
+  requires_on_time = models.BooleanField(default=False)
+
+  # Rewards
+  reward_type = models.CharField(max_length=20, choices=RewardType)
+  reward_value = models.DecimalField(max_digits=12, decimal_places=2, help_text="Percentage (e.g. 3.0 for 300%) or Flat Amount")
+  scales_with_damage = models.BooleanField(default=False, help_text="If true, multiplies reward by health %")
+
+  def __str__(self):
+    return f"{self.name} ({self.priority})"

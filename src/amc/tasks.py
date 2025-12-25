@@ -99,7 +99,7 @@ from amc.utils import (
   get_time_difference_string,
   with_verification_code,
 )
-from amc.subsidies import DEFAULT_SAVING_RATE, SUBSIDIES_TEXT
+from amc.subsidies import DEFAULT_SAVING_RATE
 from amc_finance.services import (
   register_player_withdrawal,
   register_player_take_loan,

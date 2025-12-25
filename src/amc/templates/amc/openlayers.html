@@ -1,0 +1,7 @@
+{% load i18n l10n %}
+<div class="dj_map_wrapper">
+    <div id="{{ id }}_map" class="dj_map"></div>
+    <span class="clear_features"><a href="">{% translate "Delete all Features" %}</a></span>
+    {% include "django/forms/widgets/textarea.html" %}
+    {{ map_options|json_script:map_options_id }}
+</div>

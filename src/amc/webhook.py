@@ -182,7 +182,7 @@ async def handle_cargo_dumped(event, player, timestamp):
     damage=cargo['Net_Damage'],
     data=event['data'],
   )
-  subsidy, _ = get_subsidy_for_cargo(log)
+  subsidy, _ = await get_subsidy_for_cargo(log)
   return log.payment + subsidy, subsidy
 
 
@@ -372,7 +372,8 @@ async def handle_cargo_arrived(
     payment = group_list[0].payment
     delivery_source = group_list[0].sender_point
     delivery_destination = group_list[0].destination_point
-    cargo_subsidy = get_subsidy_for_cargo(group_list[0], treasury_balance=treasury_balance)[0] * quantity
+    single_subsidy = await get_subsidy_for_cargo(group_list[0], treasury_balance=treasury_balance)
+    cargo_subsidy = single_subsidy[0] * quantity
     cargo_name = group_list[0].get_cargo_key_display()
 
     job = await (DeliveryJob.objects
