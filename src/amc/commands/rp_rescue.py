@@ -5,7 +5,7 @@ from amc.mod_server import (
     get_rp_mode, despawn_player_vehicle,
     toggle_rp_session, despawn_by_tag, set_character_name,
     get_players as get_players_mod, list_player_vehicles,
-    show_popup
+    send_system_message
 )
 from amc.utils import with_verification_code
 from amc.vehicles import format_key_string
@@ -14,8 +14,8 @@ from datetime import timedelta
 from django.conf import settings
 from django.utils.translation import gettext as _, gettext_lazy
 
-@registry.register(["/rp_mode", "/rp"], description=gettext_lazy("Toggle Roleplay Mode"), category="RP & Rescue")
-async def cmd_rp_mode(ctx: CommandContext, verification_code: str = None):
+@registry.register(["/rp_mode", "/rp"], description=gettext_lazy("Toggle Roleplay Mode"), category="RP & Rescue") # type: ignore
+async def cmd_rp_mode(ctx: CommandContext, verification_code: str = ""):
     is_rp_mode = await get_rp_mode(ctx.http_client_mod, ctx.character.guid)
     
     if verification_code:
@@ -59,7 +59,7 @@ async def cmd_rp_mode(ctx: CommandContext, verification_code: str = None):
             status=status, notes=notes, code_gen=code_gen.upper()
         ))
 
-@registry.register("/rescue", description=gettext_lazy("Calls for rescue service"), category="RP & Rescue")
+@registry.register("/rescue", description=gettext_lazy("Calls for rescue service"), category="RP & Rescue") # type: ignore
 async def cmd_rescue(ctx: CommandContext, message: str = ""):
     if await RescueRequest.objects.filter(character=ctx.character, timestamp__gte=timezone.now() - timedelta(minutes=5)).aexists():
         await ctx.reply(_("You have requested a rescue less than 5 minutes ago"))
@@ -73,10 +73,10 @@ async def cmd_rescue(ctx: CommandContext, message: str = ""):
     sent = False
     for p in players:
         if '[ARWRS]' in p.get('PlayerName', '') or '[DOT]' in p.get('PlayerName', ''): 
-            asyncio.create_task(show_popup(
+            asyncio.create_task(send_system_message(
                 ctx.http_client_mod, 
-                _("<Title>Rescue Request</>\n<Event>{name}</> needs help!\nMsg: {message}\nVeh: {vehicle_names}").format(
-                    name=ctx.character.name, message=message, vehicle_names=vehicle_names
+                _("{name} needs help!").format(
+                    name=ctx.character.name
                 ),
                 character_guid=p.get('CharacterGuid'),
                 player_id=str(ctx.player.unique_id)
@@ -100,7 +100,8 @@ async def cmd_rescue(ctx: CommandContext, message: str = ""):
                 ctx.discord_client,
                 settings.DISCORD_RESCUE_CHANNEL_ID,
                 _("@here **{name}** requested rescue.\nMsg: {message}").format(name=ctx.character.name, message=message),
-                escape_mentions=False
+                escape_mentions=False,
+                silent=True
             )
             if msg:
                 rescue_request.discord_message_id = msg.id
@@ -114,7 +115,7 @@ async def cmd_respond(ctx: CommandContext, rescue_id: int):
     except RescueRequest.DoesNotExist:
         try:
             rescue_request = await RescueRequest.objects.select_related('character').aget(timestamp__gte=timezone.now() - timedelta(minutes=5))
-        except:
+        except Exception:
             await ctx.reply(_("Invalid or expired rescue request."))
             return
 
