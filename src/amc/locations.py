@@ -79,7 +79,6 @@ async def process_player(player_info, ctx):
   try:
     character = await Character.objects.select_related('player').aget(
       name=player_info['PlayerName'],
-      player__unique_id=player_info['UniqueID'],
       guid=player_info['CharacterGuid'],
     )
   except Character.DoesNotExist:
