@@ -14,6 +14,7 @@ from amc.models import (
 )
 from amc.enums import VehicleKey
 from django.utils.translation import gettext as _, gettext_lazy
+from amc.utils import fuzzy_find_player
 
 
 @registry.register("/spawn_displays", description=gettext_lazy("Spawn display vehicles"), category="Admin")
@@ -92,7 +93,6 @@ async def cmd_exit(ctx: CommandContext, target_player_name: str):
         if target_guid:
             await force_exit_vehicle(ctx.http_client_mod, target_guid)
 
-from amc.utils import fuzzy_find_player
 
 @registry.register("/tp_player", description=gettext_lazy("Teleport a player to a location (Admin)"), category="Admin")
 async def cmd_tp_player(ctx: CommandContext, target_player_name: str, location_name: str):

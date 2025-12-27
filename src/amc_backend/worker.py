@@ -5,20 +5,20 @@ from arq.connections import RedisSettings
 from arq import cron
 import django
 django.setup()
-from django.conf import settings
-from django.utils import timezone
-from amc.tasks import process_log_line
-from necesse.tasks import process_necesse_log
-from amc.events import monitor_events, send_event_embeds
-from amc.locations import monitor_locations
-from amc.webhook import monitor_webhook, monitor_webhook_test
-from amc.ubi import handout_ubi, TASK_FREQUENCY as UBI_TASK_FREQUENCY
-from amc.deliverypoints import monitor_deliverypoints
-from amc.jobs import monitor_jobs
-from amc.status import monitor_server_status
-import discord
-from amc.discord_client import bot as discord_client
-from amc_finance.services import apply_interest_to_bank_accounts
+from django.conf import settings  # noqa: E402
+from django.utils import timezone  # noqa: E402
+from amc.tasks import process_log_line  # noqa: E402
+from necesse.tasks import process_necesse_log  # noqa: E402
+from amc.events import monitor_events, send_event_embeds  # noqa: E402
+from amc.locations import monitor_locations  # noqa: E402
+from amc.webhook import monitor_webhook, monitor_webhook_test  # noqa: E402
+from amc.ubi import handout_ubi, TASK_FREQUENCY as UBI_TASK_FREQUENCY  # noqa: E402
+from amc.deliverypoints import monitor_deliverypoints  # noqa: E402
+from amc.jobs import monitor_jobs  # noqa: E402
+from amc.status import monitor_server_status  # noqa: E402
+import discord  # noqa: E402
+from amc.discord_client import bot as discord_client  # noqa: E402
+from amc_finance.services import apply_interest_to_bank_accounts  # noqa: E402
 
 REDIS_SETTINGS = RedisSettings(**settings.REDIS_SETTINGS)
 

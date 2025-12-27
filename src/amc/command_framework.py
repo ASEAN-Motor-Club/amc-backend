@@ -87,10 +87,10 @@ class CommandRegistry:
             is_optional = default != inspect.Parameter.empty
             
             # Determine regex for type
-            if annotation == int:
+            if annotation is int:
                 # Matches digits, optional negative sign
                 type_regex = r"[-]?\d+" 
-            elif annotation == float:
+            elif annotation is float:
                 # Matches float or int
                 type_regex = r"[-]?\d+(?:\.\d+)?"
             else:
@@ -136,10 +136,10 @@ class CommandRegistry:
                     
                     target_type = hints.get(k, str)
                     try:
-                        if target_type == int:
+                        if target_type is int:
                             # Handle "1,000" -> 1000
                             processed_kwargs[k] = int(v.replace(',', ''))
-                        elif target_type == float:
+                        elif target_type is float:
                             processed_kwargs[k] = float(v)
                         else:
                             processed_kwargs[k] = v
