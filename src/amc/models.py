@@ -1101,11 +1101,20 @@ class DeliveryJobQuerySet(models.QuerySet):
 
 class DeliveryJobTemplateQuerySet(models.QuerySet):
   def exclude_has_conflicting_active_job(self):
-    return self.exclude(Exists(
-      DeliveryJob.objects.filter_active().filter(
-        created_from=OuterRef('pk')
+    # Exclude templates that:
+    # 1. Already have an active job created from them, OR
+    # 2. Have overlapping cargos AND overlapping source/destination points with any active job
+    return self.exclude(
+      Exists(
+        DeliveryJob.objects.filter_active().filter(
+          Q(created_from=OuterRef('pk')) |
+          Q(
+            Q(cargos__in=OuterRef('cargos')),
+            Q(source_points__in=OuterRef('source_points')) | Q(destination_points__in=OuterRef('destination_points'))
+          )
+        )
       )
-    ))
+    )
 
   def exclude_recently_posted(self, hours_since=12):
     # Matches logic in DeliveryJobQuerySet.exclude_recently_posted but adapted for created_from
