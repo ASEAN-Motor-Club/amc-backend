@@ -621,7 +621,7 @@ class ExtraWebhookTests(TestCase):
         
         self.assertAlmostEqual(d1.subsidy, d2.subsidy, delta=1.0)
 
-    @patch('amc.webhook.send_fund_to_player', new_callable=AsyncMock)
+    @patch('amc.jobs.send_fund_to_player', new_callable=AsyncMock)
     async def test_proportional_job_rewards(self, mock_send_fund, mock_show_popup, mock_announce, mock_get_treasury, mock_get_rp_mode):
         from amc.webhook import on_delivery_job_fulfilled
         
@@ -857,7 +857,7 @@ class ExtraWebhookTests(TestCase):
         called_jobs = {call.args[0].id for call in mock_on_fulfilled.call_args_list}
         self.assertEqual(called_jobs, {job_a.id, job_b.id})
 
-    @patch('amc.webhook.send_fund_to_player', new_callable=AsyncMock)
+    @patch('amc.jobs.send_fund_to_player', new_callable=AsyncMock)
     async def test_job_completion_rewards_integration(self, mock_send_fund, mock_show_popup, mock_announce, mock_get_treasury, mock_get_rp_mode):
         # This test DOES NOT mock on_delivery_job_fulfilled.
         # It verifies that the whole flow results in money being sent.

@@ -7,9 +7,8 @@ from amc_finance.services import (
     allocate_ministry_budget,
     escrow_ministry_funds,
     process_ministry_completion,
-    process_ministry_expiration,
 )
-from amc.deliverypoints import monitor_jobs, cleanup_expired_jobs
+from amc.jobs import cleanup_expired_jobs
 
 class MinistryFinanceTestCase(TestCase):
     async def test_financial_workflow(self):

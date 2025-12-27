@@ -9,7 +9,7 @@ from django.db import transaction
 from asgiref.sync import sync_to_async
 from django.db.models import F, Q
 from amc.game_server import announce
-from amc.mod_server import get_webhook_events2, show_popup, get_rp_mode, despawn_player_vehicle
+from amc.mod_server import get_webhook_events2, show_popup, get_rp_mode
 from amc.subsidies import (
   repay_loan_for_profit,
   set_aside_player_savings,
@@ -18,11 +18,10 @@ from amc.subsidies import (
   subsidise_player,
 )
 from amc_finance.services import (
-    send_fund_to_player,
     get_treasury_fund_balance,
-    process_ministry_completion,
     record_ministry_subsidy_spend,
 )
+from amc.jobs import on_delivery_job_fulfilled
 from amc.models import (
     Player,
     ServerCargoArrivedLog,
@@ -52,71 +51,6 @@ async def on_player_profit(character, total_subsidy, total_payment, session):
   if savings > 0:
     await set_aside_player_savings(character, savings, session)
 
-async def on_delivery_job_fulfilled(job, http_client):
-    """
-    Finds all players who contributed to a job and rewards them proportionally.
-    """
-    # Define a completion bonus. Defaults to 50,000 if not set on the job model.
-    completion_bonus = getattr(job, 'completion_bonus', 50_000)
-    if completion_bonus == 0:
-        return
-
-    log_qs = Delivery.objects.filter(job=job).order_by('timestamp')
-
-    # Get the exact N logs that fulfilled the job by taking the most recent ones.
-    contributing_logs = []
-    acc = job.quantity_requested
-    async for log in log_qs:
-      log.quantity = min(log.quantity, acc)
-      acc = acc - log.quantity
-      contributing_logs.append(log)
-
-    total_deliveries = job.quantity_fulfilled
-    if not total_deliveries:
-        return
-
-    # Group logs by player to count each player's contribution.
-    contributing_logs.sort(key=attrgetter('character_id'))
-    character_contributions = {}
-    for character_id, group in itertools.groupby(contributing_logs, key=attrgetter('character_id')):
-        if character_id:
-            character_deliveries = list(group)
-            character_contributions[character_id] = {
-              'count': sum([delivery.quantity for delivery in character_deliveries]),
-              'reward': sum([
-                int(delivery.quantity / total_deliveries * completion_bonus)
-                for delivery in character_deliveries
-              ]),
-            }
-
-    if not character_contributions:
-        print('No character_contributions')
-        return
-    
-    # Fetch all contributing Player objects in one query.
-    character_ids = character_contributions.keys()
-    characters = {c.id: c async for c in Character.objects.filter(id__in=character_ids)}
-
-    # Distribute the bonus proportionally.
-    contributors_names = []
-    for character_id, character_contribution in character_contributions.items():
-        character_obj = characters.get(character_id)
-        if not character_obj:
-            continue
-        count = character_contribution['count']
-        reward = character_contribution['reward']
-        if reward > 0:
-            await send_fund_to_player(reward, character_obj, "Job Completion")
-            contributors_names.append(f"{character_obj.name} ({count})")
-
-    contributors_str = ', '.join(contributors_names)
-    message = f"\"{job.name}\" Completed! +${completion_bonus:,} has been deposited into your bank accounts. Thanks to: {contributors_str}"
-    
-    # Ministry Rebate Logic
-    if job.funding_term_id:
-      await process_ministry_completion(job, completion_bonus)
-
-    asyncio.create_task(announce(message, http_client, color="90EE90"))
 
 
 async def post_discord_delivery_embed(
@@ -624,7 +558,7 @@ def atomic_process_delivery(job_id, quantity, delivery_data):
   """
    atomically updates the job and creates the delivery log
   """
-  from amc.models import DeliveryJob, Delivery # import here to avoid circular if any
+  from amc.models import DeliveryJob # import here to avoid circular if any
   with transaction.atomic():
     job = None
     quantity_to_add = 0
