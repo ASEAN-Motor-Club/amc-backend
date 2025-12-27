@@ -3,6 +3,7 @@ import discord
 from discord import app_commands
 from discord.ext import commands
 from django.utils import timezone
+from django.conf import settings
 from django.db.models import Q, F
 from django.contrib.gis.geos import Point
 from .utils import create_player_autocomplete
@@ -69,6 +70,24 @@ class VoteKickView(discord.ui.View):
 
 
 class ModerationCog(commands.Cog):
+  admin = app_commands.Group(
+    name="admin",
+    description="Admin-only commands",
+    default_permissions=discord.Permissions(administrator=True)
+  )
+
+  admin_teleport = app_commands.Group(
+    name="teleport",
+    description="Teleport management commands",
+    parent=admin
+  )
+
+  admin_vehicles = app_commands.Group(
+    name="vehicles",
+    description="Vehicle management commands",
+    parent=admin
+  )
+
   def __init__(self, bot):
     self.bot = bot
     self.player_autocomplete = create_player_autocomplete(self.bot.http_client_game)
@@ -76,14 +95,14 @@ class ModerationCog(commands.Cog):
   async def player_autocomplete(self, interaction, current):
     return await self.player_autocomplete(interaction, current)
 
-  @app_commands.command(name='announce_in_game', description='Sends an announcement')
-  @app_commands.checks.has_any_role(1395460420189421713)
+  @admin.command(name='announce', description='Sends an announcement')
+  @app_commands.checks.has_any_role(settings.DISCORD_ADMIN_ROLE_ID)
   async def announce_in_game(self, ctx, message: str):
     await announce(message, self.bot.http_client_game)
     await ctx.response.send_message(f'Message sent: {message}', ephemeral=True)
 
-  @app_commands.command(name='send_popup', description='Sends a popup message to an in-game player')
-  @app_commands.checks.has_any_role(1395460420189421713)
+  @admin.command(name='popup', description='Sends a popup message to an in-game player')
+  @app_commands.checks.has_any_role(settings.DISCORD_ADMIN_ROLE_ID)
   @app_commands.autocomplete(player_id=player_autocomplete)
   async def send_popup(self, ctx, player_id: str, message: str):
     player = await Player.objects.aget(
@@ -103,8 +122,8 @@ class ModerationCog(commands.Cog):
       )
     await ctx.response.send_message(f'Popup sent to {player.unique_id}: {message}')
 
-  @app_commands.command(name='add_teleport_point', description='Create a new teleport point')
-  @app_commands.checks.has_any_role(1395460420189421713)
+  @admin_teleport.command(name='add', description='Create a new teleport point')
+  @app_commands.checks.has_any_role(settings.DISCORD_ADMIN_ROLE_ID)
   async def add_teleport_point(self, ctx, name: str):
     try:
       player = await Player.objects.aget(discord_user_id=ctx.user.id)
@@ -128,8 +147,8 @@ class ModerationCog(commands.Cog):
     except Exception as e:
       await ctx.response.send_message(f'Failed to create new teleport point: {e}')
 
-  @app_commands.command(name='remove_teleport_point', description='Remove a new teleport point')
-  @app_commands.checks.has_any_role(1395460420189421713)
+  @admin_teleport.command(name='remove', description='Remove a new teleport point')
+  @app_commands.checks.has_any_role(settings.DISCORD_ADMIN_ROLE_ID)
   async def remove_teleport_point(self, ctx, name: str):
     try:
       player = await Player.objects.aget(discord_user_id=ctx.user.id)
@@ -144,8 +163,8 @@ class ModerationCog(commands.Cog):
     except Exception as e:
       await ctx.response.send_message(f'Failed to remove new teleport point: {e}')
 
-  @app_commands.command(name='list_teleport_points', description='List all teleport points available to you')
-  @app_commands.checks.has_any_role(1395460420189421713)
+  @admin_teleport.command(name='list', description='List all teleport points available to you')
+  @app_commands.checks.has_any_role(settings.DISCORD_ADMIN_ROLE_ID)
   async def list_teleport_points(self, ctx):
     try:
       player = await Player.objects.aget(discord_user_id=ctx.user.id)
@@ -177,8 +196,8 @@ class ModerationCog(commands.Cog):
       async for tp in teleport_points
     ]
 
-  @app_commands.command(name='teleport', description='Teleport in-game')
-  @app_commands.checks.has_any_role(1395460420189421713)
+  @admin_teleport.command(name='to', description='Teleport in-game')
+  @app_commands.checks.has_any_role(settings.DISCORD_ADMIN_ROLE_ID)
   @app_commands.autocomplete(name=teleport_name_autocomplete)
   async def teleport(self, ctx, name: str):
     try:
@@ -200,8 +219,8 @@ class ModerationCog(commands.Cog):
     except Exception as e:
       await ctx.response.send_message(f'Failed to teleport: {e}')
 
-  @app_commands.command(name='teleport_to_player', description='Teleport to a player')
-  @app_commands.checks.has_any_role(1395460420189421713)
+  @admin_teleport.command(name='player', description='Teleport to a player')
+  @app_commands.checks.has_any_role(settings.DISCORD_ADMIN_ROLE_ID)
   @app_commands.autocomplete(player_id=player_autocomplete)
   async def teleport_to_player(self, ctx, player_id: str):
     try:
@@ -230,8 +249,8 @@ class ModerationCog(commands.Cog):
       if current.lower() in label.lower()
     ]
 
-  @app_commands.command(name='admin_ticket', description='Sends a ticket to a player')
-  @app_commands.checks.has_any_role(1395460420189421713)
+  @admin.command(name='ticket', description='Sends a ticket to a player')
+  @app_commands.checks.has_any_role(settings.DISCORD_ADMIN_ROLE_ID)
   @app_commands.autocomplete(player_id=player_autocomplete, infringement=infringement_autocomplete)
   async def ticket(self, interaction, player_id: str, infringement: str, message: str):
     try:
@@ -309,15 +328,15 @@ This notice was issued by Officer {interaction.user.display_name}. If you wish t
     else:
       await interaction.followup.send(f"Ticket `{new_ticket.id}` was created and a mail has been sent.", embed=embed)
 
-  @app_commands.command(name='transfer_money', description='Transfer money')
-  @app_commands.checks.has_any_role(1395460420189421713)
+  @admin.command(name='transfer', description='Transfer money')
+  @app_commands.checks.has_any_role(settings.DISCORD_ADMIN_ROLE_ID)
   @app_commands.autocomplete(player_id=player_autocomplete)
   async def transfer_money_cmd(self, ctx, player_id: str, amount: int, message: str):
     await transfer_money(self.bot.http_client_mod, amount, message, player_id)
     await ctx.response.send_message('Transfered')
 
-  @app_commands.command(name='ban_player', description='Ban a player from the server')
-  @app_commands.checks.has_any_role(1395460420189421713)
+  @admin.command(name='ban', description='Ban a player from the server')
+  @app_commands.checks.has_any_role(settings.DISCORD_ADMIN_ROLE_ID)
   @app_commands.autocomplete(player_id=player_autocomplete)
   async def ban_player_cmd(self, ctx, player_id: str, hours: int=None, reason: str=''):
     player = await Player.objects.prefetch_related('characters').aget(
@@ -330,8 +349,8 @@ This notice was issued by Officer {interaction.user.display_name}. If you wish t
     await ban_player(self.bot.http_client_event, player_id, hours, reason)
     await ctx.response.send_message(f'Banned {player_id} (Aliases: {character_names}) for {hours} hours, due to: {reason}')
 
-  @app_commands.command(name='kick_player', description='Kick a player from the server')
-  @app_commands.checks.has_any_role(1395460420189421713)
+  @admin.command(name='kick', description='Kick a player from the server')
+  @app_commands.checks.has_any_role(settings.DISCORD_ADMIN_ROLE_ID)
   @app_commands.autocomplete(player_id=player_autocomplete)
   async def kick_player_cmd(self, interaction, player_id: str):
     player = await Player.objects.prefetch_related('characters').aget(
@@ -348,8 +367,8 @@ This notice was issued by Officer {interaction.user.display_name}. If you wish t
     await kick_player(self.bot.http_client_event, player_id)
     await interaction.response.send_message(f'Kicked {player_id} (Aliases: {character_names})')
 
-  @app_commands.command(name='admin_profile_player', description='Profile a player')
-  @app_commands.checks.has_any_role(1395460420189421713)
+  @admin.command(name='profile', description='Profile a player')
+  @app_commands.checks.has_any_role(settings.DISCORD_ADMIN_ROLE_ID)
   @app_commands.autocomplete(player_id=player_autocomplete)
   async def profile_player(self, ctx, player_id: str):
     player = await Player.objects.prefetch_related('characters').aget(
@@ -365,8 +384,8 @@ This notice was issued by Officer {interaction.user.display_name}. If you wish t
 """
     await ctx.response.send_message(resp)
 
-  @app_commands.command(name='admin_list_players_vehicles', description='List players spawned vehicles')
-  @app_commands.checks.has_any_role(1395460420189421713)
+  @admin_vehicles.command(name='all', description='List players spawned vehicles')
+  @app_commands.checks.has_any_role(settings.DISCORD_ADMIN_ROLE_ID)
   async def list_players_vehicles_cmd(self, ctx):
     try:
       players = await get_players(self.bot.http_client_game)
@@ -383,8 +402,8 @@ This notice was issued by Officer {interaction.user.display_name}. If you wish t
 {player_name}: {len(player_vehicles)}"""
     await ctx.response.send_message(resp)
 
-  @app_commands.command(name='admin_list_player_vehicles', description='List a player\'s spawned vehicles')
-  @app_commands.checks.has_any_role(1395460420189421713)
+  @admin_vehicles.command(name='player', description='List a player\'s spawned vehicles')
+  @app_commands.checks.has_any_role(settings.DISCORD_ADMIN_ROLE_ID)
   @app_commands.autocomplete(player_id=player_autocomplete)
   async def list_player_vehicles_cmd(self, ctx, player_id: str, only_active_vehicle: bool=True, include_trailers: bool=False):
     await ctx.response.defer()
