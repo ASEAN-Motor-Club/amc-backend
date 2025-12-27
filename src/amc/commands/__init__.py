@@ -1,11 +1,4 @@
-from .general import *  # noqa: F403
-from .decals import *  # noqa: F403
-from .jobs import *  # noqa: F403
-from .events import *  # noqa: F403
-from .rp_rescue import *  # noqa: F403
-from .admin import *  # noqa: F403
-from .vehicles import *  # noqa: F403
-from .teleport import *  # noqa: F403
-from .finance import *  # noqa: F403
-from .social import *  # noqa: F403
-from .language import *  # noqa: F403
+"""
+Package containing all command modules.
+These are automatically discovered and registered via amc.apps.AMCConfig.ready()
+"""

@@ -1,6 +1,8 @@
 import re
 import inspect
 import logging
+import importlib
+import pkgutil
 from django.utils import translation
 from typing import Callable, Any, get_type_hints, Dict, List, Union
 from django.utils.translation import gettext as _
@@ -66,6 +68,18 @@ class CommandRegistry:
             })
             return func
         return decorator
+
+    def autodiscover(self, package_path: str):
+        """
+        Dynamically imports all modules in the given package path.
+        Example: registry.autodiscover('amc.commands')
+        """
+        package = importlib.import_module(package_path)
+        for __, name, is_pkg in pkgutil.iter_modules(package.__path__):
+            full_name = f"{package_path}.{name}"
+            importlib.import_module(full_name)
+            if is_pkg:
+                self.autodiscover(full_name)
 
     def _build_regex_from_signature(self, aliases: List[str], func: Callable) -> str:
         # 1. Build the command part: (?:/cmd1|/cmd2)

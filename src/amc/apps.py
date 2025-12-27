@@ -11,4 +11,6 @@ class AMCConfig(AppConfig):
     name = 'amc'
 
     def ready(self):
+        from amc.command_framework import registry
+        registry.autodiscover('amc.commands')
         register_lifespan_manager(context_manager=aiohttp_lifespan_manager)
