@@ -3,6 +3,7 @@ import aiohttp
 import json
 from typing import Optional
 from pydantic import AwareDatetime
+import datetime
 from datetime import timedelta
 from ninja_extra.security.session import AsyncSessionAuth
 from django.core.cache import cache
@@ -180,7 +181,7 @@ players_qs = (Player.objects
   .prefetch_related(
     Prefetch(
       'characters',
-      queryset=Character.objects.with_total_session_time().order_by('-total_session_time')[:1],
+      queryset=Character.objects.with_total_session_time().order_by('-total_session_time', 'id')[:1],
       to_attr='main_characters'
     )
   )
