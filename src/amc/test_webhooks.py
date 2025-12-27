@@ -582,8 +582,8 @@ class ExtraWebhookTests(TestCase):
         character = await sync_to_async(CharacterFactory)(player=player, guid="test-char-rp-fix")
         await CharacterLocation.objects.acreate(character=character, location=Point(0,0,0), vehicle_key="TestVehicle")
         
-        p1 = await DeliveryPoint.objects.acreate(guid="s1", name="S1", type="generic", coord=Point(0,0,0))
-        p2 = await DeliveryPoint.objects.acreate(guid="d1", name="D1", type="generic", coord=Point(100,100,0))
+        await DeliveryPoint.objects.acreate(guid="s1", name="S1", type="generic", coord=Point(0,0,0))
+        await DeliveryPoint.objects.acreate(guid="d1", name="D1", type="generic", coord=Point(100,100,0))
 
         event = {
             'hook': "ServerCargoArrived",
@@ -964,8 +964,8 @@ class SubsidyIntegrationTests(TestCase):
         await rule.cargos.aadd(cargo_apple)
         
         # Delivery Points
-        p1 = await DeliveryPoint.objects.acreate(guid="s1", name="S1", type="generic", coord=Point(0,0,0))
-        p2 = await DeliveryPoint.objects.acreate(guid="d1", name="D1", type="generic", coord=Point(100,100,0))
+        await DeliveryPoint.objects.acreate(guid="s1", name="S1", type="generic", coord=Point(0,0,0))
+        await DeliveryPoint.objects.acreate(guid="d1", name="D1", type="generic", coord=Point(100,100,0))
         
         event = {
             'hook': "ServerCargoArrived",
@@ -1022,8 +1022,8 @@ class SubsidyIntegrationTests(TestCase):
         )
         await rule.cargos.aadd(cargo_gold)
         
-        p1 = await DeliveryPoint.objects.acreate(guid="s1", name="S1", type="generic", coord=Point(0,0,0))
-        p2 = await DeliveryPoint.objects.acreate(guid="d1", name="D1", type="generic", coord=Point(100,100,0))
+        await DeliveryPoint.objects.acreate(guid="s1", name="S1", type="generic", coord=Point(0,0,0))
+        await DeliveryPoint.objects.acreate(guid="d1", name="D1", type="generic", coord=Point(100,100,0))
         
         event = {
             'hook': "ServerCargoArrived",

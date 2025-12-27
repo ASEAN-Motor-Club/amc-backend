@@ -594,11 +594,10 @@ async def process_event(event, player, character, is_rp_mode=False, used_shortcu
   current_tz = timezone.get_current_timezone()
   timestamp = datetime.fromtimestamp(event['timestamp'], tz=current_tz)
 
-  vehicle_key = ""
   if character:
     try:
       latest_loc = await CharacterLocation.objects.filter(character=character).alatest('timestamp')
-      vehicle_key = latest_loc.get_vehicle_key_display()
+      latest_loc.get_vehicle_key_display()
     except CharacterLocation.DoesNotExist:
       pass
 

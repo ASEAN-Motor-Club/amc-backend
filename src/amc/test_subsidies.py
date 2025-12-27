@@ -87,7 +87,7 @@ class SubsidyLogicTest(TestCase):
 
     async def test_priority(self):
         # Low priority global rule: 1.1
-        r1 = await SubsidyRule.objects.acreate(
+        await SubsidyRule.objects.acreate(
             name="Global Low",
             reward_type=SubsidyRule.RewardType.PERCENTAGE,
             reward_value=Decimal("1.10"),
@@ -155,7 +155,7 @@ class SubsidyLogicTest(TestCase):
         await r1.cargos.aadd(self.cargo_burger)
         
         # Create inactive rule
-        r2 = await SubsidyRule.objects.acreate(
+        await SubsidyRule.objects.acreate(
             name="Inactive Rule",
             reward_type=SubsidyRule.RewardType.FLAT,
             reward_value=Decimal("5000"),

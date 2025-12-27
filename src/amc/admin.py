@@ -6,12 +6,8 @@ from django.contrib import admin
 from django.utils import timezone
 from django.utils.safestring import mark_safe
 from django.conf import settings
-from django.contrib.gis.db import models
-from django import forms
 from django.db.models import F, Count, Window
 from django.db.models.functions import RowNumber
-from django.contrib import messages
-from django.utils.translation import ngettext
 from django.contrib.postgres.aggregates import ArrayAgg
 from django.template.response import TemplateResponse
 from .models import (
@@ -56,7 +52,6 @@ from .models import (
   WorldObject,
   SubsidyArea,
   SubsidyRule,
-  SubsidyRule,
   DeliveryJobTemplate,
   MinistryElection,
   MinistryCandidacy,
@@ -67,7 +62,6 @@ from .models import (
 from amc_finance.services import send_fund_to_player
 from amc_finance.admin import AccountInlineAdmin
 from amc.dashboard_services import get_ministry_dashboard_stats
-from django.contrib.gis.db import models as gis_models
 from .widgets import AMCOpenLayersWidget
 from django.urls import path
 from django.http import HttpResponse
@@ -765,7 +759,7 @@ class MinistryDashboardAdmin(admin.ModelAdmin):
 
     def changelist_view(self, request, extra_context=None):
         # 1. Fetch current term
-        now = timezone.now()
+        timezone.now()
         current_term = MinistryTerm.objects.filter(is_active=True).first()
 
         # 2. Subsidies

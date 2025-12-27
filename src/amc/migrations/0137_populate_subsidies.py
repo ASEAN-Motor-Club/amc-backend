@@ -89,14 +89,19 @@ def populate_subsidies(apps, schema_editor):
 
     # Helper function to add source/dest based on type
     def add_location(rule, location, is_source=True):
-        if not location: return
+        if not location:
+            return
         type, obj = location
         if type == 'POINT':
-            if is_source: rule.source_delivery_points.add(obj)
-            else: rule.destination_delivery_points.add(obj)
+            if is_source:
+                rule.source_delivery_points.add(obj)
+            else:
+                rule.destination_delivery_points.add(obj)
         elif type == 'AREA':
-            if is_source: rule.source_areas.add(obj)
-            else: rule.destination_areas.add(obj)
+            if is_source:
+                rule.source_areas.add(obj)
+            else:
+                rule.destination_areas.add(obj)
 
     # 4. Coal/Iron Ore - 150% (Gwangjin Mine -> Gwangjin Storage)
     loc_coal = get_point_or_area(SubsidyArea, DeliveryPoint, "Gwangjin Coal")

@@ -3,7 +3,7 @@ from django.utils import timezone
 from django.db.models import Sum, Count, F, Max
 from django.db.models.functions import TruncDay
 from amc_finance.models import Account, LedgerEntry
-from amc.models import PlayerStatusLog, MinistryTerm
+from amc.models import PlayerStatusLog
 
 def get_ministry_dashboard_stats(term=None, days=30):
     """
@@ -107,7 +107,8 @@ def get_ministry_dashboard_stats(term=None, days=30):
     stats['active_players_peak'] = [peak_map[d] for d in date_range]
 
     # Delete old key to avoid confusion
-    if 'active_players' in stats: del stats['active_players']
+    if 'active_players' in stats:
+        del stats['active_players']
 
     # 3. Income (All Revenue in GOVERNMENT book)
     revenue_qs = LedgerEntry.objects.filter(

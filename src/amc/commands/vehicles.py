@@ -51,8 +51,10 @@ async def cmd_rental(ctx: CommandContext, alias: str = ""):
         return
 
     for v in vehicles:
-        if not v.rental: v.rental = True
-        if alias.strip(): v.alias = alias.strip()
+        if not v.rental:
+            v.rental = True
+        if alias.strip():
+            v.alias = alias.strip()
         await v.asave()
     
     names = '\n'.join([f"<Small>#{v.id} - {v.config['VehicleName']}</>" for v in vehicles if v.rental])
@@ -102,7 +104,8 @@ async def cmd_rent(ctx: CommandContext, vehicle_id: str = ""):
 
 @registry.register("/sell", description=gettext_lazy("Sell a vehicle"), category="Vehicle Management")
 async def cmd_sell(ctx: CommandContext):
-    if not ctx.player_info.get('bIsAdmin'): return
+    if not ctx.player_info.get('bIsAdmin'):
+        return
     vehicles = await register_player_vehicles(ctx.http_client_mod, ctx.character, ctx.player, active=True)
     await despawn_player_vehicle(ctx.http_client_mod, ctx.player.unique_id)
     for v in vehicles:
@@ -192,7 +195,7 @@ Use <Highlight>/display </> to permanently display a vehicle"""),
             tags=[ctx.character.name, 'display_vehicles', f'display-{v.id}']
         )
 
-    vehicles_str = '\n'.join([
+    '\n'.join([
         f"<Small>#{v.id} - {v.config['VehicleName']}</>"
         for v in vehicles
     ])

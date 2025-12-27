@@ -3,7 +3,7 @@ from decimal import Decimal
 from django.db.models import Q
 from django.contrib.gis.geos import Point
 from amc.mod_server import show_popup, transfer_money
-from amc.models import ServerPassengerArrivedLog, SubsidyRule, Cargo
+from amc.models import ServerPassengerArrivedLog, SubsidyRule
 from amc_finance.services import (
   send_fund_to_player_wallet,
   get_character_max_loan,

@@ -1,6 +1,4 @@
 from django.test import SimpleTestCase
-from django.utils import translation
-from django.utils.translation import gettext as _
 from unittest.mock import MagicMock, AsyncMock
 from amc.command_framework import CommandRegistry, CommandContext
 import asyncio

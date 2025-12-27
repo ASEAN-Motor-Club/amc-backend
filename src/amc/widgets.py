@@ -72,7 +72,7 @@ class AMCOpenLayersWidget(OSMWidget):
 
             def transform_coords(coords):
                 if isinstance(coords, (list, tuple)) and isinstance(coords[0], (int, float)):
-                   x, y = coords[0], coords[1]
+                   x, _y = coords[0], coords[1]
                    new_x = x + MAP_REAL_X_LEFT
                    new_y = -(coords[1] - MAP_REAL_SIZE) + MAP_REAL_Y_TOP
                    return (new_x, new_y) + coords[2:]

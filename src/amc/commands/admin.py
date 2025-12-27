@@ -18,13 +18,16 @@ from django.utils.translation import gettext as _, gettext_lazy
 
 @registry.register("/spawn_displays", description=gettext_lazy("Spawn display vehicles"), category="Admin")
 async def cmd_spawn_displays(ctx: CommandContext, display_id: int = None):
-    if not ctx.player_info.get('bIsAdmin'): return
+    if not ctx.player_info.get('bIsAdmin'):
+        return
     qs = CharacterVehicle.objects.select_related('character').filter(spawn_on_restart=True)
-    if display_id: qs = qs.filter(pk=display_id)
+    if display_id:
+        qs = qs.filter(pk=display_id)
     
     async for v in qs:
         tags = [f'display-{v.id}']
-        if v.character: tags.extend([v.character.name, f"display-{v.character.guid}"])
+        if v.character:
+            tags.extend([v.character.name, f"display-{v.character.guid}"])
         await despawn_by_tag(ctx.http_client_mod, f'display-{v.id}')
         await spawn_registered_vehicle(
             ctx.http_client_mod, v, tag="display_vehicles", 
@@ -41,8 +44,10 @@ async def cmd_spawn_dealerships(ctx: CommandContext):
 @registry.register("/spawn_assets", description=gettext_lazy("Spawn world assets"), category="Admin")
 async def cmd_spawn_assets(ctx: CommandContext):
     if ctx.player_info.get('bIsAdmin'):
-        async for wt in WorldText.objects.all(): await spawn_assets(ctx.http_client_mod, wt.generate_asset_data())
-        async for wo in WorldObject.objects.all(): await spawn_assets(ctx.http_client_mod, [wo.generate_asset_data()])
+        async for wt in WorldText.objects.all():
+            await spawn_assets(ctx.http_client_mod, wt.generate_asset_data())
+        async for wo in WorldObject.objects.all():
+            await spawn_assets(ctx.http_client_mod, [wo.generate_asset_data()])
 
 @registry.register("/spawn_garages", description=gettext_lazy("Spawn garages"), category="Admin")
 async def cmd_spawn_garages(ctx: CommandContext):

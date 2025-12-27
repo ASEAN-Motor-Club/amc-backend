@@ -672,7 +672,6 @@ async def allocate_ministry_budget(amount, term):
   )
   
   # Sync model
-  from amc.models import MinistryTerm
   term.current_budget = ministry_budget.balance # Should be updated by journal entry logic but we read it back or trust the flow
   # Since create_journal_entry updates balance in-memory on the account object, we can use that if returned, but here we re-fetch or assume correctness. 
   # Actually, create_journal_entry updates the passed account objects.

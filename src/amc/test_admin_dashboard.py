@@ -3,7 +3,7 @@ from django.contrib.admin.sites import AdminSite
 from django.utils import timezone
 from datetime import timedelta
 from decimal import Decimal
-from amc.models import MinistryDashboard, MinistryTerm, Player, SubsidyRule, DeliveryJob, DeliveryJobTemplate
+from amc.models import MinistryDashboard, MinistryTerm, Player, SubsidyRule, DeliveryJob
 from amc.admin import MinistryDashboardAdmin
 
 class MockSuperUser:

@@ -3,6 +3,11 @@ from datetime import datetime, timedelta
 from zoneinfo import ZoneInfo
 import difflib
 from typing import List, Tuple, Optional
+import discord
+from django.utils import timezone
+from django.core.signing import Signer
+from django.conf import settings
+from amc.game_server import announce
 
 def fuzzy_find_player(players: List[Tuple[str, dict]], name_query: str) -> Optional[str]:
     """
@@ -47,8 +52,7 @@ def fuzzy_find_player(players: List[Tuple[str, dict]], name_query: str) -> Optio
         
     return None
 
-from django.utils import timezone
-from django.core.signing import Signer
+
 
 def lowercase_first_char_in_keys(obj):
     """
@@ -227,9 +231,7 @@ def with_verification_code(input, input_verification_code):
   return code, input_verification_code.lower() == code.lower()
 
 
-import discord
-from django.conf import settings
-from amc.game_server import announce
+
 
 async def forward_to_discord(client, channel_id, content, escape_mentions=True, **kwargs):
   if not client.is_ready():

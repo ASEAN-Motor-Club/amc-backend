@@ -1,6 +1,5 @@
 from django.test import SimpleTestCase, TestCase
 from unittest.mock import AsyncMock, MagicMock, patch
-from dataclasses import dataclass
 from datetime import timedelta
 from django.utils import timezone
 from amc.command_framework import registry, CommandContext, CommandRegistry
@@ -19,7 +18,6 @@ class RentGroupingTestCase(SimpleTestCase):
         self.ctx.player_info = {}
 
     async def test_cmd_rent_grouping(self):
-        from amc import commands
         
         # Create mock vehicles with different companies
         v1 = MagicMock()
@@ -159,7 +157,6 @@ class CommandsTestCase(TestCase):
         self.ctx.timestamp = timezone.now()
 
     async def test_cmd_help(self):
-        from amc import commands
         
         # Test that we get a reply
         await commands.cmd_help(self.ctx)
@@ -177,12 +174,10 @@ class CommandsTestCase(TestCase):
         self.assertIn("Show this help message", output)
 
     async def test_cmd_credits(self):
-        from amc import commands
         await commands.cmd_credits(self.ctx)
         self.ctx.reply.assert_called()
 
     async def test_cmd_bank(self):
-        from amc import commands
         mock_bal = 1000
         mock_loan = 500
         mock_max_loan = 5000
@@ -218,14 +213,12 @@ class CommandsTestCase(TestCase):
              self.assertIn("Daily (IRL) Interest Rate", output)
 
     async def test_cmd_tp_admin(self):
-        from amc import commands
         self.ctx.player_info['bIsAdmin'] = True
         with patch('amc.commands.teleport.teleport_player', new=AsyncMock()) as mock_tp:
             await commands.cmd_tp_coords(self.ctx, 100, 200, 300)
             mock_tp.assert_called_with(self.ctx.http_client_mod, "76561198000000000", {'X': 100, 'Y': 200, 'Z': 300}, no_vehicles=False)
 
     async def test_cmd_tp_non_admin(self):
-        from amc import commands
         self.ctx.player_info['bIsAdmin'] = False
         with patch('amc.commands.teleport.teleport_player', new=AsyncMock()) as mock_tp:
             await commands.cmd_tp_coords(self.ctx, 100, 200, 300)
@@ -233,7 +226,6 @@ class CommandsTestCase(TestCase):
             self.ctx.reply.assert_called_with("Admin Only")
 
     async def test_cmd_tp_name(self):
-        from amc import commands
         from amc.models import TeleportPoint
         
         mock_tp = MagicMock()
@@ -268,7 +260,6 @@ class CommandsTestCase(TestCase):
             self.assertIn("Choose from one of the following locations", args[1])
 
     async def test_cmd_donate_flow(self):
-        from amc import commands
         from amc.utils import generate_verification_code
         
         self.ctx.character.id = 1
@@ -296,7 +287,7 @@ class CommandsTestCase(TestCase):
         """
         Test that the registry actually routes a string to a command function.
         """
-        with patch('amc.commands.general.cmd_help', new=AsyncMock()) as mock_help:
+        with patch('amc.commands.general.cmd_help', new=AsyncMock()):
              self.ctx.reply.reset_mock()
              result = await registry.execute("/help", self.ctx)
              self.assertTrue(result)
@@ -306,13 +297,11 @@ class CommandsTestCase(TestCase):
     # --- General Info Tests ---
 
     async def test_cmd_coords(self):
-        from amc import commands
         with patch('amc.commands.general.get_player', new=AsyncMock(return_value={'Location': {'X': 100.5, 'Y': 200.5, 'Z': 300.5}})):
             await commands.cmd_coords(self.ctx)
             self.ctx.announce.assert_called_with("100, 200, 300")
 
     async def test_cmd_shortcutcheck(self):
-        from amc import commands
         # Mock CharacterLocation exists checks
         with patch('amc.models.CharacterLocation.objects.filter') as mock_filter:
             mock_qs = MagicMock()
@@ -327,7 +316,6 @@ class CommandsTestCase(TestCase):
     # --- Decal Tests ---
 
     async def test_cmd_decals(self):
-        from amc import commands
         # Mock VehicleDecal queryset iteration
         mock_decal = MagicMock()
         mock_decal.hash = "1234567890"
@@ -346,7 +334,6 @@ class CommandsTestCase(TestCase):
             self.assertIn("Test Decal", args[0])
 
     async def test_cmd_save_decal(self):
-        from amc import commands
         decal_config = {'some': 'config'}
         self.ctx.player_info = {'VehicleKey': 'Truck'}
         
@@ -362,8 +349,6 @@ class CommandsTestCase(TestCase):
             self.ctx.reply.assert_called()
 
     async def test_cmd_apply_decal(self):
-        from amc import commands
-        from amc.models import VehicleDecal
         mock_decal = MagicMock()
         mock_decal.config = {'color': 'red'}
         
@@ -374,7 +359,6 @@ class CommandsTestCase(TestCase):
             mock_set.assert_called_with(self.ctx.http_client_mod, "76561198000000000", {'color': 'red'})
 
     async def test_cmd_apply_decal_not_found(self):
-        from amc import commands
         from amc.models import VehicleDecal
         
         async def async_iter(items):
@@ -395,7 +379,6 @@ class CommandsTestCase(TestCase):
     # --- Jobs & Economy Tests ---
 
     async def test_cmd_jobs(self):
-        from amc import commands
         mock_job = MagicMock()
         mock_job.quantity_fulfilled = 0
         mock_job.quantity_requested = 10
@@ -411,8 +394,10 @@ class CommandsTestCase(TestCase):
             mock_qs.prefetch_related.return_value.__aiter__.return_value = [mock_job]
             mock_filter.return_value = mock_qs
             
-            sp_mock = MagicMock(spec=['name']); sp_mock.name = 'Source A'
-            dp_mock = MagicMock(spec=['name']); dp_mock.name = 'Dest B'
+            sp_mock = MagicMock(spec=['name'])
+            sp_mock.name = 'Source A'
+            dp_mock = MagicMock(spec=['name'])
+            dp_mock.name = 'Dest B'
             mock_job.source_points.all.return_value = [sp_mock]
             mock_job.destination_points.all.return_value = [dp_mock]
 
@@ -425,14 +410,12 @@ class CommandsTestCase(TestCase):
                  self.assertIn("Dest B", args[0])
 
     async def test_cmd_subsidies(self):
-        from amc import commands
         await commands.cmd_subsidies(self.ctx)
         self.ctx.reply.assert_called()
 
     # --- Events & Racing Tests ---
 
     async def test_cmd_staggered_start(self):
-        from amc import commands
         mock_event = MagicMock()
         
         with patch('amc.models.GameEvent.objects.filter') as mock_filter:
@@ -445,7 +428,6 @@ class CommandsTestCase(TestCase):
                 mock_start.assert_called()
 
     async def test_cmd_auto_grid(self):
-        from amc import commands
         mock_event = MagicMock()
         
         with patch('amc.models.GameEvent.objects.filter') as mock_filter:
@@ -458,7 +440,6 @@ class CommandsTestCase(TestCase):
                 mock_grid.assert_called()
 
     async def test_cmd_results(self):
-        from amc import commands
         mock_event = MagicMock()
         
         with patch('amc.models.ScheduledEvent.objects.filter_active_at') as mock_filter:
@@ -471,10 +452,9 @@ class CommandsTestCase(TestCase):
                 mock_popup.assert_called()
 
     async def test_cmd_setup_event(self):
-        from amc import commands
         mock_event = MagicMock()
         
-        with patch('amc.models.ScheduledEvent.objects.select_related') as mock_sl:
+        with patch('amc.models.ScheduledEvent.objects.select_related'):
              # Logic is complex, mocking filter chains
              mock_qs = MagicMock()
              mock_qs.filter.return_value.afirst = AsyncMock(return_value=mock_event)
@@ -491,7 +471,6 @@ class CommandsTestCase(TestCase):
                 mock_setup.assert_called()
 
     async def test_cmd_events_list(self):
-        from amc import commands
         mock_event = MagicMock()
         mock_event.name = "Race"
         mock_event.start_time = self.ctx.timestamp + timedelta(hours=1)
@@ -508,7 +487,6 @@ class CommandsTestCase(TestCase):
             self.assertIn("Race", self.ctx.reply.call_args[0][0])
 
     async def test_cmd_countdown(self):
-        from amc import commands
         with patch('amc.commands.events.countdown', new=AsyncMock()) as mock_cd:
              await commands.cmd_countdown(self.ctx)
              mock_cd.assert_called()
@@ -516,7 +494,6 @@ class CommandsTestCase(TestCase):
     # --- RP Mode & Rescue Tests ---
 
     async def test_cmd_rp_mode_info(self):
-        from amc import commands
         with patch('amc.commands.rp_rescue.get_rp_mode', new=AsyncMock(return_value=False)):
             await commands.cmd_rp_mode(self.ctx)
             self.ctx.reply.assert_called()
@@ -524,7 +501,6 @@ class CommandsTestCase(TestCase):
             self.assertIn("Status: <Warning>OFF</>", args[0])
 
     async def test_cmd_rp_mode_toggle_invalid(self):
-        from amc import commands
         with patch('amc.commands.rp_rescue.get_rp_mode', new=AsyncMock(return_value=False)):
             await commands.cmd_rp_mode(self.ctx, "WRONGCODE")
             self.ctx.reply.assert_called()
@@ -532,7 +508,6 @@ class CommandsTestCase(TestCase):
             self.assertIn("Code Incorrect", args[0])
 
     async def test_cmd_rp_mode_toggle_valid(self):
-        from amc import commands
         from amc.utils import generate_verification_code
         
         # Calculate valid code
@@ -543,16 +518,15 @@ class CommandsTestCase(TestCase):
         
         with patch('amc.commands.rp_rescue.get_rp_mode', new=AsyncMock(side_effect=[False, True])): # Initial -> After toggle
             with patch('amc.commands.rp_rescue.toggle_rp_session', new=AsyncMock()) as mock_toggle, \
-                 patch('amc.commands.rp_rescue.despawn_player_vehicle', new=AsyncMock()) as mock_despawn, \
-                 patch('amc.commands.rp_rescue.despawn_by_tag', new=AsyncMock()) as mock_dbt, \
-                 patch('amc.commands.rp_rescue.set_character_name', new=AsyncMock()) as mock_set_name:
+                 patch('amc.commands.rp_rescue.despawn_player_vehicle', new=AsyncMock()), \
+                 patch('amc.commands.rp_rescue.despawn_by_tag', new=AsyncMock()), \
+                 patch('amc.commands.rp_rescue.set_character_name', new=AsyncMock()):
                 
                 await commands.cmd_rp_mode(self.ctx, code)
                 mock_toggle.assert_called()
                 self.ctx.reply.assert_called()
 
     async def test_cmd_rescue_cooldown(self):
-        from amc import commands
         with patch('amc.models.RescueRequest.objects.filter') as mock_filter:
             mock_filter.return_value.aexists = AsyncMock(return_value=True) # Recently requested
             
@@ -560,7 +534,6 @@ class CommandsTestCase(TestCase):
             self.ctx.reply.assert_called_with("You have requested a rescue less than 5 minutes ago")
 
     async def test_cmd_rescue_success(self):
-        from amc import commands
         mock_req = MagicMock()
         mock_req.id = 123
         self.ctx.is_current_event = True
@@ -577,7 +550,6 @@ class CommandsTestCase(TestCase):
             self.ctx.reply.assert_called()
 
     async def test_cmd_respond(self):
-        from amc import commands
         mock_req = MagicMock()
         mock_req.discord_message_id = 123
         
@@ -605,7 +577,6 @@ class CommandsTestCase(TestCase):
     # --- Admin & Spawning Tests ---
 
     async def test_cmd_tp_player(self):
-        from amc import commands
         from amc.models import TeleportPoint
         self.ctx.player_info['bIsAdmin'] = True
         
@@ -693,7 +664,6 @@ class CommandsTestCase(TestCase):
             self.assertIn("Teleport point not found", mock_popup.call_args[0][1])
 
     async def test_cmd_spawn_displays(self):
-        from amc import commands
         self.ctx.player_info['bIsAdmin'] = True
         mock_v = MagicMock()
         mock_v.id = 1
@@ -709,7 +679,6 @@ class CommandsTestCase(TestCase):
             mock_spawn.assert_called()
 
     async def test_cmd_spawn_dealerships(self):
-        from amc import commands
         self.ctx.player_info['bIsAdmin'] = True
         mock_vd = MagicMock()
         mock_vd.spawn = AsyncMock() # ERR FIX
@@ -721,7 +690,6 @@ class CommandsTestCase(TestCase):
             mock_vd.spawn.assert_called()
 
     async def test_cmd_spawn_assets(self):
-        from amc import commands
         self.ctx.player_info['bIsAdmin'] = True
         with patch('amc.models.WorldText.objects.all') as mock_wt, \
              patch('amc.models.WorldObject.objects.all') as mock_wo, \
@@ -735,7 +703,6 @@ class CommandsTestCase(TestCase):
             mock_spawn.assert_called()
 
     async def test_cmd_spawn_garages(self):
-        from amc import commands
         self.ctx.player_info['bIsAdmin'] = True
         mock_g = MagicMock()
         mock_g.config = {'Location': {}, 'Rotation': {}}
@@ -750,7 +717,6 @@ class CommandsTestCase(TestCase):
             mock_g.asave.assert_called()
 
     async def test_cmd_spawn_garage_single(self):
-        from amc import commands
         self.ctx.player_info['bIsAdmin'] = True
         self.ctx.player_info['Location'] = {'X':0,'Y':0,'Z':0}
         
@@ -762,12 +728,11 @@ class CommandsTestCase(TestCase):
             self.ctx.announce.assert_called()
 
     async def test_cmd_spawn(self):
-        from amc import commands
         self.ctx.player_info['bIsAdmin'] = True
         self.ctx.player_info['Location'] = {'X':0,'Y':0,'Z':0}
         
         # Test numeric ID (existing vehicle)
-        with patch('amc.models.CharacterVehicle.objects.aget', new=AsyncMock(return_value=MagicMock())) as mock_get_v, \
+        with patch('amc.models.CharacterVehicle.objects.aget', new=AsyncMock(return_value=MagicMock())), \
              patch('amc.commands.admin.spawn_registered_vehicle', new=AsyncMock()) as mock_srv:
             
             await commands.cmd_spawn(self.ctx, "123")
@@ -781,7 +746,6 @@ class CommandsTestCase(TestCase):
     # --- Vehicle Management Tests ---
 
     async def test_cmd_register_vehicles(self):
-        from amc import commands
         mock_v = MagicMock()
         mock_v.id = 1
         mock_v.config = {'VehicleName': 'Car'}
@@ -792,7 +756,6 @@ class CommandsTestCase(TestCase):
             self.assertIn("Car", self.ctx.reply.call_args[0][0])
 
     async def test_cmd_unrental(self):
-        from amc import commands
         mock_v = MagicMock()
         mock_v.rental = True
         mock_v.id = 1
@@ -808,7 +771,6 @@ class CommandsTestCase(TestCase):
             self.ctx.reply.assert_called_with("Rentals removed")
 
     async def test_cmd_rental(self):
-        from amc import commands
         mock_v = MagicMock()
         mock_v.rental = False
         mock_v.config = {'CompanyName': 'Corp', 'VehicleName': 'Truck'}
@@ -823,7 +785,6 @@ class CommandsTestCase(TestCase):
             self.ctx.reply.assert_called()
 
     async def test_cmd_rent(self):
-        from amc import commands
         mock_v = MagicMock()
         mock_v.id = 1
         mock_v.config = {'CompanyName': 'Corp', 'VehicleName': 'Truck'}
@@ -845,7 +806,6 @@ class CommandsTestCase(TestCase):
             mock_spawn.assert_called()
 
     async def test_cmd_sell(self):
-        from amc import commands
         self.ctx.player_info['bIsAdmin'] = True
         mock_v = MagicMock()
         mock_v.id = 1
@@ -864,7 +824,6 @@ class CommandsTestCase(TestCase):
     # --- Teleport Tests ---
 
     async def test_cmd_exit(self):
-        from amc import commands
         self.ctx.player_info['bIsAdmin'] = True
         players_list = [{'PlayerName': 'Target', 'CharacterGuid': 'guid1'}]
         
@@ -878,19 +837,17 @@ class CommandsTestCase(TestCase):
 
 
     async def test_cmd_withdraw(self):
-        from amc import commands
         with patch('amc.commands.finance.with_verification_code', return_value=('CODE', False)), \
-             patch('amc.commands.finance.register_player_withdrawal', new=AsyncMock()) as mock_reg, \
+             patch('amc.commands.finance.register_player_withdrawal', new=AsyncMock()), \
              patch('amc.commands.finance.transfer_money', new=AsyncMock()) as mock_transfer:
              
              await commands.cmd_withdraw(self.ctx, "100")
              mock_transfer.assert_called()
 
     async def test_cmd_loan(self):
-        from amc import commands
         with patch('amc.commands.finance.get_player_loan_balance', new=AsyncMock(return_value=0)), \
              patch('amc.commands.finance.get_character_max_loan', new=AsyncMock(return_value=(1000, 'Ok'))), \
-             patch('amc.commands.finance.register_player_take_loan', new=AsyncMock(return_value=(1100, 100))) as mock_take, \
+             patch('amc.commands.finance.register_player_take_loan', new=AsyncMock(return_value=(1100, 100))), \
              patch('amc.commands.finance.transfer_money', new=AsyncMock()) as mock_transfer, \
              patch('amc.models.Delivery.objects.filter') as mock_del_filter:
              
@@ -906,7 +863,6 @@ class CommandsTestCase(TestCase):
             mock_transfer.assert_called()
 
     async def test_cmd_thank(self):
-        from amc import commands
         mock_p = {'name': 'Other', 'character_guid': 'guid2'}
         mock_char = MagicMock()
         
@@ -930,7 +886,6 @@ class CommandsTestCase(TestCase):
                 self.assertEqual(mock_sys_msg.call_count, 2) # Check for 2 system messages
 
     async def test_cmd_set_rates(self):
-        from amc import commands
         with patch('amc.commands.finance.show_popup', new=AsyncMock()) as mock_popup:
             await commands.cmd_set_saving_rate(self.ctx, "10%")
             self.assertEqual(float(round(self.ctx.character.saving_rate, 1)), 0.1)
@@ -942,7 +897,6 @@ class CommandsTestCase(TestCase):
             mock_popup.assert_called()
 
     async def test_cmd_toggle_ubi(self):
-        from amc import commands
         initial = self.ctx.character.reject_ubi
         with patch('amc.commands.finance.show_popup', new=AsyncMock()) as mock_popup:
             await commands.cmd_toggle_ubi(self.ctx)
@@ -952,12 +906,11 @@ class CommandsTestCase(TestCase):
     # --- Misc Tests ---
 
     async def test_cmd_verify(self):
-        from amc import commands
         self.ctx.discord_client = MagicMock()
         self.ctx.discord_client.loop = MagicMock()
         
         with patch('amc.commands.general.verify_player', new=AsyncMock(return_value="discord_id")), \
-             patch('amc.commands.general.add_discord_verified_role', new=AsyncMock()) as mock_role, \
+             patch('amc.commands.general.add_discord_verified_role', new=AsyncMock()), \
              patch('amc.commands.general.show_popup', new=AsyncMock()) as mock_popup, \
              patch('asyncio.run_coroutine_threadsafe') as mock_run_coro:
              
@@ -974,20 +927,17 @@ class CommandsTestCase(TestCase):
             # But the existence of the call in code is verified by run_coroutine_threadsafe.
 
     async def test_cmd_rename(self):
-        from amc import commands
         with patch('amc.commands.general.set_character_name', new=AsyncMock()) as mock_set:
             await commands.cmd_rename(self.ctx, "NewName")
             self.assertEqual(self.ctx.character.custom_name, "NewName")
             mock_set.assert_called()
 
     async def test_cmd_bot(self):
-        from amc import commands
         with patch('amc.models.BotInvocationLog.objects.acreate', new=AsyncMock()) as mock_log:
             await commands.cmd_bot(self.ctx, "prompt")
             mock_log.assert_called()
 
     async def test_cmd_song_request(self):
-        from amc import commands
         with patch('amc.models.SongRequestLog.objects.acreate', new=AsyncMock()) as mock_log:
             # Case 1: No event
             self.ctx.is_current_event = False
@@ -1004,7 +954,6 @@ class CommandsTestCase(TestCase):
     # --- Moved Legacy Commands Tests ---
 
     async def test_cmd_undisplay(self):
-        from amc import commands
         
         # Mock admin status
         self.ctx.player_info['bIsAdmin'] = True
@@ -1033,7 +982,6 @@ class CommandsTestCase(TestCase):
             mock_despawn.assert_called_with(self.ctx.http_client_mod, 'display-1')
 
     async def test_cmd_display(self):
-        from amc import commands
         self.ctx.player_info['bIsAdmin'] = True
         
         mock_v = MagicMock()
@@ -1053,7 +1001,6 @@ class CommandsTestCase(TestCase):
              mock_spawn.assert_called()
              
     async def test_cmd_burn(self):
-        from amc import commands
         from amc.utils import generate_verification_code
         
         amount = 100
@@ -1072,21 +1019,18 @@ class CommandsTestCase(TestCase):
              mock_transfer.assert_called_with(self.ctx.http_client_mod, -100, 'Burn', str(self.ctx.player.unique_id))
 
     async def test_cmd_repay_loan_deprecated(self):
-        from amc import commands
         with patch('amc.commands.finance.show_popup', new=AsyncMock()) as mock_popup:
             await commands.cmd_repay_loan(self.ctx)
             mock_popup.assert_called()
             self.assertIn("Command Removed", mock_popup.call_args[0][1])
 
     async def test_cmd_language_list(self):
-        from amc import commands
         await commands.cmd_language(self.ctx)
         self.ctx.reply.assert_called()
         args, _ = self.ctx.reply.call_args
         self.assertIn("Available languages", args[0])
 
     async def test_cmd_language_set(self):
-        from amc import commands
         await commands.cmd_language(self.ctx, "id")
         await self.player.arefresh_from_db()
         self.assertEqual(self.player.language, "id")
@@ -1156,7 +1100,6 @@ class CommandsTestCase(TestCase):
         self.assertIn("Daftarkan kendaraan Anda", msg)
 
     async def test_cmd_help_shows_all_for_admin(self):
-        from amc import commands
         self.ctx.player_info['bIsAdmin'] = True
         
         mock_commands = [
@@ -1173,7 +1116,6 @@ class CommandsTestCase(TestCase):
             self.assertIn("/admin", output)
 
     async def test_cmd_help_hides_admin_for_non_admin(self):
-        from amc import commands
         self.ctx.player_info['bIsAdmin'] = False
         
         mock_commands = [

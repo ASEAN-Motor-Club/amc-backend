@@ -12,7 +12,6 @@ from amc.subsidies import DEFAULT_SAVING_RATE
 from amc.mod_server import transfer_money, show_popup
 from amc.utils import with_verification_code
 from decimal import Decimal
-from django.core.signing import Signer
 from django.utils.translation import gettext as _, gettext_lazy
 
 @registry.register("/bank", description=gettext_lazy("Access your bank account"), category="Finance")

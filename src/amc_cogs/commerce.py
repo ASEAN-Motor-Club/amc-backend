@@ -3,7 +3,7 @@ from discord import app_commands, ui
 from discord.ext import commands, tasks
 from django.utils import timezone
 from datetime import timedelta
-from amc.models import Player, MinistryElection, MinistryCandidacy, MinistryVote, MinistryTerm
+from amc.models import Player, MinistryElection, MinistryCandidacy, MinistryVote, MinistryTerm, SubsidyRule
 from django.db.models import Count
 from amc_finance.services import allocate_ministry_budget
 from django.conf import settings

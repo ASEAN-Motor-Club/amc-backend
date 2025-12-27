@@ -33,7 +33,7 @@ class IntegrationCommandWorkflowTest(TestCase):
         mock_ctx_instance.character = mock_char
         mock_ctx_instance.player = mock_player
         
-        with patch('amc.tasks.aget_or_create_character', new=AsyncMock(return_value=(mock_char, mock_player, False, {}))) as mock_get_char, \
+        with patch('amc.tasks.aget_or_create_character', new=AsyncMock(return_value=(mock_char, mock_player, False, {}))), \
              patch('amc.command_framework.CommandContext', mock_ctx_class), \
              patch('amc.models.PlayerChatLog.objects.acreate', new=AsyncMock()), \
              patch('amc.models.BotInvocationLog.objects.acreate', new=AsyncMock()):
