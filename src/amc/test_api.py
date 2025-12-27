@@ -29,6 +29,7 @@ from amc.factories import (
   DeliveryPointFactory,
 )
 from amc.models import (
+  Character,
   PlayerStatusLog,
   PlayerRestockDepotLog,
   CharacterLocation,
@@ -42,7 +43,7 @@ class PlayersAPITest(TestCase):
 
   async def test_get_player(self):
     player = await sync_to_async(PlayerFactory)()
-    character = await player.characters.afirst()
+    character = await Character.objects.with_total_session_time().filter(player=player).order_by('-total_session_time', 'id').afirst()
     response = await self.client.get(f"/{player.unique_id}/")
 
     self.assertEqual(response.status_code, 200)
@@ -67,7 +68,7 @@ class PlayersAPITest(TestCase):
 
   async def test_get_player_logged_in(self):
     player = await sync_to_async(PlayerFactory)()
-    character = await player.characters.afirst()
+    character = await Character.objects.with_total_session_time().filter(player=player).order_by('-total_session_time', 'id').afirst()
     now = timezone.now()
     now = now.replace(microsecond=0)
     await PlayerStatusLog.objects.acreate(
