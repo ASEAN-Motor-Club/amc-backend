@@ -79,7 +79,6 @@ async def cmd_rescue(ctx: CommandContext, message: str = ""):
                     name=ctx.character.name
                 ),
                 character_guid=p.get('CharacterGuid'),
-                player_id=str(ctx.player.unique_id)
             ))
             sent = True
     
@@ -87,7 +86,7 @@ async def cmd_rescue(ctx: CommandContext, message: str = ""):
     rescue_request = await RescueRequest.objects.acreate(character=ctx.character, message=message)
     
     if ctx.is_current_event:
-        await ctx.announce(_("{name} needs a rescue! {vehicle_names}. /respond {request_id}").format(
+        await ctx.announce(_("{name} needs a rescue! {vehicle_names}. Respond with /respond {request_id}").format(
             name=ctx.character.name, vehicle_names=vehicle_names, request_id=rescue_request.id
         ))
         await ctx.reply(_("<EffectGood>Request Sent</>\n") + (_("Help is on the way.") if sent else _("Rescuers offline, notified Discord.")))
