@@ -1,13 +1,16 @@
+import logging
 import asyncio
+from datetime import timedelta
 import discord
 from discord import app_commands
 from discord.ext import commands
 from django.utils import timezone
 from django.conf import settings
-from django.db.models import Q, F
+from django.db.models import Q, F, Sum, Count, Min
 from django.contrib.gis.geos import Point
 from .utils import create_player_autocomplete
-from amc.models import Player, CharacterLocation, TeleportPoint, Ticket, PlayerMailMessage
+from amc.models import Player, CharacterLocation, TeleportPoint, Ticket, PlayerMailMessage, Delivery, PlayerChatLog
+from amc_finance.models import Account
 from amc.mod_server import show_popup, teleport_player, get_player, transfer_money, list_player_vehicles
 from amc.game_server import announce, is_player_online, kick_player, ban_player, get_players
 from amc.vehicles import format_vehicle_name, format_vehicle_parts
@@ -90,6 +93,7 @@ class ModerationCog(commands.Cog):
 
   def __init__(self, bot):
     self.bot = bot
+    self.logger = logging.getLogger(__name__)
     self.player_autocomplete = create_player_autocomplete(self.bot.http_client_game)
 
   async def player_autocomplete(self, interaction, current):
@@ -371,18 +375,166 @@ This notice was issued by Officer {interaction.user.display_name}. If you wish t
   @app_commands.checks.has_any_role(settings.DISCORD_ADMIN_ROLE_ID)
   @app_commands.autocomplete(player_id=player_autocomplete)
   async def profile_player(self, ctx, player_id: str):
-    player = await Player.objects.prefetch_related('characters').aget(
-      Q(unique_id=player_id) | Q(discord_user_id=player_id)
-    )
-    def character_report(char):
-      return f"{char.name}"
+    await ctx.response.defer()
+    
+    now = timezone.now()
+    seven_days_ago = now - timedelta(days=7)
+    
+    try:
+      player = await Player.objects.with_total_session_time().with_last_login().annotate(
+        first_seen=Min('characters__status_logs__timespan__startswith'),
+        recent_session_time=Sum(
+          'characters__status_logs__duration',
+          filter=Q(characters__status_logs__timespan__startswith__gte=seven_days_ago),
+          default=timedelta(0)
+        )
+      ).aget(Q(unique_id=player_id) | Q(discord_user_id=player_id))
+    except Player.DoesNotExist:
+      await ctx.followup.send("Player not found")
+      return
 
-    resp = f"""
-# Player Report
-#
-{'\n\n'.join([character_report(c) async for c in player.characters.all()])}
-"""
-    await ctx.response.send_message(resp)
+    # Aggregate stats separately to avoid join explosion in the main query
+    economy = await Delivery.objects.filter(character__player=player).aaggregate(
+      total_payment=Sum('payment', default=0),
+      total_subsidy=Sum('subsidy', default=0),
+      count=Count('id')
+    )
+    total_revenue = economy['total_payment'] + economy['total_subsidy']
+    total_deliveries = economy['count']
+    avg_payment = total_revenue / total_deliveries if total_deliveries > 0 else 0
+    
+    total_messages = await PlayerChatLog.objects.filter(character__player=player).acount()
+    tickets_count = await player.tickets.acount()
+
+    try:
+        latest_char = await player.get_latest_character()
+        display_name = latest_char.name
+    except Exception:
+        display_name = str(player.unique_id)
+
+    embed = discord.Embed(
+      title=f"Player Profile: {display_name}",
+      color=discord.Color.blue(),
+      timestamp=now
+    )
+
+    # Section 1: Identity
+    verified_str = "✅ Verified" if player.verified else "❌ Unverified"
+    flags = []
+    if player.adminstrator:
+        flags.append("🛡️ Admin")
+    if player.suspect:
+        flags.append("⚠️ Suspect")
+    if player.displayer:
+        flags.append("🎨 Displayer")
+    flags_str = " | ".join(flags) if flags else "None"
+    
+    identity_val = (
+        f"**ID:** `{player.unique_id}`\n"
+        f"**Status:** {verified_str}\n"
+    )
+    if player.discord_user_id:
+        identity_val += f"**Discord:** <@{player.discord_user_id}>"
+        if player.discord_name:
+            # Check if discord_name is different from mentions name (though we can't easily check here without fetching member)
+            identity_val += f" (`{player.discord_name}`)"
+        identity_val += "\n"
+        
+    identity_val += (
+        f"**Social Score:** `{player.social_score}`\n"
+        f"**Flags:** {flags_str}"
+    )
+    if player.notes:
+        identity_val += f"\n**Notes:** {player.notes}"
+    embed.add_field(name="👤 Identity", value=identity_val, inline=False)
+
+    # Section 2: Characters (Alts)
+    alts_lines = []
+    chars = player.characters.all().with_last_login().order_by('-last_login')
+    async for char in chars:
+        lvls = (
+            f"D:{char.driver_level or 0} | T:{char.truck_level or 0} | "
+            f"Tx:{char.taxi_level or 0} | B:{char.bus_level or 0} | "
+            f"P:{char.police_level or 0} | W:{char.wrecker_level or 0} | "
+            f"R:{char.racer_level or 0}"
+        )
+        rp = " (RP)" if char.rp_mode else ""
+        
+        # Fetch bank balance from amc_finance.Account
+        bank_balance = await Account.objects.filter(
+            character=char, 
+            book=Account.Book.BANK
+        ).aaggregate(total=Sum('balance', default=0))
+        bank_val = bank_balance['total']
+        
+        alts_lines.append(
+            f"• **{char.name}**{rp}\n"
+            f"  └ Wallet: `${char.money or 0:,}` | Bank: `${bank_val:,.0f}`\n"
+            f"  └ Levels: `[{lvls}]`"
+        )
+    
+    embed.add_field(name="👥 Characters (Alts)", value="\n".join(alts_lines) or "None", inline=False)
+
+    # Section 3: Activity
+    def format_duration(td):
+        if not td:
+            return "0s"
+        total_seconds = int(td.total_seconds())
+        days, remainder = divmod(total_seconds, 86400)
+        hours, remainder = divmod(remainder, 3600)
+        minutes, seconds = divmod(remainder, 60)
+        
+        parts = []
+        if days > 0:
+            parts.append(f"{days}d")
+        if hours > 0:
+            parts.append(f"{hours}h")
+        if minutes > 0:
+            parts.append(f"{minutes}m")
+        if not parts:
+            parts.append(f"{seconds}s")
+        return " ".join(parts[:2]) # Show top 2 units
+
+    first_seen_str = player.first_seen.strftime('%Y-%m-%d') if player.first_seen else "Never"
+    last_login_str = player.last_login.strftime('%Y-%m-%d %H:%M') if player.last_login else "Never"
+    activity_val = (
+        f"**First seen:** {first_seen_str}\n"
+        f"**Last online:** {last_login_str}\n"
+        f"**Total online:** {format_duration(player.total_session_time)}\n"
+        f"**Recent (7d):** {format_duration(player.recent_session_time)}"
+    )
+    embed.add_field(name="📊 Activity", value=activity_val, inline=True)
+
+    # Section 4: Economy & Social
+    economy_val = (
+        f"**Deliveries:** `{total_deliveries}`\n"
+        f"**Revenue:** `${total_revenue:,}`\n"
+        f"**Avg/Job:** `${avg_payment:,.0f}`\n"
+        f"**Messages:** `{total_messages}`"
+    )
+    embed.add_field(name="💰 Economy & Chat", value=economy_val, inline=True)
+
+    # Section 5: Infractions
+    infractions_val = f"**Total Tickets:** `{tickets_count}`"
+    recent_tickets = player.tickets.all().order_by('-created_at')[:3]
+    ticket_lines = []
+    async for t in recent_tickets:
+        ticket_lines.append(f"• {t.created_at.strftime('%Y-%m-%d')} - {t.get_infringement_display()}")
+    
+    if ticket_lines:
+        infractions_val += "\n" + "\n".join(ticket_lines)
+    embed.add_field(name="⚖️ Infractions", value=infractions_val, inline=False)
+
+    # Section 6: Teams
+    # Fetch team memberships asynchronously
+    teams_list = []
+    async for tm in player.team_memberships.all().select_related('team'):
+        teams_list.append(tm.team.name)
+        
+    if teams_list:
+        embed.add_field(name="🏢 Teams", value=", ".join(teams_list), inline=False)
+
+    await ctx.followup.send(embed=embed)
 
   @admin_vehicles.command(name='all', description='List players spawned vehicles')
   @app_commands.checks.has_any_role(settings.DISCORD_ADMIN_ROLE_ID)
@@ -390,7 +542,7 @@ This notice was issued by Officer {interaction.user.display_name}. If you wish t
     try:
       players = await get_players(self.bot.http_client_game)
     except Exception as e:
-      print(f"Failed to get players: {e}")
+      self.logger.error(f"Failed to get players: {e}")
       players = []
 
     resp = "# Player Vehicles\n\n"
