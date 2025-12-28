@@ -1,0 +1,17 @@
+name: Notify Parent Repo
+
+on:
+  push:
+    branches: [main, master]
+
+jobs:
+  notify:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Notify Parent Repo
+        uses: peter-evans/repository-dispatch@v3
+        with:
+          token: ${{ secrets.AMC_SERVER_DISPATCH_TOKEN }}
+          repository: ASEAN-Motor-Club/amc-server
+          event-type: submodule-update
+          client-payload: '{"submodule": "${{ github.repository }}", "sha": "${{ github.sha }}"}'
