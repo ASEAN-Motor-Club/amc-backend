@@ -397,6 +397,8 @@ def create_event_embed(game_event):
       state_str = 'Finished'
     case 0:
       state_str = 'Not Ready'
+    case _:
+      state_str = 'Unknown'
   embed.set_footer(text=f"Status: {state_str}")
 
   return embed
@@ -617,10 +619,10 @@ async def auto_starting_grid(http_client_mod, game_event):
   starting_point = game_event.race_setup.waypoints[0]
   start_pos = starting_point['Location']
   start_quat = starting_point['Rotation']
-  lateral_spacing = config.get('lateral_spacing', 600)
-  longitudinal_spacing = config.get('longitudinal_spacing', 1000)
-  initial_offset = config.get('initial_offset', 1000)
-  pole_side = config.get('pole_side', 'right')
+  lateral_spacing = int(config.get('lateral_spacing', 600))
+  longitudinal_spacing = int(config.get('longitudinal_spacing', 1000))
+  initial_offset = int(config.get('initial_offset', 1000))
+  pole_side = str(config.get('pole_side', 'right'))
 
   # --- 2. Vector Calculations from Quaternion ---
   # Define base vectors in a standard coordinate system (e.g., X-Forward, Y-Left, Z-Up)
