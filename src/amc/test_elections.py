@@ -5,6 +5,7 @@ from amc.models import (
     Player, MinistryElection, MinistryCandidacy, MinistryVote, MinistryTerm,
     Character, PlayerStatusLog
 )
+import discord
 from amc_cogs.commerce import CommerceCog
 from unittest.mock import MagicMock, AsyncMock, patch
 from amc_finance.models import Account
@@ -31,7 +32,7 @@ class ElectionTestCase(TestCase):
         
         # Mock bot for Cog
         bot = MagicMock()
-        channel = AsyncMock()
+        channel = AsyncMock(spec=discord.abc.Messageable)
         bot.get_channel.return_value = channel
         
         cog = CommerceCog(bot)
