@@ -11,6 +11,7 @@ from factory import (
   RelatedFactoryList,
 )
 from factory.django import DjangoModelFactory
+from typing import Any, cast
 from .models import (
   Player,
   Character,
@@ -27,14 +28,14 @@ from .models import (
 )
 
 class CharacterFactory(DjangoModelFactory):
-  class Meta:
+  class Meta:  # type: ignore[misc]
     model = Character
 
   player = SubFactory('amc.factories.PlayerFactory', characters=None)
   name = Faker('user_name')
 
 class PlayerFactory(DjangoModelFactory):
-  class Meta:
+  class Meta:  # type: ignore[misc]
     model = Player
 
   characters = RelatedFactoryList(
@@ -46,7 +47,7 @@ class PlayerFactory(DjangoModelFactory):
   discord_user_id = LazyAttribute(lambda _: random.randint(100000000000000000, 999999999999999999))
 
 class TeamFactory(DjangoModelFactory):
-  class Meta:
+  class Meta:  # type: ignore[misc]
     model = Team
 
   name = Faker('company')
@@ -55,7 +56,7 @@ class TeamFactory(DjangoModelFactory):
   discord_thread_id = LazyAttribute(lambda _: str(random.randint(100000000000000000, 999999999999999999)))
 
 class ScheduledEventFactory(DjangoModelFactory):
-  class Meta:
+  class Meta:  # type: ignore[misc]
     model = ScheduledEvent
 
   name = Faker('company')
@@ -66,7 +67,7 @@ class ScheduledEventFactory(DjangoModelFactory):
   end_time = LazyAttribute(lambda e: e.start_time + timedelta(days=3))
 
 class GameEventFactory(DjangoModelFactory):
-  class Meta:
+  class Meta:  # type: ignore[misc]
     model = GameEvent
 
   name = Faker('company')
@@ -77,7 +78,7 @@ class GameEventFactory(DjangoModelFactory):
   start_time = LazyAttribute(lambda e: e.scheduled_event.start_time + timedelta(hours=1))
 
 class ChampionshipFactory(DjangoModelFactory):
-  class Meta:
+  class Meta:  # type: ignore[misc]
     model = Championship
 
   name = Faker('company')
@@ -85,7 +86,7 @@ class ChampionshipFactory(DjangoModelFactory):
   description = Faker('catch_phrase')
 
 class ChampionshipPointFactory(DjangoModelFactory):
-  class Meta:
+  class Meta:  # type: ignore[misc]
     model = ChampionshipPoint
 
   championship = SubFactory('amc.factories.ChampionshipFactory')
@@ -94,7 +95,7 @@ class ChampionshipPointFactory(DjangoModelFactory):
   points = LazyAttribute(lambda _: str(random.randint(0, 25)))
 
 class GameEventCharacterFactory(DjangoModelFactory):
-  class Meta:
+  class Meta:  # type: ignore[misc]
     model = GameEventCharacter
 
   character = SubFactory('amc.factories.CharacterFactory')
@@ -106,18 +107,18 @@ class GameEventCharacterFactory(DjangoModelFactory):
   first_section_total_time_seconds = LazyAttribute(lambda p: random.randint(0, 99) if p.finished else None)
 
 class CargoFactory(DjangoModelFactory):
-  class Meta:
+  class Meta:  # type: ignore[misc]
     model = Cargo
 
 class DeliveryPointFactory(DjangoModelFactory):
-  class Meta:
+  class Meta:  # type: ignore[misc]
     model = DeliveryPoint
 
   guid = LazyAttribute(lambda _: uuid.uuid4())
   coord = LazyAttribute(lambda _: Point(random.randint(100, 1000), random.randint(100, 1000), random.randint(100, 1000)))
 
 class DeliveryJobFactory(DjangoModelFactory):
-  class Meta:
+  class Meta:  # type: ignore[misc]
     model = DeliveryJob
 
   quantity_requested = LazyAttribute(lambda _: random.randint(1, 1000))
@@ -125,7 +126,7 @@ class DeliveryJobFactory(DjangoModelFactory):
   expired_at = LazyAttribute(lambda _: timezone.now() + timedelta(hours=random.randint(2, 8)))
 
 class DeliveryJobTemplateFactory(DjangoModelFactory):
-  class Meta:
+  class Meta:  # type: ignore[misc]
     model = DeliveryJobTemplate
 
   name = Faker('bs')
@@ -138,19 +139,19 @@ class DeliveryJobTemplateFactory(DjangoModelFactory):
     if not create:
         return
     if extracted:
-        self.cargos.add(*extracted)
+        cast(Any, self).cargos.add(*extracted)
 
   @factory.post_generation
   def source_points(self, create, extracted, **kwargs):
     if not create:
         return
     if extracted:
-        self.source_points.add(*extracted)
+        cast(Any, self).source_points.add(*extracted)
 
   @factory.post_generation
   def destination_points(self, create, extracted, **kwargs):
     if not create:
         return
     if extracted:
-        self.destination_points.add(*extracted)
+        cast(Any, self).destination_points.add(*extracted)
 
