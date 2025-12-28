@@ -1,10 +1,9 @@
 import asyncio
 import aiohttp
 import json
-from typing import Optional
+from typing import Optional, Any, cast
 from pydantic import AwareDatetime
-import datetime
-from datetime import timedelta
+from datetime import datetime, timedelta
 from ninja_extra.security.session import AsyncSessionAuth
 from django.core.cache import cache
 from django.db.models import Count, Q, F, Window, Prefetch, Max
@@ -141,7 +140,7 @@ players_router = Router()
 async def get_players_mod(
   session,
   cache_key: str = "mod_online_players_list",
-  cache_ttl: int = POSITION_UPDATE_SLEEP / 2
+  cache_ttl: int = int(POSITION_UPDATE_SLEEP / 2)
 ):
   cached_data = cache.get(cache_key)
   if cached_data:
@@ -230,11 +229,11 @@ async def player_locations(
   request,
   start_time: AwareDatetime,
   end_time: AwareDatetime,
-  player_id: str=None,
-  num_samples: int=50,
+  player_id: Optional[str] = None,
+  num_samples: int = 50,
 ):
   """Returns the locations of players between the specified times"""
-  filters = {
+  filters: dict[str, Any] = {
     'timestamp__gte': start_time,
     'timestamp__lt': end_time,
   }
@@ -287,7 +286,7 @@ async def streaming_player_positions(request):
 stats_router = Router()
 
 @stats_router.get('/depots_restocked_leaderboard/', response=list[LeaderboardsRestockDepotCharacterSchema])
-async def depots_restocked_leaderboard(request, limit=10, now: AwareDatetime=None, days=7):
+async def depots_restocked_leaderboard(request, limit: int = 10, now: Optional[AwareDatetime] = None, days: int = 7):
   if now is None:
     now = timezone.now()
 
@@ -307,12 +306,15 @@ race_setups_router = Router()
 @race_setups_router.get('/{hash}/')
 async def get_race_setup_by_hash(request, hash):
   race_setup = await RaceSetup.objects.aget(hash=hash)
-  route = lowercase_first_char_in_keys(race_setup.config['Route'])
-  route['waypoints'] = [
+  if race_setup.config is None:
+      return {}
+  route = lowercase_first_char_in_keys(race_setup.config.get('Route', {}))
+  route_data = cast(dict[str, Any], route)
+  route_data['waypoints'] = [
     { **waypoint, 'translation': waypoint['location'] }
-    for waypoint in route['waypoints']
+    for waypoint in route_data.get('waypoints', [])
   ]
-  return route
+  return route_data
 
 
 teams_router = Router()
@@ -341,8 +343,8 @@ async def get_team(request, id):
   return team
 
 class TeamOwnerSessionAuth(AsyncSessionAuth):
-  async def authenticate(self, request, token):
-    token = await super().authenticate(request, token)
+  async def authenticate(self, request, key):
+    token = await super().authenticate(request, key)
     if not token:
       return
     print(request)
