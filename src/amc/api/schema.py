@@ -76,8 +76,8 @@ class LeaderboardsRestockDepotCharacterSchema(CharacterSchema):
 
 class CharacterLocationSchema(ModelSchema):
   location: PositionSchema
-  player_id: str = Field(None, alias="character.player.unqiue_id")
-  character_name: str = Field(None, alias="character.name")
+  player_id: Optional[str] = Field(None, alias="character.player.unqiue_id")
+  character_name: Optional[str] = Field(None, alias="character.name")
 
   class Meta:
     model = CharacterLocation
@@ -188,9 +188,9 @@ class PersonalStandingSchema(Schema):
 
 class TeamStandingSchema(Schema):
   total_points: int
-  team_id: int = Field(None, alias="team__id")
-  team_tag: str = Field(None, alias="team__tag")
-  team_name: str = Field(None, alias="team__name")
+  team_id: Optional[int] = Field(None, alias="team__id")
+  team_tag: Optional[str] = Field(None, alias="team__tag")
+  team_name: Optional[str] = Field(None, alias="team__name")
 
 
 class DeliveryPointSchema(ModelSchema):
