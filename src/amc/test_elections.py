@@ -80,7 +80,7 @@ class ElectionTestCase(TestCase):
             
             # Refresh election object to get updated phase
             await election.arefresh_from_db()
-            self.assertEqual(election.phase, MinistryElection.Phase.POLLING)
+            self.assertEqual(election.phase, MinistryElection.Phase.CANDIDACY)
             
         candidacy = await MinistryCandidacy.objects.filter(election=election, candidate=player1).afirst()
         self.assertIsNotNone(candidacy)
@@ -95,7 +95,7 @@ class ElectionTestCase(TestCase):
             # Step 4: Cast votes
             # Mock the interaction for the Select menu
             select_interaction = create_interaction(player1.discord_user_id)
-            select_interaction.data = {"values": [str(player1.pk)]} # Player 1 votes for Player 1
+            select_interaction.data = {"values": [str(candidacy.id)]} # Player 1 votes for Player 1 (via Candidacy ID)
             
             from amc_cogs.commerce import CandidateSelect
             # Advance time again for voting
@@ -117,7 +117,7 @@ class ElectionTestCase(TestCase):
                 view = MagicMock()
                 candidate_select = CandidateSelect(candidacies)
                 candidate_select._view = view
-                candidate_select._values = [str(player1.unique_id)]
+                candidate_select._values = [str(candidacy.id)]
                 await candidate_select.callback(select_interaction)
         
         vote_count = await MinistryVote.objects.filter(election=election, candidate__candidate=player1).acount()

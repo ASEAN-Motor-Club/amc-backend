@@ -1,5 +1,6 @@
 import time
 import asyncio
+from typing import Any
 from datetime import timedelta
 from unittest.mock import patch, MagicMock, AsyncMock
 from django.test import TestCase
@@ -71,6 +72,7 @@ class ProcessEventTests(TestCase):
       1
     )
     delivery = await ServerCargoArrivedLog.objects.select_related('player', 'sender_point', 'destination_point').afirst()
+    self.assertIsNotNone(delivery)
     self.assertEqual(delivery.payment, 10_000)
     self.assertEqual(payment, 10_000)
     self.assertEqual(delivery.cargo_key, 'oranges')
@@ -109,6 +111,7 @@ class ProcessEventTests(TestCase):
       1
     )
     log = await ServerPassengerArrivedLog.objects.select_related('player').afirst()
+    self.assertIsNotNone(log)
     self.assertEqual(log.payment, 10_000)
     self.assertEqual(payment, 17_000)
     self.assertEqual(subsidy, 7_000)
@@ -137,6 +140,7 @@ class ProcessEventTests(TestCase):
       1
     )
     log = await ServerTowRequestArrivedLog.objects.select_related('player').afirst()
+    self.assertIsNotNone(log)
     self.assertEqual(log.payment, 10_000)
     self.assertEqual(payment, 22_000)
     self.assertEqual(subsidy, 12_000)
@@ -242,6 +246,7 @@ class ProcessEventTests(TestCase):
       
       self.assertEqual(await ServerSignContractLog.objects.acount(), 1)
       log = await ServerSignContractLog.objects.afirst()
+      self.assertIsNotNone(log)
       self.assertEqual(log.cargo_key, 'sand')
       self.assertEqual(log.amount, 100)
       self.assertEqual(log.payment, 50000)
@@ -441,6 +446,7 @@ class ExtraWebhookTests(TestCase):
         self.assertEqual(await ServerCargoArrivedLog.objects.acount(), 2)
         self.assertEqual(await Delivery.objects.filter(character=character).acount(), 1)
         delivery = await Delivery.objects.afirst()
+        self.assertIsNotNone(delivery)
         self.assertEqual(delivery.quantity, 2)
         self.assertEqual(delivery.payment, 2000)
 
@@ -544,6 +550,7 @@ class ExtraWebhookTests(TestCase):
         
         self.assertEqual(await ServerCargoArrivedLog.objects.acount(), 1)
         log = await ServerCargoArrivedLog.objects.afirst()
+        self.assertIsNotNone(log)
         self.assertEqual(log.cargo_key, 'trash')
         self.assertEqual(log.payment, 500)
 
@@ -619,6 +626,8 @@ class ExtraWebhookTests(TestCase):
         d1 = deliveries[0]
         d2 = deliveries[1]
         
+        self.assertIsNotNone(d1)
+        self.assertIsNotNone(d2)
         self.assertAlmostEqual(d1.subsidy, d2.subsidy, delta=1.0)
 
     @patch('amc.jobs.send_fund_to_player', new_callable=AsyncMock)
@@ -755,8 +764,9 @@ class ExtraWebhookTests(TestCase):
             }
         }
         # Create 10 cargos
+        cargos: list[dict[str, Any]] = list(event['data']['Cargos']) # type: ignore
         for _ in range(10):
-            event['data']['Cargos'].append({
+            cargos.append({
                 'Net_CargoKey': 'apples',
                 'Net_Payment': 100,
                 'Net_Weight': 10.0,
@@ -764,6 +774,7 @@ class ExtraWebhookTests(TestCase):
                 'Net_SenderAbsoluteLocation': {'X': 0, 'Y': 0, 'Z': 0},
                 'Net_DestinationLocation': {'X': 100, 'Y': 100, 'Z': 0},
             })
+        event['data']['Cargos'] = cargos
             
         await process_events([event], http_client=MagicMock())
         
@@ -1096,7 +1107,9 @@ class SubsidyIntegrationTests(TestCase):
             }
         }
         await process_events([event_exact], http_client=MagicMock())
-        d1 = await Delivery.objects.filter(character=character).order_by('-id').afirst()
+        deliveries = [d async for d in Delivery.objects.filter(character=character).order_by('-id')]
+        d1 = deliveries[0]
+        self.assertIsNotNone(d1)
         self.assertEqual(d1.subsidy, 100, "Exact match should get subsidy")
 
         # 2. Test Within Tolerance (0.9) -> Should Match
@@ -1126,6 +1139,7 @@ class SubsidyIntegrationTests(TestCase):
         }
         await process_events([event_near], http_client=MagicMock())
         d2 = await Delivery.objects.filter(character=character).order_by('-id').afirst()
+        self.assertIsNotNone(d2)
         self.assertEqual(d2.subsidy, 100, "0.9 distance should resolve point and get subsidy")
         
         # 3. Test Outside Tolerance (1.1) -> Should NOT Match
@@ -1153,6 +1167,7 @@ class SubsidyIntegrationTests(TestCase):
         }
         await process_events([event_far], http_client=MagicMock())
         d3 = await Delivery.objects.filter(character=character).order_by('-id').afirst()
+        self.assertIsNotNone(d3)
         self.assertEqual(d3.subsidy, 0, "1.1 distance should NOT resolve point and thus NOT get subsidy")
 
     async def test_subsidy_zero_treasury(self, mock_show_popup, mock_announce, mock_get_treasury, mock_get_rp_mode):
@@ -1195,6 +1210,7 @@ class SubsidyIntegrationTests(TestCase):
         }
         await process_events([event], http_client=MagicMock())
         d = await Delivery.objects.filter(character=character).afirst()
+        self.assertIsNotNone(d)
         self.assertEqual(d.subsidy, 0, "Zero treasury should result in zero subsidy")
 
     async def test_subsidy_cargo_case_mismatch(self, mock_show_popup, mock_announce, mock_get_treasury, mock_get_rp_mode):
@@ -1241,4 +1257,5 @@ class SubsidyIntegrationTests(TestCase):
         # If strict matching, this should be 0.
         # Note: In Python, string equality is case sensitive. In Postgres, defaults are too.
         # This test ensures we KNOW if it's failing due to case.
+        self.assertIsNotNone(d)
         self.assertEqual(d.subsidy, 0, "Case mismatch should result in zero subsidy (if strictly matched)")
