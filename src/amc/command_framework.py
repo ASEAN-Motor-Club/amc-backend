@@ -4,8 +4,10 @@ import logging
 import importlib
 import pkgutil
 from django.utils import translation
-from typing import Callable, Any, get_type_hints, Dict, List, Union
+from typing import Callable, Any, get_type_hints, Dict, List, Union, Optional, TYPE_CHECKING
 from django.utils.translation import gettext as _
+if TYPE_CHECKING:
+    from django.utils.functional import _StrPromise
 from dataclasses import dataclass
 
 logger = logging.getLogger(__name__)
@@ -21,7 +23,7 @@ class CommandContext:
     http_client: Any
     http_client_mod: Any
     discord_client: Any = None
-    player_info: Dict = None
+    player_info: Optional[Dict] = None
     is_current_event: bool = False
 
     async def reply(self, message: str):
@@ -44,7 +46,7 @@ class CommandRegistry:
     def __init__(self):
         self.commands: List[Dict] = []
 
-    def register(self, command: Union[str, List[str]], description: str = "", category: str = "General"):
+    def register(self, command: Union[str, List[str]], description: Union[str, "_StrPromise"] = "", category: str = "General"):
         """
         Decorator to register a command.
         
