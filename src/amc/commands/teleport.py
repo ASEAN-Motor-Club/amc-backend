@@ -1,6 +1,9 @@
 import asyncio
+import math
+from datetime import timedelta
+from django.utils import timezone
 from amc.command_framework import registry, CommandContext
-from amc.models import TeleportPoint
+from amc.models import TeleportPoint, RescueRequest
 from amc.mod_server import teleport_player, list_player_vehicles, show_popup
 from django.db.models import Q
 from django.utils.translation import gettext as _, gettext_lazy
@@ -32,6 +35,7 @@ async def cmd_tp_name(ctx: CommandContext, name: str = ""):
 
     no_vehicles = not player_info.get('bIsAdmin')
     location = None
+    rescue_tp_data = None
 
     if name:
         try:
@@ -46,16 +50,58 @@ async def cmd_tp_name(ctx: CommandContext, name: str = ""):
                 locations='\n'.join(tp_points_names)
             ), character_guid=ctx.character.guid, player_id=str(ctx.player.unique_id)))
             return
-    elif player_info.get('bIsAdmin') or (current_vehicle and current_vehicle.get('companyGuid') in CORPS_WITH_TP):
-        # Teleport to Custom Waypoint
-        no_vehicles = False
-        location = player_info.get('CustomDestinationAbsoluteLocation')
-        if location:
-            # Fix Z offset based on vehicle
-            if player_info.get('VehicleKey') == 'None':
-                location['Z'] += 100
-            else:
-                location['Z'] += 5
+    else:
+        # Check for Rescue Responder permission
+        recent_rescues = RescueRequest.objects.filter(
+            responders=ctx.player, 
+            timestamp__gte=timezone.now() - timedelta(minutes=10)
+        ).order_by('-timestamp')
+        
+        async for rescue in recent_rescues:
+            if rescue.location:
+                rescue_tp_data = {
+                    "requester_name": rescue.character.name,
+                    "location": {
+                        'X': rescue.location.x,
+                        'Y': rescue.location.y,
+                        'Z': rescue.location.z
+                    }
+                }
+                break
+
+        if player_info.get('bIsAdmin') or (current_vehicle and current_vehicle.get('companyGuid') in CORPS_WITH_TP) or rescue_tp_data:
+            # Teleport to Custom Waypoint
+            no_vehicles = not player_info.get('bIsAdmin') and not rescue_tp_data
+            location = player_info.get('CustomDestinationAbsoluteLocation')
+            
+            if location and rescue_tp_data and not player_info.get('bIsAdmin'):
+                # Enforce distance limit for rescue responders
+                origin = rescue_tp_data['location']
+                dx = location['X'] - origin['X']
+                dy = location['Y'] - origin['Y']
+                distance = math.sqrt(dx*dx + dy*dy)
+                
+                if distance > 10_000:
+                    asyncio.create_task(show_popup(
+                        ctx.http_client_mod,
+                        _("<Title>Rescue Teleport Restricted</Title>\n"
+                          "Destination is {distance:.0f} units from {requester}.\n"
+                          "Maximum allowed distance: <Highlight>10,000 units</Highlight>.\n\n"
+                          "Move your custom destination marker closer to the requester.").format(
+                              distance=distance,
+                              requester=rescue_tp_data['requester_name']
+                          ),
+                        character_guid=ctx.character.guid,
+                        player_id=str(ctx.player.unique_id)
+                    ))
+                    return
+
+            if location:
+                # Fix Z offset based on vehicle
+                if player_info.get('VehicleKey') == 'None':
+                    location['Z'] += 100
+                else:
+                    location['Z'] += 5
     
     if not location:
         asyncio.create_task(

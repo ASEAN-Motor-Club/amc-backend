@@ -1510,6 +1510,7 @@ class RescueRequest(models.Model):
   responders = models.ManyToManyField(Player, related_name='rescue_responses')
   discord_message_id = models.CharField(max_length=32, null=True, blank=True, unique=True)
   message = models.TextField(blank=True)
+  location = models.PointField(srid=0, dim=3, null=True, blank=True)
 
 
 @final

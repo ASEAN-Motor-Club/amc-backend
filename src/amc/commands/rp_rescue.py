@@ -1,6 +1,7 @@
 import asyncio
 from amc.command_framework import registry, CommandContext
 from amc.models import RescueRequest
+from django.contrib.gis.geos import Point
 from amc.mod_server import (
     get_rp_mode, despawn_player_vehicle,
     toggle_rp_session, despawn_by_tag, set_character_name,
@@ -13,6 +14,7 @@ from django.utils import timezone
 from datetime import timedelta
 from django.conf import settings
 from django.utils.translation import gettext as _, gettext_lazy
+from amc.mod_server import get_player
 
 @registry.register(["/rp_mode", "/rp"], description=gettext_lazy("Toggle Roleplay Mode"), category="RP & Rescue") # type: ignore
 async def cmd_rp_mode(ctx: CommandContext, verification_code: str = ""):
@@ -84,7 +86,13 @@ async def cmd_rescue(ctx: CommandContext, message: str = ""):
                 sent = True
     
     # 2. Create DB Entry
-    rescue_request = await RescueRequest.objects.acreate(character=ctx.character, message=message)
+    location = None
+    player_info = await get_player(ctx.http_client_mod, str(ctx.player.unique_id))
+    if player_info and 'Location' in player_info:
+        loc = player_info['Location']
+        location = Point(loc['X'], loc['Y'], loc['Z'], srid=0)
+    
+    rescue_request = await RescueRequest.objects.acreate(character=ctx.character, message=message, location=location)
     
     if ctx.is_current_event:
         await ctx.announce(_("{name} needs a rescue! {vehicle_names}. Respond with /respond {request_id}").format(
@@ -120,9 +128,18 @@ async def cmd_respond(ctx: CommandContext, rescue_id: int):
             return
 
     await rescue_request.responders.aadd(ctx.player)
-    await ctx.announce(_("{responder} responded to {requester}'s request!").format(
+
+    await ctx.announce(_("{responder} is responding to {requester}'s rescue request!").format(
         responder=ctx.character.name, requester=rescue_request.character.name
     ))
+
+    await ctx.reply(_(
+        "<Title>Rescue Response</Title>\n"
+        "You are responding to {requester}'s rescue!\n\n"
+        "<EffectGood>Teleport Enabled</EffectGood>\n"
+        "Use <Highlight>/tp</Highlight> with your custom destination marker "
+        "to teleport within 10,000 units of {requester} for the next 10 minutes."
+    ).format(requester=rescue_request.character.name))
     
     # Discord Reaction
     if ctx.discord_client and rescue_request.discord_message_id:
