@@ -2,7 +2,7 @@ name: Notify Parent Repo
 
 on:
   push:
-    branches: [main, master]
+    branches: [master]
 
 jobs:
   notify:
