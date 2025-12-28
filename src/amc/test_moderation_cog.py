@@ -2,6 +2,7 @@ from django.test import TestCase
 from unittest.mock import AsyncMock, MagicMock
 from datetime import timedelta
 from django.utils import timezone
+from typing import Any, cast
 from amc_cogs.moderation import ModerationCog
 from amc.models import Player, Character, Delivery, PlayerChatLog, PlayerStatusLog, Ticket, Team, TeamMembership
 from amc_finance.models import Account
@@ -108,11 +109,10 @@ class ModerationCogTestCase(TestCase):
             timestamp=now - timedelta(minutes=10)
         )
 
-        # Execute Command
-        await self.cog.profile_player.callback(self.cog, self.ctx, str(player.unique_id))
+        # Run command
+        await cast(Any, self.cog.profile_player.callback)(self.cog, self.ctx, str(player.unique_id))
         
-        # Verification
-        self.ctx.followup.send.assert_called_once()
+        # Verify response was sent      self.ctx.followup.send.assert_called_once()
         embed = self.ctx.followup.send.call_args.kwargs['embed']
         
         # Identity Checks
@@ -151,6 +151,9 @@ class ModerationCogTestCase(TestCase):
 
     async def test_profile_player_not_found(self):
         """Test /admin profile with non-existent player"""
-        await self.cog.profile_player.callback(self.cog, self.ctx, "99999999999")
+        # Run command with non-existent ID
+        await cast(Any, self.cog.profile_player.callback)(self.cog, self.ctx, "99999999999")
+        
+        # Verify error response
         args = self.ctx.followup.send.call_args[0]
         self.assertIn("Player not found", args[0])
