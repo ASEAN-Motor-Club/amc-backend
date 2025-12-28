@@ -120,14 +120,15 @@ async def handle_cargo_dumped(event, player, timestamp):
   if cargo['Net_Payment'] < 0:
     raise ValueError(f"Negative payment for dumped cargo: {cargo}")
   
+  cargo_data = cargo or {}
   log = await ServerCargoArrivedLog.objects.acreate(
     timestamp=timestamp,
     player=player,
-    cargo_key=cargo['Net_CargoKey'],
-    payment=cargo['Net_Payment'],
-    weight=cargo.get('Net_Weight', 0),
-    damage=cargo['Net_Damage'],
-    data=event['data'],
+    cargo_key=cargo_data.get('Net_CargoKey', ''),
+    payment=cargo_data.get('Net_Payment', 0),
+    weight=cargo_data.get('Net_Weight', 0),
+    damage=cargo_data.get('Net_Damage', 0),
+    data=event.get('data'),
   )
   subsidy, _, rule = await get_subsidy_for_cargo(log)
   if rule and subsidy > 0:
@@ -204,29 +205,27 @@ async def handle_contract_delivered(event, player, timestamp):
 
 async def handle_passenger_arrived(event, player, timestamp):
   passenger = event['data'].get('Passenger')
-  if not passenger:
-    raise ValueError(f"Missing passenger data: {event}")
-
-  base_payment = passenger['Net_Payment']
-  flag = passenger.get('Net_PassengerFlags', 0)
+  passenger_data = passenger or {}
+  base_payment = passenger_data.get('Net_Payment', 0)
+  flag = passenger_data.get('Net_PassengerFlags', 0)
   
   if base_payment < 0:
-    raise ValueError(f"Negative payment for passenger: {passenger}")
+    raise ValueError(f"Negative payment for passenger: {passenger_data}")
 
   log = ServerPassengerArrivedLog(
     timestamp=timestamp,
     player=player,
-    passenger_type=passenger['Net_PassengerType'],
-    distance=passenger.get('Net_Distance'),
+    passenger_type=passenger_data.get('Net_PassengerType', ''),
+    distance=passenger_data.get('Net_Distance'),
     payment=base_payment,
-    arrived=passenger.get('Net_bArrived', True),
+    arrived=passenger_data.get('Net_bArrived', True),
     comfort=bool(flag & 1),
     urgent=bool(flag & 2),
     limo=bool(flag & 4),
     offroad=bool(flag & 8),
-    comfort_rating=passenger.get('Net_LCComfortSatisfaction'),
-    urgent_rating=passenger.get('Net_TimeLimitPoint'),
-    data=passenger,
+    comfort_rating=passenger_data.get('Net_LCComfortSatisfaction'),
+    urgent_rating=passenger_data.get('Net_TimeLimitPoint'),
+    data=passenger_data,
   )
   
   if log.passenger_type == ServerPassengerArrivedLog.PassengerType.Taxi:
@@ -245,18 +244,16 @@ async def handle_passenger_arrived(event, player, timestamp):
 
 async def handle_tow_request(event, player, timestamp):
   tow_request = event['data'].get('TowRequest')
-  if not tow_request:
-    raise ValueError(f"Missing tow request data: {event}")
-    
-  payment = tow_request['Net_Payment']
+  tow_data = tow_request or {}
+  payment = tow_data.get('Net_Payment', 0)
   await ServerTowRequestArrivedLog.objects.acreate(
     timestamp=timestamp,
     player=player,
     payment=payment,
-    data=tow_request,
+    data=tow_data,
   )
   
-  match tow_request.get('Net_TowRequestFlags', 0):
+  match tow_data.get('Net_TowRequestFlags', 0):
     case 1: # Flipped
       subsidy = 2_000 + payment * 1.0
     case _:
@@ -600,8 +597,9 @@ async def process_event(event, player, character, is_rp_mode=False, used_shortcu
 
   if character:
     try:
-      latest_loc = await CharacterLocation.objects.filter(character=character).alatest('timestamp')
-      latest_loc.get_vehicle_key_display()
+      latest_loc = await CharacterLocation.objects.filter(character=character).afirst()
+      if latest_loc:
+        latest_loc.get_vehicle_key_display()
     except CharacterLocation.DoesNotExist:
       pass
 

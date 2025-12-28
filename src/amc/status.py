@@ -1,4 +1,4 @@
-import psutil
+import psutil # type: ignore[import-untyped]
 from amc.mod_server import get_status, set_config, list_player_vehicles, teleport_player
 from amc.game_server import get_players, announce
 from amc.models import ServerStatus, CharacterLocation
@@ -11,11 +11,14 @@ async def monitor_server_status(ctx):
     print(f"Failed to get players: {e}")
     players = []
 
+  if status is None:
+    status = {}
+  
   mem = psutil.virtual_memory()
   await ServerStatus.objects.acreate(
     fps=status.get('FPS', 0),
     used_memory=mem.used,
-    num_players=len(players)
+    num_players=len(players) if players is not None else 0
   )
 
 async def monitor_server_condition(ctx):
@@ -26,13 +29,19 @@ async def monitor_server_condition(ctx):
     print(f"Failed to get players: {e}")
     players = []
 
-  fps = status.get('FPS')
+  if status is None:
+    status = {}
+  fps = status.get('FPS', 0)
+  num_players = len(players) if players is not None else 0
   base_vehicles_per_player = 12
   target_fps = 22
-  max_vehicles_per_player = min(
-    base_vehicles_per_player,
-    max(int(fps * base_vehicles_per_player * 20 / target_fps / len(players)), 3)
-  ) - 1
+  if num_players == 0:
+    max_vehicles_per_player = base_vehicles_per_player
+  else:
+    max_vehicles_per_player = min(
+      base_vehicles_per_player,
+      max(int(fps * base_vehicles_per_player * 20 / target_fps / num_players), 3)
+    ) - 1
 
   await set_config(ctx['http_client_mod'], max_vehicles_per_player)
   if fps < target_fps:
@@ -47,8 +56,8 @@ async def monitor_server_condition(ctx):
     player_vehicles = await list_player_vehicles(ctx['http_client_mod'], player_id)
     player_name = player.get('name')
 
-    if fps < target_fps:
-      if len(player_vehicles) > max_vehicles_per_player:
+    if players is not None and fps < target_fps:
+      if player_vehicles is not None and len(player_vehicles) > max_vehicles_per_player:
         await announce(
           f"{player_name}, please despawn your vehicles, you currently have {len(player_vehicles)} spanwed",
           ctx['http_client'],
