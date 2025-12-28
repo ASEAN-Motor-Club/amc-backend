@@ -11,9 +11,16 @@ from amc.models import (
 )
 from amc.utils import get_time_difference_string
 from amc.webhook import on_delivery_job_fulfilled
+from typing import TYPE_CHECKING, Optional
+
+if TYPE_CHECKING:
+    from amc.discord_client import AMCDiscordBot
+
+if TYPE_CHECKING:
+    from amc.discord_client import AMCDiscordBot
 
 class JobsCog(commands.Cog):
-  def __init__(self, bot: commands.Bot):
+  def __init__(self, bot: "AMCDiscordBot"):
     self.bot = bot
     self.channel_id = settings.DISCORD_JOBS_CHANNEL_ID
     self.deliveries_channel_id = settings.DISCORD_DELIVERIES_CHANNEL_ID
@@ -106,6 +113,12 @@ class JobsCog(commands.Cog):
     embed.set_footer(text=f"Job ID: {job.id}")
     return embed
 
+  async def get_channel_messageable(self, channel_id: int) -> Optional[discord.abc.Messageable]:
+    channel = self.bot.get_channel(channel_id)
+    if isinstance(channel, discord.abc.Messageable):
+        return channel
+    return None
+
   def _build_delivery_embed(
     self,
     character_name,
@@ -149,9 +162,9 @@ class JobsCog(commands.Cog):
     return embed
 
   async def post_delivery_embed(self, *args, **kwargs):
-    deliveries_channel = self.bot.get_channel(self.deliveries_channel_id)
+    deliveries_channel = await self.get_channel_messageable(self.deliveries_channel_id)
     if not deliveries_channel:
-      print(f"Error: Could not find channel with ID {self.deliveries_channel_id}")
+      print(f"Error: Could not find deliveries channel with ID {self.deliveries_channel_id}")
       return
     await deliveries_channel.send(embed=self._build_delivery_embed(*args, **kwargs))
 
@@ -160,9 +173,9 @@ class JobsCog(commands.Cog):
     Synchronizes Discord messages with the jobs in the database.
     Handles creating, updating, and deleting job messages.
     """
-    channel = self.bot.get_channel(self.channel_id)
+    channel = await self.get_channel_messageable(self.channel_id)
     if not channel:
-        print(f"Error: Could not find channel with ID {self.channel_id}")
+        print(f"Error: Could not find messageable channel with ID {self.channel_id}")
         return
 
     active_jobs = DeliveryJob.objects.prefetch_related(
@@ -212,6 +225,8 @@ class JobsCog(commands.Cog):
     async for job in stale_jobs:
       embed = self._build_job_embed(job, stale=True)
       try:
+        if not channel:
+            continue
         message = await channel.fetch_message(job.discord_message_id)
         await message.edit(embed=embed)
         print(f"Updated message for stale job {job.id}")

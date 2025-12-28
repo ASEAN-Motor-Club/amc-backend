@@ -1,5 +1,9 @@
 import os
 from discord.ext import commands
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from amc.discord_client import AMCDiscordBot
 from django.conf import settings
 from amc.models import Player
 from amc.mod_server import send_message_as_player
@@ -8,7 +12,7 @@ from amc.game_server import announce, get_players
 FIFO_PATH = os.environ.get('NECESSE_FIFO_PATH')
 
 class ChatCog(commands.Cog):
-  def __init__(self, bot, game_chat_channel_id=settings.DISCORD_GAME_CHAT_CHANNEL_ID):
+  def __init__(self, bot: "AMCDiscordBot", game_chat_channel_id=settings.DISCORD_GAME_CHAT_CHANNEL_ID):
     self.bot = bot
     self.game_chat_channel_id = game_chat_channel_id
 
@@ -32,6 +36,8 @@ class ChatCog(commands.Cog):
       )
 
     if not message.author.bot and message.channel.id == settings.DISCORD_NECESSE_GAME_CHAT_CHANNEL_ID:
+      if not FIFO_PATH:
+        return
       try:
         with open(FIFO_PATH, 'w') as f:
           f.write(f"/print {message.author.display_name}: {message.content}\n")

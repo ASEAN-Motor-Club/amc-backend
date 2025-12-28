@@ -1,6 +1,10 @@
 import discord
 from discord.ext import commands
 from discord import app_commands, ui
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from amc.discord_client import AMCDiscordBot
 from django.conf import settings
 
 from amc.models import Player, PlayerShift, RescueRequest
@@ -50,11 +54,19 @@ class ShiftTimeModal(ui.Modal, title='Enter Shift Hours'):
             await interaction.followup.send("❌ **Error:** Please enter valid numbers for the start and end hours.", ephemeral=True)
             return
 
+        if interaction.guild is None:
+            await interaction.followup.send("❌ **Error:** This command must be used in a server.", ephemeral=True)
+            return
+
         rescuer_role = discord.utils.get(interaction.guild.roles, name="Rescuer")
         if not rescuer_role:
             await interaction.followup.send("❌ **Configuration Error:** A role named 'Rescuer' could not be found.", ephemeral=True)
             return
         
+        if not isinstance(interaction.user, discord.Member):
+             await interaction.followup.send("❌ **Error:** You must be a member of the server.", ephemeral=True)
+             return
+
         try:
             await interaction.user.add_roles(rescuer_role)
         except discord.Forbidden:
@@ -64,7 +76,7 @@ class ShiftTimeModal(ui.Modal, title='Enter Shift Hours'):
         # 3. Save the data
         try:
           player = await Player.objects.aget(discord_user_id=interaction.user.id)
-        except Player.DoesNotExists:
+        except Player.DoesNotExist:
           await interaction.followup.send(
               "You are not verified\n"
               "Please first use the `/verify` command",
@@ -117,7 +129,7 @@ class PersistentShiftView(ui.View):
         )
 
 class RoleplayCog(commands.Cog):
-    def __init__(self, bot: commands.Bot):
+    def __init__(self, bot: "AMCDiscordBot"):
         self.bot = bot
         # Register the persistent view so it works after bot restarts
         self.bot.add_view(PersistentShiftView())
@@ -159,6 +171,9 @@ class RoleplayCog(commands.Cog):
 
         # 2. Fetch the Message object from the channel (requires an API call)
         # fetch_message is an asynchronous operation, so we must await it.
+        if not isinstance(channel, discord.abc.Messageable):
+            print(f"Error: Channel {channel.id} is not messageable.")
+            return
         message = await channel.fetch_message(message_id)
         
         # 3. Add the reaction
@@ -176,14 +191,14 @@ class RoleplayCog(commands.Cog):
     async def on_rescue_response(self, message, user):
       try:
         rescue_request = await RescueRequest.objects.select_related('character').aget(discord_message_id=message.id)
-      except RescueRequest.DoesNotExists:
+      except RescueRequest.DoesNotExist:
         print(f"Reaction to a rescue request without associated discord_message_id: {message.id}")
         return
 
       await announce(f"{user.display_name} responded to {rescue_request.character.name}'s rescue request!", self.bot.http_client_game)
       try:
         player = await Player.objects.aget(discord_user_id=user.id)
-      except Player.DoesNotExists:
+      except Player.DoesNotExist:
         print(f"User {user.id} has not verified yet responded to a rescue request")
         return
 

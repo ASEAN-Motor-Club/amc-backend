@@ -2,6 +2,10 @@ import logging
 import discord
 from discord import app_commands
 from discord.ext import tasks, commands
+from typing import TYPE_CHECKING, Union
+
+if TYPE_CHECKING:
+    from amc.discord_client import AMCDiscordBot
 from django.utils import timezone
 from datetime import timedelta
 from django.db.models import Sum, Count, F
@@ -15,12 +19,12 @@ from amc.models import (
 logger = logging.getLogger(__name__)
 
 class LeaderboardCog(commands.Cog):
-    def __init__(self, bot):
+    def __init__(self, bot: "AMCDiscordBot"):
         self.bot = bot
         self.leaderboard_channel_name = "leaderboards"
         self.update_leaderboards.start()
 
-    def cog_unload(self):
+    async def cog_unload(self):
         self.update_leaderboards.cancel()
 
     async def get_leaderboard_data(self, days: int):
@@ -95,7 +99,7 @@ class LeaderboardCog(commands.Cog):
         if not data:
             return "No data yet."
         
-        lines = []
+        lines: list[str] = []
         for i, item in enumerate(data, 1):
             val = item['value']
             if is_money:
@@ -185,8 +189,10 @@ class LeaderboardCog(commands.Cog):
         await self.bot.wait_until_ready()
         
         for guild in self.bot.guilds:
+            if not guild:
+                continue
             channel = discord.utils.get(guild.channels, name=self.leaderboard_channel_name)
-            if not channel:
+            if not isinstance(channel, discord.TextChannel):
                 continue
             
             embed = await self.create_leaderboard_embeds()
@@ -213,10 +219,13 @@ class LeaderboardCog(commands.Cog):
         await interaction.response.defer(ephemeral=True)
         
         guild = interaction.guild
+        if not guild:
+            await interaction.followup.send("This command must be used in a server", ephemeral=True)
+            return
         channel = discord.utils.get(guild.channels, name=self.leaderboard_channel_name)
         
-        if not channel:
-            overwrites = {
+        if not channel or not isinstance(channel, discord.TextChannel):
+            overwrites: dict[Union[discord.Member, discord.Role, discord.Object], discord.PermissionOverwrite] = {
                 guild.default_role: discord.PermissionOverwrite(send_messages=False),
                 guild.me: discord.PermissionOverwrite(send_messages=True, embed_links=True)
             }

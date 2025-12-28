@@ -8,6 +8,10 @@ from django.utils import timezone
 from django.db.models import Count, Q
 from discord import app_commands
 from discord.ext import tasks, commands
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from amc.discord_client import AMCDiscordBot
 from django.conf import settings
 from amc.game_server import get_players
 from amc.models import Character, ServerStatus
@@ -17,7 +21,7 @@ logger = logging.getLogger(__name__)
 class StatusCog(commands.Cog):
   def __init__(
     self,
-    bot,
+    bot: "AMCDiscordBot",
     status_channel_id=settings.DISCORD_STATUS_CHANNEL_ID,
     general_channel_id=settings.DISCORD_GENERAL_CHANNEL_ID,
   ):
@@ -37,7 +41,7 @@ class StatusCog(commands.Cog):
 
   def generate_graph_image(self, fps_data: list, memory_data: list) -> io.BytesIO:
     """Generates the dual-axis line graph image using Matplotlib."""
-    plt.style.use('dark_background')
+    plt.style.use('dark_background') # type: ignore[attr-defined]
     fig, ax1 = plt.subplots()
 
     # Plot FPS data on the primary y-axis (left)
@@ -60,7 +64,7 @@ class StatusCog(commands.Cog):
 
     # Add a title and adjust layout
     fig.suptitle("Live Server Status", color='white')
-    fig.tight_layout(rect=[0, 0.03, 1, 0.95]) # Adjust rect to make space for title
+    fig.tight_layout(rect=(0, 0.03, 1, 0.95)) # Adjust rect to make space for title
 
     # Create a combined legend for both lines
     lines, labels = ax1.get_legend_handles_labels()
@@ -82,8 +86,8 @@ class StatusCog(commands.Cog):
     """
     # 1. Basic Safety Checks
     channel = self.bot.get_channel(self.status_channel_id)
-    if not channel:
-      print("Status channel not found.")
+    if not isinstance(channel, discord.abc.Messageable):
+      print("Status channel not found or not messageable.")
       return
 
     try:
@@ -186,6 +190,8 @@ class StatusCog(commands.Cog):
     top_restockers_str = await self.daily_top_restockers()
     client = self.bot
     general_channel = client.get_channel(self.general_channel_id)
+    if not isinstance(general_channel, discord.abc.Messageable):
+        return
     await general_channel.send(f"""\
 ## Top 3 Depot Restockers
 Last 24 hours

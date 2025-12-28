@@ -1,5 +1,9 @@
 from discord import app_commands
 from discord.ext import commands
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    pass
 
 from django.core.signing import Signer
 from django.contrib.auth import get_user_model

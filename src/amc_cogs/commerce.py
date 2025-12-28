@@ -7,6 +7,9 @@ from amc.models import Player, MinistryElection, MinistryCandidacy, MinistryVote
 from django.db.models import Count
 from amc_finance.services import allocate_ministry_budget
 from django.conf import settings
+from typing import TYPE_CHECKING
+if TYPE_CHECKING:
+    from amc.discord_client import AMCDiscordBot
 
 class CandidateSelect(ui.Select):
     def __init__(self, candidates):
@@ -50,12 +53,12 @@ class VoteView(ui.View):
         self.add_item(CandidateSelect(candidates))
 
 class CommerceCog(commands.Cog):
-    def __init__(self, bot, channel_id=settings.DISCORD_GENERAL_CHANNEL_ID):
+    def __init__(self, bot: "AMCDiscordBot", channel_id=settings.DISCORD_GENERAL_CHANNEL_ID):
         self.bot = bot
         self.channel_id = channel_id
         self.manage_elections_task.start()
 
-    def cog_unload(self):
+    async def cog_unload(self):
         self.manage_elections_task.cancel()
 
     async def get_announcement_channel(self):
@@ -106,12 +109,12 @@ class CommerceCog(commands.Cog):
                         current_budget=50_000_000,
                         is_active=True
                     )
-                    ended_election.term_created_id = new_term.id
+                    ended_election.term_created = new_term
                     
                     # Allocate budget financially
                     await allocate_ministry_budget(50_000_000, new_term)
                     
-                    if channel:
+                    if isinstance(channel, discord.abc.Messageable):
                         embed = discord.Embed(
                             title="🎉 Election Results: Minister of Commerce",
                             description=f"Congratulations to **{winner_candidacy.candidate.discord_name or winner_candidacy.candidate.unique_id}** for winning the election!",
@@ -121,7 +124,7 @@ class CommerceCog(commands.Cog):
                         embed.add_field(name="Budget Allocated", value="₱50,000,000")
                         await channel.send(embed=embed)
                 else:
-                    if channel:
+                    if isinstance(channel, discord.abc.Messageable):
                         await channel.send("⚠️ The Minister of Commerce election has ended with no candidates. A new election will begin shortly.")
                 
                 # Mark as processed regardless of winner
@@ -136,7 +139,7 @@ class CommerceCog(commands.Cog):
                     )
                     
                     channel = await self.get_announcement_channel()
-                    if channel:
+                    if isinstance(channel, discord.abc.Messageable):
                         embed = discord.Embed(
                             title="📢 Elections: Minister of Commerce",
                             description="A new election for the Minister of Commerce has begun!",
@@ -209,7 +212,7 @@ class CommerceCog(commands.Cog):
 
         phase = election.phase
         embed = discord.Embed(title="Minister of Commerce Election Status", color=discord.Color.blue())
-        embed.add_field(name="Current Phase", value=election.get_phase_display())
+        embed.add_field(name="Current Phase", value=election.phase.label)
         
         if phase == MinistryElection.Phase.CANDIDACY:
             embed.description = f"Candidacy ends at <t:{int(election.candidacy_end_at.timestamp())}:R>"

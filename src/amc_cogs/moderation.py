@@ -1,5 +1,9 @@
 import logging
 import asyncio
+from typing import Optional, Any, TYPE_CHECKING, cast
+
+if TYPE_CHECKING:
+    from amc.discord_client import AMCDiscordBot
 from datetime import timedelta
 import discord
 from discord import app_commands
@@ -24,11 +28,14 @@ class VoteKickView(discord.ui.View):
     self.votes = {"yes": set(), "no": set()}
     self.vote_finished = asyncio.Event()
     self.bot = bot
+    self.message: Optional[discord.Message] = None
 
   async def disable_buttons(self):
     for item in self.children:
-        item.disabled = True
-    await self.message.edit(view=self)
+        if hasattr(item, 'disabled'):
+            setattr(item, 'disabled', True)
+    if self.message:
+        await self.message.edit(view=self)
 
   async def on_timeout(self):
     await self.disable_buttons()
@@ -46,7 +53,8 @@ class VoteKickView(discord.ui.View):
       result += f"😇 Player **{self.player}** is safe."
       await announce(f'{self.player} survived the votekick', self.bot.http_client_game)
 
-    await self.message.channel.send(result)
+    if self.message and self.message.channel:
+        await self.message.channel.send(result)
 
   @discord.ui.button(label="Yes", style=discord.ButtonStyle.success)
   async def yes_button(self, interaction: discord.Interaction, button: discord.ui.Button):
@@ -91,7 +99,7 @@ class ModerationCog(commands.Cog):
     parent=admin
   )
 
-  def __init__(self, bot):
+  def __init__(self, bot: "AMCDiscordBot"):
     self.bot = bot
     self.logger = logging.getLogger(__name__)
     self.player_autocomplete = create_player_autocomplete(self.bot.http_client_game)
@@ -231,11 +239,11 @@ class ModerationCog(commands.Cog):
       player = await Player.objects.aget(discord_user_id=ctx.user.id)
       target_player = await Player.objects.aget(unique_id=int(player_id))
       target_character = await target_player.get_latest_character()
-      target_character_location = await CharacterLocation.objects.fiter(
+      target_character_location = await CharacterLocation.objects.filter(
         character=target_character,
       ).alatest('timestamp')
       location = target_character_location.location
-      await teleport_player(self.bot.http_client_event_mod, player.unique_id, {
+      await teleport_player(self.bot.event_http_client_mod, player.unique_id, {
         'X': location.x, 
         'Y': location.y, 
         'Z': location.z,
@@ -275,7 +283,7 @@ class ModerationCog(commands.Cog):
       notes=message,
       issued_by=admin,
     )
-    player.social_score = F('social_score') - Ticket.get_social_score_deduction(infringement)
+    player.social_score = cast(Any, F('social_score') - Ticket.get_social_score_deduction(infringement))
     await player.asave(update_fields=['social_score'])
 
     mail_message = f"""\
@@ -321,7 +329,7 @@ This notice was issued by Officer {interaction.user.display_name}. If you wish t
 
     # Send a copy to your private mod-log channel for record-keeping
     log_channel = self.bot.get_channel(1354451955774132284) 
-    if log_channel:
+    if isinstance(log_channel, discord.abc.Messageable):
       await log_channel.send(embed=embed)
 
     await announce(f"Citation issued to {character.name} for {new_ticket.get_infringement_display()}", self.bot.http_client_game, color="FF0000")
@@ -342,7 +350,7 @@ This notice was issued by Officer {interaction.user.display_name}. If you wish t
   @admin.command(name='ban', description='Ban a player from the server')
   @app_commands.checks.has_any_role(settings.DISCORD_ADMIN_ROLE_ID)
   @app_commands.autocomplete(player_id=player_autocomplete)
-  async def ban_player_cmd(self, ctx, player_id: str, hours: int=None, reason: str=''):
+  async def ban_player_cmd(self, ctx, player_id: str, hours: Optional[int]=None, reason: str=''):
     player = await Player.objects.prefetch_related('characters').aget(
       Q(unique_id=player_id) | Q(discord_user_id=player_id)
     )
@@ -350,7 +358,7 @@ This notice was issued by Officer {interaction.user.display_name}. If you wish t
       c.name for c in player.characters.all()
     ])
     await ban_player(self.bot.http_client_game, player_id, hours, reason)
-    await ban_player(self.bot.http_client_event, player_id, hours, reason)
+    await ban_player(self.bot.event_http_client_game, player_id, hours, reason)
     await ctx.response.send_message(f'Banned {player_id} (Aliases: {character_names}) for {hours} hours, due to: {reason}')
 
   @admin.command(name='kick', description='Kick a player from the server')
@@ -368,7 +376,7 @@ This notice was issued by Officer {interaction.user.display_name}. If you wish t
       return
 
     await kick_player(self.bot.http_client_game, player_id)
-    await kick_player(self.bot.http_client_event, player_id)
+    await kick_player(self.bot.event_http_client_game, player_id)
     await interaction.response.send_message(f'Kicked {player_id} (Aliases: {character_names})')
 
   @admin.command(name='profile', description='Profile a player')
@@ -551,7 +559,7 @@ This notice was issued by Officer {interaction.user.display_name}. If you wish t
       player_vehicles = await list_player_vehicles(self.bot.http_client_mod, player_id)
 
       resp += f"""
-{player_name}: {len(player_vehicles)}"""
+{player_name}: {len(player_vehicles) if player_vehicles else 0}"""
     await ctx.response.send_message(resp)
 
   @admin_vehicles.command(name='player', description='List a player\'s spawned vehicles')
@@ -592,8 +600,9 @@ This notice was issued by Officer {interaction.user.display_name}. If you wish t
   @app_commands.describe(player_id="The name of the player to kick")
   @app_commands.autocomplete(player_id=player_autocomplete)
   async def votekick(self, interaction: discord.Interaction, player_id: str):
-    if interaction.channel.id != 1421915330279641098:
+    if not interaction.channel or interaction.channel.id != 1421915330279641098:
       await interaction.response.send_message("You can only use this command in the <#1421915330279641098> channel", ephemeral=True)
+      return
 
     #member = interaction.guild.get_member(interaction.user.id)
     #if member and member.joined_at:
