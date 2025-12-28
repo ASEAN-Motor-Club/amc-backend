@@ -15,7 +15,7 @@ from django.utils.translation import gettext as _, gettext_lazy
 async def cmd_help(ctx: CommandContext):
     # Group commands by category
     categories = {}
-    is_admin = ctx.player_info.get('bIsAdmin', False)
+    is_admin = ctx.player_info.get('bIsAdmin', False) if ctx.player_info else False
 
     for cmd in registry.commands:
         cat = cmd.get('category', 'General')

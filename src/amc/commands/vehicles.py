@@ -16,7 +16,7 @@ async def cmd_despawn(ctx: CommandContext, category: str = "all"):
 @registry.register("/register_vehicles", description=gettext_lazy("Register your vehicles"), category="Vehicle Management")
 async def cmd_register_vehicles(ctx: CommandContext):
     vehicles = await register_player_vehicles(ctx.http_client_mod, ctx.character, ctx.player)
-    names = '\n'.join([f"#{v.id} - {v.config['VehicleName']}" for v in vehicles])
+    names = '\n'.join([f"#{v.id} - {v.config['VehicleName']}" for v in vehicles]) if vehicles else _('No vehicles found')
     await ctx.reply(_("<Title>Vehicles Registered!</>\n\n{names}").format(names=names))
 
 @registry.register("/unrental", description=gettext_lazy("Stop renting out your vehicle"), category="Vehicle Management")
@@ -44,7 +44,8 @@ async def cmd_unrental(ctx: CommandContext, category: str = ""):
 async def cmd_rental(ctx: CommandContext, alias: str = ""):
     vehicles = await register_player_vehicles(ctx.http_client_mod, ctx.character, ctx.player, active=True)
     # Filter for corp vehicles
-    vehicles = [v for v in vehicles if v.config.get('CompanyName') and v.company_guid == ctx.player_info['OwnCompanyGuid']]
+    own_company_guid = ctx.player_info.get('OwnCompanyGuid') if ctx.player_info else None
+    vehicles = [v for v in vehicles if v.config.get('CompanyName') and v.company_guid == own_company_guid] if vehicles else []
     
     if not vehicles:
         await ctx.reply(_("<Title>Rental System</>\nOnly Corporation vehicles can be rented out."))
@@ -81,7 +82,7 @@ async def cmd_rent(ctx: CommandContext, vehicle_id: str = ""):
         # Group by company
         vehicles.sort(key=lambda v: v.config.get('CompanyName', 'Independent'))
         
-        lines = []
+        lines: list[str] = []
         for company, group in itertools.groupby(vehicles, key=lambda v: v.config.get('CompanyName', 'Independent')):
             lines.append(f"<Bold>{company}</>")
             for v in group:
@@ -94,6 +95,9 @@ async def cmd_rent(ctx: CommandContext, vehicle_id: str = ""):
         # Spawn logic
         try:
             v = await CharacterVehicle.objects.aget(pk=vehicle_id, rental=True)
+            if not ctx.player_info:
+                await ctx.reply(_("Player info not found"))
+                return
             loc = ctx.player_info['Location']
             loc['Z'] -= 100
             await spawn_registered_vehicle(ctx.http_client_mod, v, loc, driver_guid=ctx.character.guid, 
@@ -104,12 +108,13 @@ async def cmd_rent(ctx: CommandContext, vehicle_id: str = ""):
 
 @registry.register("/sell", description=gettext_lazy("Sell a vehicle"), category="Vehicle Management")
 async def cmd_sell(ctx: CommandContext):
-    if not ctx.player_info.get('bIsAdmin'):
+    if not ctx.player_info or not ctx.player_info.get('bIsAdmin'):
         return
     vehicles = await register_player_vehicles(ctx.http_client_mod, ctx.character, ctx.player, active=True)
     await despawn_player_vehicle(ctx.http_client_mod, ctx.player.unique_id)
-    for v in vehicles:
-        await despawn_by_tag(ctx.http_client_mod, f'sale-{v.id}')
+    if vehicles:
+        for v in vehicles:
+            await despawn_by_tag(ctx.http_client_mod, f'sale-{v.id}')
         v.for_sale = True
         await v.asave()
         await spawn_registered_vehicle(ctx.http_client_mod, v, v.config['Location'], rotation=v.config['Rotation'], 
@@ -117,7 +122,7 @@ async def cmd_sell(ctx: CommandContext):
 
 @registry.register("/undisplay", description=gettext_lazy("Remove displayed vehicles"), category="Vehicle Management")
 async def cmd_undisplay(ctx: CommandContext, category: str = ""):
-    if not ctx.player_info.get('bIsAdmin') and not ctx.player.displayer:
+    if (not ctx.player_info or not ctx.player_info.get('bIsAdmin')) and not ctx.player.displayer:
         asyncio.create_task(
             show_popup(ctx.http_client_mod, _("Admin-only command"), character_guid=ctx.character.guid, player_id=str(ctx.player.unique_id))
         )
@@ -147,7 +152,7 @@ Use <Highlight>/undisplay </> to remove displayed vehicles."""),
 
 @registry.register("/display", description=gettext_lazy("Permanently display a vehicle"), category="Vehicle Management")
 async def cmd_display(ctx: CommandContext, category: str = ""):
-    if not ctx.player_info.get('bIsAdmin') and not ctx.player.displayer:
+    if (not ctx.player_info or not ctx.player_info.get('bIsAdmin')) and not ctx.player.displayer:
         asyncio.create_task(
             show_popup(ctx.http_client_mod, _("Admin-only command"), character_guid=ctx.character.guid, player_id=str(ctx.player.unique_id))
         )

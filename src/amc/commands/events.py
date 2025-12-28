@@ -1,4 +1,5 @@
 import asyncio
+from typing import Optional
 from amc.command_framework import registry, CommandContext
 from amc.models import GameEvent, GameEventCharacter, ScheduledEvent, BotInvocationLog
 from amc.events import (
@@ -41,7 +42,7 @@ async def cmd_results(ctx: CommandContext):
     await show_scheduled_event_results_popup(ctx.http_client_mod, active_event, character_guid=ctx.character.guid, player_id=str(ctx.player.unique_id))
 
 @registry.register("/setup_event", description=gettext_lazy("Creates an event properly"), category="Events")
-async def cmd_setup_event(ctx: CommandContext, event_id: int = None):
+async def cmd_setup_event(ctx: CommandContext, event_id: Optional[int] = None):
     try:
         if event_id:
             scheduled_event = await ScheduledEvent.objects.select_related('race_setup').filter(race_setup__isnull=False).aget(pk=event_id)
@@ -62,7 +63,7 @@ async def cmd_setup_event(ctx: CommandContext, event_id: int = None):
 
 @registry.register("/events", description=gettext_lazy("List current and upcoming scheduled events"), category="Events")
 async def cmd_events_list(ctx: CommandContext):
-    events = []
+    events: list[str] = []
     async for event in ScheduledEvent.objects.filter(end_time__gte=timezone.now()).order_by('start_time'):
         start_msg = f"{format_timedelta(event.start_time - timezone.now())} from now" if event.start_time > timezone.now() else 'In progress'
         events.append(f"""<Title>{event.name}</>

@@ -104,9 +104,7 @@ async def cmd_loan(ctx: CommandContext, amount: str, verification_code: str = ""
     amount_int = int(amount.replace(',', ''))
     loan_balance = await get_player_loan_balance(ctx.character)
     max_loan, _ignored = await get_character_max_loan(ctx.character)
-    amount_int = min(amount_int, max_loan - loan_balance)
-    
-    amount_int = min(amount_int, max_loan - loan_balance)
+    amount_int = int(min(Decimal(amount_int), max_loan - loan_balance))
     
     code_expected, verified = with_verification_code((amount_int, ctx.character.id), verification_code)
 
@@ -125,7 +123,7 @@ async def cmd_loan(ctx: CommandContext, amount: str, verification_code: str = ""
 async def cmd_set_saving_rate(ctx: CommandContext, saving_rate: str):
     try:
         rate = Decimal(saving_rate.replace('%', '')) / 100
-        ctx.character.saving_rate = min(max(rate, 0), 1)
+        ctx.character.saving_rate = min(max(rate, Decimal(0)), Decimal(1))
         await ctx.character.asave(update_fields=['saving_rate'])
         asyncio.create_task(show_popup(ctx.http_client_mod, _("<Title>Savings rate saved</>\n\n{rate:.0f}% of your earnings will automatically go into your bank account").format(
             rate=ctx.character.saving_rate * 100
@@ -137,7 +135,7 @@ async def cmd_set_saving_rate(ctx: CommandContext, saving_rate: str):
 async def cmd_set_repayment_rate(ctx: CommandContext, repayment_rate: str):
     try:
         rate = Decimal(repayment_rate.replace('%', '')) / 100
-        ctx.character.loan_repayment_rate = min(max(rate, 0), 1)
+        ctx.character.loan_repayment_rate = min(max(rate, Decimal(0)), Decimal(1))
         await ctx.character.asave(update_fields=['loan_repayment_rate'])
         asyncio.create_task(show_popup(ctx.http_client_mod, _("<Title>Loan repayment rate saved</>\n\n{rate:.0f}% of your earnings will automatically go repaying loans, if any").format(
             rate=ctx.character.loan_repayment_rate * 100

@@ -1,4 +1,5 @@
 import asyncio
+from typing import Optional
 from amc.command_framework import registry, CommandContext
 from amc.mod_server import (
     show_popup, despawn_by_tag,
@@ -18,8 +19,8 @@ from amc.utils import fuzzy_find_player
 
 
 @registry.register("/spawn_displays", description=gettext_lazy("Spawn display vehicles"), category="Admin")
-async def cmd_spawn_displays(ctx: CommandContext, display_id: int = None):
-    if not ctx.player_info.get('bIsAdmin'):
+async def cmd_spawn_displays(ctx: CommandContext, display_id: Optional[int] = None):
+    if not ctx.player_info or not ctx.player_info.get('bIsAdmin'):
         return
     qs = CharacterVehicle.objects.select_related('character').filter(spawn_on_restart=True)
     if display_id:
@@ -38,13 +39,13 @@ async def cmd_spawn_displays(ctx: CommandContext, display_id: int = None):
 
 @registry.register("/spawn_dealerships", description=gettext_lazy("Spawn dealership vehicles"), category="Admin")
 async def cmd_spawn_dealerships(ctx: CommandContext):
-    if ctx.player_info.get('bIsAdmin'):
+    if ctx.player_info and ctx.player_info.get('bIsAdmin'):
         async for vd in VehicleDealership.objects.filter(spawn_on_restart=True):
             await vd.spawn(ctx.http_client_mod)
 
 @registry.register("/spawn_assets", description=gettext_lazy("Spawn world assets"), category="Admin")
 async def cmd_spawn_assets(ctx: CommandContext):
-    if ctx.player_info.get('bIsAdmin'):
+    if ctx.player_info and ctx.player_info.get('bIsAdmin'):
         async for wt in WorldText.objects.all():
             await spawn_assets(ctx.http_client_mod, wt.generate_asset_data())
         async for wo in WorldObject.objects.all():
@@ -52,15 +53,17 @@ async def cmd_spawn_assets(ctx: CommandContext):
 
 @registry.register("/spawn_garages", description=gettext_lazy("Spawn garages"), category="Admin")
 async def cmd_spawn_garages(ctx: CommandContext):
-    if ctx.player_info.get('bIsAdmin'):
+    if ctx.player_info and ctx.player_info.get('bIsAdmin'):
         async for g in Garage.objects.filter(spawn_on_restart=True):
+            if g.config is None:
+                continue
             resp = await spawn_garage(ctx.http_client_mod, g.config['Location'], g.config['Rotation'])
             g.tag = resp.get('tag')
             await g.asave()
 
 @registry.register("/spawn_garage", description=gettext_lazy("Spawn a single garage"), category="Admin")
 async def cmd_spawn_garage_single(ctx: CommandContext, name: str):
-    if ctx.player_info.get('bIsAdmin'):
+    if ctx.player_info and ctx.player_info.get('bIsAdmin'):
         loc = ctx.player_info['Location']
         loc['Z'] -= 100
         rot = ctx.player_info.get('Rotation', {})
@@ -70,8 +73,8 @@ async def cmd_spawn_garage_single(ctx: CommandContext, name: str):
         await Garage.objects.acreate(config={'Location': loc, 'Rotation': rot}, notes=name.strip(), tag=tag)
 
 @registry.register("/spawn", description=gettext_lazy("Spawn a vehicle"), category="Admin")
-async def cmd_spawn(ctx: CommandContext, vehicle_label: str = None):
-    if not ctx.player_info.get('bIsAdmin'):
+async def cmd_spawn(ctx: CommandContext, vehicle_label: Optional[str] = None):
+    if not ctx.player_info or not ctx.player_info.get('bIsAdmin'):
         await ctx.reply(_("Admin-only"))
         return
     
@@ -87,8 +90,10 @@ async def cmd_spawn(ctx: CommandContext, vehicle_label: str = None):
 
 @registry.register("/exit", description=gettext_lazy("Force exit vehicle (Admin)"), category="Admin")
 async def cmd_exit(ctx: CommandContext, target_player_name: str):
-    if ctx.player_info.get('bIsAdmin'):
+    if ctx.player_info and ctx.player_info.get('bIsAdmin'):
         players = await get_players_mod(ctx.http_client_mod)
+        if players is None:
+            return
         target_guid = next((p['CharacterGuid'] for p in players if p['PlayerName'] == target_player_name), None)
         if target_guid:
             await force_exit_vehicle(ctx.http_client_mod, target_guid)
@@ -96,7 +101,7 @@ async def cmd_exit(ctx: CommandContext, target_player_name: str):
 
 @registry.register("/tp_player", description=gettext_lazy("Teleport a player to a location (Admin)"), category="Admin")
 async def cmd_tp_player(ctx: CommandContext, target_player_name: str, location_name: str):
-    if not ctx.player_info.get('bIsAdmin'):
+    if not ctx.player_info or not ctx.player_info.get('bIsAdmin'):
         await ctx.reply(_("Admin-only"))
         return
 

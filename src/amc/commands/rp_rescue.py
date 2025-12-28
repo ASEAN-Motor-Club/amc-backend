@@ -68,19 +68,20 @@ async def cmd_rescue(ctx: CommandContext, message: str = ""):
     # 1. Notify In-Game Rescuers
     players = await get_players_mod(ctx.http_client_mod)
     vehicles = await list_player_vehicles(ctx.http_client_mod, ctx.player.unique_id, active=True)
-    vehicle_names = '+'.join([format_key_string(v.get('VehicleName', '?')) for v in vehicles.values()])
+    vehicle_names = '+'.join([format_key_string(v.get('VehicleName', '?')) for v in vehicles.values()]) if vehicles else _('Vehicles')
     
     sent = False
-    for p in players:
-        if '[ARWRS]' in p.get('PlayerName', '') or '[DOT]' in p.get('PlayerName', ''): 
-            asyncio.create_task(send_system_message(
-                ctx.http_client_mod, 
-                _("{name} needs help!").format(
-                    name=ctx.character.name
-                ),
-                character_guid=p.get('CharacterGuid'),
-            ))
-            sent = True
+    if players:
+        for p in players:
+            if '[ARWRS]' in p.get('PlayerName', '') or '[DOT]' in p.get('PlayerName', ''): 
+                asyncio.create_task(send_system_message(
+                    ctx.http_client_mod, 
+                    _("{name} needs help!").format(
+                        name=ctx.character.name
+                    ),
+                    character_guid=p.get('CharacterGuid'),
+                ))
+                sent = True
     
     # 2. Create DB Entry
     rescue_request = await RescueRequest.objects.acreate(character=ctx.character, message=message)
