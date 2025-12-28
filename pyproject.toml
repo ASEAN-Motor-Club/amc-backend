@@ -72,5 +72,9 @@ dev = [
     "pyrefly>=0.46.1",
     "ruff>=0.14.10",
     "taskipy>=1.14.1",
+    "dpytest>=0.7.0",
+    "pytest>=8.0.0",
+    "pytest-asyncio>=0.24.0",
+    "pytest-django>=4.9.0",
 ]
 
