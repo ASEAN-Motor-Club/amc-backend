@@ -3,6 +3,7 @@ from django.contrib.admin.sites import AdminSite
 from amc.models import SubsidyRule
 from amc.admin import SubsidyRuleAdmin
 from decimal import Decimal
+from typing import cast, Any
 
 class MockSuperUser:
     def has_perm(self, perm):
@@ -27,7 +28,7 @@ class SubsidyAdminTest(TestCase):
         request = self.factory.post('/admin/amc/subsidyrule/reorder/', {
             'ids[]': [self.r1.id, self.r2.id, self.r3.id]
         })
-        request.user = MockSuperUser() # Not strictly checked in the view currently unless admin view wrap enforces it
+        request.user = cast(Any, MockSuperUser()) # Not strictly checked in the view currently unless admin view wrap enforces it
         
         response = self.admin.reorder_view(request)
         self.assertEqual(response.status_code, 200)

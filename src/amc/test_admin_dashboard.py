@@ -5,6 +5,7 @@ from datetime import timedelta
 from decimal import Decimal
 from amc.models import MinistryDashboard, MinistryTerm, Player, SubsidyRule, DeliveryJob
 from amc.admin import MinistryDashboardAdmin
+from typing import cast, Any
 
 class MockSuperUser:
     def has_perm(self, perm):
@@ -23,9 +24,9 @@ class MinistryDashboardAdminTest(TestCase):
 
     def test_dashboard_view_loads_empty(self):
         request = self.factory.get('/admin/amc/ministrydashboard/')
-        request.user = MockSuperUser()
+        request.user = cast(Any, MockSuperUser())
         
-        response = self.admin.changelist_view(request)
+        response = cast(Any, self.admin.changelist_view(request))
         self.assertEqual(response.status_code, 200)
         
         # Check context
@@ -57,9 +58,9 @@ class MinistryDashboardAdminTest(TestCase):
         )
         
         request = self.factory.get('/admin/amc/ministrydashboard/')
-        request.user = MockSuperUser()
+        request.user = cast(Any, MockSuperUser())
         
-        response = self.admin.changelist_view(request)
+        response = cast(Any, self.admin.changelist_view(request))
         self.assertEqual(response.status_code, 200)
         
         context = response.context_data
