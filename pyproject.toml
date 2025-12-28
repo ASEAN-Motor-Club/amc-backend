@@ -44,15 +44,6 @@ allowedUntypedLibraries = [
 [tool.hatch.build.targets.wheel]
 sources = ["src"]
 include = ["src/manage.py"]
-packages = [
-  "src/amc_backend",
-  "src/amc",
-  "src/amc_cogs",
-  "src/amc_finance",
-  "src/necesse",
-  "src/manage.py",
-  "src/locale",
-]
 
 [tool.pyrefly]
 project-includes = [
