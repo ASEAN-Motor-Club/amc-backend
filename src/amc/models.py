@@ -18,7 +18,7 @@ from django.contrib.auth import get_user_model
 from django.contrib.postgres.fields import DateTimeRangeField
 from django.contrib.postgres.search import SearchVector
 from django.contrib.postgres.indexes import GinIndex
-from typing import override, final, ClassVar, TYPE_CHECKING
+from typing import override, final, ClassVar, TYPE_CHECKING, Optional
 from amc.server_logs import (
   PlayerVehicleLogEvent,
   PlayerEnteredVehicleLogEvent,
@@ -85,6 +85,8 @@ class Player(models.Model):
     ministry_candidacies: models.Manager["MinistryCandidacy"]
     ministry_votes: models.Manager["MinistryVote"]
     delivered_cargos: models.Manager["ServerCargoArrivedLog"]
+    character_names: list[str]
+    characters_count: int
 
   objects: ClassVar[PlayerManager] = PlayerManager()
 
@@ -233,6 +235,8 @@ class Character(models.Model):
     chat_logs: models.Manager["PlayerChatLog"]
     restock_depot_logs: models.Manager["PlayerRestockDepotLog"]
     vehicle_logs: models.Manager["PlayerVehicleLog"]
+    last_login: Optional[timezone.datetime]
+    total_session_time: Optional[timedelta]
 
   INVALID_GUID = "00000000000000000000000000000000"
 
@@ -1346,6 +1350,9 @@ class DeliveryJob(models.Model):
     db_persist=True,
   )
 
+  if TYPE_CHECKING:
+    bonus_percentage: int
+
   objects: ClassVar[DeliveryJobManager] = DeliveryJobManager()
 
   def __str__(self):
@@ -1698,6 +1705,9 @@ class SubsidyRule(models.Model):
   # Ministry Budget Tracking
   allocation = models.DecimalField(max_digits=16, decimal_places=2, default=0, help_text="Ministry allocated budget for this rule")
   spent = models.DecimalField(max_digits=16, decimal_places=2, default=0, help_text="Amount spent from the allocation")
+
+  if TYPE_CHECKING:
+    reward_percentage: int
 
   def __str__(self):
     return f"{self.name} ({self.priority})"
