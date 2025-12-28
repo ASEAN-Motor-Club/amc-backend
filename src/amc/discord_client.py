@@ -15,7 +15,8 @@ from amc_cogs.leaderboard import LeaderboardCog
 
 class AMCDiscordBot(commands.Bot):
   def __init__(self, *args, **kwargs):
-    super().__init__(*args, command_prefix="/", **kwargs)
+    kwargs.setdefault('command_prefix', '/')
+    super().__init__(*args, **kwargs)
 
   async def setup_hook(self):
     self.http_client_game = aiohttp.ClientSession(base_url=settings.GAME_SERVER_API_URL)
