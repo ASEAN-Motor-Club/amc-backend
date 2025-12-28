@@ -10,7 +10,11 @@ from django.db.models import F, Count, Window
 from django.db.models.functions import RowNumber
 from django.contrib.postgres.aggregates import ArrayAgg
 from django.template.response import TemplateResponse
+from typing import cast, Any, TYPE_CHECKING
+if TYPE_CHECKING:
+    from .models import CharacterQuerySet, DeliveryJobQuerySet
 from .models import (
+  TeamMembership,
   Player,
   Ticket,
   Character,
@@ -83,7 +87,7 @@ class CharacterInlineAdmin(admin.TabularInline):
     return character.total_session_time
 
   def get_queryset(self, request):
-    qs = super().get_queryset(request)
+    qs = cast("CharacterQuerySet", super().get_queryset(request))
     return qs.with_last_login().with_total_session_time()
 
 
@@ -101,12 +105,12 @@ class TicketAdmin(admin.ModelAdmin):
   list_filter = ['infringement']
 
 class TeamPlayerInlineAdmin(admin.TabularInline):
-  model = Team.players.through
+  model = TeamMembership
   autocomplete_fields = ['player', 'character']
   show_change_link = True
 
 class PlayerTeamInlineAdmin(admin.TabularInline):
-  model = Player.teams.through
+  model = TeamMembership
   show_change_link = True
   autocomplete_fields = ['character']
 
@@ -163,7 +167,7 @@ class CharacterAdmin(admin.ModelAdmin):
     return obj.total_session_time
 
   def get_queryset(self, request):
-    qs = super().get_queryset(request)
+    qs = cast("CharacterQuerySet", super().get_queryset(request))
     return qs.with_last_login().with_total_session_time().order_by(F('last_login').desc(nulls_last=True))
 
 class PlayerVehicleLogInlineAdmin(admin.TabularInline):
@@ -214,7 +218,7 @@ class SongRequestLogAdmin(admin.ModelAdmin):
 class PlayerStatusLogAdmin(admin.ModelAdmin):
   list_display = ['character', 'login_time', 'logout_time', 'duration']
   list_select_related = ['character', 'character__player']
-  ordering = [F('timespan__startswith').desc(nulls_last=True)]
+  ordering = [cast(Any, F('timespan__startswith').desc(nulls_last=True))]
   exclude = ['original_log']
   readonly_fields = ['character', 'login_time', 'logout_time']
   search_fields = ['character__name', 'character__player__unique_id']
@@ -548,7 +552,7 @@ class DeliveryJobAdmin(admin.ModelAdmin):
     return async_to_sync(job.is_postable)()
 
   def get_queryset(self, request):
-    qs = super().get_queryset(request)
+    qs = cast("DeliveryJobQuerySet", super().get_queryset(request))
     return (qs
       .annotate_active()
       .prefetch_related('source_points', 'destination_points', 'cargos')
@@ -570,7 +574,7 @@ class DeliveryJobAdmin(admin.ModelAdmin):
       if 'template' in request.GET:
           try:
               template = DeliveryJobTemplate.objects.get(pk=request.GET['template'])
-              initial.update({
+              cast(dict[str, Any], initial).update({
                   'name': template.name,
                   'description': template.description,
                   'quantity_requested': template.default_quantity,
@@ -654,14 +658,14 @@ class SubsidyAreaAdmin(admin.ModelAdmin):
             )
         }
 
-    def get_form(self, request, obj=None, **kwargs):
+    def get_form(self, request, obj=None, change=False, **kwargs):
         defaults = {
             'widgets': {
                 'polygon': AMCOpenLayersWidget,
             }
         }
         defaults.update(kwargs)
-        return super().get_form(request, obj, **defaults)
+        return super().get_form(request, obj, change, **defaults)
 
 
 @admin.register(SubsidyRule)
@@ -789,4 +793,4 @@ class MinistryDashboardAdmin(admin.ModelAdmin):
             'dashboard_stats': json.dumps(stats),
             **(extra_context or {}),
         }
-        return TemplateResponse(request, self.change_list_template, context)
+        return TemplateResponse(request, cast(Any, self.change_list_template), context)
