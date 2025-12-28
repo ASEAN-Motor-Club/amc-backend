@@ -7,7 +7,7 @@ from django.utils.translation import gettext as _, gettext_lazy
 
 @registry.register(["/teleport", "/tp"], description=gettext_lazy("Teleport to coordinates (Admin Only)"), category="Teleportation")
 async def cmd_tp_coords(ctx: CommandContext, x: int, y: int, z: int):
-    if ctx.player_info.get('bIsAdmin'):
+    if ctx.player_info and ctx.player_info.get('bIsAdmin'):
         await teleport_player(ctx.http_client_mod, ctx.player.unique_id, {'X': x, 'Y': y, 'Z': z}, no_vehicles=False)
     else:
         await ctx.reply(_("Admin Only"))
