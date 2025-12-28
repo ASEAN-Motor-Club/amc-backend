@@ -9,7 +9,9 @@ User = get_user_model()
 
 class DeliveryJobAdminTestCase(TestCase):
     def setUp(self):
-        self.user = User.objects.create_superuser(
+        from django.contrib.auth.models import UserManager
+        from typing import cast
+        self.user = cast(UserManager, User.objects).create_superuser(
             'admin', 'admin@example.com', 'password'
         )
         self.client.login(username='admin', password='password')
@@ -142,4 +144,5 @@ class DeliveryJobAdminTestCase(TestCase):
         response = self.client.get(url)
         # Should redirect to login
         self.assertEqual(response.status_code, 302)
-        self.assertIn('/admin/login/', response.url)
+        # Type safe access or ignore
+        self.assertIn('/admin/login/', getattr(response, 'url', ''))

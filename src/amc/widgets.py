@@ -41,7 +41,7 @@ class AMCOpenLayersWidget(OSMWidget):
                    x, y = coords[0], coords[1]
                    new_x = x - MAP_REAL_X_LEFT
                    new_y = -(y - MAP_REAL_Y_TOP) + MAP_REAL_SIZE
-                   return (new_x, new_y) + coords[2:]
+                   return (new_x, new_y) + tuple(coords[2:])
                 else:
                    return tuple(transform_coords(item) for item in coords)
 
@@ -75,7 +75,7 @@ class AMCOpenLayersWidget(OSMWidget):
                    x, _y = coords[0], coords[1]
                    new_x = x + MAP_REAL_X_LEFT
                    new_y = -(coords[1] - MAP_REAL_SIZE) + MAP_REAL_Y_TOP
-                   return (new_x, new_y) + coords[2:]
+                   return (new_x, new_y) + tuple(coords[2:])
                 else:
                    return tuple(transform_coords(item) for item in coords)
 

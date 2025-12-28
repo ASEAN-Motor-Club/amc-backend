@@ -39,7 +39,7 @@ class IntegrationCommandWorkflowTest(TestCase):
              patch('amc.models.BotInvocationLog.objects.acreate', new=AsyncMock()):
             
             # 3. Simulate Log Event
-            log_event = PlayerChatMessageLogEvent(timestamp, player_name, str(player_id), "/help")
+            log_event = PlayerChatMessageLogEvent(timestamp, player_name, player_id, "/help")
             
             ctx = {
                 'http_client': MagicMock(),
