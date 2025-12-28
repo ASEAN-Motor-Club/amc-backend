@@ -1,10 +1,11 @@
 import asyncio
+from typing import Any, cast
+import urllib.parse
 from yarl import URL
-import urllib
 
 async def game_api_request(session, url, method='get', password='', params={}):
   req_params = {'password': password, **params}
-  params_str = urllib.parse.urlencode(req_params, quote_via=urllib.parse.quote)
+  params_str = urllib.parse.urlencode(req_params, quote_via=cast(Any, urllib.parse.quote))
   try:
     fn = getattr(session, method)
   except AttributeError as e:

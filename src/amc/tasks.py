@@ -83,8 +83,9 @@ async def aget_or_create_character(player_name, player_id, http_client_mod=None)
     while True:
       try:
         player_info = await get_player(http_client_mod, player_id)
-        character_guid = player_info.get('CharacterGuid')
-        if character_guid != Character.INVALID_GUID and i < 10:
+        if player_info:
+          character_guid = player_info.get('CharacterGuid')
+        if character_guid and character_guid != Character.INVALID_GUID and i < 10:
           break
         await asyncio.sleep(1)
         i = i + 1
@@ -227,7 +228,7 @@ async def process_log_event(event: LogEvent, http_client=None, http_client_mod=N
           http_client_mod=http_client_mod,
           discord_client=discord_client,
           player_info=player_info or {}, # Ensure dict
-          is_current_event=is_current_event
+          is_current_event=bool(is_current_event)
       )
       
       if await registry.execute(message, cmd_ctx):
@@ -286,7 +287,7 @@ Not everyone likes to be roughed up!
     case PlayerLoginLogEvent(timestamp, player_name, player_id):
       character, player, character_created, player_info = await aget_or_create_character(player_name, player_id, http_client_mod)
       if ctx.get('startup_time') and timestamp > ctx.get('startup_time'):
-        if 'DOT' in player_info['PlayerName']:
+        if player_info and 'DOT' in player_info.get('PlayerName', ''):
           if not (await Team.objects.filter(tag='DOT', players=player).aexists()):
             asyncio.create_task(
               show_popup(http_client_mod, "You are not authorised to use the DOT tag, please remove it then rejoin the server", character_guid=character.guid, player_id=str(player.unique_id))
@@ -313,16 +314,20 @@ Not everyone likes to be roughed up!
             asyncio.create_task(
               announce(welcome_message, http_client, delay=5)
             )
-          if (is_new_player or player.suspect) and player_info.get('Location') is not None and player_info.get('VehicleKey') != "None":
-            location = Point(**{
-              axis.lower(): value for axis, value in player_info.get('Location').items()
-            })
-            dps = DeliveryPoint.objects.filter(coord__isnull=False).only('coord')
-            spawned_near_delivery_point = False
-            async for dp in dps:
-              if location.distance(dp.coord) < 400:
-                spawned_near_delivery_point = True
-                break
+          if (is_new_player or player.suspect) and player_info and player_info.get('Location') is not None and player_info.get('VehicleKey') != "None":
+            loc_data = player_info.get('Location')
+            if loc_data:
+              location = Point(**{
+                axis.lower(): value for axis, value in loc_data.items()
+              })
+              dps = DeliveryPoint.objects.filter(coord__isnull=False).only('coord')
+              spawned_near_delivery_point = False
+              async for dp in dps:
+                if location.distance(dp.coord) < 400:
+                  spawned_near_delivery_point = True
+                  break
+            else:
+               spawned_near_delivery_point = False
 
             if spawned_near_delivery_point:
               impound_location = {
@@ -508,8 +513,13 @@ Not everyone likes to be roughed up!
           )
       async def spawn_garages():
         async for g in Garage.objects.filter(spawn_on_restart=True):
-          location = g.config['Location']
-          rotation = g.config['Rotation']
+          if not g.config:
+            continue
+          location = g.config.get('Location')
+          rotation = g.config.get('Rotation')
+          if not location:
+            continue
+            
           resp = await spawn_garage(
             http_client_mod,
             location,

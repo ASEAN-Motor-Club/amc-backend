@@ -146,6 +146,7 @@ LogEvent = (
   | CompanyRemovedLogEvent
   | AnnouncementLogEvent
   | SecurityAlertLogEvent
+  | ServerStartedLogEvent
   | UnknownLogEntry
 )
 
