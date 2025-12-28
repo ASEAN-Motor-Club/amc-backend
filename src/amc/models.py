@@ -18,7 +18,7 @@ from django.contrib.auth import get_user_model
 from django.contrib.postgres.fields import DateTimeRangeField
 from django.contrib.postgres.search import SearchVector
 from django.contrib.postgres.indexes import GinIndex
-from typing import override, final
+from typing import override, final, ClassVar, TYPE_CHECKING
 from amc.server_logs import (
   PlayerVehicleLogEvent,
   PlayerEnteredVehicleLogEvent,
@@ -48,6 +48,10 @@ class PlayerQuerySet(models.QuerySet):
     )
 
 @final
+class PlayerManager(models.Manager.from_queryset(PlayerQuerySet)): # type: ignore[misc]
+  pass
+
+@final
 class Player(models.Model):
   unique_id = models.PositiveBigIntegerField(primary_key=True)
   discord_user_id = models.PositiveBigIntegerField(unique=True, null=True, blank=True)
@@ -60,7 +64,29 @@ class Player(models.Model):
   language = models.CharField(max_length=10, default='en-gb', choices=[('en-gb', 'English'), ('id', 'Indonesian')])
   notes = models.TextField(blank=True)
 
-  objects = models.Manager.from_queryset(PlayerQuerySet)()
+  if TYPE_CHECKING:
+    characters: "CharacterManager"
+    team_memberships: models.Manager["TeamMembership"]
+    teams_owned: models.Manager["Team"]
+    teams: models.Manager["Team"]
+    scheduled_events: "ScheduledEventManager"
+    outbox_messages: models.Manager["PlayerMailMessage"]
+    inbox_messages: models.Manager["PlayerMailMessage"]
+    contracts_signed: models.Manager["ServerSignContractLog"]
+    passengers_delivered: models.Manager["ServerPassengerArrivedLog"]
+    tow_requests_delivered: models.Manager["ServerTowRequestArrivedLog"]
+    tickets: models.Manager["Ticket"]
+    tickets_issued: models.Manager["Ticket"]
+    decals: models.Manager["VehicleDecal"]
+    shifts: models.Manager["PlayerShift"]
+    rescue_responses: models.Manager["RescueRequest"]
+    ministry_terms: models.Manager["MinistryTerm"]
+    elections_won: models.Manager["MinistryElection"]
+    ministry_candidacies: models.Manager["MinistryCandidacy"]
+    ministry_votes: models.Manager["MinistryVote"]
+    delivered_cargos: models.Manager["ServerCargoArrivedLog"]
+
+  objects: ClassVar[PlayerManager] = PlayerManager()
 
   @override
   def __str__(self) -> str:
@@ -68,7 +94,7 @@ class Player(models.Model):
       return self.discord_name
     character = self.characters.first()
     if character is None:
-      return self.unique_id
+      return str(self.unique_id)
     return f"{character.name} {self.unique_id}"
 
   @property
@@ -102,7 +128,12 @@ class CharacterQuerySet(models.QuerySet):
       )
     )
 
-class CharacterManager(models.Manager):
+@final
+class CharacterManager(models.Manager.from_queryset(CharacterQuerySet)): # type: ignore[misc]
+  if TYPE_CHECKING:
+    model: type["Character"]
+    def get_queryset(self) -> CharacterQuerySet: ...
+
   async def aget_or_create_character_player(self, player_name, player_id, character_guid=None):
     """
     Gets or creates a character and its associated player.
@@ -191,7 +222,17 @@ class Character(models.Model):
   reject_ubi = models.BooleanField(default=False)
   ubi_multiplier = models.FloatField(default=1.0)
 
-  objects = CharacterManager.from_queryset(CharacterQuerySet)()
+  objects: ClassVar[CharacterManager] = CharacterManager()
+
+  if TYPE_CHECKING:
+    team_memberships: models.Manager["TeamMembership"]
+    game_events: models.Manager["GameEvent"]
+    bot_invocation_logs: models.Manager["BotInvocationLog"]
+    song_request_logs: models.Manager["SongRequestLog"]
+    status_logs: models.Manager["PlayerStatusLog"]
+    chat_logs: models.Manager["PlayerChatLog"]
+    restock_depot_logs: models.Manager["PlayerRestockDepotLog"]
+    vehicle_logs: models.Manager["PlayerVehicleLog"]
 
   INVALID_GUID = "00000000000000000000000000000000"
 
@@ -267,6 +308,8 @@ class RaceSetup(models.Model):
   @override
   def __str__(self):
     try:
+      if self.config is None:
+        return "Unknown race setup (no config)"
       route_name = self.config['Route']['RouteName']
       num_laps = self.config['NumLaps']
       return f"{route_name} ({num_laps} laps) - {self.hash[:8]}"
@@ -277,20 +320,26 @@ class RaceSetup(models.Model):
   def route_name(self):
     if self.name is not None:
       return self.name
+    if self.config is None:
+      return None
     return self.config.get('Route', {}).get('RouteName')
 
   @property
   def num_laps(self):
+    if self.config is None:
+      return 0
     return self.config.get('NumLaps', 0)
 
   @property
   def vehicles(self):
-    # TODO map strings
+    if self.config is None:
+      return []
     return self.config.get('VehicleKeys', [])
 
   @property
   def engines(self):
-    # TODO map strings
+    if self.config is None:
+      return []
     return self.config.get('EngineKeys', [])
 
   @property
@@ -299,6 +348,8 @@ class RaceSetup(models.Model):
 
   @property
   def waypoints(self):
+    if self.config is None:
+      return []
     return self.config.get('Route', {}).get('Waypoints', [])
 
 
@@ -375,6 +426,10 @@ class ScheduledEventQuerySet(models.QuerySet):
 
 
 @final
+class ScheduledEventManager(models.Manager.from_queryset(ScheduledEventQuerySet)): # type: ignore[misc]
+  pass
+
+@final
 class ScheduledEvent(models.Model):
   name = models.CharField(max_length=200)
   start_time = models.DateTimeField()
@@ -393,7 +448,7 @@ class ScheduledEvent(models.Model):
   description_in_game = models.TextField(blank=True, help_text="This will be shown when players use /events. Defaults to description")
   time_trial = models.BooleanField(default=False)
   staggered_start_delay = models.PositiveIntegerField(default=0, help_text="Delay between staggered start, in seconds. This can be overridden in the game")
-  objects = models.Manager.from_queryset(ScheduledEventQuerySet)()
+  objects: ClassVar[ScheduledEventManager] = ScheduledEventManager()
 
   @override
   def __str__(self):
@@ -509,6 +564,10 @@ class ParticipantQuerySet(models.QuerySet):
     )
 
 @final
+class ParticipantManager(models.Manager.from_queryset(ParticipantQuerySet)): # type: ignore[misc]
+  pass
+
+@final
 class GameEventCharacter(models.Model):
   character = models.ForeignKey(Character, on_delete=models.CASCADE)
   game_event = models.ForeignKey(GameEvent, on_delete=models.CASCADE, related_name='participants')
@@ -534,7 +593,7 @@ class GameEventCharacter(models.Model):
   wrong_vehicle = models.BooleanField(default=False)
   disqualified = models.BooleanField(default=False)
   finished = models.BooleanField(default=False)
-  objects = models.Manager.from_queryset(ParticipantQuerySet)()
+  objects: ClassVar[ParticipantManager] = ParticipantManager()
 
   class Meta:
     ordering = ['disqualified', '-finished', '-laps', '-section_index', 'net_time']
@@ -580,6 +639,10 @@ class ChampionshipPointQuerySet(models.QuerySet):
     )
 
 @final
+class ChampionshipPointManager(models.Manager.from_queryset(ChampionshipPointQuerySet)): # type: ignore[misc]
+  pass
+
+@final
 class ChampionshipPoint(models.Model):
   championship = models.ForeignKey(Championship, models.SET_NULL, null=True)
   participant = models.OneToOneField(GameEventCharacter, models.CASCADE, related_name='championship_point')
@@ -587,7 +650,7 @@ class ChampionshipPoint(models.Model):
   points = models.PositiveIntegerField(default=0, blank=True)
   prize = models.PositiveIntegerField(default=0, blank=True)
 
-  objects = models.Manager.from_queryset(ChampionshipPointQuerySet)()
+  objects: ClassVar[ChampionshipPointManager] = ChampionshipPointManager()
 
   event_prize_by_position = [900000, 540000, 360000, 300000, 240000, 180000, 150000, 120000, 105000, 105000]
   time_trial_prize_by_position = [300000, 180000, 120000, 100000, 80000, 60000, 50000, 40000, 35000, 35000]
@@ -638,13 +701,17 @@ class LapSectionTimeQuerySet(models.QuerySet):
 
 
 @final
+class LapSectionTimeManager(models.Manager.from_queryset(LapSectionTimeQuerySet)): # type: ignore[misc]
+  pass
+
+@final
 class LapSectionTime(models.Model):
   game_event_character = models.ForeignKey(GameEventCharacter, on_delete=models.CASCADE, related_name='lap_section_times')
   section_index = models.IntegerField()
   lap = models.IntegerField()
   rank = models.IntegerField()
   total_time_seconds = models.FloatField()
-  objects = models.Manager.from_queryset(LapSectionTimeQuerySet)()
+  objects: ClassVar[LapSectionTimeManager] = LapSectionTimeManager()
 
   class Meta:
     constraints = [
@@ -811,6 +878,7 @@ class PlayerVehicleLog(models.Model):
       )
     ]
 
+@final
 class CharacterLocationManager(models.Manager):
   def filter_character_activity(self, character, start_time, end_time):
     return self.filter(character=character, timestamp__gte=start_time, timestamp__lt=end_time).annotate(
@@ -827,7 +895,7 @@ class CharacterLocation(models.Model):
   character = models.ForeignKey(Character, on_delete=models.CASCADE, related_name='locations')
   location = models.PointField(srid=0, dim=3)
   vehicle_key = models.CharField(max_length=100, null=True, choices=VehicleKey)
-  objects = CharacterLocationManager() 
+  objects: ClassVar[CharacterLocationManager] = CharacterLocationManager() 
 
   class Meta:
     constraints = [
@@ -895,6 +963,11 @@ class DeliveryPointStorageQuerySet(models.QuerySet):
       )
     )
 
+@final
+class DeliveryPointStorageManager(models.Manager.from_queryset(DeliveryPointStorageQuerySet)): # type: ignore[misc]
+  pass
+
+
 class DeliveryPointStorage(models.Model):
   class Kind(models.TextChoices):
     INPUT = "IN", "Input"
@@ -906,7 +979,7 @@ class DeliveryPointStorage(models.Model):
   cargo = models.ForeignKey('Cargo', models.CASCADE, related_name='storages', null=True)
   amount = models.PositiveIntegerField()
   capacity = models.PositiveIntegerField(null=True, blank=True)
-  objects = models.Manager.from_queryset(DeliveryPointStorageQuerySet)()
+  objects: ClassVar[DeliveryPointStorageManager] = DeliveryPointStorageManager()
 
 @final
 class CharacterAFKReminder(models.Model):
@@ -1126,6 +1199,11 @@ class DeliveryJobTemplateQuerySet(models.QuerySet):
     ))
 
 @final
+class DeliveryJobTemplateManager(models.Manager.from_queryset(DeliveryJobTemplateQuerySet)): # type: ignore[misc]
+  pass
+
+
+@final
 class DeliveryJobTemplate(models.Model):
   name = models.CharField(max_length=200, help_text="Give the template a name")
   description = models.TextField(blank=True, null=True)
@@ -1143,7 +1221,7 @@ class DeliveryJobTemplate(models.Model):
   job_posting_probability = models.FloatField(default=1.0, help_text="The probability at which the job is posted. Defaults to 100% (1.0)")
   duration_hours = models.FloatField(default=5.0, help_text="The number of hours to complete the job")
 
-  objects = models.Manager.from_queryset(DeliveryJobTemplateQuerySet)()
+  objects: ClassVar[DeliveryJobTemplateManager] = DeliveryJobTemplateManager()
 
   def __str__(self):
     return self.name
@@ -1188,11 +1266,15 @@ class MinistryElection(models.Model):
   winner = models.ForeignKey(Player, on_delete=models.SET_NULL, null=True, blank=True, related_name='elections_won')
   term_created = models.OneToOneField('MinistryTerm', on_delete=models.SET_NULL, null=True, blank=True, related_name='election')
   is_processed = models.BooleanField(default=False)
+  
+  if TYPE_CHECKING:
+    candidates: models.Manager["MinistryCandidacy"]
+    votes: models.Manager["MinistryVote"]
 
   @property
   def phase(self):
     now = timezone.now()
-    if self.winner_id or self.term_created_id:
+    if self.winner_id or self.term_created:
       return self.Phase.FINALIZED
     if now < self.candidacy_end_at:
       return self.Phase.CANDIDACY
@@ -1210,6 +1292,9 @@ class MinistryCandidacy(models.Model):
   candidate = models.ForeignKey(Player, on_delete=models.CASCADE, related_name='ministry_candidacies')
   created_at = models.DateTimeField(auto_now_add=True)
   manifesto = models.TextField(blank=True)
+  
+  if TYPE_CHECKING:
+    votes: models.Manager["MinistryVote"]
 
   class Meta:
     unique_together = ('election', 'candidate')
@@ -1225,6 +1310,11 @@ class MinistryVote(models.Model):
 
   class Meta:
     unique_together = ('election', 'voter')
+
+
+@final
+class DeliveryJobManager(models.Manager.from_queryset(DeliveryJobQuerySet)): # type: ignore[misc]
+  pass
 
 
 @final
@@ -1256,7 +1346,7 @@ class DeliveryJob(models.Model):
     db_persist=True,
   )
 
-  objects = models.Manager.from_queryset(DeliveryJobQuerySet)()
+  objects: ClassVar[DeliveryJobManager] = DeliveryJobManager()
 
   def __str__(self):
     return f"{self.name} ({self.id})"

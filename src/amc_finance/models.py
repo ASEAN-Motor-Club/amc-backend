@@ -1,6 +1,7 @@
 from django.db import models
 from django.db.models import Sum
 from django.core.exceptions import ValidationError
+from typing import ClassVar, TYPE_CHECKING
 
 class Account(models.Model):
   """
@@ -45,6 +46,9 @@ class JournalEntry(models.Model):
   description = models.CharField(max_length=255)
   creator = models.ForeignKey('amc.Character', on_delete=models.PROTECT, null=True, blank=True)
   created_at = models.DateTimeField(auto_now_add=True)
+  
+  if TYPE_CHECKING:
+      entries: models.Manager["LedgerEntry"]
 
   def clean(self):
     """
@@ -91,6 +95,9 @@ class LedgerEntriesQuerySet(models.QuerySet):
   def filter_character_donations(self, character):
     return self.filter_donations().filter(journal_entry__creator=character)
 
+class LedgerEntryManager(models.Manager.from_queryset(LedgerEntriesQuerySet)): # type: ignore[misc]
+    pass
+
 class LedgerEntry(models.Model):
   """
   A single entry (a debit or a credit) in the ledger.
@@ -100,7 +107,7 @@ class LedgerEntry(models.Model):
   account = models.ForeignKey(Account, on_delete=models.PROTECT, related_name='entries')
   debit = models.DecimalField(max_digits=12, decimal_places=2, default=0.00)
   credit = models.DecimalField(max_digits=12, decimal_places=2, default=0.00)
-  objects = models.Manager.from_queryset(LedgerEntriesQuerySet)()
+  objects: ClassVar[LedgerEntryManager] = LedgerEntryManager()
 
   class Meta:
     # Ensures that an entry is either a debit or a credit, but not both.
