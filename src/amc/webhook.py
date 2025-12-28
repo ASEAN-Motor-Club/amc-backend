@@ -2,12 +2,13 @@ import json
 import asyncio
 import itertools
 from operator import attrgetter
-from datetime import datetime, timedelta
+from datetime import timedelta
 from django.utils import timezone
 from django.contrib.gis.geos import Point
 from django.db import transaction
 from asgiref.sync import sync_to_async
 from django.db.models import F, Q
+from typing import Any, cast
 from amc.game_server import announce
 from amc.mod_server import get_webhook_events2, show_popup, get_rp_mode
 from amc.subsidies import (
@@ -188,7 +189,7 @@ async def handle_contract_delivered(event, player, timestamp):
       except ServerSignContractLog.DoesNotExist:
         return 0, 0
   
-  log.finished_amount = F('finished_amount') + 1
+  log.finished_amount = cast(Any, F('finished_amount') + 1)
   await log.asave(update_fields=['finished_amount'])
   await log.arefresh_from_db()
   
@@ -351,7 +352,7 @@ async def handle_cargo_arrived(
 
     if is_rp_mode:
          # fixed bug: using cargo_subsidy instead of accumulator
-         delivery_data['subsidy'] = (cargo_subsidy * 1.5) + (payment * quantity * 0.5)
+         delivery_data['subsidy'] = int((cargo_subsidy * 1.5) + (payment * quantity * 0.5))
 
     job_id = job.id if job and not used_shortcut else None
     
@@ -567,7 +568,7 @@ def atomic_process_delivery(job_id, quantity, delivery_data):
       requested_remaining = job.quantity_requested - job.quantity_fulfilled
       quantity_to_add = min(requested_remaining, quantity)
       if quantity_to_add > 0:
-        job.quantity_fulfilled = F('quantity_fulfilled') + quantity_to_add
+        job.quantity_fulfilled = cast(Any, F('quantity_fulfilled') + quantity_to_add)
         job.save(update_fields=['quantity_fulfilled'])
         job.refresh_from_db(fields=['quantity_fulfilled'])
     
@@ -595,7 +596,7 @@ async def process_event(event, player, character, is_rp_mode=False, used_shortcu
   total_payment = 0
   subsidy = 0
   current_tz = timezone.get_current_timezone()
-  timestamp = datetime.fromtimestamp(event['timestamp'], tz=current_tz)
+  timestamp = timezone.datetime.fromtimestamp(event['timestamp'], tz=current_tz)
 
   if character:
     try:

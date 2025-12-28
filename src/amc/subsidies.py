@@ -74,9 +74,9 @@ def calculate_loan_repayment(payment, loan_balance, max_loan, character_repaymen
   loan_utilisation = loan_balance / max(max_loan, loan_balance)
   repayment_percentage = Decimal(0.5) + (Decimal(0.5) * loan_utilisation)
   if character_repayment_rate is not None:
-    repayment_percentage = max(repayment_percentage, character_repayment_rate)
+    repayment_percentage = max(repayment_percentage, Decimal(str(character_repayment_rate)))
 
-  repayment = min(loan_balance, max(Decimal(1), int(payment * Decimal(repayment_percentage))))
+  repayment = min(loan_balance, max(Decimal(1), Decimal(int(payment * Decimal(repayment_percentage)))))
   return repayment
 
 async def repay_loan_for_profit(character, payment, session):

@@ -1,4 +1,5 @@
 import asyncio
+from decimal import Decimal
 from datetime import timedelta
 from django.utils import timezone
 from amc.models import (
@@ -34,7 +35,7 @@ async def handout_ubi(ctx):
       grant_amount = ACTIVE_GRANT_AMOUNT
     else:
       grant_amount = AFK_GRANT_AMOUNT
-    amount = min(grant_amount, character.driver_level * grant_amount * character.ubi_multiplier / MAX_LEVEL)
+    amount = min(Decimal(str(grant_amount)), character.driver_level * Decimal(str(grant_amount)) * character.ubi_multiplier / MAX_LEVEL)
 
     await send_fund_to_player_wallet(amount, character, 'Universal Basic Income')
     await transfer_money(

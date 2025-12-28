@@ -9,7 +9,7 @@ from amc_finance.models import Account, JournalEntry, LedgerEntry
 
 
 from enum import Enum
-from typing import Optional, Tuple
+from typing import Optional, Tuple, Any, cast
 
 class LoanLimitReason(Enum):
   """Enumeration for reasons a character's loan may be limited."""
@@ -209,17 +209,17 @@ async def register_player_withdrawal(amount, character, player):
 LOAN_INTEREST_RATES = [0.1, 0.2, 0.3]
 
 def calc_loan_fee(amount, character, max_loan):
-  threshold = 0
-  fee = 0
+  threshold = Decimal(0)
+  fee = Decimal(0)
   for i, interest_rate in enumerate(LOAN_INTEREST_RATES, start=1):
     prev_threshold = threshold
-    threshold += max_loan / 2 ** i
-    amount_under_threshold = min(max(0, int(amount) - prev_threshold), threshold - prev_threshold)
+    threshold += max_loan / Decimal(2 ** i)
+    amount_under_threshold = min(max(Decimal(0), Decimal(amount) - prev_threshold), threshold - prev_threshold)
     if amount_under_threshold > 0:
-      fee += int(amount_under_threshold) * interest_rate
+      fee += Decimal(amount_under_threshold) * Decimal(interest_rate)
 
   if amount > threshold:
-    fee += (amount - threshold) * (interest_rate)
+    fee += (Decimal(amount) - threshold) * Decimal(interest_rate)
   return int(fee)
 
 async def register_player_take_loan(amount, character):
@@ -502,7 +502,7 @@ def create_journal_entry(date, description, creator_character, entries_data):
       else:
         balance_change = credit - debit
 
-      account.balance = F('balance') + balance_change
+      account.balance = cast(Any, F('balance') + balance_change)
       account.save(update_fields=['balance'])
 
   return journal_entry
@@ -722,7 +722,7 @@ async def escrow_ministry_funds(amount, job):
     term = await MinistryTerm.objects.aget(id=job.funding_term_id)
     await ministry_budget.arefresh_from_db()
     term.current_budget = ministry_budget.balance
-    term.created_jobs_count = F('created_jobs_count') + 1
+    term.created_jobs_count = cast(Any, F('created_jobs_count') + 1)
     await term.asave()
 
   return True
@@ -808,7 +808,7 @@ async def process_ministry_completion(job, bonus_amount):
        term = await MinistryTerm.objects.aget(id=job.funding_term_id)
        await ministry_budget.arefresh_from_db()
        term.current_budget = ministry_budget.balance
-       term.total_spent = F('total_spent') + (escrowed - rebate_amount)
+       term.total_spent = cast(Any, F('total_spent') + (escrowed - rebate_amount))
        await term.asave()
 
 
@@ -870,8 +870,8 @@ async def process_ministry_expiration(job):
       term = await MinistryTerm.objects.aget(id=job.funding_term_id)
       await ministry_budget.arefresh_from_db()
       term.current_budget = ministry_budget.balance
-      term.expired_jobs_count = F('expired_jobs_count') + 1
-      term.total_spent = F('total_spent') + burn_amount
+      term.expired_jobs_count = cast(Any, F('expired_jobs_count') + 1)
+      term.total_spent = cast(Any, F('total_spent') + burn_amount)
       await term.asave()
 
   # Clear escrow on job to prevent double refund
@@ -920,5 +920,5 @@ async def record_ministry_subsidy_spend(amount, term_id):
     term = await MinistryTerm.objects.aget(id=term_id)
     await ministry_budget.arefresh_from_db()
     term.current_budget = ministry_budget.balance
-    term.total_spent = F('total_spent') + amount
+    term.total_spent = cast(Any, F('total_spent') + amount)
     await term.asave()

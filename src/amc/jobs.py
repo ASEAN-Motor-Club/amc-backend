@@ -1,6 +1,7 @@
 import math
 import asyncio
 import random
+from typing import List
 import itertools
 from operator import attrgetter
 from datetime import timedelta
@@ -203,7 +204,7 @@ async def on_delivery_job_fulfilled(job, http_client):
     characters = {c.id: c async for c in Character.objects.filter(id__in=character_ids)}
 
     # Distribute the bonus proportionally.
-    contributors_names = []
+    contributors_names: List[str] = []
     for character_id, character_contribution in character_contributions.items():
         character_obj = characters.get(character_id)
         if not character_obj:
