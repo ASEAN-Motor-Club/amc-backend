@@ -12,29 +12,40 @@ from amc_cogs.jobs import JobsCog
 from amc_cogs.roleplay import RoleplayCog
 from amc_cogs.commerce import CommerceCog
 from amc_cogs.leaderboard import LeaderboardCog
+from amc_cogs.delivery_stats import DeliveryStatsCog
+
 
 class AMCDiscordBot(commands.Bot):
-  def __init__(self, *args, **kwargs):
-    kwargs.setdefault('command_prefix', '/')
-    super().__init__(*args, **kwargs)
+    def __init__(self, *args, **kwargs):
+        kwargs.setdefault("command_prefix", "/")
+        super().__init__(*args, **kwargs)
 
-  async def setup_hook(self):
-    self.http_client_game = aiohttp.ClientSession(base_url=settings.GAME_SERVER_API_URL)
-    self.http_client_mod = aiohttp.ClientSession(base_url=settings.MOD_SERVER_API_URL)
-    self.event_http_client_game = aiohttp.ClientSession(base_url=settings.EVENT_GAME_SERVER_API_URL)
-    self.event_http_client_mod = aiohttp.ClientSession(base_url=settings.EVENT_MOD_SERVER_API_URL)
-    guild = discord.Object(id=settings.DISCORD_GUILD_ID)
-    await self.add_cog(ModerationCog(self), guild=guild)
-    await self.add_cog(AuthenticationCog(self), guild=guild)
-    await self.add_cog(EventsCog(self), guild=guild)
-    await self.add_cog(EconomyCog(self), guild=guild)
-    await self.add_cog(ChatCog(self), guild=guild)
-    await self.add_cog(StatusCog(self), guild=guild)
-    await self.add_cog(JobsCog(self), guild=guild)
-    await self.add_cog(RoleplayCog(self), guild=guild)
-    await self.add_cog(CommerceCog(self), guild=guild)
-    await self.add_cog(LeaderboardCog(self), guild=guild)
-    await self.tree.sync(guild=guild)
+    async def setup_hook(self):
+        self.http_client_game = aiohttp.ClientSession(
+            base_url=settings.GAME_SERVER_API_URL
+        )
+        self.http_client_mod = aiohttp.ClientSession(
+            base_url=settings.MOD_SERVER_API_URL
+        )
+        self.event_http_client_game = aiohttp.ClientSession(
+            base_url=settings.EVENT_GAME_SERVER_API_URL
+        )
+        self.event_http_client_mod = aiohttp.ClientSession(
+            base_url=settings.EVENT_MOD_SERVER_API_URL
+        )
+        guild = discord.Object(id=settings.DISCORD_GUILD_ID)
+        await self.add_cog(ModerationCog(self), guild=guild)
+        await self.add_cog(AuthenticationCog(self), guild=guild)
+        await self.add_cog(EventsCog(self), guild=guild)
+        await self.add_cog(EconomyCog(self), guild=guild)
+        await self.add_cog(ChatCog(self), guild=guild)
+        await self.add_cog(StatusCog(self), guild=guild)
+        await self.add_cog(JobsCog(self), guild=guild)
+        await self.add_cog(RoleplayCog(self), guild=guild)
+        await self.add_cog(CommerceCog(self), guild=guild)
+        await self.add_cog(LeaderboardCog(self), guild=guild)
+        await self.add_cog(DeliveryStatsCog(self), guild=guild)
+        await self.tree.sync(guild=guild)
 
 
 intents = discord.Intents.default()
@@ -44,4 +55,3 @@ intents.message_content = True
 intents.guild_scheduled_events = True
 
 bot = AMCDiscordBot(intents=intents)
-
