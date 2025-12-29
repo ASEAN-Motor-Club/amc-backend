@@ -10,3 +10,4 @@ src/static/
 scripts
 spawns
 datatables
+.pre-commit-config.yaml
