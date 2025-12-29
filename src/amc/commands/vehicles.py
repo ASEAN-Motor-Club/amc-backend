@@ -8,9 +8,15 @@ import asyncio
 import itertools
 from django.utils.translation import gettext as _, gettext_lazy
 
-@registry.register(["/despawn", "/d"], description=gettext_lazy("Despawn your vehicle"), category="Vehicle Management")
+@registry.register(
+    ["/despawn", "/d"], 
+    description=gettext_lazy("Despawn your vehicle"), 
+    category="Vehicle Management",
+    deprecated=True,
+    deprecated_message="<Title>Command Deprecated</Title>\nThe /despawn command is no longer available.\nVehicles now despawn automatically."
+)
 async def cmd_despawn(ctx: CommandContext, category: str = "all"):
-    # Handled by server mod, we just register so it shows up on /help
+    # Deprecated - handled by the command framework
     pass
 
 @registry.register("/register_vehicles", description=gettext_lazy("Register your vehicles"), category="Vehicle Management")

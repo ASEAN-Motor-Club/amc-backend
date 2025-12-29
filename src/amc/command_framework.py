@@ -46,7 +46,7 @@ class CommandRegistry:
     def __init__(self):
         self.commands: List[Dict] = []
 
-    def register(self, command: Union[str, List[str]], description: Union[str, "_StrPromise"] = "", category: str = "General"):
+    def register(self, command: Union[str, List[str]], description: Union[str, "_StrPromise"] = "", category: str = "General", deprecated: bool = False, deprecated_message: Optional[str] = None):
         """
         Decorator to register a command.
         
@@ -54,6 +54,8 @@ class CommandRegistry:
             command: The command string (e.g. "/help") or list of aliases (e.g. ["/teleport", "/tp"])
             description: A short description of what the command does.
             category: The category the command belongs to (e.g. "General", "Events").
+            deprecated: If True, the command is deprecated and will not be executed.
+            deprecated_message: Optional custom message to show when a deprecated command is used.
         """
         def decorator(func: Callable):
             aliases = [command] if isinstance(command, str) else command
@@ -66,7 +68,9 @@ class CommandRegistry:
                 'pattern': re.compile(pattern, re.IGNORECASE),
                 'hints': get_type_hints(func),
                 'description': description,
-                'category': category
+                'category': category,
+                'deprecated': deprecated,
+                'deprecated_message': deprecated_message
             })
             return func
         return decorator
@@ -140,6 +144,13 @@ class CommandRegistry:
         for cmd_data in self.commands:
             match = cmd_data['pattern'].match(message)
             if match:
+                # Handle deprecated commands
+                if cmd_data.get('deprecated', False):
+                    if ctx.is_current_event:
+                        deprecation_msg = cmd_data.get('deprecated_message') or _("<Title>Command Deprecated</>\nThis command is no longer available.")
+                        await ctx.reply(deprecation_msg)
+                    return True  # Prevent forwarding to Discord
+                
                 kwargs = match.groupdict()
                 func = cmd_data['func']
                 hints = cmd_data['hints']
