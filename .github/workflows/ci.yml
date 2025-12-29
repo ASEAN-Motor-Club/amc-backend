@@ -15,4 +15,4 @@ jobs:
         with:
           github_access_token: ${{ secrets.GITHUB_TOKEN }}
       - name: Run Pyrefly
-        run: nix develop --command pyrefly check --exit-code
+        run: nix develop .#devShells.x86_64-linux.default --command pyrefly check --exit-code
