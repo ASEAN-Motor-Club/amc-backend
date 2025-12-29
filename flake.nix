@@ -511,6 +511,25 @@
             touch $out
           '';
 
+        checks.ruff =
+          pkgs.runCommand "ruff-check" {
+            buildInputs = [ pkgs.ruff ];
+          } ''
+            export RUFF_CACHE_DIR=$(mktemp -d)
+            ruff check ${./.} --cache-dir "$RUFF_CACHE_DIR"
+            touch $out
+          '';
+
+        checks.django-check =
+          pkgs.runCommand "django-check" {
+            buildInputs = [ virtualenv pkgs.libspatialite ];
+            inherit (mkPostgisDeps pkgs) GEOS_LIBRARY_PATH GDAL_LIBRARY_PATH;
+            SPATIALITE_LIBRARY_PATH = "${pkgs.libspatialite}/lib/libspatialite.${if pkgs.stdenv.hostPlatform.isDarwin then "dylib" else "so"}";
+          } ''
+            python ${./.}/src/manage.py check
+            touch $out
+          '';
+
         # Git hooks configuration
         pre-commit.settings.hooks = {
           ruff.enable = true;
