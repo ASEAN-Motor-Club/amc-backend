@@ -2,6 +2,7 @@ import logging
 import asyncio
 import discord
 import io
+# pyrefly: ignore [untyped-import]
 import matplotlib.pyplot as plt
 from datetime import time as dt_time, timedelta, timezone as dt_timezone
 from django.utils import timezone

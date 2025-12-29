@@ -537,7 +537,7 @@
             enable = true;
             name = "pyrefly";
             description = "Type check Python code with Pyrefly";
-            entry = "${pkgs.pyrefly}/bin/pyrefly check";
+            entry = "pyrefly check";
             files = "\\.py$";
             language = "system";
             pass_filenames = true;

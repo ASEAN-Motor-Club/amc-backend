@@ -23,7 +23,8 @@ from amc_finance.services import apply_interest_to_bank_accounts  # noqa: E402
 REDIS_SETTINGS = RedisSettings(**settings.REDIS_SETTINGS)
 
 bot_task_handle = None
-global loop
+# pyrefly: ignore [unknown-name]
+loop = None
 
 def run_blocking_bot():
   discord.utils.setup_logging(root=False)
@@ -32,6 +33,7 @@ def run_blocking_bot():
   except Exception as e:
     print(f"Error in bot thread: {e}")
   except asyncio.CancelledError:
+    # pyrefly: ignore [unused-coroutine]
     discord_client.close()
 
 async def run_discord():
@@ -104,18 +106,28 @@ class WorkerSettings:
       process_necesse_log,
     ]
     cron_jobs = [
+        # pyrefly: ignore [bad-argument-type]
         cron(monitor_webhook, second=set(range(0, 60, 4))),
+        # pyrefly: ignore [bad-argument-type]
         cron(monitor_webhook_test, second=set(range(0, 60, 4))),
+        # pyrefly: ignore [bad-argument-type]
         cron(monitor_locations, second=None),
+        # pyrefly: ignore [bad-argument-type]
         cron(handout_ubi, minute=set(range(0, 60, UBI_TASK_FREQUENCY)), second=37),
+        # pyrefly: ignore [bad-argument-type]
         cron(apply_interest_to_bank_accounts, hour=None, minute=0, second=0),
         # cron(monitor_events_main, second=None),
+        # pyrefly: ignore [bad-argument-type]
         cron(monitor_events_event, second=None),
+        # pyrefly: ignore [bad-argument-type]
         cron(send_event_embeds, second=set(range(0, 60, 10))),
         # cron(monitor_event_locations, second=None),
+        # pyrefly: ignore [bad-argument-type]
         cron(monitor_deliverypoints, second=set(range(0, 60, 7))),
+        # pyrefly: ignore [bad-argument-type]
         cron(monitor_jobs, second=37),
         #cron(monitor_corporations, second=23),
+        # pyrefly: ignore [bad-argument-type]
         cron(monitor_server_status, second=set(range(3, 60, 10))),
         # cron(monitor_server_condition, minute=set(range(3, 60, 5))),
         # cron(monitor_rp_mode, second=set(range(7, 60, 13))),

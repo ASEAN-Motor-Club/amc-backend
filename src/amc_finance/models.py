@@ -112,6 +112,7 @@ class LedgerEntry(models.Model):
   class Meta:
     # Ensures that an entry is either a debit or a credit, but not both.
     constraints = [
+      # pyrefly: ignore [deprecated]
       models.CheckConstraint(
         check=(models.Q(debit__gt=0, credit=0) | models.Q(debit=0, credit__gt=0)),
         name='debit_or_credit'
