@@ -500,6 +500,17 @@
         packages.scripts = pythonSet.mkVirtualEnv "amc-scripts-env"  { scripts = []; };
         packages.staticRoot = staticRoot;
 
+        # Flake check for pyrefly type checking
+        checks.pyrefly =
+          pkgs.runCommand "pyrefly-check" {
+            buildInputs = [ virtualenv ];
+          } ''
+            cp -r ${./.}/src .
+            chmod -R +w .
+            pyrefly check .
+            touch $out
+          '';
+
         # Git hooks configuration
         pre-commit.settings.hooks = {
           ruff.enable = true;
