@@ -48,7 +48,7 @@ include = ["src/manage.py"]
 "src" = "/"
 
 [tool.pyrefly]
-project-includes = [
+project_includes = [
     "**/*.py*",
     "**/*.ipynb",
 ]

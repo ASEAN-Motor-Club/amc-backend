@@ -213,10 +213,12 @@ class MockResponse:
         self.json = AsyncMock(return_value=self.data)
         
     def __await__(self):
-        async def _ret(): return self
-        return _ret().__await__()
+        return self._await().__await__()
+    
+    async def _await(self) -> "MockResponse":
+        return self
         
-    async def __aenter__(self):
+    async def __aenter__(self) -> "MockResponse":
         return self
         
     async def __aexit__(self, *args):
