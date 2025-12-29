@@ -125,6 +125,87 @@ class CommandRegistryTestCase(SimpleTestCase):
         # Ideally we test execute logic.
         pass
 
+    async def test_deprecated_command_returns_true(self):
+        """Test that deprecated commands return True to prevent forwarding to Discord"""
+        ctx = MagicMock(spec=CommandContext)
+        ctx.reply = AsyncMock()
+        ctx.is_current_event = True
+        
+        reg = CommandRegistry()
+        
+        @reg.register("/deprecated_cmd", deprecated=True)
+        async def deprecated_func(ctx):
+            pass
+        
+        result = await reg.execute("/deprecated_cmd", ctx)
+        self.assertTrue(result)
+
+    async def test_deprecated_command_sends_message(self):
+        """Test that deprecated commands send a deprecation message to the user"""
+        ctx = MagicMock(spec=CommandContext)
+        ctx.reply = AsyncMock()
+        ctx.is_current_event = True
+        
+        reg = CommandRegistry()
+        
+        @reg.register("/old_cmd", deprecated=True)
+        async def old_func(ctx):
+            pass
+        
+        await reg.execute("/old_cmd", ctx)
+        ctx.reply.assert_called_once()
+        args, _ = ctx.reply.call_args
+        self.assertIn("Command Deprecated", args[0])
+
+    async def test_deprecated_command_custom_message(self):
+        """Test that deprecated commands can use a custom deprecation message"""
+        ctx = MagicMock(spec=CommandContext)
+        ctx.reply = AsyncMock()
+        ctx.is_current_event = True
+        
+        custom_msg = "This command has been replaced by /newcmd"
+        reg = CommandRegistry()
+        
+        @reg.register("/legacy", deprecated=True, deprecated_message=custom_msg)
+        async def legacy_func(ctx):
+            pass
+        
+        await reg.execute("/legacy", ctx)
+        ctx.reply.assert_called_once_with(custom_msg)
+
+    async def test_deprecated_command_does_not_execute_handler(self):
+        """Test that deprecated commands do not execute the handler function"""
+        ctx = MagicMock(spec=CommandContext)
+        ctx.reply = AsyncMock()
+        ctx.is_current_event = True
+        
+        handler_called = False
+        reg = CommandRegistry()
+        
+        @reg.register("/obsolete", deprecated=True)
+        async def obsolete_func(ctx):
+            nonlocal handler_called
+            handler_called = True
+        
+        await reg.execute("/obsolete", ctx)
+        self.assertFalse(handler_called)
+
+    async def test_deprecated_command_no_message_when_not_current_event(self):
+        """Test that deprecated commands don't send messages for historical events"""
+        ctx = MagicMock(spec=CommandContext)
+        ctx.reply = AsyncMock()
+        ctx.is_current_event = False  # Historical event
+        
+        reg = CommandRegistry()
+        
+        @reg.register("/old", deprecated=True)
+        async def old_func(ctx):
+            pass
+        
+        result = await reg.execute("/old", ctx)
+        self.assertTrue(result)  # Still returns True to prevent forwarding
+        ctx.reply.assert_not_called()  # But doesn't send message
+
 class MockResponse:
     def __init__(self, data=None):
         self.status = 200
