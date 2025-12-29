@@ -39,6 +39,21 @@ You're assumed to have some familiarity with Django.
 
 Slash commands are now handled via a registry system in the `src/amc/commands/` package.
 
+To add a new command:
+1.  Navigate to `src/amc/commands/`.
+2.  Choose an appropriate category file (e.g., `general.py`, `vehicles.py`) or create a new one.
+3.  Import `registry` and `CommandContext` from `amc.command_framework`.
+4.  Decorate your async function with `@registry.register("/yourcommand")` (or a list of aliases).
+5.  **Important**: If you created a new file, ensure you import it in `src/amc/commands/__init__.py` so it's registered.
+
+Example:
+```python
+@registry.register("/greet")
+async def cmd_greet(ctx: CommandContext, name: str):
+    await ctx.reply(f"Hello, {name}!")
+```
+
+
 ## Usage as NixOS Container
 
 The flake exposes a `nixosModules.containers` module that allows you to run the backend as a systemd-nspawn container on NixOS.
@@ -104,20 +119,6 @@ This will:
 2. Create key `amc-log-listener` container for log ingestion.
 3. Configure Nginx on the host to proxy requests to the container.
 
-
-To add a new command:
-1.  Navigate to `src/amc/commands/`.
-2.  Choose an appropriate category file (e.g., `general.py`, `vehicles.py`) or create a new one.
-3.  Import `registry` and `CommandContext` from `amc.command_framework`.
-4.  Decorate your async function with `@registry.register("/yourcommand")` (or a list of aliases).
-5.  **Important**: If you created a new file, ensure you import it in `src/amc/commands/__init__.py` so it's registered.
-
-Example:
-```python
-@registry.register("/greet")
-async def cmd_greet(ctx: CommandContext, name: str):
-    await ctx.reply(f"Hello, {name}!")
-```
 
 ## Running Tests
 
