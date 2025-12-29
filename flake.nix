@@ -5,6 +5,11 @@
     nixpkgs.url = "github:NixOS/nixpkgs/nixpkgs-unstable";
     flake-parts.url = "github:hercules-ci/flake-parts";
 
+    git-hooks-nix = {
+      url = "github:cachix/git-hooks.nix";
+      inputs.nixpkgs.follows = "nixpkgs";
+    };
+
     pyproject-nix = {
       url = "github:pyproject-nix/pyproject.nix";
       inputs.nixpkgs.follows = "nixpkgs";
@@ -37,6 +42,7 @@
     pyproject-nix,
     pyproject-build-systems,
     ragenix,
+    git-hooks-nix,
     ...
   }:
     let
@@ -96,6 +102,9 @@
       };
     in
     flake-parts.lib.mkFlake {inherit inputs;} {
+      imports = [
+        git-hooks-nix.flakeModule
+      ];
       systems = [
         "x86_64-linux"
         "x86_64-darwin"
@@ -490,6 +499,21 @@
         packages.default = pythonSet.mkVirtualEnv "amc-backend-env" workspace.deps.default;
         packages.scripts = pythonSet.mkVirtualEnv "amc-scripts-env"  { scripts = []; };
         packages.staticRoot = staticRoot;
+
+        # Git hooks configuration
+        pre-commit.settings.hooks = {
+          ruff.enable = true;
+          pyrefly = {
+            enable = true;
+            name = "pyrefly";
+            description = "Type check Python code with Pyrefly";
+            entry = "${pkgs.pyrefly}/bin/pyrefly check";
+            files = "\\.py$";
+            language = "system";
+            pass_filenames = true;
+          };
+        };
+
         devShells.default = pkgs.mkShell {
           packages = [
             virtualenv
@@ -502,7 +526,8 @@
             pkgs.libspatialite
             (pkgs.postgresql_16.withPackages(p: [p.postgis]))
             pkgs.redis
-          ];
+            pkgs.pre-commit
+          ] ++ config.pre-commit.settings.enabledPackages;
           env =
             {
               # Needed for postgis
@@ -522,6 +547,7 @@
               LD_LIBRARY_PATH = lib.makeLibraryPath pkgs.pythonManylinuxPackages.manylinux1;
             };
           shellHook = ''
+            ${config.pre-commit.shellHook}
             unset PYTHONPATH
             export REPO_ROOT=$(git rev-parse --show-toplevel)
           '';
