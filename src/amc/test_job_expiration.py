@@ -96,7 +96,7 @@ class MinistryExpirationTestCase(TestCase):
 
         # Escrow funds
         await escrow_ministry_funds(100_000, job)
-        job.escrowed_amount = 100_000
+        setattr(job, "escrowed_amount", 100_000)
         await job.asave()
 
         # Get ministry budget account balance before expiration
