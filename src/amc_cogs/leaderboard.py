@@ -2,11 +2,12 @@ import logging
 import discord
 from discord import app_commands
 from discord.ext import tasks, commands
-from typing import TYPE_CHECKING, Union
+from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
     from amc.discord_client import AMCDiscordBot
 from django.utils import timezone
+from django.conf import settings
 from datetime import timedelta
 from django.db.models import Sum, Count, F
 from amc.models import (
@@ -21,7 +22,7 @@ logger = logging.getLogger(__name__)
 class LeaderboardCog(commands.Cog):
     def __init__(self, bot: "AMCDiscordBot"):
         self.bot = bot
-        self.leaderboard_channel_name = "leaderboards"
+        self.leaderboard_channel_id = settings.DISCORD_LEADERBOARD_CHANNEL_ID
         self.update_leaderboards.start()
 
     async def cog_unload(self):
@@ -40,7 +41,7 @@ class LeaderboardCog(commands.Cog):
             .order_by("-total")[:10]
         )
         revenue = [
-            {"name": item["character__name"], "value": item["total"]}
+            {"name": item["character__name"] or "Unknown", "value": item["total"]}
             async for item in revenue_qs
         ]
 
@@ -55,7 +56,7 @@ class LeaderboardCog(commands.Cog):
             .order_by("-total")[:10]
         )
         vehicles = [
-            {"name": item["character__name"], "value": item["total"]}
+            {"name": item["character__name"] or "Unknown", "value": item["total"]}
             async for item in vehicles_qs
         ]
 
@@ -69,7 +70,7 @@ class LeaderboardCog(commands.Cog):
         )
         active = [
             {
-                "name": item["character__name"],
+                "name": item["character__name"] or "Unknown",
                 "value": item["total"].total_seconds() / 3600 if item["total"] else 0,
             }
             async for item in active_qs
@@ -84,7 +85,7 @@ class LeaderboardCog(commands.Cog):
             .order_by("-total")[:10]
         )
         restocks = [
-            {"name": item["character__name"], "value": item["total"]}
+            {"name": item["character__name"] or "Unknown", "value": item["total"]}
             async for item in restocks_qs
         ]
 
@@ -188,26 +189,36 @@ class LeaderboardCog(commands.Cog):
     async def update_leaderboards(self):
         await self.bot.wait_until_ready()
         
+        logger.info("Starting hourly leaderboard update")
         for guild in self.bot.guilds:
             if not guild:
                 continue
-            channel = discord.utils.get(guild.channels, name=self.leaderboard_channel_name)
-            if not isinstance(channel, discord.TextChannel):
-                continue
             
-            embed = await self.create_leaderboard_embeds()
-            
-            # Find last message from bot in this channel
-            last_message = None
-            async for message in channel.history(limit=10):
-                if message.author == self.bot.user:
-                    last_message = message
-                    break
-            
-            if last_message:
-                await last_message.edit(embed=embed)
-            else:
-                await channel.send(embed=embed)
+            try:
+                channel = guild.get_channel(self.leaderboard_channel_id)
+                
+                if not isinstance(channel, discord.TextChannel):
+                    logger.warning(f"Leaderboard channel {self.leaderboard_channel_id} not found in guild {guild.name}")
+                    continue
+                
+                logger.debug(f"Updating leaderboard in #{channel.name} ({guild.name})")
+                embed = await self.create_leaderboard_embeds()
+                
+                # Find last message from bot in this channel
+                last_message = None
+                async for message in channel.history(limit=10):
+                    if message.author == self.bot.user:
+                        last_message = message
+                        break
+                
+                if last_message:
+                    await last_message.edit(embed=embed)
+                    logger.info(f"Updated existing leaderboard message in #{channel.name} ({guild.name})")
+                else:
+                    await channel.send(embed=embed)
+                    logger.info(f"Posted new leaderboard message in #{channel.name} ({guild.name})")
+            except Exception as e:
+                logger.error(f"Failed to update leaderboard in guild {guild.name}: {e}", exc_info=True)
 
     @update_leaderboards.before_loop
     async def before_update_leaderboards(self):
@@ -222,20 +233,34 @@ class LeaderboardCog(commands.Cog):
         if not guild:
             await interaction.followup.send("This command must be used in a server", ephemeral=True)
             return
-        channel = discord.utils.get(guild.channels, name=self.leaderboard_channel_name)
+            
+        channel = guild.get_channel(self.leaderboard_channel_id)
         
         if not channel or not isinstance(channel, discord.TextChannel):
-            overwrites: dict[Union[discord.Member, discord.Role, discord.Object], discord.PermissionOverwrite] = {
-                guild.default_role: discord.PermissionOverwrite(send_messages=False),
-                guild.me: discord.PermissionOverwrite(send_messages=True, embed_links=True)
-            }
-            channel = await guild.create_text_channel(self.leaderboard_channel_name, overwrites=overwrites)
-            await interaction.followup.send(f"Created channel #{self.leaderboard_channel_name}", ephemeral=True)
+            await interaction.followup.send(f"Leaderboard channel with ID {self.leaderboard_channel_id} not found in this server.", ephemeral=True)
+            return
         else:
-            await interaction.followup.send(f"Channel #{self.leaderboard_channel_name} already exists. Posting/updating leaderboard...", ephemeral=True)
+            await interaction.followup.send(f"Channel #{channel.name} found. Posting/updating leaderboard...", ephemeral=True)
         
-        embed = await self.create_leaderboard_embeds()
-        await channel.send(embed=embed)
+        try:
+            embed = await self.create_leaderboard_embeds()
+            
+            # Use same logic as task to find last message
+            last_message = None
+            async for message in channel.history(limit=10):
+                if message.author == self.bot.user:
+                    last_message = message
+                    break
+            
+            if last_message:
+                await last_message.edit(embed=embed)
+            else:
+                await channel.send(embed=embed)
+            
+            await interaction.followup.send("Leaderboard successfully updated.", ephemeral=True)
+        except Exception as e:
+            logger.error(f"Failed manual leaderboard setup/update: {e}", exc_info=True)
+            await interaction.followup.send(f"Failed to update leaderboard: {e}", ephemeral=True)
 
 async def setup(bot):
     await bot.add_cog(LeaderboardCog(bot))
