@@ -55,7 +55,7 @@ async def cmd_tp_name(ctx: CommandContext, name: str = ""):
         recent_rescues = RescueRequest.objects.filter(
             responders=ctx.player, 
             timestamp__gte=timezone.now() - timedelta(minutes=10)
-        ).order_by('-timestamp')
+        ).select_related('character').order_by('-timestamp')
         
         async for rescue in recent_rescues:
             if rescue.location:
