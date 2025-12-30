@@ -127,9 +127,6 @@
             fqdn = lib.mkOption {
               type = lib.types.str;
             };
-            necesseFifoPath = lib.mkOption {
-              type = lib.types.str;
-            };
             allowedHosts = lib.mkOption {
               type = lib.types.listOf lib.types.str;
               default = [];
@@ -189,10 +186,9 @@
             };
             containers.amc-backend = {
               autoStart = true;
-              restartIfChanged = false;
+              restartIfChanged = true;
               bindMounts = {
                 "/etc/ssh/ssh_host_ed25519_key".isReadOnly = true;
-                ${cfg.necesseFifoPath}.isReadOnly = false;
               } // cfg.extraBindMounts;
               config = { config, pkgs, ... }: {
                 imports = [
@@ -202,7 +198,6 @@
                 system.stateVersion = "25.05";
                 environment.variables = {
                   inherit (mkPostgisDeps pkgs) GEOS_LIBRARY_PATH GDAL_LIBRARY_PATH;
-                  NECESSE_FIFO_PATH = cfg.necesseFifoPath;
                 };
                 age.identityPaths = [ "/etc/ssh/ssh_host_ed25519_key" ];
                 age.secrets.backend = lib.mkIf (cfg.secretFile != null) {
