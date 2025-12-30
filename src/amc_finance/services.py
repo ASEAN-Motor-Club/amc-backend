@@ -485,11 +485,23 @@ def create_journal_entry(date, description, creator_character, entries_data):
     `entries_data` should be a list of dicts:
     [{'account': account_obj, 'debit': amount, 'credit': 0}, ...]
     """
-    # 1. Validate that the transaction is balanced before hitting the DB
+    # 1. Filter out zero-amount entries and validate that the transaction is balanced
+    entries_data = [
+        d for d in entries_data if d.get("debit", 0) > 0 or d.get("credit", 0) > 0
+    ]
+
     total_debits = sum(d.get("debit", 0) for d in entries_data)
     total_credits = sum(d.get("credit", 0) for d in entries_data)
+
+    if total_debits == 0 and total_credits == 0:
+        return None
+
     if total_debits != total_credits:
         raise ValueError("The provided entries are not balanced.")
+
+    for d in entries_data:
+        if d.get("debit", 0) > 0 and d.get("credit", 0) > 0:
+            raise ValueError("An entry cannot have both a debit and a credit.")
 
     with transaction.atomic():
         # 2. Create the main journal entry
