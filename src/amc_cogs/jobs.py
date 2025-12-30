@@ -9,7 +9,6 @@ from amc.models import (
   DeliveryJob,
   Delivery
 )
-from amc.utils import get_time_difference_string
 from amc.webhook import on_delivery_job_fulfilled
 from typing import TYPE_CHECKING, Optional
 
@@ -53,7 +52,7 @@ class JobsCog(commands.Cog):
     description += f"\n**Bonus multiplier**: {job.bonus_multiplier*100:.0f}%"
 
     if not stale:
-      description += f"\n**Expires in**: {get_time_difference_string(timezone.now(), job.expired_at)}"
+      description += f"\n**Expires in**: <t:{int(job.expired_at.timestamp())}:R>"
 
     source_points = list(job.source_points.all())
     if source_points:
