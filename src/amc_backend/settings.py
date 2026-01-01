@@ -99,7 +99,12 @@ TEMPLATES = [
 
 WSGI_APPLICATION = 'amc_backend.wsgi.application'
 
-# SESSION_COOKIE_DOMAIN = os.environ.get('DJANGO_SESSION_COOKIE_DOMAIN', 'aseanmotorclub.com')
+# Cross-domain cookie settings for sharing sessions across *.aseanmotorclub.com
+SESSION_COOKIE_DOMAIN = os.environ.get('DJANGO_SESSION_COOKIE_DOMAIN', '.aseanmotorclub.com')
+CSRF_COOKIE_DOMAIN = os.environ.get('DJANGO_CSRF_COOKIE_DOMAIN', '.aseanmotorclub.com')
+SESSION_COOKIE_SECURE = not DEBUG  # HTTPS-only in production
+CSRF_COOKIE_SECURE = not DEBUG
+
 SITE_DOMAIN = os.environ.get('DJANGO_SITE_DOMAIN', 'https://www.aseanmotorclub.com')
 
 # Database

@@ -33,7 +33,19 @@ class AuthenticationCog(commands.Cog):
     """
     Generates and sends a one-time login link to the user.
     """
+    await self._generate_login_link(ctx, domain='https://www.aseanmotorclub.com', redirect_to='/')
 
+  @app_commands.command(name='admin_login', description='Log in to the AMC Admin Panel')
+  async def admin_login(self, ctx):
+    """
+    Generates and sends a one-time login link to the admin panel.
+    """
+    await self._generate_login_link(ctx, domain='https://api.aseanmotorclub.com', redirect_to='/admin/')
+
+  async def _generate_login_link(self, ctx, domain: str, redirect_to: str = '/'):
+    """
+    Helper method to generate a one-time login link with a redirect.
+    """
     try:
       player, player_created = await Player.objects.select_related('user').aget_or_create(
         discord_user_id=ctx.user.id,
@@ -53,14 +65,11 @@ class AuthenticationCog(commands.Cog):
       player.user = user
       await player.asave(update_fields=['user'])
 
-
     # Generate the token and user ID
     token = account_activation_token_generator.make_token(user)
     uidb64 = urlsafe_base64_encode(force_bytes(user.pk))
     
-    login_url = reverse('token_login')  # Assumes your URL is named 'token_login'
-    full_login_url = f"https://www.aseanmotorclub.com{login_url}?uidb64={uidb64}&token={token}"
+    login_url = reverse('token_login')
+    full_login_url = f"{domain}{login_url}?uidb64={uidb64}&token={token}&next={redirect_to}"
 
-    # For demonstration, we'll just print it. In a real app, you'd email this.
     await ctx.response.send_message(f"Login link: <{full_login_url}>", ephemeral=True)
-
