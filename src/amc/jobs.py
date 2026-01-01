@@ -27,6 +27,54 @@ from amc_finance.services import (
 )
 
 
+async def get_job_success_rate(hours_lookback: int = 24) -> tuple[float, int, int]:
+    """
+    Calculate job completion rate over recent history.
+    Returns: (success_rate, completed_count, expired_count)
+    """
+    cutoff = timezone.now() - timedelta(hours=hours_lookback)
+
+    completed = await DeliveryJob.objects.filter(
+        fulfilled_at__gte=cutoff,
+        fulfilled_at__isnull=False,
+    ).acount()
+
+    expired = await DeliveryJob.objects.filter(
+        expired_at__gte=cutoff,
+        expired_at__lt=timezone.now(),
+        fulfilled_at__isnull=True,
+    ).acount()
+
+    total = completed + expired
+    if total == 0:
+        return (1.0, 0, 0)  # No data, assume healthy
+
+    return (completed / total, completed, expired)
+
+
+def calculate_adaptive_multiplier(
+    success_rate: float,
+    target_rate: float = 0.80,
+    min_mult: float = 0.5,
+    max_mult: float = 2.0,
+) -> float:
+    """
+    Returns multiplier for max_active_jobs based on success rate.
+    - If success_rate > target: multiplier > 1 (post more jobs)
+    - If success_rate < target: multiplier < 1 (post fewer jobs)
+    """
+    if success_rate >= target_rate:
+        # Scale up: 80% → 1.0x, 100% → 2.0x
+        ratio = (success_rate - target_rate) / (1.0 - target_rate)
+        multiplier = 1.0 + ratio * (max_mult - 1.0)
+    else:
+        # Scale down: 80% → 1.0x, 0% → 0.5x
+        ratio = success_rate / target_rate
+        multiplier = min_mult + ratio * (1.0 - min_mult)
+
+    return max(min_mult, min(max_mult, multiplier))
+
+
 async def cleanup_expired_jobs():
     # 1. Handle Ministry-funded expired jobs (existing)
     expired_jobs = DeliveryJob.objects.filter(
@@ -58,7 +106,13 @@ async def monitor_jobs(ctx):
     treasury_balance = await get_treasury_fund_balance()
     treasury_health = min(1.0, float(treasury_balance) / 50_000_000)
 
-    max_active_jobs = max(4, 2 + math.ceil(num_players / 6))
+    # Get adaptive multiplier from recent history
+    success_rate, _, _ = await get_job_success_rate(hours_lookback=24)
+    adaptive_mult = calculate_adaptive_multiplier(success_rate)
+
+    # Base formula: 1 job per 10 players, floor of 2
+    base_max_jobs = max(2, 1 + math.ceil(num_players / 10))
+    max_active_jobs = max(1, int(base_max_jobs * adaptive_mult))
 
     if num_active_jobs >= max_active_jobs:
         return
