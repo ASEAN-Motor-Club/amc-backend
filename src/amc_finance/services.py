@@ -346,9 +346,7 @@ async def player_donation(amount, character):
         account_type=Account.AccountType.REVENUE,
         book=Account.Book.GOVERNMENT,
         character=None,
-        defaults={
-            "name": "Treasury Revenue",
-        },
+        name="Treasury Revenue"
     )
 
     await sync_to_async(create_journal_entry, thread_sensitive=True)(
@@ -381,9 +379,7 @@ async def send_fund_to_player_wallet(amount, character, description):
         account_type=Account.AccountType.EXPENSE,
         book=Account.Book.GOVERNMENT,
         character=None,
-        defaults={
-            "name": "Treasury Expenses",
-        },
+        name="Treasury Expenses"
     )
 
     await sync_to_async(create_journal_entry)(
@@ -435,9 +431,7 @@ async def send_fund_to_player(amount, character, reason):
         account_type=Account.AccountType.EXPENSE,
         book=Account.Book.GOVERNMENT,
         character=None,
-        defaults={
-            "name": "Treasury Expenses",
-        },
+        name="Treasury Expenses",
     )
 
     await sync_to_async(create_journal_entry, thread_sensitive=True)(
@@ -997,9 +991,7 @@ async def process_treasury_expiration_penalty(job):
         account_type=Account.AccountType.EXPENSE,
         book=Account.Book.GOVERNMENT,
         character=None,
-        defaults={
-            "name": "Treasury Expenses",
-        },
+        name="Treasury Expenses",
     )
 
     await sync_to_async(create_journal_entry)(
