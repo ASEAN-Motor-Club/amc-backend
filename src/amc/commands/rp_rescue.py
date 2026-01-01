@@ -69,7 +69,7 @@ async def cmd_rescue(ctx: CommandContext, message: str = ""):
         await ctx.announce(_("{name} needs a rescue! {vehicle_names}. Respond with /respond {request_id}").format(
             name=ctx.character.name, vehicle_names=vehicle_names, request_id=rescue_request.id
         ))
-        await ctx.reply(_("<EffectGood>Request Sent</>\n") + (_("Help is on the way.") if sent else _("Rescuers offline, notified Discord.")))
+        await ctx.reply(_("<EffectGood>Request Sent>\n") + (_("Help is on the way.") if sent else _("Rescuers offline, notified Discord.")))
 
     # 3. Discord Notification
     if ctx.discord_client:
@@ -105,10 +105,10 @@ async def cmd_respond(ctx: CommandContext, rescue_id: int):
     ))
 
     await ctx.reply(_(
-        "<Title>Rescue Response</Title>\n"
+        "<Title>Rescue Response</>\n"
         "You are responding to {requester}'s rescue!\n\n"
-        "<EffectGood>Teleport Enabled</EffectGood>\n"
-        "Use <Highlight>/tp</Highlight> with your custom destination marker "
+        "<EffectGood>Teleport Enabled</>\n"
+        "Use <Highlight>/tp</> with your custom destination marker "
         "to teleport within 10,000 units of {requester} for the next 10 minutes."
     ).format(requester=rescue_request.character.name))
     
