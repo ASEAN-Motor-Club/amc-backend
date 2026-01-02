@@ -136,11 +136,42 @@ class CommandRegistry:
         regex_parts.append(r"$") # End of string anchor
         return "".join(regex_parts)
 
+    def _generate_usage(self, cmd_data: Dict) -> str:
+        """Generate usage string for a command."""
+        func = cmd_data['func']
+        sig = inspect.signature(func)
+        params = list(sig.parameters.values())
+        
+        # Filter out 'ctx' and 'self'
+        args = [p for p in params if p.name not in ('ctx', 'self')]
+        
+        # Build usage string
+        usage_parts = [cmd_data['name']]
+        for param in args:
+            is_optional = param.default != inspect.Parameter.empty
+            if is_optional:
+                usage_parts.append(f"[{param.name}]")
+            else:
+                usage_parts.append(f"<{param.name}>")
+        
+        return " ".join(usage_parts)
+
     async def execute(self, message: str, ctx: CommandContext) -> bool:
         """
         Iterates through registered commands, checks matches, casts types, and executes.
         Returns True if a command was matched and executed.
         """
+        # First, check if any command base matches (without args) for usage feedback
+        partial_match_cmd: Optional[Dict[str, Any]] = None
+        for cmd_data in self.commands:
+            for alias in cmd_data['aliases']:
+                # Check if message starts with a command alias (case-insensitive)
+                if message.lower() == alias.lower() or message.lower().startswith(alias.lower() + ' '):
+                    partial_match_cmd = cmd_data
+                    break
+            if partial_match_cmd:
+                break
+        
         for cmd_data in self.commands:
             match = cmd_data['pattern'].match(message)
             if match:
@@ -193,6 +224,26 @@ class CommandRegistry:
                     with translation.override(lang):
                         await ctx.reply(_("<Title>Error</>\n{error}").format(error=str(e)))
                     return True
+        
+        # If we matched a command base but not the full pattern, show usage
+        if partial_match_cmd:
+            usage = self._generate_usage(partial_match_cmd)
+            description = partial_match_cmd.get('description', '')
+            # Force string evaluation for lazy translation
+            if hasattr(description, '__str__'):
+                description = str(description)
+            
+            lang = 'en-gb'
+            if ctx.player and hasattr(ctx.player, 'language') and isinstance(ctx.player.language, str):
+                lang = ctx.player.language
+            
+            with translation.override(lang):
+                msg = _("<Title>Usage</>\n{usage}").format(usage=usage)
+                if description:
+                    msg += f"\n\n{description}"
+                await ctx.reply(msg)
+            return True
+        
         return False
 
 # Global instance

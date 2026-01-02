@@ -64,6 +64,7 @@ async def cmd_spawn_garages(ctx: CommandContext):
 @registry.register("/spawn_garage", description=gettext_lazy("Spawn a single garage"), category="Admin")
 async def cmd_spawn_garage_single(ctx: CommandContext, name: str):
     if ctx.player_info and ctx.player_info.get('bIsAdmin'):
+        await ctx.announce('spawning garage')
         loc = ctx.player_info['Location']
         loc['Z'] -= 100
         rot = ctx.player_info.get('Rotation', {})
@@ -71,6 +72,38 @@ async def cmd_spawn_garage_single(ctx: CommandContext, name: str):
         tag = resp.get('tag')
         await ctx.announce(_("Garage spawned! Tag: {tag}").format(tag=tag))
         await Garage.objects.acreate(config={'Location': loc, 'Rotation': rot}, notes=name.strip(), tag=tag)
+
+@registry.register("/remove_garage", description=gettext_lazy("Remove nearby garages (within 100 units)"), category="Admin")
+async def cmd_remove_garage(ctx: CommandContext):
+    if not ctx.player_info or not ctx.player_info.get('bIsAdmin'):
+        return
+    
+    player_loc = ctx.player_info['Location']
+    player_x, player_y, player_z = player_loc['X'], player_loc['Y'], player_loc['Z']
+    
+    removed_count = 0
+    async for garage in Garage.objects.all():
+        if garage.config is None:
+            continue
+        
+        garage_loc = garage.config.get('Location', {})
+        gx, gy, gz = garage_loc.get('X', 0), garage_loc.get('Y', 0), garage_loc.get('Z', 0)
+        
+        # Calculate 3D distance
+        distance = ((player_x - gx) ** 2 + (player_y - gy) ** 2 + (player_z - gz) ** 2) ** 0.5
+        
+        if distance <= 100:  # 100 units = 1m
+            # Despawn from game world
+            if garage.tag:
+                await despawn_by_tag(ctx.http_client_mod, garage.tag)
+            # Delete from database
+            await garage.adelete()
+            removed_count += 1
+    
+    if removed_count > 0:
+        await ctx.reply(_("<Title>Garage Removed</>\n\nRemoved {count} garage(s) near your location.").format(count=removed_count))
+    else:
+        await ctx.reply(_("<Title>No Garages Found</>\n\nNo garages within 100 units of your location."))
 
 @registry.register("/spawn", description=gettext_lazy("Spawn a vehicle"), category="Admin")
 async def cmd_spawn(ctx: CommandContext, vehicle_label: Optional[str] = None):
