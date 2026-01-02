@@ -847,6 +847,7 @@ commands_list_router = Router()
 async def list_server_commands(request):
   """List all available server-side commands"""
   from amc.command_framework import registry
+  from django.utils.encoding import force_str
   
   commands = []
   for cmd_data in registry.commands:
@@ -857,11 +858,9 @@ async def list_server_commands(request):
     # Determine shorthand (second alias if exists)
     shorthand = aliases[1] if len(aliases) > 1 else None
     
-    # Get description - handle translation strings
+    # Get description - convert lazy translation to string
     description = cmd_data.get('description', '')
-    if hasattr(description, '_proxy____args'):
-      # It's a lazy translation object, force string conversion
-      description = str(description)
+    description = force_str(description)
     
     commands.append({
       'command': command_name,
