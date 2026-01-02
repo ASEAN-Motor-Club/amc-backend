@@ -586,9 +586,9 @@ async def get_current_ministry_term(request):
 championships_list_router = Router()
 
 @championships_list_router.get('/', response=list[ChampionshipSchema])
-async def list_championships(request):
-  """List all championships"""
-  return [champ async for champ in Championship.objects.all()]
+async def list_championships(request, offset: int = 0, limit: int = 50):
+  """List all championships with pagination"""
+  return [champ async for champ in Championship.objects.all()[offset:offset + limit]]
 
 
 deliveries_stats_router = Router()
@@ -631,9 +631,9 @@ async def list_delivery_stats(request, limit: int = 10, days: int = 7):
 companies_router = Router()
 
 @companies_router.get('/', response=list[CompanyPublicSchema])
-async def list_companies(request):
-  """List all companies (public information only)"""
-  companies = Company.objects.select_related('owner').all()
+async def list_companies(request, offset: int = 0, limit: int = 50):
+  """List all companies with pagination (public information only)"""
+  companies = Company.objects.select_related('owner').all()[offset:offset + limit]
   
   return [
     {
@@ -651,14 +651,14 @@ async def list_companies(request):
 ministry_elections_router = Router()
 
 @ministry_elections_router.get('/', response=list[MinistryElectionPublicSchema])
-async def list_ministry_elections(request):
-  """List all ministry elections"""
+async def list_ministry_elections(request, offset: int = 0, limit: int = 20):
+  """List all ministry elections with pagination"""
   
   elections = (MinistryElection.objects
     .prefetch_related('candidates__candidate', 'candidates__votes', 'winner')
     .all()
     .order_by('-created_at')
-  )
+  )[offset:offset + limit]
   
   return [
     {
@@ -799,9 +799,9 @@ async def list_passenger_stats(request, limit: int = 10, days: int = 7):
 decals_router = Router()
 
 @decals_router.get('/', response=list[VehicleDecalPublicSchema])
-async def list_public_decals(request):
-  """List all public vehicle decals"""
-  decals = VehicleDecal.objects.filter(private=False).select_related('player').all()
+async def list_public_decals(request, offset: int = 0, limit: int = 50):
+  """List all public vehicle decals with pagination"""
+  decals = VehicleDecal.objects.filter(private=False).select_related('player').all()[offset:offset + limit]
   
   return [
     {

@@ -1,4 +1,4 @@
-from typing import Optional, List
+from typing import Optional, List, TypeVar, Generic
 from pydantic import AwareDatetime
 from datetime import timedelta
 from ninja import Schema, ModelSchema, Field
@@ -389,3 +389,15 @@ class VehicleDealershipSchema(Schema):
   vehicle_key: Optional[str] = None
   location: PositionSchema
   notes: str
+
+# Pagination Schema
+
+T = TypeVar('T')
+
+class PaginatedResponseSchema(Schema, Generic[T]):
+  """Generic paginated response"""
+  items: List[T]
+  total: int
+  offset: int
+  limit: int
+  has_more: bool
