@@ -64,32 +64,40 @@ from amc.webhook import on_player_profit
 from amc.vehicles import spawn_registered_vehicle
 import logging
 from collections import deque
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from amc.discord_client import AMCDiscordBot
 
 logger = logging.getLogger(__name__)
 
 # Discord message queue for ordered, non-blocking forwarding
 _discord_queue: deque[tuple[str, str, float]] = deque()  # (channel_id, content, timestamp)
-_discord_queue_task: asyncio.Task | None = None
-_discord_queue_event = asyncio.Event()
+_discord_client_ref: "AMCDiscordBot | None" = None  # Store reference to Discord client
 
 
-async def _discord_queue_processor(discord_client):
-    """Process Discord messages in FIFO order."""
-    while True:
-        await _discord_queue_event.wait()
-        while _discord_queue:
-            channel_id, content, _ts = _discord_queue.popleft()
-            try:
-                await forward_to_discord(discord_client, channel_id, content[:240])
-            except Exception as e:
-                logger.exception(f"Discord forward failed: {e}")
-        _discord_queue_event.clear()
+def _process_discord_queue():
+    """Process Discord messages in FIFO order. Called from the arq event loop."""
+    global _discord_client_ref
+    if not _discord_client_ref or not _discord_client_ref.loop:
+        return
+    
+    while _discord_queue:
+        channel_id, content, _ts = _discord_queue.popleft()
+        try:
+            asyncio.run_coroutine_threadsafe(
+                forward_to_discord(_discord_client_ref, channel_id, content[:240]),
+                _discord_client_ref.loop
+            )
+        except Exception as e:
+            logger.exception(f"Discord forward failed: {e}")
 
 
 def enqueue_discord_message(channel_id: str, content: str, timestamp):
     """Non-blocking enqueue for Discord messages."""
     _discord_queue.append((channel_id, content, timestamp))
-    _discord_queue_event.set()
+    # Process immediately since we're using run_coroutine_threadsafe
+    _process_discord_queue()
 
 
 async def _handle_rp_mode_async(http_client_mod, character):

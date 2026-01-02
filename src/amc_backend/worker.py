@@ -61,19 +61,11 @@ async def startup(ctx):
   if settings.DISCORD_TOKEN:
     ctx['discord_client'] = discord_client
     bot_task_handle = asyncio.create_task(run_discord())
-    # Start Discord queue processor after bot is ready
-    async def start_discord_queue():
-        await asyncio.sleep(5)  # Wait for bot to connect
-        tasks_module._discord_queue_task = asyncio.create_task(
-            tasks_module._discord_queue_processor(discord_client)
-        )
-    asyncio.create_task(start_discord_queue())
+    # Set Discord client reference for the message queue
+    tasks_module._discord_client_ref = discord_client
 
 
 async def shutdown(ctx):
-  # Cancel Discord queue processor
-  if tasks_module._discord_queue_task:
-    tasks_module._discord_queue_task.cancel()
 
   if http_client := ctx.get('http_client'):
     await http_client.close()
