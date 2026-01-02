@@ -41,6 +41,8 @@ from .schema import (
   PassengerStatsSchema,
   VehicleDecalPublicSchema,
   VehicleDealershipSchema,
+  # Commands
+  ServerCommandSchema,
 )
 from django.conf import settings
 from amc.models import (
@@ -836,3 +838,41 @@ async def list_dealerships(request):
     }
     async for dealership in dealerships
   ]
+
+# Server Commands Router
+
+commands_list_router = Router()
+
+@commands_list_router.get('/', response=list[ServerCommandSchema])
+async def list_server_commands(request):
+  """List all available server-side commands"""
+  from amc.command_framework import registry
+  
+  commands = []
+  for cmd_data in registry.commands:
+    # Get the primary command name
+    command_name = cmd_data['name']
+    aliases = cmd_data['aliases']
+    
+    # Determine shorthand (second alias if exists)
+    shorthand = aliases[1] if len(aliases) > 1 else None
+    
+    # Get description - handle translation strings
+    description = cmd_data.get('description', '')
+    if hasattr(description, '_proxy____args'):
+      # It's a lazy translation object, force string conversion
+      description = str(description)
+    
+    commands.append({
+      'command': command_name,
+      'aliases': aliases,
+      'shorthand': shorthand,
+      'description': description,
+      'category': cmd_data.get('category', 'General'),
+      'deprecated': cmd_data.get('deprecated', False),
+    })
+  
+  # Sort by category, then by command name
+  commands.sort(key=lambda x: (x['category'], x['command']))
+  
+  return commands

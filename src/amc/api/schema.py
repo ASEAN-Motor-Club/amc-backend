@@ -401,3 +401,14 @@ class PaginatedResponseSchema(Schema, Generic[T]):
   offset: int
   limit: int
   has_more: bool
+
+# Server Commands Schema
+
+class ServerCommandSchema(Schema):
+  """Server-side command information"""
+  command: str
+  aliases: List[str]
+  shorthand: Optional[str] = None
+  description: str
+  category: str
+  deprecated: bool = False

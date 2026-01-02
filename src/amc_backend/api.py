@@ -33,3 +33,5 @@ api.add_router('/subsidies/areas/', 'amc.api.routes.subsidy_areas_router')
 api.add_router('/stats/passengers/', 'amc.api.routes.passenger_stats_router')
 api.add_router('/decals/', 'amc.api.routes.decals_router')
 api.add_router('/dealerships/', 'amc.api.routes.dealerships_router')
+# Server Commands
+api.add_router('/commands/', 'amc.api.routes.commands_list_router')
