@@ -62,6 +62,54 @@ from amc_finance.services import (
 )
 from amc.webhook import on_player_profit
 from amc.vehicles import spawn_registered_vehicle
+import logging
+from collections import deque
+
+logger = logging.getLogger(__name__)
+
+# Discord message queue for ordered, non-blocking forwarding
+_discord_queue: deque[tuple[str, str, float]] = deque()  # (channel_id, content, timestamp)
+_discord_queue_task: asyncio.Task | None = None
+_discord_queue_event = asyncio.Event()
+
+
+async def _discord_queue_processor(discord_client):
+    """Process Discord messages in FIFO order."""
+    while True:
+        await _discord_queue_event.wait()
+        while _discord_queue:
+            channel_id, content, _ts = _discord_queue.popleft()
+            try:
+                await forward_to_discord(discord_client, channel_id, content[:240])
+            except Exception as e:
+                logger.exception(f"Discord forward failed: {e}")
+        _discord_queue_event.clear()
+
+
+def enqueue_discord_message(channel_id: str, content: str, timestamp):
+    """Non-blocking enqueue for Discord messages."""
+    _discord_queue.append((channel_id, content, timestamp))
+    _discord_queue_event.set()
+
+
+async def _handle_rp_mode_async(http_client_mod, character):
+    """Fire-and-forget RP mode synchronization."""
+    try:
+        is_rp_mode = await get_rp_mode(http_client_mod, character.guid)
+        if character.rp_mode and not is_rp_mode:
+            await toggle_rp_session(http_client_mod, character.guid)
+            is_rp_mode = True
+
+        new_name = character.name
+        if is_rp_mode and '[RP]' not in new_name:
+            new_name = f"{new_name}[RP]"
+        elif not is_rp_mode and '[RP]' in new_name:
+            new_name = character.name.replace('[RP]', '')
+
+        if new_name != character.name:
+            await set_character_name(http_client_mod, character.guid, new_name)
+    except Exception as e:
+        logger.exception(f"RP mode handling failed for {character.name}: {e}")
 
 
 def get_welcome_message(last_login, player_name):
@@ -75,23 +123,35 @@ def get_welcome_message(last_login, player_name):
   return None, False
 
 
-async def aget_or_create_character(player_name, player_id, http_client_mod=None):
+async def aget_or_create_character(player_name, player_id, http_client_mod=None, wait_for_guid=False):
   character_guid = None
   player_info = None
   i = 0
-  if http_client_mod:
+  if http_client_mod and wait_for_guid:
+    # Only retry for login events where GUID resolution is critical
     while True:
       try:
         player_info = await get_player(http_client_mod, player_id)
         if player_info:
           character_guid = player_info.get('CharacterGuid')
-        if character_guid and character_guid != Character.INVALID_GUID and i < 10:
+        if character_guid and character_guid != Character.INVALID_GUID:
+          break
+        if i >= 10:
+          logger.warning(f"GUID not resolved after 10 attempts for {player_name}")
           break
         await asyncio.sleep(1)
         i = i + 1
       except Exception as e:
-        print(f"Failed to fetch player info for {player_name} ({player_id}): {e}")
+        logger.exception(f"Failed to fetch player info for {player_name} ({player_id}): {e}")
         break
+  elif http_client_mod:
+    # Single attempt for non-login events
+    try:
+      player_info = await get_player(http_client_mod, player_id)
+      if player_info:
+        character_guid = player_info.get('CharacterGuid')
+    except Exception as e:
+      logger.debug(f"Player info fetch failed (non-blocking): {e}")
 
   character, player, character_created, player_created = await Character.objects.aget_or_create_character_player(
     player_name,
@@ -210,7 +270,7 @@ async def process_log_event(event: LogEvent, http_client=None, http_client_mod=N
 
   match event:
     case PlayerChatMessageLogEvent(timestamp, player_name, player_id, message):
-      character, player, character_created, player_info = await aget_or_create_character(player_name, player_id, http_client_mod)
+      character, player, character_created, player_info = await aget_or_create_character(player_name, player_id, http_client_mod, wait_for_guid=False)
       await PlayerChatLog.objects.acreate(
         timestamp=timestamp,
         character=character, 
@@ -249,7 +309,7 @@ async def process_log_event(event: LogEvent, http_client=None, http_client_mod=N
 
     case PlayerVehicleLogEvent(timestamp, player_name, player_id, vehicle_name, vehicle_id):
       action = PlayerVehicleLog.action_for_event(event)
-      character, player, *_ = await aget_or_create_character(player_name, player_id, http_client_mod)
+      character, player, *_ = await aget_or_create_character(player_name, player_id, http_client_mod, wait_for_guid=False)
       await PlayerVehicleLog.objects.acreate(
         timestamp=timestamp,
         character=character, 
@@ -285,7 +345,7 @@ Not everyone likes to be roughed up!
         )
 
     case PlayerLoginLogEvent(timestamp, player_name, player_id):
-      character, player, character_created, player_info = await aget_or_create_character(player_name, player_id, http_client_mod)
+      character, player, character_created, player_info = await aget_or_create_character(player_name, player_id, http_client_mod, wait_for_guid=True)
       if ctx.get('startup_time') and timestamp > ctx.get('startup_time'):
         if player_info and 'DOT' in player_info.get('PlayerName', ''):
           if not (await Team.objects.filter(tag='DOT', players=player).aexists()):
@@ -356,19 +416,7 @@ Not everyone likes to be roughed up!
         asyncio.create_task(send_player_messages(http_client_mod, player))
 
         if http_client_mod:
-          is_rp_mode = await get_rp_mode(http_client_mod, character.guid)
-          if character.rp_mode and not is_rp_mode:
-            asyncio.create_task(toggle_rp_session(http_client_mod, character.guid))
-            is_rp_mode = True
-
-          new_name = character.name
-          if is_rp_mode and '[RP]' not in new_name:
-            new_name = f"{new_name}[RP]"
-          elif not is_rp_mode and '[RP]' in new_name:
-            new_name = character.name.replace('[RP]', '')
-
-          if new_name != character.name:
-            asyncio.create_task(set_character_name(http_client_mod, character.guid, new_name))
+          asyncio.create_task(_handle_rp_mode_async(http_client_mod, character))
 
       if discord_client and ctx.get('startup_time') and timestamp > ctx.get('startup_time'):
         forward_message = (
@@ -403,7 +451,7 @@ Not everyone likes to be roughed up!
       await process_logout_event(character.id, timestamp)
 
     case CompanyAddedLogEvent(timestamp, company_name, is_corp, owner_name, owner_id) | CompanyRemovedLogEvent(timestamp, company_name, is_corp, owner_name, owner_id):
-      character, *_ = await aget_or_create_character(owner_name, owner_id, http_client_mod)
+      character, *_ = await aget_or_create_character(owner_name, owner_id, http_client_mod, wait_for_guid=False)
       company, company_created = await Company.objects.aget_or_create(
         name=company_name,
         owner=character,
@@ -443,12 +491,12 @@ Not everyone likes to be roughed up!
           f"**📦 Player Restocked Depot:** {player_name} (Depot: {depot_name})"
         )
         subsidy_amount = 10_000
-        await on_player_profit(
+        asyncio.create_task(on_player_profit(
           character,
           subsidy_amount,
           subsidy_amount,
           http_client_mod
-        )
+        ))
 
     case PlayerCreatedCompanyLogEvent(timestamp, player_name, company_name):
       # Handled by CompanyAddedLogEvent, if created
@@ -558,15 +606,8 @@ Not everyone likes to be roughed up!
       pass
 
   if forward_message and discord_client and ctx.get('startup_time') and timestamp > ctx.get('startup_time') and hostname == "asean-mt-server":
-    forward_message_channel_id, forward_message_content = forward_message
-    asyncio.run_coroutine_threadsafe(
-      forward_to_discord(
-        discord_client,
-        forward_message_channel_id,
-        forward_message_content[:240]
-      ),
-      discord_client.loop
-    )
+    channel_id, content = forward_message
+    enqueue_discord_message(channel_id, content, timestamp)
 
 async def process_log_line(ctx, line):
   log, event = parse_log_line(line)

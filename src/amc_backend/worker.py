@@ -8,6 +8,7 @@ django.setup()
 from django.conf import settings  # noqa: E402
 from django.utils import timezone  # noqa: E402
 from amc.tasks import process_log_line  # noqa: E402
+import amc.tasks as tasks_module  # noqa: E402
 from necesse.tasks import process_necesse_log  # noqa: E402
 from amc.events import monitor_events, send_event_embeds  # noqa: E402
 from amc.locations import monitor_locations  # noqa: E402
@@ -60,9 +61,20 @@ async def startup(ctx):
   if settings.DISCORD_TOKEN:
     ctx['discord_client'] = discord_client
     bot_task_handle = asyncio.create_task(run_discord())
+    # Start Discord queue processor after bot is ready
+    async def start_discord_queue():
+        await asyncio.sleep(5)  # Wait for bot to connect
+        tasks_module._discord_queue_task = asyncio.create_task(
+            tasks_module._discord_queue_processor(discord_client)
+        )
+    asyncio.create_task(start_discord_queue())
 
 
 async def shutdown(ctx):
+  # Cancel Discord queue processor
+  if tasks_module._discord_queue_task:
+    tasks_module._discord_queue_task.cancel()
+
   if http_client := ctx.get('http_client'):
     await http_client.close()
 
