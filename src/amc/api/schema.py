@@ -10,6 +10,7 @@ from ..models import (
   ScheduledEvent,
   GameEventCharacter,
   ChampionshipPoint,
+  Championship,
   DeliveryPoint,
   Cargo,
   Delivery,
@@ -251,3 +252,140 @@ class WebhookPayloadSchema(Schema):
   hook: str
   timestamp: int
 
+
+# Phase 1: Public API Schemas
+
+class SubsidyRulePublicSchema(Schema):
+  """Public-safe subsidy rule information"""
+  id: int
+  name: str
+  active: bool
+  priority: int
+  reward_type: str
+  reward_value: float
+  cargo_keys: List[str] = []
+  source_area_names: List[str] = []
+  destination_area_names: List[str] = []
+  requires_on_time: bool
+
+
+class MinistryTermPublicSchema(Schema):
+  """Public ministry term information"""
+  id: int
+  minister_name: str
+  minister_id: str
+  start_date: AwareDatetime
+  end_date: AwareDatetime
+  initial_budget: float
+  current_budget: float
+  total_spent: float
+  is_active: bool
+  created_jobs_count: int
+  expired_jobs_count: int
+
+  class Config(Schema.Config):
+    coerce_numbers_to_str = True
+
+
+class ChampionshipSchema(ModelSchema):
+  """Championship basic information"""
+  class Meta:
+    model = Championship
+    fields = ['id', 'name', 'description', 'discord_thread_id']
+
+
+class DeliveryStatsSchema(Schema):
+  """Delivery statistics by character"""
+  character_id: int
+  character_name: str
+  player_id: str
+  total_deliveries: int
+  total_payment: int
+  total_subsidy: int
+  total_quantity: int
+
+  class Config(Schema.Config):
+    coerce_numbers_to_str = True
+
+
+# Phase 2: Community Features Schemas
+
+class CompanyPublicSchema(Schema):
+  """Public company information"""
+  id: int
+  name: str
+  description: str
+  owner_name: str
+  is_corp: bool
+  first_seen_at: AwareDatetime
+
+
+class MinistryCandidacySchema(Schema):
+  """Ministry candidacy information"""
+  candidate_name: str
+  candidate_id: str
+  manifesto: str
+  created_at: AwareDatetime
+  vote_count: int = 0
+
+  class Config(Schema.Config):
+    coerce_numbers_to_str = True
+
+
+class MinistryElectionPublicSchema(Schema):
+  """Public ministry election information"""
+  id: int
+  phase: str
+  created_at: AwareDatetime
+  candidacy_end_at: AwareDatetime
+  poll_end_at: AwareDatetime
+  winner_name: Optional[str] = None
+  candidates: List[MinistryCandidacySchema] = []
+
+
+class RaceSetupListSchema(Schema):
+  """Race setup list information"""
+  hash: str
+  route_name: Optional[str] = None
+  num_laps: int
+  num_sections: int
+
+# Phase 3: Extended Data Schemas
+
+class SubsidyAreaSchema(Schema):
+  """Subsidy area geographic information"""
+  id: int
+  name: str
+  description: str
+  # Note: polygon field would need special serialization
+
+
+class PassengerStatsSchema(Schema):
+  """Passenger transport statistics by character"""
+  character_id: int
+  character_name: str
+  player_id: str
+  total_passengers: int
+  total_payment: int
+  passenger_type_counts: dict
+
+  class Config(Schema.Config):
+    coerce_numbers_to_str = True
+
+
+class VehicleDecalPublicSchema(Schema):
+  """Public vehicle decal information"""
+  id: int
+  name: str
+  vehicle_key: Optional[str] = None
+  hash: str
+  price: int
+  player_name: Optional[str] = None
+
+
+class VehicleDealershipSchema(Schema):
+  """Vehicle dealership location"""
+  id: int
+  vehicle_key: Optional[str] = None
+  location: PositionSchema
+  notes: str

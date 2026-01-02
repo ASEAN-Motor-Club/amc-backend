@@ -25,7 +25,12 @@ from .models import (
   Cargo,
   DeliveryJobTemplate,
   DeliveryJob,
+  # Phase 1
+  SubsidyRule,
+  MinistryTerm,
+  Delivery,
 )
+
 
 class CharacterFactory(DjangoModelFactory):
   class Meta:  # type: ignore[misc]
@@ -155,3 +160,44 @@ class DeliveryJobTemplateFactory(DjangoModelFactory):
     if extracted:
         cast(Any, self).destination_points.add(*extracted)
 
+
+# Phase 1 Factories
+
+class SubsidyRuleFactory(DjangoModelFactory):
+  class Meta:  # type: ignore[misc]
+    model = SubsidyRule
+
+  name = Faker('bs')
+  active = True
+  priority = LazyAttribute(lambda _: random.randint(0, 10))
+  reward_type = 'PERCENTAGE'
+  reward_value = LazyAttribute(lambda _: random.randint(1, 5))
+  requires_on_time = False
+
+
+class MinistryTermFactory(DjangoModelFactory):
+  class Meta:  # type: ignore[misc]
+    model = MinistryTerm
+
+  minister = SubFactory('amc.factories.PlayerFactory')
+  start_date = LazyAttribute(lambda _: timezone.now() - timedelta(days=7))
+  end_date = LazyAttribute(lambda o: o.start_date + timedelta(days=30))
+  initial_budget = LazyAttribute(lambda _: random.randint(10000000, 50000000))
+  current_budget = LazyAttribute(lambda o: o.initial_budget * 0.5)
+  total_spent = LazyAttribute(lambda o: o.initial_budget - o.current_budget)
+  is_active = True
+  created_jobs_count = LazyAttribute(lambda _: random.randint(5, 20))
+  expired_jobs_count = LazyAttribute(lambda _: random.randint(0, 5))
+
+
+class DeliveryFactory(DjangoModelFactory):
+  class Meta:  # type: ignore[misc]
+    model = Delivery
+
+  timestamp = Faker('date_time')
+  character = SubFactory('amc.factories.CharacterFactory')
+  cargo_key = 'C::Stone'
+  quantity = LazyAttribute(lambda _: random.randint(1, 100))
+  payment = LazyAttribute(lambda _: random.randint(1000, 50000))
+  subsidy = LazyAttribute(lambda _: random.randint(0, 10000))
+  rp_mode = False

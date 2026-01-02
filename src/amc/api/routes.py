@@ -26,6 +26,21 @@ from .schema import (
   DeliveryPointSchema,
   DeliveryJobSchema,
   LapSectionTimeSchema,
+  # Phase 1
+  CargoSchema,
+  SubsidyRulePublicSchema,
+  MinistryTermPublicSchema,
+  ChampionshipSchema,
+  DeliveryStatsSchema,
+  # Phase 2
+  CompanyPublicSchema,
+  MinistryElectionPublicSchema,
+  RaceSetupListSchema,
+  # Phase 3
+  SubsidyAreaSchema,
+  PassengerStatsSchema,
+  VehicleDecalPublicSchema,
+  VehicleDealershipSchema,
 )
 from django.conf import settings
 from amc.models import (
@@ -37,10 +52,22 @@ from amc.models import (
   ScheduledEvent,
   GameEventCharacter,
   ChampionshipPoint,
+  Championship,
   Delivery,
   DeliveryPoint,
   LapSectionTime,
   DeliveryJob,
+  # Phase 1
+  Cargo,
+  SubsidyRule,
+  MinistryTerm,
+  # Phase 2
+  Company,
+  MinistryElection,
+  SubsidyArea,
+  ServerPassengerArrivedLog,
+  VehicleDecal,
+  VehicleDealership,
 )
 from amc.utils import lowercase_first_char_in_keys
 from amc.save_file import get_world, get_character as get_save_character, get_housings, DATA_PATH
@@ -63,6 +90,13 @@ def housing(request):
     return {
       **get_housings(get_world()),
     }
+
+@app_router.get('/subsidies/', response=dict)
+async def list_subsidies(request):
+    """Returns current active subsidy rules as formatted text."""
+    from amc.subsidies import get_subsidies_text
+    text = await get_subsidies_text()
+    return {'subsidies_text': text}
 
 @app_router.get('/active_events', response=dict)
 def list_active_events(request):
@@ -480,3 +514,325 @@ async def list_deliveryjobs(request):
     )
   ]
 
+
+# Phase 1: Public API Routers
+
+cargos_router = Router()
+
+@cargos_router.get('/', response=list[CargoSchema])
+async def list_cargos(request):
+  """List all cargo types"""
+  return [cargo async for cargo in Cargo.objects.all()]
+
+
+subsidies_rules_router = Router()
+
+@subsidies_rules_router.get('/', response=list[SubsidyRulePublicSchema])
+async def list_subsidy_rules(request):
+  """List all active subsidy rules (public information only)"""
+  
+  rules = SubsidyRule.objects.filter(active=True).prefetch_related(
+    'cargos',
+    'source_areas',
+    'destination_areas',
+    'source_delivery_points',
+    'destination_delivery_points',
+  )
+  
+  return [
+    {
+      'id': rule.id,
+      'name': rule.name,
+      'active': rule.active,
+      'priority': rule.priority,
+      'reward_type': rule.reward_type,
+      'reward_value': float(rule.reward_value),
+      'cargo_keys': [c.key async for c in rule.cargos.all()],
+      'source_area_names': [a.name async for a in rule.source_areas.all()],
+      'destination_area_names': [a.name async for a in rule.destination_areas.all()],
+      'requires_on_time': rule.requires_on_time,
+    }
+    async for rule in rules
+  ]
+
+
+ministry_router = Router()
+
+@ministry_router.get('/current/', response=Optional[MinistryTermPublicSchema])
+async def get_current_ministry_term(request):
+  """Get current active ministry term"""
+  try:
+    term = await (MinistryTerm.objects
+      .select_related('minister')
+      .aget(is_active=True)
+    )
+    return {
+      'id': term.id,
+      'minister_name': term.minister.discord_name or str(term.minister.unique_id),
+      'minister_id': str(term.minister.unique_id),
+      'start_date': term.start_date,
+      'end_date': term.end_date,
+      'initial_budget': float(term.initial_budget),
+      'current_budget': float(term.current_budget),
+      'total_spent': float(term.total_spent),
+      'is_active': term.is_active,
+      'created_jobs_count': term.created_jobs_count,
+      'expired_jobs_count': term.expired_jobs_count,
+    }
+  except MinistryTerm.DoesNotExist:
+    return None
+
+
+championships_list_router = Router()
+
+@championships_list_router.get('/', response=list[ChampionshipSchema])
+async def list_championships(request):
+  """List all championships"""
+  return [champ async for champ in Championship.objects.all()]
+
+
+deliveries_stats_router = Router()
+
+@deliveries_stats_router.get('/', response=list[DeliveryStatsSchema])
+async def list_delivery_stats(request, limit: int = 10, days: int = 7):
+  """Get delivery statistics leaderboard"""
+  from django.db.models import Sum
+  
+  cutoff_date = timezone.now() - timedelta(days=days)
+  
+  stats = (Delivery.objects
+    .filter(timestamp__gte=cutoff_date, character__isnull=False)
+    .values('character__id', 'character__name', 'character__player__unique_id')
+    .annotate(
+      total_deliveries=Count('id'),
+      total_payment=Sum('payment'),
+      total_subsidy=Sum('subsidy'),
+      total_quantity=Sum('quantity'),
+    )
+    .order_by('-total_deliveries')[:limit]
+  )
+  
+  return [
+    {
+      'character_id': stat['character__id'],
+      'character_name': stat['character__name'],
+      'player_id': str(stat['character__player__unique_id']),
+      'total_deliveries': stat['total_deliveries'],
+      'total_payment': stat['total_payment'] or 0,
+      'total_subsidy': stat['total_subsidy'] or 0,
+      'total_quantity': stat['total_quantity'] or 0,
+    }
+    async for stat in stats
+  ]
+
+
+# Phase 2: Community Features Routers
+
+companies_router = Router()
+
+@companies_router.get('/', response=list[CompanyPublicSchema])
+async def list_companies(request):
+  """List all companies (public information only)"""
+  companies = Company.objects.select_related('owner').all()
+  
+  return [
+    {
+      'id': company.id,
+      'name': company.name,
+      'description': company.description or '',
+      'owner_name': company.owner.name if company.owner else 'Unknown',
+      'is_corp': company.is_corp,
+      'first_seen_at': company.first_seen_at,
+    }
+    async for company in companies
+  ]
+
+
+ministry_elections_router = Router()
+
+@ministry_elections_router.get('/', response=list[MinistryElectionPublicSchema])
+async def list_ministry_elections(request):
+  """List all ministry elections"""
+  
+  elections = (MinistryElection.objects
+    .prefetch_related('candidates__candidate', 'candidates__votes', 'winner')
+    .all()
+    .order_by('-created_at')
+  )
+  
+  return [
+    {
+      'id': election.id,
+      'phase': election.phase,
+      'created_at': election.created_at,
+      'candidacy_end_at': election.candidacy_end_at,
+      'poll_end_at': election.poll_end_at,
+      'winner_name': election.winner.discord_name if election.winner else None,
+      'candidates': [
+        {
+          'candidate_name': candidacy.candidate.discord_name or str(candidacy.candidate.unique_id),
+          'candidate_id': str(candidacy.candidate.unique_id),
+          'manifesto': candidacy.manifesto,
+          'created_at': candidacy.created_at,
+          'vote_count': await candidacy.votes.acount(),
+        }
+        async for candidacy in election.candidates.all()
+      ],
+    }
+    async for election in elections
+  ]
+
+
+@ministry_elections_router.get('/{id}/', response=MinistryElectionPublicSchema)
+async def get_ministry_election(request, id: int):
+  """Get a specific ministry election"""
+  
+  election = await (MinistryElection.objects
+    .prefetch_related('candidates__candidate', 'candidates__votes', 'winner')
+    .aget(id=id)
+  )
+  
+  return {
+    'id': election.id,
+    'phase': election.phase,
+    'created_at': election.created_at,
+    'candidacy_end_at': election.candidacy_end_at,
+    'poll_end_at': election.poll_end_at,
+    'winner_name': election.winner.discord_name if election.winner else None,
+    'candidates': [
+      {
+        'candidate_name': candidacy.candidate.discord_name or str(candidacy.candidate.unique_id),
+        'candidate_id': str(candidacy.candidate.unique_id),
+        'manifesto': candidacy.manifesto,
+        'created_at': candidacy.created_at,
+        'vote_count': await candidacy.votes.acount(),
+      }
+      async for candidacy in election.candidates.all()
+    ],
+  }
+
+
+race_setups_list_router = Router()
+
+@race_setups_list_router.get('/', response=list[RaceSetupListSchema])
+async def list_race_setups(request):
+  """List all race setups (tracks)"""
+  setups = RaceSetup.objects.filter(name__isnull=False).all()
+  
+  return [
+    {
+      'hash': setup.hash,
+      'route_name': setup.route_name,
+      'num_laps': setup.num_laps,
+      'num_sections': setup.num_sections,
+    }
+    async for setup in setups
+  ]
+
+# Phase 3: Extended Data Routers
+
+subsidy_areas_router = Router()
+
+@subsidy_areas_router.get('/', response=list[SubsidyAreaSchema])
+async def list_subsidy_areas(request):
+  """List all subsidy geographic areas"""
+  areas = SubsidyArea.objects.all()
+  
+  return [
+    {
+      'id': area.id,
+      'name': area.name,
+      'description': area.description or '',
+      # Note: polygon serialization would need GeoJSON format
+    }
+    async for area in areas
+  ]
+
+
+passenger_stats_router = Router()
+
+@passenger_stats_router.get('/', response=list[PassengerStatsSchema])
+async def list_passenger_stats(request, limit: int = 10, days: int = 7):
+  """Get passenger transport statistics leaderboard"""
+  from django.db.models import Sum, Count, Q
+  
+  cutoff_date = timezone.now() - timedelta(days=days)
+  
+  # Aggregate by character with passenger type breakdown
+  stats = (ServerPassengerArrivedLog.objects
+    .filter(timestamp__gte=cutoff_date, player__isnull=False)
+    .values('player__unique_id')
+    .annotate(
+      player_id_str=F('player__unique_id'),
+      # Get first character name for display
+      character_id=Max('player__characters__id'),
+      character_name=Max('player__characters__name'),
+      total_passengers=Count('id'),
+      total_payment=Sum('payment'),
+      # Count by passenger type
+      hitchhiker_count=Count('id', filter=Q(passenger_type=1)),
+      taxi_count=Count('id', filter=Q(passenger_type=2)),
+      ambulance_count=Count('id', filter=Q(passenger_type=3)),
+      bus_count=Count('id', filter=Q(passenger_type=4)),
+    )
+    .order_by('-total_passengers')[:limit]
+  )
+  
+  return [
+    {
+      'character_id': stat['character_id'],
+      'character_name': stat['character_name'],
+      'player_id': str(stat['player_id_str']),
+      'total_passengers': stat['total_passengers'],
+      'total_payment': stat['total_payment'] or 0,
+      'passenger_type_counts': {
+        'hitchhiker': stat['hitchhiker_count'],
+        'taxi': stat['taxi_count'],
+        'ambulance': stat['ambulance_count'],
+        'bus': stat['bus_count'],
+      },
+    }
+    async for stat in stats
+  ]
+
+
+decals_router = Router()
+
+@decals_router.get('/', response=list[VehicleDecalPublicSchema])
+async def list_public_decals(request):
+  """List all public vehicle decals"""
+  decals = VehicleDecal.objects.filter(private=False).select_related('player').all()
+  
+  return [
+    {
+      'id': decal.id,
+      'name': decal.name,
+      'vehicle_key': decal.vehicle_key,
+      'hash': decal.hash,
+      'price': decal.price,
+      'player_name': decal.player.discord_name if decal.player else None,
+    }
+    async for decal in decals
+  ]
+
+
+dealerships_router = Router()
+
+@dealerships_router.get('/', response=list[VehicleDealershipSchema])
+async def list_dealerships(request):
+  """List all vehicle dealership locations"""
+  dealerships = VehicleDealership.objects.all()
+  
+  return [
+    {
+      'id': dealership.id,
+      'vehicle_key': dealership.vehicle_key,
+      'location': {
+        'x': dealership.location.x,
+        'y': dealership.location.y,
+        'z': dealership.location.z,
+      },
+      'notes': dealership.notes or '',
+    }
+    async for dealership in dealerships
+  ]
