@@ -302,6 +302,21 @@ async def process_log_event(event: LogEvent, http_client=None, http_client_mod=N
       if await registry.execute(message, cmd_ctx):
           pass
 
+      # Emit SSE event for all chat messages (allows bot to build conversation history)
+      if is_current_event:
+        from amc.api.bot_events import emit_bot_event
+        is_bot_command = message.startswith("/bot ")
+        await emit_bot_event({
+          "type": "chat_message",
+          "timestamp": timestamp.isoformat(),
+          "player_name": player_name,
+          "player_id": str(player_id),
+          "discord_id": player.discord_user_id if player else None,
+          "character_guid": str(character.guid) if character and character.guid else None,
+          "message": message[5:] if is_bot_command else message,
+          "is_bot_command": is_bot_command,
+        })
+
       if discord_client and ctx.get('startup_time') and timestamp > ctx.get('startup_time'):
         forward_message = (
           settings.DISCORD_GAME_CHAT_CHANNEL_ID,
