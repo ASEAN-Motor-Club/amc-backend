@@ -173,15 +173,22 @@ class CharacterManager(models.Manager.from_queryset(CharacterQuerySet)): # type:
       )
     else:
       # No GUID provided. We look up by name.
-      # aget_or_create will find a character by name regardless of its GUID status,
-      # or create a new one with a NULL GUID if none is found.
-      character, character_created = await (self.get_queryset()
-        .aget_or_create(
+      # Use filter instead of aget_or_create to handle potential duplicates.
+      # Prefer characters with GUIDs (more authoritative).
+      character = await (self.get_queryset()
+        .filter(name=player_name, player=player)
+        .order_by(F('guid').asc(nulls_last=True), '-id')
+        .afirst()
+      )
+      if character:
+        character_created = False
+      else:
+        character = await self.get_queryset().acreate(
           name=player_name,
           player=player,
-          defaults={'guid': None}
+          guid=None
         )
-      )
+        character_created = True
 
     return (character, player, character_created, player_created)
 
