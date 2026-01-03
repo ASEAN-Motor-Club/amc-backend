@@ -1,24 +1,20 @@
 """Tests for the bot_events SSE endpoint."""
 
-import asyncio
 import json
+from unittest.mock import AsyncMock, patch
 from django.test import TestCase
-from amc.api.bot_events import emit_bot_event, _bot_event_queue
+from amc.api.bot_events import emit_bot_event, BOT_EVENTS_CHANNEL
 
 
-class BotEventsQueueTest(TestCase):
-    """Tests for the bot_events event queue and emit functionality."""
+class BotEventsRedisTest(TestCase):
+    """Tests for the bot_events Redis pub/sub functionality."""
 
-    def setUp(self):
-        # Clear the queue before each test
-        while not _bot_event_queue.empty():
-            try:
-                _bot_event_queue.get_nowait()
-            except asyncio.QueueEmpty:
-                break
-
-    async def test_emit_bot_event_adds_to_queue(self):
-        """Test that emit_bot_event correctly adds events to the queue."""
+    @patch('amc.api.bot_events.aioredis')
+    async def test_emit_bot_event_publishes_to_redis(self, mock_aioredis):
+        """Test that emit_bot_event correctly publishes events to Redis."""
+        mock_client = AsyncMock()
+        mock_aioredis.from_url.return_value = mock_client
+        
         event = {
             "type": "chat_message",
             "player_name": "TestPlayer",
@@ -27,29 +23,37 @@ class BotEventsQueueTest(TestCase):
         
         await emit_bot_event(event)
         
-        # Verify event was added to queue
-        self.assertFalse(_bot_event_queue.empty())
-        queued_event = await _bot_event_queue.get()
-        self.assertEqual(queued_event, event)
+        # Verify Redis client was created and publish was called
+        mock_aioredis.from_url.assert_called_once()
+        mock_client.publish.assert_called_once_with(
+            BOT_EVENTS_CHANNEL, 
+            json.dumps(event)
+        )
+        mock_client.aclose.assert_called_once()
 
-    async def test_emit_multiple_events_maintains_order(self):
-        """Test that multiple events are queued in FIFO order."""
+    @patch('amc.api.bot_events.aioredis')
+    async def test_emit_multiple_events(self, mock_aioredis):
+        """Test that multiple events are published correctly."""
+        mock_client = AsyncMock()
+        mock_aioredis.from_url.return_value = mock_client
+        
         events = [
             {"type": "chat_message", "message": "First"},
             {"type": "chat_message", "message": "Second"},
-            {"type": "chat_message", "message": "Third"},
         ]
         
         for event in events:
             await emit_bot_event(event)
         
-        # Verify FIFO order
-        for expected in events:
-            queued = await _bot_event_queue.get()
-            self.assertEqual(queued["message"], expected["message"])
+        # Verify publish was called for each event
+        self.assertEqual(mock_client.publish.call_count, 2)
 
-    async def test_event_contains_required_fields(self):
-        """Test that events can contain all required bot event fields."""
+    @patch('amc.api.bot_events.aioredis')
+    async def test_emit_event_with_all_fields(self, mock_aioredis):
+        """Test that events with all bot event fields are correctly serialized."""
+        mock_client = AsyncMock()
+        mock_aioredis.from_url.return_value = mock_client
+        
         event = {
             "type": "chat_message",
             "timestamp": "2026-01-03T12:00:00+00:00",
@@ -63,24 +67,10 @@ class BotEventsQueueTest(TestCase):
         
         await emit_bot_event(event)
         
-        queued_event = await _bot_event_queue.get()
-        self.assertEqual(queued_event["type"], "chat_message")
-        self.assertEqual(queued_event["player_name"], "TestPlayer")
-        self.assertEqual(queued_event["is_bot_command"], True)
-        self.assertEqual(queued_event["discord_id"], "987654321")
-
-    async def test_event_serializable_to_json(self):
-        """Test that queued events can be serialized to JSON for SSE."""
-        event = {
-            "type": "chat_message",
-            "player_name": "TestPlayer",
-            "message": "Test message",
-        }
-        
-        await emit_bot_event(event)
-        queued_event = await _bot_event_queue.get()
-        
-        # Should be JSON serializable for SSE output
-        json_str = json.dumps(queued_event)
-        self.assertIn("chat_message", json_str)
-        self.assertIn("TestPlayer", json_str)
+        # Verify the event was serialized as JSON
+        call_args = mock_client.publish.call_args[0]
+        self.assertEqual(call_args[0], BOT_EVENTS_CHANNEL)
+        published_data = json.loads(call_args[1])
+        self.assertEqual(published_data["type"], "chat_message")
+        self.assertEqual(published_data["player_name"], "TestPlayer")
+        self.assertEqual(published_data["is_bot_command"], True)
