@@ -2,6 +2,7 @@
 
 import asyncio
 import json
+from datetime import datetime
 from ninja import Router
 from django.http import StreamingHttpResponse
 
@@ -21,7 +22,8 @@ async def bot_events_stream(request):
     """SSE stream for bot-relevant game events.
     
     Events include:
-    - bot_command: In-game /bot command with full player context
+    - chat_message: In-game chat with full player context
+    - heartbeat: Periodic heartbeat for connection verification
     """
     
     async def event_stream():
@@ -29,14 +31,19 @@ async def bot_events_stream(request):
             try:
                 event = await asyncio.wait_for(
                     _bot_event_queue.get(), 
-                    timeout=30.0
+                    timeout=10.0
                 )
                 yield f"data: {json.dumps(event)}\n\n"
             except asyncio.TimeoutError:
-                # Send keepalive comment to prevent connection timeout
-                yield ": keepalive\n\n"
+                # Send heartbeat event for connection verification
+                heartbeat = {
+                    "type": "heartbeat",
+                    "timestamp": datetime.now().isoformat(),
+                }
+                yield f"data: {json.dumps(heartbeat)}\n\n"
     
     return StreamingHttpResponse(
         event_stream(), 
         content_type="text/event-stream"
     )
+
