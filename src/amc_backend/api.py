@@ -35,3 +35,6 @@ api.add_router('/decals/', 'amc.api.routes.decals_router')
 api.add_router('/dealerships/', 'amc.api.routes.dealerships_router')
 # Server Commands
 api.add_router('/commands/', 'amc.api.routes.commands_list_router')
+
+# Bot Events (SSE for Discord bot)
+api.add_router('/bot_events/', 'amc.api.bot_events.router')
