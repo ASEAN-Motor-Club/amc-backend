@@ -61,7 +61,7 @@ async def cmd_setup_event(ctx: CommandContext, event_id: Optional[int] = None):
     
     await BotInvocationLog.objects.acreate(timestamp=ctx.timestamp, character=ctx.character, prompt="/setup_event")
 
-@registry.register("/events", description=gettext_lazy("List current and upcoming scheduled events"), category="Events")
+@registry.register("/events", description=gettext_lazy("List current and upcoming scheduled events"), category="Events", featured=True)
 async def cmd_events_list(ctx: CommandContext):
     events: list[str] = []
     async for event in ScheduledEvent.objects.filter(end_time__gte=timezone.now()).order_by('start_time'):

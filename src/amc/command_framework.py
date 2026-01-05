@@ -46,7 +46,7 @@ class CommandRegistry:
     def __init__(self):
         self.commands: List[Dict] = []
 
-    def register(self, command: Union[str, List[str]], description: Union[str, "_StrPromise"] = "", category: str = "General", deprecated: bool = False, deprecated_message: Optional[str] = None):
+    def register(self, command: Union[str, List[str]], description: Union[str, "_StrPromise"] = "", category: str = "General", deprecated: bool = False, deprecated_message: Optional[str] = None, featured: bool = False):
         """
         Decorator to register a command.
         
@@ -56,6 +56,7 @@ class CommandRegistry:
             category: The category the command belongs to (e.g. "General", "Events").
             deprecated: If True, the command is deprecated and will not be executed.
             deprecated_message: Optional custom message to show when a deprecated command is used.
+            featured: If True, command appears in Featured section at top of /help.
         """
         def decorator(func: Callable):
             aliases = [command] if isinstance(command, str) else command
@@ -70,7 +71,8 @@ class CommandRegistry:
                 'description': description,
                 'category': category,
                 'deprecated': deprecated,
-                'deprecated_message': deprecated_message
+                'deprecated_message': deprecated_message,
+                'featured': featured
             })
             return func
         return decorator

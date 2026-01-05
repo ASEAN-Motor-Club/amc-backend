@@ -15,6 +15,7 @@ from django.utils.translation import gettext as _, gettext_lazy
 async def cmd_help(ctx: CommandContext):
     # Group commands by category
     categories = {}
+    featured_cmds = []
     is_admin = ctx.player_info.get('bIsAdmin', False) if ctx.player_info else False
 
     for cmd in registry.commands:
@@ -26,8 +27,28 @@ async def cmd_help(ctx: CommandContext):
         if cat not in categories:
             categories[cat] = []
         categories[cat].append(cmd)
+        
+        # Collect featured commands
+        if cmd.get('featured', False):
+            featured_cmds.append(cmd)
     
     msg = _("<Title>Available Commands</>\n\n")
+    
+    # Show Featured section first
+    if featured_cmds:
+        msg += _("<Title>Featured</>\n<Secondary></>\n")
+        for cmd in featured_cmds:
+            name = cmd['name']
+            aliases = cmd.get('aliases', [name])
+            desc = str(cmd.get('description', ''))
+            
+            shorthands = [a for a in aliases if a != name]
+            shorthand_str = ""
+            if shorthands:
+                shorthand_str = "\n" + _("<Secondary>Shorthand: {shorthands}</>").format(shorthands=', '.join(shorthands))
+            
+            msg += f"<Highlight>{name}</> - {desc}{shorthand_str}\n<Secondary></>\n"
+        msg += "\n"
     
     # Sort categories: General first, then alphabetical
     cat_names = sorted(categories.keys())
@@ -122,11 +143,11 @@ async def cmd_rename(ctx: CommandContext, name: str):
     await ctx.character.asave()
     await set_character_name(ctx.http_client_mod, ctx.character.guid, name)
 
-@registry.register("/bot", description=gettext_lazy("Ask the bot a question"), category="General")
+@registry.register("/bot", description=gettext_lazy("Ask the bot a question"), category="General", featured=True)
 async def cmd_bot(ctx: CommandContext, prompt: str):
     await BotInvocationLog.objects.acreate(timestamp=ctx.timestamp, character=ctx.character, prompt=prompt)
 
-@registry.register(["/song_request", "/songrequest"], description=gettext_lazy("Request a song for the radio"), category="General")
+@registry.register(["/song_request", "/songrequest"], description=gettext_lazy("Request a song for the radio"), category="General", featured=True)
 async def cmd_song_request(ctx: CommandContext, song: str):
     await SongRequestLog.objects.acreate(timestamp=ctx.timestamp, character=ctx.character, song=song)
     if ctx.is_current_event:

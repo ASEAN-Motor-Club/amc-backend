@@ -32,7 +32,7 @@ async def cmd_rp_mode(ctx: CommandContext, verification_code: str = ""):
         
 
 
-@registry.register("/rescue", description=gettext_lazy("Calls for rescue service"), category="RP & Rescue") # type: ignore
+@registry.register("/rescue", description=gettext_lazy("Calls for rescue service"), category="RP & Rescue", featured=True) # type: ignore
 async def cmd_rescue(ctx: CommandContext, message: str = ""):
     if await RescueRequest.objects.filter(character=ctx.character, timestamp__gte=timezone.now() - timedelta(minutes=5)).aexists():
         await ctx.reply(_("You have requested a rescue less than 5 minutes ago"))

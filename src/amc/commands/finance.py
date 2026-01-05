@@ -14,7 +14,7 @@ from amc.utils import with_verification_code
 from decimal import Decimal
 from django.utils.translation import gettext as _, gettext_lazy
 
-@registry.register("/bank", description=gettext_lazy("Access your bank account"), category="Finance")
+@registry.register("/bank", description=gettext_lazy("Access your bank account"), category="Finance", featured=True)
 async def cmd_bank(ctx: CommandContext):
     balance = await get_player_bank_balance(ctx.character)
     loan_balance = await get_player_loan_balance(ctx.character)

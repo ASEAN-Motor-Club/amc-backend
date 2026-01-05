@@ -6,7 +6,7 @@ from amc.subsidies import get_subsidies_text
 from django.db.models import F
 from django.utils.translation import gettext as _, gettext_lazy
 
-@registry.register("/jobs", description=gettext_lazy("List available server jobs"), category="Jobs")
+@registry.register("/jobs", description=gettext_lazy("List available server jobs"), category="Jobs", featured=True)
 async def cmd_jobs(ctx: CommandContext):
     is_rp_mode = await get_rp_mode(ctx.http_client_mod, ctx.character.guid)
     jobs = DeliveryJob.objects.filter(

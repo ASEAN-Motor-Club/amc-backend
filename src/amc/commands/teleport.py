@@ -15,7 +15,7 @@ async def cmd_tp_coords(ctx: CommandContext, x: int, y: int, z: int):
     else:
         await ctx.reply(_("Admin Only"))
 
-@registry.register(["/teleport", "/tp"], description=gettext_lazy("Teleport to a location"), category="Teleportation")
+@registry.register(["/teleport", "/tp"], description=gettext_lazy("Teleport to a location"), category="Teleportation", featured=True)
 async def cmd_tp_name(ctx: CommandContext, name: str = ""):
     CORPS_WITH_TP = { "69FF57844F3F79D1F9665991B4006325" }
     player_info = ctx.player_info or {} 
