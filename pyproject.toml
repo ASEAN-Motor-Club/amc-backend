@@ -26,6 +26,7 @@ dependencies = [
     "pycryptodome>=3.23.0",
     "psutil>=6.1.1",
     "pyjwt>=2.9.0",
+    "protobuf>=6.30.0",
 ]
 [project.scripts]
 amc-manage = "manage:main"

@@ -19,5 +19,14 @@ django_application = get_asgi_application()
 async def application(scope, receive, send):
     if scope["type"] in {"http", "lifespan"}:
         await django_application(scope, receive, send)
+    elif scope["type"] == "websocket":
+        from amc.api.player_positions_ws import player_positions_ws_app
+
+        try:
+            await player_positions_ws_app(scope, receive, send)
+        except NotImplementedError:
+            raise NotImplementedError(
+                f"Unhandled WebSocket route: {scope.get('path')}"
+            )
     else:
         raise NotImplementedError(f"Unknown scope type {scope['type']}")
