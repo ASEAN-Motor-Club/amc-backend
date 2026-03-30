@@ -8,7 +8,9 @@ from amc.mod_detection import (
     detect_incompatible_parts,
     format_custom_parts_game,
     format_incompatible_parts_game,
+    POLICE_DUTY_WHITELIST,
 )
+from amc.models import PoliceSession
 from amc.player_tags import refresh_player_name
 from amc.utils import fuzzy_find_player
 from django.utils.translation import gettext as _, gettext_lazy
@@ -94,7 +96,14 @@ async def cmd_check_mods(ctx: CommandContext, target_player_name: Optional[str] 
         return
     vehicle_name = format_vehicle_name(vehicle["fullName"])
     parts = vehicle.get("parts", [])
-    custom = detect_custom_parts(parts)
+    # Whitelist police parts for officers on active duty
+    whitelist = None
+    is_on_duty = await PoliceSession.objects.filter(
+        character=ctx.character, ended_at__isnull=True
+    ).aexists()
+    if is_on_duty:
+        whitelist = POLICE_DUTY_WHITELIST
+    custom = detect_custom_parts(parts, whitelist=whitelist)
     incompatible = detect_incompatible_parts(parts, vehicle["fullName"])
 
     # Recalculate [MODS] tag when checking own vehicle
@@ -103,6 +112,23 @@ async def cmd_check_mods(ctx: CommandContext, target_player_name: Optional[str] 
             ctx.character, ctx.http_client_mod,
             has_custom_parts=bool(custom or incompatible),
         )
+
+    # Build drivetrain summary from DriveInfo
+    drive_info = vehicle.get("DriveInfo", {})
+    drive_line = ""
+    if drive_info:
+        drive_type = drive_info.get("drive_type", "Unknown")
+        effective = drive_info.get("effective_drive_type", drive_type)
+        driven = drive_info.get("driven_wheel_count", 0)
+        total = drive_info.get("total_wheel_count", 0)
+        axles = drive_info.get("total_axle_count", 0)
+        driven_axles = len(drive_info.get("driven_axle_indices", []))
+
+        label = drive_type
+        if effective != drive_type:
+            label = f"{drive_type} ({effective})"
+
+        drive_line = f"\nDrivetrain: {label} — {driven}/{total} wheels, {driven_axles}/{axles} axles"
 
     issues = []
     if custom:
@@ -122,9 +148,10 @@ async def cmd_check_mods(ctx: CommandContext, target_player_name: Optional[str] 
 
     if issues:
         await ctx.reply(
-            _("<Title>Mod Check</>\n\n<Bold>{name}</> — {vehicle}{issues}").format(
+            _("<Title>Mod Check</>\n\n<Bold>{name}</> — {vehicle}{drive}{issues}").format(
                 name=target_player_name,
                 vehicle=vehicle_name,
+                drive=drive_line,
                 issues="\n".join(issues),
             )
         )
@@ -132,10 +159,11 @@ async def cmd_check_mods(ctx: CommandContext, target_player_name: Optional[str] 
         await ctx.reply(
             _(
                 "<Title>Parts Check</>"
-                "\n\n<Bold>{name}</> — {vehicle}"
+                "\n\n<Bold>{name}</> — {vehicle}{drive}"
                 "\n\nAll stock parts."
             ).format(
                 name=target_player_name,
                 vehicle=vehicle_name,
+                drive=drive_line,
             )
         )

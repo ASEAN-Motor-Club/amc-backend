@@ -129,14 +129,17 @@ class TuningWorkshopCog(commands.Cog):
             )
             return
 
+        # Defer before the slow reaction-counting phase to avoid
+        # Discord's 3-second interaction timeout (error 10062).
+        await interaction.response.defer(ephemeral=True)
+
         # Count current reactions across starter + author's image messages
         unique_reactors = await self._count_unique_reactors(
             channel, submission.author_discord_id
         )
         if unique_reactors is None:
-            await interaction.response.send_message(
+            await interaction.followup.send(
                 "❌ Could not fetch messages to count reactions.",
-                ephemeral=True,
             )
             return
 
@@ -144,11 +147,10 @@ class TuningWorkshopCog(commands.Cog):
         new_reactions = current_count - submission.rewarded_reaction_count
 
         if new_reactions <= 0:
-            await interaction.response.send_message(
+            await interaction.followup.send(
                 "❌ No new reactions to claim since your last cashout."
                 if submission.rewarded_reaction_count > 0
                 else "❌ This post has no reactions from other users yet.",
-                ephemeral=True,
             )
             return
 
@@ -158,9 +160,8 @@ class TuningWorkshopCog(commands.Cog):
                 discord_user_id=submission.author_discord_id
             )
         except Player.DoesNotExist:
-            await interaction.response.send_message(
+            await interaction.followup.send(
                 "❌ No linked game account found. Make sure your Discord is linked to your in-game account.",
-                ephemeral=True,
             )
             return
 
@@ -182,11 +183,10 @@ class TuningWorkshopCog(commands.Cog):
         )
 
         # Send voucher code ephemerally (only visible to the author)
-        await interaction.response.send_message(
+        await interaction.followup.send(
             f"✅ Voucher issued for **${reward_amount:,}**!\n"
             f"🎟️ Code: `{code}`\n"
             f"Use `/claim_voucher {code}` in-game to deposit.",
-            ephemeral=True,
         )
 
         # Post a public announcement (without the code)

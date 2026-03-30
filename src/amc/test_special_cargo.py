@@ -76,7 +76,7 @@ class MoneyCargoHandlerTests(TestCase):
 
     @patch("amc.special_cargo.refresh_player_name", new_callable=AsyncMock)
     @patch("amc.special_cargo.record_treasury_expense", new_callable=AsyncMock)
-    async def test_criminal_record_extended_on_repeat_delivery(
+    async def test_criminal_record_reset_on_repeat_delivery(
         self, mock_treasury_expense, mock_refresh, mock_get_treasury, mock_get_rp_mode,
     ):
         mock_get_rp_mode.return_value = False
@@ -94,10 +94,10 @@ class MoneyCargoHandlerTests(TestCase):
 
         records = [r async for r in CriminalRecord.objects.filter(character=character)]
         self.assertEqual(len(records), 1, "Should not create a second record")
-        # Should be extended by 7 days from original expiry
+        # Should be reset to 7 days from now (not extended from original expiry)
         self.assertAlmostEqual(
             records[0].expires_at.timestamp(),
-            (original_expiry + timedelta(days=7)).timestamp(),
+            (timezone.now() + timedelta(days=7)).timestamp(),
             delta=5,
         )
 
@@ -203,21 +203,21 @@ class MoneyCargoHandlerTests(TestCase):
     async def test_criminal_level_increases_with_total(
         self, mock_treasury_expense, mock_refresh, mock_get_treasury, mock_get_rp_mode,
     ):
-        """Criminal level increases after crossing 100k threshold."""
+        """Criminal level increases after crossing 50k threshold."""
         from amc.special_cargo import calculate_criminal_level
 
         mock_get_rp_mode.return_value = False
         mock_get_treasury.return_value = 100_000
         player, character = await self._setup_character()
 
-        # First delivery: 50k → level 1
+        # First delivery: 50k → level 2
         event1 = self._money_event(character, payment=50_000)
         await process_event(event1, player, character)
         await character.arefresh_from_db()
-        self.assertEqual(calculate_criminal_level(character.criminal_laundered_total), 1)
+        self.assertEqual(calculate_criminal_level(character.criminal_laundered_total), 2)
 
-        # Second delivery: 60k → total 110k → level 2
+        # Second delivery: 60k → total 110k → level 3
         event2 = self._money_event(character, payment=60_000)
         await process_event(event2, player, character)
         await character.arefresh_from_db()
-        self.assertEqual(calculate_criminal_level(character.criminal_laundered_total), 2)
+        self.assertEqual(calculate_criminal_level(character.criminal_laundered_total), 3)

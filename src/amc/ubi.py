@@ -7,6 +7,7 @@ from amc.models import (
 )
 from amc.game_server import get_players
 from amc.mod_server import transfer_money
+from amc.police import is_police
 from amc_finance.services import (
     send_fund_to_player_wallet,
     get_player_loan_balance,
@@ -78,7 +79,11 @@ async def handout_ubi(ctx):
                 / MAX_LEVEL,
             )
 
-            if character.is_gov_employee:
+            on_duty = await is_police(character)
+            if on_duty:
+                amount *= 2
+                label = "Police Salary"
+            elif character.is_gov_employee:
                 amount *= 2
                 label = "Government Salary"
             else:

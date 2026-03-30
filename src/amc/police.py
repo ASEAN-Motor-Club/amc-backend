@@ -8,7 +8,27 @@ from django.db.models import F
 from django.utils import timezone
 from amc.player_tags import refresh_player_name
 
-POLICE_LEVEL_STEP = 50_000
+POLICE_LEVEL_STEP = 10_000
+
+# Risk premium: extra payout on Money deliveries per active online police officer.
+SECURITY_BONUS_RATE = 0.20  # 20% per officer
+SECURITY_BONUS_MAX = 1.0  # capped at 100%
+
+
+async def get_active_police_count() -> int:
+    """Count police officers who are on duty AND currently online.
+
+    An officer counts if they have an active PoliceSession (ended_at is null)
+    AND their character.last_online is within the last 60 seconds.
+    """
+    from datetime import timedelta
+    from amc.models import PoliceSession
+
+    online_threshold = timezone.now() - timedelta(seconds=60)
+    return await PoliceSession.objects.filter(
+        ended_at__isnull=True,
+        character__last_online__gte=online_threshold,
+    ).acount()
 
 
 def calculate_police_level(confiscated_total: int) -> int:

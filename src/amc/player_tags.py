@@ -41,7 +41,7 @@ def build_display_name(
     Tag format: [MP1C1G3] BaseName  (order: M, P, C, G)
       M = Modded vehicle parts
       P1 = Police level (active session)
-      C1 = Criminal level (suppressed when police or gov employee)
+      C1 = Criminal level (suppressed when police is active)
       G3 = Government employee level
 
     Args:
@@ -60,7 +60,7 @@ def build_display_name(
     if police_level > 0:
         tag += f"P{police_level}"
 
-    # C is suppressed when police or gov employee is active
+    # C is suppressed when police or gov is active
     if criminal_level > 0 and police_level == 0 and gov_level == 0:
         tag += f"C{criminal_level}"
 

@@ -130,11 +130,11 @@ async def run_sse_listener(ctx):
 
     from django.core.cache import cache
     from amc.webhook import LAST_SEQ_CACHE_KEY, LAST_EPOCH_CACHE_KEY
-    current_epoch = cache.get(LAST_EPOCH_CACHE_KEY)
+    current_epoch = await cache.aget(LAST_EPOCH_CACHE_KEY)
     if current_epoch is not None:
         # Build epoch-prefixed Last-Event-ID so the C++ server can
         # properly position in the ring buffer for this epoch.
-        last_seq = cache.get(LAST_SEQ_CACHE_KEY, 0)
+        last_seq = await cache.aget(LAST_SEQ_CACHE_KEY, 0)
         last_event_id = f"{current_epoch}:{last_seq}" if last_seq else "0"
     else:
         # No epoch cached — SSE has never connected, or the cache was
@@ -203,7 +203,19 @@ async def run_sse_listener(ctx):
                     )
 
                     try:
-                        async for raw_line in resp.content:
+                        while True:
+                            try:
+                                raw_line = await asyncio.wait_for(
+                                    resp.content.readline(), timeout=120.0
+                                )
+                            except asyncio.TimeoutError:
+                                logger.warning("SSE read timeout (no events/heartbeats for 120s), forcing fresh reconnect")
+                                await cache.aset(LAST_SEQ_CACHE_KEY, 0, timeout=None)
+                                break  # Break loop to trigger reconnect
+
+                            if not raw_line:
+                                break  # EOF
+
                             line = raw_line.decode("utf-8", errors="replace").rstrip("\n").rstrip("\r")
 
                             if line == "":
@@ -227,11 +239,11 @@ async def run_sse_listener(ctx):
                                                     "SSE epoch changed: %s -> %s (server restarted), resetting seq high-water mark",
                                                     current_epoch, parsed_epoch,
                                                 )
-                                                cache.set(LAST_SEQ_CACHE_KEY, 0, timeout=None)
+                                                await cache.aset(LAST_SEQ_CACHE_KEY, 0, timeout=None)
 
                                             if parsed_epoch is not None:
                                                 current_epoch = parsed_epoch
-                                                cache.set(LAST_EPOCH_CACHE_KEY, current_epoch, timeout=None)
+                                                await cache.aset(LAST_EPOCH_CACHE_KEY, current_epoch, timeout=None)
 
                                         try:
                                             event_obj = json.loads(data)

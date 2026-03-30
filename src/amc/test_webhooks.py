@@ -3,6 +3,7 @@ import asyncio
 from typing import Any
 from datetime import timedelta
 from unittest.mock import patch, MagicMock, AsyncMock
+from django.core.cache import cache
 from django.test import TestCase
 from django.contrib.gis.geos import Point
 import unittest
@@ -580,10 +581,97 @@ class ProcessEventTests(TestCase):
         mock_show_popup.assert_called_once()
         self.assertIn("not allowed to use modified vehicles", mock_show_popup.call_args[0][1])
 
+    @patch("amc.webhook.SMUGGLING_TIPOFF_ENABLED", True)
+    @patch("amc.webhook._announce_smuggling_tipoff_after_delay", new_callable=AsyncMock)
+    @patch("amc.webhook.detect_custom_parts")
+    @patch("amc.webhook.list_player_vehicles", new_callable=AsyncMock)
+    async def test_load_cargo_money_smuggling_tipoff(
+        self, mock_list_vehicles, mock_detect, mock_announce_tipoff, mock_get_treasury, mock_get_rp_mode,
+    ):
+        """First Money load triggers a smuggling tip-off announcement."""
+        mock_get_rp_mode.return_value = False
+        mock_get_treasury.return_value = 100_000
+        mock_list_vehicles.return_value = {}
+        mock_detect.return_value = []
+
+        player = await sync_to_async(PlayerFactory)()
+        character = await sync_to_async(CharacterFactory)(player=player)
+
+        event = {
+            "hook": "ServerLoadCargo",
+            "timestamp": int(time.time()),
+            "data": {
+                "Cargo": {"Net_CargoKey": "Money", "Net_Payment": 10_000},
+                "PlayerId": str(player.unique_id),
+                "CharacterGuid": str(character.guid),
+            },
+        }
+        http_client = MagicMock()
+        http_client_mod = MagicMock()
+
+        await process_event(
+            event, player, character,
+            http_client=http_client, http_client_mod=http_client_mod,
+        )
+        # Let background task run
+        await asyncio.sleep(0)
+
+        mock_announce_tipoff.assert_called_once_with(http_client, delay=15)
+
+    @patch("amc.webhook.SMUGGLING_TIPOFF_ENABLED", True)
+    @patch("amc.webhook._announce_smuggling_tipoff_after_delay", new_callable=AsyncMock)
+    @patch("amc.webhook.detect_custom_parts")
+    @patch("amc.webhook.list_player_vehicles", new_callable=AsyncMock)
+    async def test_load_cargo_money_smuggling_tipoff_throttled(
+        self, mock_list_vehicles, mock_detect, mock_announce_tipoff, mock_get_treasury, mock_get_rp_mode,
+    ):
+        """Second Money load within 60s cooldown does NOT trigger another tip-off."""
+        mock_get_rp_mode.return_value = False
+        mock_get_treasury.return_value = 100_000
+        mock_list_vehicles.return_value = {}
+        mock_detect.return_value = []
+
+        player = await sync_to_async(PlayerFactory)()
+        character = await sync_to_async(CharacterFactory)(player=player)
+
+        event = {
+            "hook": "ServerLoadCargo",
+            "timestamp": int(time.time()),
+            "data": {
+                "Cargo": {"Net_CargoKey": "Money", "Net_Payment": 10_000},
+                "PlayerId": str(player.unique_id),
+                "CharacterGuid": str(character.guid),
+            },
+        }
+        http_client = MagicMock()
+        http_client_mod = MagicMock()
+
+        # First load — triggers tip-off
+        await process_event(
+            event, player, character,
+            http_client=http_client, http_client_mod=http_client_mod,
+        )
+        await asyncio.sleep(0)
+        self.assertEqual(mock_announce_tipoff.call_count, 1)
+
+        mock_announce_tipoff.reset_mock()
+
+        # Second load — should be throttled (no new announcement)
+        await process_event(
+            event, player, character,
+            http_client=http_client, http_client_mod=http_client_mod,
+        )
+        await asyncio.sleep(0)
+
+        mock_announce_tipoff.assert_not_called()
+
 
 @patch("amc.webhook.get_rp_mode", new_callable=AsyncMock)
 @patch("amc.webhook.get_treasury_fund_balance", new_callable=AsyncMock)
 class ProcessEventsTests(TestCase):
+    def setUp(self):
+        cache.clear()
+
     async def test_process_events_integration(
         self, mock_get_treasury, mock_get_rp_mode
     ):
@@ -693,6 +781,9 @@ class ProcessEventsTests(TestCase):
 @patch("amc.webhook.announce", new_callable=AsyncMock)
 @patch("amc.webhook.show_popup", new_callable=AsyncMock)
 class ExtraWebhookTests(TestCase):
+    def setUp(self):
+        cache.clear()
+
     async def test_cargo_aggregation_same_event(
         self, mock_show_popup, mock_announce, mock_get_treasury, mock_get_rp_mode
     ):
@@ -1353,6 +1444,9 @@ class ExtraWebhookTests(TestCase):
 @patch("amc.webhook.announce", new_callable=AsyncMock)
 @patch("amc.webhook.show_popup", new_callable=AsyncMock)
 class SubsidyIntegrationTests(TestCase):
+    def setUp(self):
+        cache.clear()
+
     async def test_subsidy_rule_integration(
         self, mock_show_popup, mock_announce, mock_get_treasury, mock_get_rp_mode
     ):
@@ -1533,9 +1627,10 @@ class SubsidyIntegrationTests(TestCase):
         # AND Filtering for the Delivery Point itself (Webhook logic) uses buffer(1)
 
         # 1. Test EXACT Location -> Should Match
+        base_ts = int(time.time())
         event_exact = {
             "hook": "ServerCargoArrived",
-            "timestamp": int(time.time()),
+            "timestamp": base_ts,
             "data": {
                 "CharacterGuid": str(character.guid),
                 "Cargos": [
@@ -1571,7 +1666,7 @@ class SubsidyIntegrationTests(TestCase):
 
         event_near = {
             "hook": "ServerCargoArrived",
-            "timestamp": int(time.time()),
+            "timestamp": base_ts + 1,
             "data": {
                 "CharacterGuid": str(character.guid),
                 "Cargos": [
@@ -1593,9 +1688,9 @@ class SubsidyIntegrationTests(TestCase):
             d2.subsidy, 100, "0.9 distance should resolve point and get subsidy"
         )
 
-        # 3. Test Outside Tolerance (1.1) -> Should NOT Match
-        # Point(1.1, 0, 0).buffer(1) -> Circle from 0.1 to 2.1.
-        # Zero point (0,0,0) is NOT covered.
+        # 3. Test Outside Tolerance (2.1) -> Should NOT Match
+        # Point(2.1, 0, 0).buffer(1) -> Circle from 1.1 to 3.1.
+        # Zero point (0,0,0) is clearly NOT covered (distance 2.1 >> radius 1).
         # So 'sender_point' will be None.
         # SubsidyRule loop: if cargo.sender_point is None:
         #   rules = rules.filter(source_areas__isnull=True, source_delivery_points__isnull=True)
@@ -1603,7 +1698,7 @@ class SubsidyIntegrationTests(TestCase):
 
         event_far = {
             "hook": "ServerCargoArrived",
-            "timestamp": int(time.time()),
+            "timestamp": base_ts + 2,
             "data": {
                 "CharacterGuid": str(character.guid),
                 "Cargos": [
@@ -1612,7 +1707,7 @@ class SubsidyIntegrationTests(TestCase):
                         "Net_Payment": 100,
                         "Net_Weight": 10.0,
                         "Net_Damage": 0.0,
-                        "Net_SenderAbsoluteLocation": {"X": 1.1, "Y": 0, "Z": 0},
+                        "Net_SenderAbsoluteLocation": {"X": 2.1, "Y": 0, "Z": 0},
                         "Net_DestinationLocation": {"X": 100, "Y": 100, "Z": 0},
                     }
                 ],
@@ -1624,7 +1719,7 @@ class SubsidyIntegrationTests(TestCase):
         self.assertEqual(
             d3.subsidy,
             0,
-            "1.1 distance should NOT resolve point and thus NOT get subsidy",
+            "2.1 distance should NOT resolve point and thus NOT get subsidy",
         )
 
     async def test_subsidy_zero_treasury(
@@ -1994,6 +2089,9 @@ class OnPlayerProfitTests(TestCase):
 class SeqDeduplicationTests(TestCase):
     """Tests for _seq-based idempotency in process_events."""
 
+    def setUp(self):
+        cache.clear()
+
     def _make_cargo_event(self, character_guid, seq=None):
         event = {
             "hook": "ServerCargoArrived",
@@ -2164,3 +2262,224 @@ class SeqDeduplicationTests(TestCase):
 
         cache.delete("webhook:last_processed_seq")
         cache.delete("webhook:last_epoch")
+
+
+@patch("amc.webhook.get_rp_mode", new_callable=AsyncMock)
+@patch("amc.webhook.get_treasury_fund_balance", new_callable=AsyncMock)
+@patch("amc.webhook.subsidise_player", new_callable=AsyncMock)
+class SecurityBonusTests(TestCase):
+    """Test Risk Premium on Money deliveries based on active online police."""
+
+    def _make_money_event(self, player, character):
+        return {
+            "hook": "ServerCargoArrived",
+            "timestamp": int(time.time()),
+            "data": {
+                "Cargos": [
+                    {
+                        "Net_CargoKey": "Money",
+                        "Net_Payment": 10_000,
+                        "Net_Weight": 100.0,
+                        "Net_Damage": 0.0,
+                        "Net_SenderAbsoluteLocation": {"X": 0, "Y": 0, "Z": 0},
+                        "Net_DestinationLocation": {"X": 1000, "Y": 1000, "Z": 0},
+                    }
+                ],
+                "PlayerId": str(player.unique_id),
+                "CharacterGuid": str(character.guid),
+            },
+        }
+
+    @patch("amc.webhook.list_player_vehicles", new_callable=AsyncMock)
+    async def test_money_delivery_no_police_no_bonus(
+        self, mock_list_vehicles, mock_subsidise, mock_get_treasury, mock_get_rp_mode
+    ):
+        """0 police on duty → 0% risk premium."""
+        mock_get_rp_mode.return_value = False
+        mock_get_treasury.return_value = 100_000
+        mock_list_vehicles.return_value = {}
+
+        player = await sync_to_async(PlayerFactory)()
+        character = await sync_to_async(CharacterFactory)(player=player)
+        await CharacterLocation.objects.acreate(
+            character=character, location=Point(0, 0, 0), vehicle_key="TestVehicle"
+        )
+        await DeliveryPoint.objects.acreate(guid="1", name="mine", coord=Point(0, 0, 0))
+        await DeliveryPoint.objects.acreate(
+            guid="2", name="factory", coord=Point(1000, 1000, 0)
+        )
+
+        event = self._make_money_event(player, character)
+        http_client_mod = MagicMock()
+        payment, subsidy, _ = await process_event(
+            event, player, character, http_client_mod=http_client_mod
+        )
+
+        self.assertEqual(payment, 10_000)
+        # No police → no risk premium; subsidise_player not called
+        self.assertEqual(subsidy, 0)
+        mock_subsidise.assert_not_called()
+
+    @patch("amc.webhook.list_player_vehicles", new_callable=AsyncMock)
+    async def test_money_delivery_one_police_20pct_bonus(
+        self, mock_list_vehicles, mock_subsidise, mock_get_treasury, mock_get_rp_mode
+    ):
+        """1 police on duty and online → 20% risk premium."""
+        mock_get_rp_mode.return_value = False
+        mock_get_treasury.return_value = 100_000
+        mock_list_vehicles.return_value = {}
+
+        from amc.models import PoliceSession
+
+        player = await sync_to_async(PlayerFactory)()
+        character = await sync_to_async(CharacterFactory)(player=player)
+        await CharacterLocation.objects.acreate(
+            character=character, location=Point(0, 0, 0), vehicle_key="TestVehicle"
+        )
+        await DeliveryPoint.objects.acreate(guid="1", name="mine", coord=Point(0, 0, 0))
+        await DeliveryPoint.objects.acreate(
+            guid="2", name="factory", coord=Point(1000, 1000, 0)
+        )
+
+        # Create a police officer who is on duty and online
+        cop_player = await sync_to_async(PlayerFactory)()
+        cop_char = await sync_to_async(CharacterFactory)(
+            player=cop_player, last_online=timezone.now()
+        )
+        await PoliceSession.objects.acreate(character=cop_char)
+
+        event = self._make_money_event(player, character)
+        http_client_mod = MagicMock()
+        payment, subsidy, _ = await process_event(
+            event, player, character, http_client_mod=http_client_mod
+        )
+
+        self.assertEqual(payment, 10_000)
+        # Risk premium paid directly, not in returned subsidy
+        self.assertEqual(subsidy, 0)
+        # 1 police * 20% * 10,000 = 2,000 risk premium
+        mock_subsidise.assert_called_once_with(
+            2_000, character, http_client_mod, message="Risk Premium"
+        )
+
+    @patch("amc.webhook.list_player_vehicles", new_callable=AsyncMock)
+    async def test_money_delivery_offline_police_no_bonus(
+        self, mock_list_vehicles, mock_subsidise, mock_get_treasury, mock_get_rp_mode
+    ):
+        """Police on duty but offline (stale last_online) → no risk premium."""
+        mock_get_rp_mode.return_value = False
+        mock_get_treasury.return_value = 100_000
+        mock_list_vehicles.return_value = {}
+
+        from amc.models import PoliceSession
+
+        player = await sync_to_async(PlayerFactory)()
+        character = await sync_to_async(CharacterFactory)(player=player)
+        await CharacterLocation.objects.acreate(
+            character=character, location=Point(0, 0, 0), vehicle_key="TestVehicle"
+        )
+        await DeliveryPoint.objects.acreate(guid="1", name="mine", coord=Point(0, 0, 0))
+        await DeliveryPoint.objects.acreate(
+            guid="2", name="factory", coord=Point(1000, 1000, 0)
+        )
+
+        # Create a police officer on duty but last_online is 5 minutes ago (stale)
+        cop_player = await sync_to_async(PlayerFactory)()
+        cop_char = await sync_to_async(CharacterFactory)(
+            player=cop_player, last_online=timezone.now() - timedelta(minutes=5)
+        )
+        await PoliceSession.objects.acreate(character=cop_char)
+
+        event = self._make_money_event(player, character)
+        http_client_mod = MagicMock()
+        payment, subsidy, _ = await process_event(
+            event, player, character, http_client_mod=http_client_mod
+        )
+
+        self.assertEqual(payment, 10_000)
+        # Offline police → not counted → no risk premium
+        self.assertEqual(subsidy, 0)
+        mock_subsidise.assert_not_called()
+
+    @patch("amc.webhook.list_player_vehicles", new_callable=AsyncMock)
+    async def test_money_delivery_two_police_40pct_bonus(
+        self, mock_list_vehicles, mock_subsidise, mock_get_treasury, mock_get_rp_mode
+    ):
+        """2 police on duty and online → 40% risk premium."""
+        mock_get_rp_mode.return_value = False
+        mock_get_treasury.return_value = 100_000
+        mock_list_vehicles.return_value = {}
+
+        from amc.models import PoliceSession
+
+        player = await sync_to_async(PlayerFactory)()
+        character = await sync_to_async(CharacterFactory)(player=player)
+        await CharacterLocation.objects.acreate(
+            character=character, location=Point(0, 0, 0), vehicle_key="TestVehicle"
+        )
+        await DeliveryPoint.objects.acreate(guid="1", name="mine", coord=Point(0, 0, 0))
+        await DeliveryPoint.objects.acreate(
+            guid="2", name="factory", coord=Point(1000, 1000, 0)
+        )
+
+        now = timezone.now()
+        for _ in range(2):
+            cp = await sync_to_async(PlayerFactory)()
+            cc = await sync_to_async(CharacterFactory)(player=cp, last_online=now)
+            await PoliceSession.objects.acreate(character=cc)
+
+        event = self._make_money_event(player, character)
+        http_client_mod = MagicMock()
+        payment, subsidy, _ = await process_event(
+            event, player, character, http_client_mod=http_client_mod
+        )
+
+        self.assertEqual(payment, 10_000)
+        # Risk premium paid directly, not in returned subsidy
+        self.assertEqual(subsidy, 0)
+        # 2 police * 20% * 10,000 = 4,000 risk premium
+        mock_subsidise.assert_called_once_with(
+            4_000, character, http_client_mod, message="Risk Premium"
+        )
+
+    @patch("amc.webhook.list_player_vehicles", new_callable=AsyncMock)
+    async def test_money_delivery_bonus_capped_at_100pct(
+        self, mock_list_vehicles, mock_subsidise, mock_get_treasury, mock_get_rp_mode
+    ):
+        """6 police → would be 120%, but capped at 100%."""
+        mock_get_rp_mode.return_value = False
+        mock_get_treasury.return_value = 100_000
+        mock_list_vehicles.return_value = {}
+
+        from amc.models import PoliceSession
+
+        player = await sync_to_async(PlayerFactory)()
+        character = await sync_to_async(CharacterFactory)(player=player)
+        await CharacterLocation.objects.acreate(
+            character=character, location=Point(0, 0, 0), vehicle_key="TestVehicle"
+        )
+        await DeliveryPoint.objects.acreate(guid="1", name="mine", coord=Point(0, 0, 0))
+        await DeliveryPoint.objects.acreate(
+            guid="2", name="factory", coord=Point(1000, 1000, 0)
+        )
+
+        now = timezone.now()
+        for _ in range(6):
+            cp = await sync_to_async(PlayerFactory)()
+            cc = await sync_to_async(CharacterFactory)(player=cp, last_online=now)
+            await PoliceSession.objects.acreate(character=cc)
+
+        event = self._make_money_event(player, character)
+        http_client_mod = MagicMock()
+        payment, subsidy, _ = await process_event(
+            event, player, character, http_client_mod=http_client_mod
+        )
+
+        self.assertEqual(payment, 10_000)
+        # Risk premium paid directly, not in returned subsidy
+        self.assertEqual(subsidy, 0)
+        # Capped at 100%: 10,000 * 1.0 = 10,000 risk premium
+        mock_subsidise.assert_called_once_with(
+            10_000, character, http_client_mod, message="Risk Premium"
+        )
+

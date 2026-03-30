@@ -1,3 +1,4 @@
+import asyncio
 import discord
 from discord.ext import commands
 import aiohttp
@@ -17,6 +18,7 @@ from amc_cogs.profile import PlayerProfileCog
 from amc_cogs.supply_chain import SupplyChainCog
 from amc_cogs.tuning_workshop import TuningWorkshopCog
 from amc_cogs.faction import FactionCog
+from amc_cogs.crime_stats import CrimeStatsCog
 
 
 class AMCDiscordBot(commands.Bot):
@@ -53,7 +55,14 @@ class AMCDiscordBot(commands.Bot):
         await self.add_cog(SupplyChainCog(self), guild=guild)
         await self.add_cog(TuningWorkshopCog(self), guild=guild)
         await self.add_cog(FactionCog(self), guild=guild)
+        await self.add_cog(CrimeStatsCog(self), guild=guild)
         await self.tree.sync(guild=guild)
+
+        # Start auto-arrest patrol loop
+        from amc.auto_arrest import run_patrol_loop
+        self._patrol_task = asyncio.create_task(
+            run_patrol_loop(self.http_client_game, self.http_client_mod)
+        )
 
 
 intents = discord.Intents.default()

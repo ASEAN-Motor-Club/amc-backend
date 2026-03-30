@@ -1,10 +1,24 @@
 import asyncio
+import logging
+import os
+from datetime import timedelta
+
 from django.contrib.gis.geos import Point
 from django.utils import timezone
-from amc.models import Character, CharacterLocation, ShortcutZone
+from django.conf import settings
+
+from amc.models import Character, CharacterLocation, Delivery, PoliceSession, ShortcutZone
 from amc.utils import skip_if_running
 from amc.mod_server import show_popup, teleport_player
-from django.conf import settings
+
+logger = logging.getLogger("amc.locations")
+
+# Teleport detection via location delta
+TELEPORT_DISTANCE_THRESHOLD = 10_000  # game units (~100m)
+TELEPORT_DETECTION_WINDOW = 10  # minutes — match TELEPORT_PENALTY_WINDOW
+LOCATION_TELEPORT_DETECTION_ENABLED = os.environ.get(
+    "LOCATION_TELEPORT_DETECTION_ENABLED", "1"
+).lower() in ("1", "true", "yes")
 
 
 point_of_interests = [
@@ -133,6 +147,55 @@ async def _check_shortcut_zones(character, old_location, new_location, ctx):
         character.shortcut_zone_entered_at = None
 
 
+async def _check_teleport_by_location(character, old_location, new_location, ctx):
+    """Detect teleportation via location delta and apply penalty.
+
+    Hotfix for when the mod server hooks (ServerTeleportCharacter etc.) are
+    unavailable. If a player who has recent Money deliveries moves more than
+    TELEPORT_DISTANCE_THRESHOLD between ticks, trigger the same penalty
+    as handle_teleport_or_respawn.
+    """
+    if not LOCATION_TELEPORT_DETECTION_ENABLED:
+        return
+
+    distance = old_location.distance(new_location)
+    if distance <= TELEPORT_DISTANCE_THRESHOLD:
+        return
+
+    # Quick check: any recent Money deliveries?
+    window_start = timezone.now() - timedelta(minutes=TELEPORT_DETECTION_WINDOW)
+    has_recent_money = await Delivery.objects.filter(
+        character=character,
+        cargo_key="Money",
+        timestamp__gte=window_start,
+    ).aexists()
+    if not has_recent_money:
+        return
+
+    # Skip police officers
+    is_police = await PoliceSession.objects.filter(
+        character=character, ended_at__isnull=True
+    ).aexists()
+    if is_police:
+        return
+
+    logger.info(
+        "Teleport detected via location delta for %s (distance=%.0f)",
+        character.name, distance,
+    )
+
+    # Reuse the existing penalty handler from webhook.py
+    from amc.webhook import handle_teleport_or_respawn
+
+    http_client_mod = ctx.get("http_client_mod")
+    http_client = ctx.get("http_client")
+    # Synthesize a minimal event dict (the handler doesn't use event data)
+    event = {"data": {}}
+    await handle_teleport_or_respawn(
+        event, character, timezone.now(), http_client_mod, http_client,
+    )
+
+
 async def _check_pois_and_portals(character, old_location, new_location, ctx):
     """Check POI entries and portal triggers using the cached last_location."""
     player = character.player
@@ -213,6 +276,9 @@ async def monitor_locations(ctx):
                 character, character.last_location, new_point, ctx
             )
             await _check_shortcut_zones(
+                character, character.last_location, new_point, ctx
+            )
+            await _check_teleport_by_location(
                 character, character.last_location, new_point, ctx
             )
 

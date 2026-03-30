@@ -245,6 +245,7 @@ CACHES = {
     "default": {
         "BACKEND": "django.core.cache.backends.redis.RedisCache",
         "LOCATION": f"redis://127.0.0.1:{os.environ.get('REDIS_PORT', '6379')}",
+        "KEY_PREFIX": os.environ.get("CACHE_KEY_PREFIX", ""),
     },
 }
 
@@ -397,3 +398,10 @@ DASHBOARD_JWT_EXPIRY_HOURS = int(os.environ.get("DASHBOARD_JWT_EXPIRY_HOURS", "2
 
 
 ADMINS = [("Admin", os.environ.get("ADMIN_EMAIL"))]
+
+# Temporary: use list_player_vehicles + teleport fallback for /tp vehicle
+# until new mod version with enter_last_vehicle is deployed.
+# Set to empty string or "0" to disable and use native mod endpoint.
+TP_VEHICLE_USE_TELEPORT_FALLBACK = bool(
+    os.environ.get("TP_VEHICLE_USE_TELEPORT_FALLBACK", "1")
+)

@@ -130,6 +130,7 @@ class ClaimRewardCommandTestCase(TestCase):
         interaction.channel = thread
         interaction.user = MagicMock(id=user_id)
         interaction.response = AsyncMock()
+        interaction.followup = AsyncMock()
 
         if reactions is not None:
             starter_message = MagicMock()
@@ -161,11 +162,11 @@ class ClaimRewardCommandTestCase(TestCase):
 
         await self.cog.claim_reward.callback(self.cog, interaction)
 
-        # Ephemeral response with code (only visible to author)
-        interaction.response.send_message.assert_called_once()
-        call_kwargs = interaction.response.send_message.call_args
+        # Deferred, then followup with code (only visible to author)
+        interaction.response.defer.assert_called_once_with(ephemeral=True)
+        interaction.followup.send.assert_called_once()
+        call_kwargs = interaction.followup.send.call_args
         self.assertIn("claim_voucher", call_kwargs[0][0])
-        self.assertTrue(call_kwargs[1]["ephemeral"])
 
         # Public embed posted WITHOUT the code
         interaction.channel.send.assert_called_once()
@@ -232,7 +233,7 @@ class ClaimRewardCommandTestCase(TestCase):
 
         await self.cog.claim_reward.callback(self.cog, interaction)
 
-        self.assertIn("No new reactions", interaction.response.send_message.call_args[0][0])
+        self.assertIn("No new reactions", interaction.followup.send.call_args[0][0])
         self.assertEqual(await Voucher.objects.acount(), 0)
 
     async def test_claim_no_reactions_at_all(self):
@@ -245,7 +246,7 @@ class ClaimRewardCommandTestCase(TestCase):
 
         await self.cog.claim_reward.callback(self.cog, interaction)
 
-        self.assertIn("no reactions", interaction.response.send_message.call_args[0][0])
+        self.assertIn("no reactions", interaction.followup.send.call_args[0][0])
 
     async def test_claim_wrong_channel(self):
         interaction = AsyncMock()
@@ -295,7 +296,7 @@ class ClaimRewardCommandTestCase(TestCase):
 
         await self.cog.claim_reward.callback(self.cog, interaction)
 
-        self.assertIn("No linked game account", interaction.response.send_message.call_args[0][0])
+        self.assertIn("No linked game account", interaction.followup.send.call_args[0][0])
         self.assertEqual(await Voucher.objects.acount(), 0)
 
     async def test_claim_excludes_bot_and_author(self):
@@ -381,7 +382,7 @@ class ClaimRewardCommandTestCase(TestCase):
 
         await self.cog.claim_reward.callback(self.cog, interaction)
 
-        self.assertIn("no reactions", interaction.response.send_message.call_args[0][0])
+        self.assertIn("no reactions", interaction.followup.send.call_args[0][0])
         self.assertEqual(await Voucher.objects.acount(), 0)
 
     async def test_claim_ignores_other_users_image_messages(self):
@@ -412,7 +413,7 @@ class ClaimRewardCommandTestCase(TestCase):
 
         await self.cog.claim_reward.callback(self.cog, interaction)
 
-        self.assertIn("no reactions", interaction.response.send_message.call_args[0][0])
+        self.assertIn("no reactions", interaction.followup.send.call_args[0][0])
         self.assertEqual(await Voucher.objects.acount(), 0)
 
     async def test_claim_deduplicates_across_messages(self):

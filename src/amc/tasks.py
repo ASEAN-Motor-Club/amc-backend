@@ -42,6 +42,7 @@ from amc.models import (
     NewsItem,
     CriminalRecord,
     FactionMembership,
+    PoliceSession,
 )
 from amc.game_server import announce, get_players
 from amc.utils import forward_to_discord
@@ -62,7 +63,7 @@ from amc_finance.services import (
     player_donation,
     get_player_loan_balance,
 )
-from amc.mod_detection import detect_custom_parts, detect_incompatible_parts
+from amc.mod_detection import detect_custom_parts, detect_incompatible_parts, POLICE_DUTY_WHITELIST
 from amc.player_tags import refresh_player_name
 from amc.webhook import on_player_profit
 from amc.enums import VehicleKeyByLabel, VEHICLE_DATA
@@ -113,12 +114,21 @@ async def _show_police_popup(http_client_mod, character_guid, player_id):
     try:
         rules = """\
 <Title>Police Rules</>
-Using police cars does not require whitelisting on the server, but there are some rules:
-- <Warning>No ramming without consent</>
-- No spike strips unless it's part of group play
+To begin your police shift, type <Highlight>/police</> in chat.
+This will activate your [Pn] tag and enable police commands.
 
-Please communicate with the other players first to obtain permission to conduct police chases and arrests.
-Not everyone likes to be roughed up!"""
+<Bold>Commands (while on duty)</>
+- <Highlight>/arrest</> — Arrest nearby suspects
+- <Highlight>/tp vehicle</> — Teleport to your police car
+- <Highlight>/police</> — End your shift
+
+<Bold>Rules</>
+- Ramming and spike strips are allowed against suspected criminals <Highlight>[C]</>
+- <Warning>No ramming or spike strips against non-criminals without consent</>
+- Communicate with other players before conducting chases
+
+<Bold>Discord</Bold>
+Use <Highlight>/faction</Highlight> on Discord to join the Police faction and gain access to the police-only channel."""
 
         # Get online players from mod server API
         from amc.mod_server import get_players as get_players_mod
@@ -443,7 +453,14 @@ async def handle_player_vehicle_mod_check(
             return
 
         parts = main_vehicle.get("parts", [])
-        custom_parts = detect_custom_parts(parts)
+        # Whitelist police parts for officers on active duty
+        whitelist = None
+        is_on_duty = await PoliceSession.objects.filter(
+            character=character, ended_at__isnull=True
+        ).aexists()
+        if is_on_duty:
+            whitelist = POLICE_DUTY_WHITELIST
+        custom_parts = detect_custom_parts(parts, whitelist=whitelist)
         incompatible_parts = detect_incompatible_parts(
             parts, main_vehicle["fullName"]
         )
@@ -742,7 +759,7 @@ async def process_log_event(
                             member = guild.get_member(player.discord_user_id)
                             if member:
                                 from amc_cogs.faction import sync_faction_discord_role
-                                asyncio.create_task(
+                                discord_client.loop.create_task(
                                     sync_faction_discord_role(
                                         guild, member, membership.faction
                                     )
@@ -939,7 +956,7 @@ async def process_log_event(
             asyncio.create_task(delay(spawn_garages(), 25))
 
         case UnknownLogEntry():
-            raise ValueError("Unknown log entry")
+            logger.warning("Unknown log entry: %s", event)
         case SecurityAlertLogEvent():
             pass
         case _:

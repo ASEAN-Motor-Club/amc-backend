@@ -2,6 +2,7 @@ import os
 import time
 from datetime import timedelta
 from unittest.mock import patch, MagicMock, AsyncMock
+from django.core.cache import cache
 from django.test import TestCase
 from django.contrib.gis.geos import Point
 from django.utils import timezone
@@ -311,6 +312,9 @@ async def _create_online_character(player=None, guid=None, **kwargs):
 @patch("amc.webhook.PARTY_BONUS_ENABLED", True)
 class PartyPaymentSplitTest(TestCase):
     """Integration tests for party payment splitting via process_events."""
+
+    def setUp(self):
+        cache.clear()
 
     async def test_equal_split_two_members(self, mock_treasury, mock_rp):
         """2-person party: payment split equally after bonus."""
@@ -689,6 +693,9 @@ class PartyShareGovEmployeeTest(TestCase):
     and expose issues where wallet transfers don't account for gov status.
     """
 
+    def setUp(self):
+        cache.clear()
+
     async def test_gov_earner_share_values(self, mock_treasury, mock_rp):
         """Gov earner's share should reach on_player_profit correctly.
 
@@ -979,6 +986,8 @@ class PartyShareGovEmployeeTest(TestCase):
 @patch("amc.webhook.get_treasury_fund_balance", new_callable=AsyncMock)
 @patch("amc.webhook.PARTY_BONUS_ENABLED", True)
 class PartyShareLoanRepaymentTest(TestCase):
+    def setUp(self):
+        cache.clear()
     """Tests for loan repayment interactions with party sharing.
 
     Loan repayment in on_player_profit is calculated on actual_income:
@@ -1134,6 +1143,8 @@ class PartyShareLoanRepaymentTest(TestCase):
 @patch("amc.webhook.get_treasury_fund_balance", new_callable=AsyncMock)
 @patch("amc.webhook.PARTY_BONUS_ENABLED", True)
 class PartyShareContractTest(TestCase):
+    def setUp(self):
+        cache.clear()
     """Tests for contract completion interactions with party sharing.
 
     Contract payments flow differently from regular cargo:
@@ -1560,6 +1571,8 @@ class PartyShareContractTest(TestCase):
 @patch("amc.webhook.get_treasury_fund_balance", new_callable=AsyncMock)
 @patch("amc.webhook.PARTY_BONUS_ENABLED", True)
 class PartyContractWalletTransferBugTest(TestCase):
+    def setUp(self):
+        cache.clear()
     """Failing tests that assert the CORRECT behavior.
 
     These tests should FAIL on the current code because the party split

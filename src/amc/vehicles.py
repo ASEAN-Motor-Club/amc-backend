@@ -1,12 +1,13 @@
 import typing
 import re
 import logging
-from amc.models import CharacterVehicle
+from amc.models import CharacterVehicle, PoliceSession
 from amc.mod_server import list_player_vehicles, spawn_vehicle, show_popup
 from amc.enums import VehiclePartSlot
 from amc.mod_detection import (
     detect_custom_parts, detect_incompatible_parts,
     format_custom_parts_plain, format_incompatible_parts_plain,
+    POLICE_DUTY_WHITELIST,
 )
 
 logger = logging.getLogger(__name__)
@@ -130,6 +131,14 @@ async def register_player_vehicles(http_client_mod, character, player, active=No
     if not isinstance(player_vehicles, dict):
         return []
 
+    # Whitelist police parts for officers on active duty
+    whitelist = None
+    is_on_duty = await PoliceSession.objects.filter(
+        character=character, ended_at__isnull=True
+    ).aexists()
+    if is_on_duty:
+        whitelist = POLICE_DUTY_WHITELIST
+
     results = []
     for vehicle_id, vehicle in player_vehicles.items():
         if int(vehicle_id) < 0:
@@ -167,7 +176,7 @@ async def register_player_vehicles(http_client_mod, character, player, active=No
 
         # Check main vehicle for custom/modded parts
         if vehicle.get("isLastVehicle") and vehicle.get("index", -1) == 0:
-            custom = detect_custom_parts(vehicle.get("parts", []))
+            custom = detect_custom_parts(vehicle.get("parts", []), whitelist=whitelist)
             if custom:
                 logger.warning(
                     "Custom parts detected on %s's %s (#%s):\n%s",

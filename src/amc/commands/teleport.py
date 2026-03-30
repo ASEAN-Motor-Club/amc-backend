@@ -4,9 +4,65 @@ from datetime import timedelta
 from django.utils import timezone
 from amc.command_framework import registry, CommandContext
 from amc.models import TeleportPoint, RescueRequest, PoliceSession
-from amc.mod_server import teleport_player, list_player_vehicles, show_popup
+from amc.mod_server import teleport_player, list_player_vehicles, show_popup, enter_last_vehicle
+from django.conf import settings
 from django.db.models import Q
 from django.utils.translation import gettext as _, gettext_lazy
+
+
+@registry.register(
+    ["/teleport vehicle", "/tp vehicle"],
+    description=gettext_lazy("Teleport to and enter your last used vehicle (Police Only)"),
+    category="Teleportation",
+)
+async def cmd_tp_vehicle(ctx: CommandContext):
+    is_on_duty = await PoliceSession.objects.filter(
+        character=ctx.character, ended_at__isnull=True
+    ).aexists()
+    
+    if not is_on_duty:
+        await ctx.reply(_("Police Only"))
+        return
+
+    if settings.TP_VEHICLE_USE_TELEPORT_FALLBACK:
+        # Temporary fallback: find police vehicle via list_player_vehicles and teleport
+        try:
+            player_vehicles = await list_player_vehicles(
+                ctx.http_client_mod, ctx.player.unique_id
+            )
+        except Exception:
+            await ctx.reply(_("Could not fetch vehicles"))
+            return
+
+        if not player_vehicles:
+            await ctx.reply(_("No vehicles found"))
+            return
+
+        # Find a police vehicle (same pattern as tasks.py line 681)
+        police_vehicle = next(
+            (v for v in player_vehicles.values() if "Police" in v.get("VehicleName", "")),
+            None,
+        )
+        if not police_vehicle:
+            await ctx.reply(_("No police vehicle found"))
+            return
+
+        position = police_vehicle.get("position")
+        if not position:
+            await ctx.reply(_("Could not determine vehicle location"))
+            return
+
+        location = {"X": position["X"], "Y": position["Y"], "Z": position["Z"] + 100}
+        await teleport_player(
+            ctx.http_client_mod,
+            ctx.player.unique_id,
+            location,
+            no_vehicles=True,
+        )
+    else:
+        response = await enter_last_vehicle(ctx.http_client_mod, ctx.character.guid)
+        if "error" in response:
+            await ctx.reply(_("Could not enter vehicle: ") + response["error"])
 
 
 @registry.register(
@@ -70,8 +126,8 @@ async def cmd_tp_name(ctx: CommandContext, name: str = ""):
                 name__iexact=name,
             )
 
-            # Block police on duty from using dasa
-            if teleport_point.name.lower() == "dasa":
+            # Block police on duty from using restricted locations
+            if teleport_point.name.lower() in ("dasa", "harbor"):
                 is_police = await PoliceSession.objects.filter(
                     character=ctx.character, ended_at__isnull=True
                 ).aexists()
@@ -128,8 +184,20 @@ async def cmd_tp_name(ctx: CommandContext, name: str = ""):
             or (current_vehicle and current_vehicle.get("companyGuid") in CORPS_WITH_TP)
             or rescue_tp_data
         ):
+            # Block police on duty from custom destination teleport
+            if is_on_duty and not rescue_tp_data:
+                asyncio.create_task(
+                    show_popup(
+                        ctx.http_client_mod,
+                        _("Custom destination teleport is restricted while on police duty."),
+                        character_guid=ctx.character.guid,
+                        player_id=str(ctx.player.unique_id),
+                    )
+                )
+                return
+
             # Teleport to Custom Waypoint
-            no_vehicles = not player_info.get("bIsAdmin") and not rescue_tp_data
+            no_vehicles = (not player_info.get("bIsAdmin") and not rescue_tp_data) or is_on_duty
             location = player_info.get("CustomDestinationAbsoluteLocation")
 
             if location and rescue_tp_data and not player_info.get("bIsAdmin"):
@@ -186,3 +254,5 @@ async def cmd_tp_name(ctx: CommandContext, name: str = ""):
         reset_trailers=not player_info.get("bIsAdmin"),
         reset_carried_vehicles=not player_info.get("bIsAdmin"),
     )
+
+

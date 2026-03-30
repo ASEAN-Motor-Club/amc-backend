@@ -29,6 +29,14 @@ log = logging.getLogger(__name__)
 
 GAME_DB_PATH = os.environ.get("GAME_DB_PATH", "/var/lib/motortown/gamedata.db")
 
+# Attachment slots (cosmetic) should not count as modded parts
+ATTACHMENT_SLOT_MIN = VehiclePartSlot.Attachment0.value  # 148
+
+# Part key prefixes whitelisted for characters on active police duty
+POLICE_DUTY_WHITELIST: tuple[str, ...] = (
+    "apf_",
+)
+
 # Module-level caches — loaded once on first call
 _stock_part_keys: Optional[set[str]] = None
 _part_compatible_types: Optional[dict[str, set[str]]] = None
@@ -192,12 +200,16 @@ def _slot_name(slot_value: int) -> str:
         return f"Unknown({slot_value})"
 
 
-def detect_custom_parts(parts: list[dict]) -> list[dict]:
+def detect_custom_parts(
+    parts: list[dict],
+    whitelist: Optional[tuple[str, ...]] = None,
+) -> list[dict]:
     """
     Detect custom/modded parts in a vehicle's parts list.
 
     Args:
         parts: List of part dicts with at least 'Key' and 'Slot' fields.
+        whitelist: Optional tuple of lowercased key prefixes to skip.
 
     Returns:
         List of dicts for each custom part found:
@@ -212,12 +224,21 @@ def detect_custom_parts(parts: list[dict]) -> list[dict]:
     for part in parts:
         key = part.get("Key", "")
         slot_value = part.get("Slot", 0)
-        if key and key.lower() not in stock_keys:
-            custom.append({
-                "key": key,
-                "slot": _slot_name(slot_value),
-                "slot_value": slot_value,
-            })
+        if not key:
+            continue
+        # Skip attachment slots — cosmetic items, not performance mods
+        if slot_value >= ATTACHMENT_SLOT_MIN:
+            continue
+        key_lower = key.lower()
+        if key_lower in stock_keys:
+            continue
+        if whitelist and key_lower.startswith(whitelist):
+            continue
+        custom.append({
+            "key": key,
+            "slot": _slot_name(slot_value),
+            "slot_value": slot_value,
+        })
 
     return custom
 

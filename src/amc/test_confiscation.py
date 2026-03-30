@@ -27,6 +27,8 @@ def _pickup_event(character_guid, payment=5000, previous_owner_guid=None, cargo_
     }
 
 
+@patch("amc.webhook.send_system_message", new_callable=AsyncMock)
+@patch("amc.webhook.send_fund_to_player_wallet", new_callable=AsyncMock)
 @patch("amc.police.record_confiscation_for_level", new_callable=AsyncMock)
 @patch("amc.webhook.record_treasury_confiscation_income", new_callable=AsyncMock)
 @patch("amc.webhook.despawn_player_cargo", new_callable=AsyncMock)
@@ -47,8 +49,9 @@ class ConfiscationHandlerTests(TestCase):
 
     async def test_police_confiscates_money(
         self, mock_announce, mock_transfer, mock_despawn, mock_treasury, mock_level,
+        mock_fund_wallet, mock_sys_msg,
     ):
-        """Police picking up Money from non-police triggers full confiscation."""
+        """Police picking up Money from non-police triggers full confiscation and officer reward."""
         officer, criminal = await self._setup_police_and_criminal()
 
         event = _pickup_event(
@@ -65,20 +68,33 @@ class ConfiscationHandlerTests(TestCase):
         self.assertEqual(conf.officer_id, officer.id)
         self.assertEqual(conf.amount, 10_000)
 
-        # Previous owner charged
-        mock_transfer.assert_called_once_with(
+        # Previous owner charged AND officer rewarded
+        self.assertEqual(mock_transfer.call_count, 2)
+        mock_transfer.assert_any_call(
             mock_http_mod, -10_000, "Money Confiscated",
             str(criminal.player.unique_id),
+        )
+        mock_transfer.assert_any_call(
+            mock_http_mod, 10_000, "Confiscation Reward",
+            str(officer.player.unique_id),
         )
 
         # Treasury credited
         mock_treasury.assert_called_once_with(10_000, "Police Confiscation")
+
+        # Officer wallet ledger entry
+        mock_fund_wallet.assert_called_once_with(10_000, officer, "Confiscation Reward")
+
+        # Officer notification
+        mock_sys_msg.assert_called_once()
+        self.assertIn("10,000", mock_sys_msg.call_args[0][1])
 
         # Cargo despawned
         mock_despawn.assert_called_once_with(mock_http_mod, str(officer.guid))
 
     async def test_non_police_no_confiscation(
         self, mock_announce, mock_transfer, mock_despawn, mock_treasury, mock_level,
+        mock_fund_wallet, mock_sys_msg,
     ):
         """Non-police picking up Money should not trigger confiscation."""
         player = await sync_to_async(PlayerFactory)()
@@ -97,6 +113,7 @@ class ConfiscationHandlerTests(TestCase):
 
     async def test_non_money_cargo_no_confiscation(
         self, mock_announce, mock_transfer, mock_despawn, mock_treasury, mock_level,
+        mock_fund_wallet, mock_sys_msg,
     ):
         """Police picking up non-Money cargo should not trigger confiscation."""
         officer, criminal = await self._setup_police_and_criminal()
@@ -112,6 +129,7 @@ class ConfiscationHandlerTests(TestCase):
 
     async def test_self_confiscation_blocked(
         self, mock_announce, mock_transfer, mock_despawn, mock_treasury, mock_level,
+        mock_fund_wallet, mock_sys_msg,
     ):
         """Police picking up their own Money should not trigger confiscation."""
         officer, _ = await self._setup_police_and_criminal()
@@ -126,6 +144,7 @@ class ConfiscationHandlerTests(TestCase):
 
     async def test_police_on_police_blocked(
         self, mock_announce, mock_transfer, mock_despawn, mock_treasury, mock_level,
+        mock_fund_wallet, mock_sys_msg,
     ):
         """Police picking up Money from another police officer should not trigger confiscation."""
         officer1_player = await sync_to_async(PlayerFactory)()
@@ -146,6 +165,7 @@ class ConfiscationHandlerTests(TestCase):
 
     async def test_missing_previous_owner_guid(
         self, mock_announce, mock_transfer, mock_despawn, mock_treasury, mock_level,
+        mock_fund_wallet, mock_sys_msg,
     ):
         """Missing PreviousOwnerCharacterGuid should not trigger confiscation."""
         officer, _ = await self._setup_police_and_criminal()
@@ -158,6 +178,7 @@ class ConfiscationHandlerTests(TestCase):
 
     async def test_zero_payment_no_confiscation(
         self, mock_announce, mock_transfer, mock_despawn, mock_treasury, mock_level,
+        mock_fund_wallet, mock_sys_msg,
     ):
         """Zero-payment cargo should not trigger confiscation."""
         officer, criminal = await self._setup_police_and_criminal()
@@ -172,6 +193,7 @@ class ConfiscationHandlerTests(TestCase):
 
     async def test_unknown_previous_owner_triggers_confiscation(
         self, mock_announce, mock_transfer, mock_despawn, mock_treasury, mock_level,
+        mock_fund_wallet, mock_sys_msg,
     ):
         """Unknown PreviousOwnerCharacterGuid (not in DB) should still trigger confiscation without charging."""
         officer, _ = await self._setup_police_and_criminal()
@@ -189,11 +211,17 @@ class ConfiscationHandlerTests(TestCase):
         self.assertEqual(conf.officer_id, officer.id)
         self.assertEqual(conf.amount, 5000)
 
-        # Previous owner transfer should be skipped
-        mock_transfer.assert_not_called()
+        # Previous owner transfer skipped, but officer still rewarded
+        mock_transfer.assert_called_once_with(
+            mock_http_mod, 5000, "Confiscation Reward",
+            str(officer.player.unique_id),
+        )
 
         # Treasury credited
         mock_treasury.assert_called_once_with(5000, "Police Confiscation")
+
+        # Officer wallet ledger entry
+        mock_fund_wallet.assert_called_once_with(5000, officer, "Confiscation Reward")
         
         # Cargo despawned
         mock_despawn.assert_called_once_with(mock_http_mod, str(officer.guid))

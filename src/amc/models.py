@@ -347,7 +347,8 @@ class Confiscation(models.Model):
         null=True, blank=True
     )
     officer = models.ForeignKey(
-        Character, on_delete=models.CASCADE, related_name="confiscations_made"
+        Character, on_delete=models.CASCADE, related_name="confiscations_made",
+        null=True, blank=True
     )
     cargo_key = models.CharField(max_length=100)
     amount = models.PositiveIntegerField()

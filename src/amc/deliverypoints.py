@@ -92,8 +92,10 @@ async def monitor_deliverypoints(ctx):
             # Create storages from API inventory
             new_storages = []
             for inventory in dp_info.get("InputInventory", {}).values():
+                if "cargo" not in inventory:
+                    continue
                 cargo_key = cargo_key_by_label.get(
-                    inventory["cargo"]["name"], inventory["cargo"]["cargo_key"]
+                    inventory["cargo"]["name"], inventory["cargo"].get("cargo_key", "")
                 )
                 cargo = cargo_by_key.get(cargo_key)
                 new_storages.append(
@@ -106,8 +108,10 @@ async def monitor_deliverypoints(ctx):
                     )
                 )
             for inventory in dp_info.get("OutputInventory", {}).values():
+                if "cargo" not in inventory:
+                    continue
                 cargo_key = cargo_key_by_label.get(
-                    inventory["cargo"]["name"], inventory["cargo"]["cargo_key"]
+                    inventory["cargo"]["name"], inventory["cargo"].get("cargo_key", "")
                 )
                 cargo = cargo_by_key.get(cargo_key)
                 new_storages.append(
@@ -125,12 +129,12 @@ async def monitor_deliverypoints(ctx):
 
         # Update live data
         dp.data = {
-            "inputInventory": list(
-                map(normalise_inventory, dp_info.get("InputInventory", {}).values())
-            ),
-            "outputInventory": list(
-                map(normalise_inventory, dp_info.get("OutputInventory", {}).values())
-            ),
+            "inputInventory": [
+                normalise_inventory(inv) for inv in dp_info.get("InputInventory", {}).values() if "cargo" in inv
+            ],
+            "outputInventory": [
+                normalise_inventory(inv) for inv in dp_info.get("OutputInventory", {}).values() if "cargo" in inv
+            ],
             "deliveries": list(
                 map(normalise_delivery, dp_info.get("Deliveries", {}).values())
             ),

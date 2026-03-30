@@ -304,6 +304,14 @@ async def force_exit_vehicle(session, character_guid):
             raise Exception("Failed to exit vehicle")
 
 
+async def enter_last_vehicle(session, character_guid):
+    async with session.post(f"/players/{character_guid}/enter_last_vehicle") as resp:
+        data = await resp.json()
+        if resp.status != 200:
+            return {"error": data.get("error", "Unknown error")}
+        return {"status": "success"}
+
+
 async def despawn_player_cargo(session, character_guid):
     async with session.post(f"/players/{character_guid}/despawn_cargo") as resp:
         if resp.status != 200:
