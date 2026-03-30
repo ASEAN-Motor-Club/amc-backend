@@ -4,18 +4,10 @@ import logging
 import aiohttp
 from django.conf import settings
 
+from amc.api.player_positions_common import POSITION_UPDATE_SLEEP, get_players_mod
 from amc.api.player_positions_pb2 import PlayerPositions
 
 logger = logging.getLogger(__name__)
-
-POSITION_UPDATE_RATE = 1
-POSITION_UPDATE_SLEEP = 1.0 / POSITION_UPDATE_RATE
-
-
-async def get_players_mod(session: aiohttp.ClientSession):
-    async with session.get("/players") as resp:
-        data = await resp.json()
-    return data.get("data", [])
 
 
 def serialize_players(players: list[dict]) -> bytes:
