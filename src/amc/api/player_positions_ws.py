@@ -22,7 +22,7 @@ def serialize_players(players: list[dict]) -> bytes:
     for p in players:
         loc = p.get("Location", {})
         pos = positions.players.add()
-        pos.unique_id = str(p.get("UniqueID", ""))
+        pos.unique_id = int(p.get("UniqueID", 0))
         pos.player_name = str(p.get("PlayerName", ""))
         pos.x = float(loc.get("X", 0))
         pos.y = float(loc.get("Y", 0))
