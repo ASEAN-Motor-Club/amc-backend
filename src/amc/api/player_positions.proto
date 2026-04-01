@@ -170,7 +170,7 @@ enum VehicleKey {
 }
 
 message PlayerPosition {
-    fixed64 unique_id = 1;
+    fixed64 unique_id = 1 [jstype = JS_STRING];
     string player_name = 2;
     double z = 3;
     double y = 4;
