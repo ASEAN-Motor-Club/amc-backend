@@ -175,7 +175,7 @@ message PlayerPosition {
     double z = 3;
     double y = 4;
     double x = 5;
-    oneof vehicle_key_type {
+    oneof vehicle_key {
         VehicleKey vehicle_key_enum = 6;
         string vehicle_key_unknown = 7;
     }
