@@ -30,8 +30,8 @@ from django.utils.translation import gettext as _, gettext_lazy
     featured=True,
 )
 async def cmd_bank(ctx: CommandContext):
-    balance = await get_player_bank_balance(ctx.character)
-    loan_balance = await get_player_loan_balance(ctx.character)
+    balance = int(await get_player_bank_balance(ctx.character))
+    loan_balance = int(await get_player_loan_balance(ctx.character))
     max_loan, reason = await get_character_max_loan(ctx.character)
     npl_status = await get_character_npl_status(ctx.character)
 
@@ -46,7 +46,7 @@ async def cmd_bank(ctx: CommandContext):
 
     transactions_str = "\n".join(
         [
-            f"{tx.journal_entry.date} {tx.journal_entry.description:<25} <Money>{tx.credit - tx.debit:,}</>"
+            f"{tx.journal_entry.date} {tx.journal_entry.description:<25} <Money>{int(tx.credit - tx.debit):,}</>"
             async for tx in transactions
         ]
     )

@@ -105,6 +105,30 @@ async def _activate_guild(
     now = timezone.now()
     guild = guild_vehicle.guild
 
+    try:
+        popup_parts = []
+        if guild.welcome_message:
+            popup_parts.append(guild.welcome_message)
+
+        other_members = [
+            s.character.name
+            async for s in GuildSession.objects.filter(
+                guild=guild, ended_at__isnull=True
+            ).exclude(character=character).select_related("character")
+        ]
+        if other_members:
+            popup_parts.append(f"<Bold>Online Members:</> {', '.join(other_members)}")
+
+        if popup_parts:
+            await show_popup(
+                http_client_mod,
+                "\n\n".join(popup_parts),
+                character_guid=str(character.guid),
+                player_id=player_id,
+            )
+    except Exception as e:
+        logger.error(f"Failed to show guild welcome popup for {character.name}: {e}")
+
     existing = await GuildSession.objects.filter(
         character=character, guild=guild, ended_at__isnull=True
     ).afirst()
@@ -136,30 +160,6 @@ async def _activate_guild(
                 await set_decal(http_client_mod, player_id, decal.config)
         except Exception as e:
             logger.error(f"Failed to apply guild decal for {character.name}: {e}")
-
-    try:
-        popup_parts = []
-        if guild.welcome_message:
-            popup_parts.append(guild.welcome_message)
-
-        other_members = [
-            s.character.name
-            async for s in GuildSession.objects.filter(
-                guild=guild, ended_at__isnull=True
-            ).exclude(character=character).select_related("character")
-        ]
-        if other_members:
-            popup_parts.append(f"<Bold>Online Members:</> {', '.join(other_members)}")
-
-        if popup_parts:
-            await show_popup(
-                http_client_mod,
-                "\n\n".join(popup_parts),
-                character_guid=str(character.guid),
-                player_id=player_id,
-            )
-    except Exception as e:
-        logger.error(f"Failed to show guild welcome popup for {character.name}: {e}")
 
 
 async def check_guild_cargo(
