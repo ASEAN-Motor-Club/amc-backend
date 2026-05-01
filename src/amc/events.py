@@ -480,7 +480,7 @@ async def send_event_embed(game_event, channel):
 
 @skip_if_running
 async def send_event_embeds(ctx):
-    http_client = ctx.get("http_client_event_mod")
+    http_client = ctx.get("http_client_mod")
     discord_client = ctx.get("discord_client")
     if not discord_client:
         return

@@ -1,6 +1,6 @@
 """Passenger event handler.
 
-Handles: ServerPassengerArrived
+Handles: ServerPassengerArrived, ServerAcceptPassenger
 """
 
 from __future__ import annotations
@@ -129,6 +129,62 @@ async def handle_passenger_arrived(event, player, character, ctx):
 
     subsidy = get_passenger_subsidy(log)
     return log.payment, subsidy, 0, 0
+
+
+@register("ServerAcceptPassenger")
+async def handle_accept_passenger(event, player, character, ctx):
+    if not character:
+        return 0, 0, 0, 0
+
+    from amc.models import GuildSession
+
+    session = await (
+        GuildSession.objects.filter(character=character, ended_at__isnull=True)
+        .select_related("guild__passenger_requirement")
+        .afirst()
+    )
+    if not session:
+        return 0, 0, 0, 0
+
+    try:
+        req = session.guild.passenger_requirement
+    except Exception:
+        return 0, 0, 0, 0
+
+    type_labels = {
+        0: "Any",
+        1: "Hitchhiker",
+        2: "Taxi",
+        3: "Ambulance",
+        4: "Bus",
+    }
+    allowed = req.allowed_passenger_types or []
+    parts = []
+    if allowed:
+        labels = [type_labels.get(t, str(t)) for t in allowed]
+        parts.append(f"Types: {', '.join(labels)}")
+    if req.require_comfort:
+        parts.append("Comfort required")
+    if req.require_urgent:
+        parts.append("Urgent required")
+    if req.require_limo:
+        parts.append("Limo required")
+    if req.require_offroad:
+        parts.append("Offroad required")
+
+    if parts and ctx.http_client_mod:
+        guild = session.guild
+        msg = f"<Bold>{guild.name}</> Passenger Requirements:\n" + "\n".join(parts)
+        asyncio.create_task(
+            show_popup(
+                ctx.http_client_mod,
+                msg,
+                character_guid=str(character.guid),
+                player_id=str(player.unique_id),
+            )
+        )
+
+    return 0, 0, 0, 0
 
 
 def _parse_timestamp(event):
