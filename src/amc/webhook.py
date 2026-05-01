@@ -186,17 +186,49 @@ async def process_events(
     if not events:
         return
 
-    # Pre-process events to simplify keys
+    # Pre-process events: tag each with a character key and split into
+    # character-linked vs character-less buckets.  Character-less events
+    # (e.g. ServerAddEvent for ownerless auto-events) don't go through
+    # the profit pipeline — they are dispatched directly to their handler.
+    character_events = []
+    characterless_events = []
     for event in events:
         player_id = event["data"].get("CharacterGuid", "")
         if not player_id:
             player_id = event["data"].get("PlayerId", "")
         event["key_id"] = player_id
+        if player_id:
+            character_events.append(event)
+        else:
+            characterless_events.append(event)
+
+    # --- Dispatch character-less events directly (race events, etc.) ---
+    if characterless_events:
+        ctx = EventContext(
+            http_client=http_client,
+            http_client_mod=http_client_mod,
+            discord_client=discord_client,
+        )
+        for event in characterless_events:
+            try:
+                await dispatch(event["hook"], event, None, None, ctx)
+            except Exception:
+                logger.exception(
+                    "Failed to dispatch character-less event %s",
+                    event.get("hook"),
+                )
+
+    if not character_events:
+        # Nothing for the character-linked pipeline — just persist watermarks.
+        persist_watermarks(max_seq, last_processed, events)
+        return
+
+    # --- Character-linked pipeline (cargo, profit, etc.) ---
 
     def key_fn(event):
         return (event["key_id"], event["hook"])
 
-    sorted_events = sorted(events, key=key_fn)
+    sorted_events = sorted(character_events, key=key_fn)
     aggregated_events = aggregate_homogenous_events(sorted_events)
 
     def key_by_character(event):
