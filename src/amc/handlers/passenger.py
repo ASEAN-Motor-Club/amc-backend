@@ -115,6 +115,11 @@ async def handle_passenger_arrived(event, player, character, ctx):
 
     from amc.guilds import check_guild_passenger
 
+    logger.debug(
+        "Passenger arrived: character=%s type=%r comfort=%s urgent=%s limo=%s offroad=%s rating=%s payment=%s",
+        character, log.passenger_type, log.comfort, log.urgent,
+        log.limo, log.offroad, log.comfort_rating, log.payment,
+    )
     session, bonus = await check_guild_passenger(
         character, log.passenger_type, log.comfort, log.urgent,
         log.limo, log.offroad, log.comfort_rating, log.payment,
@@ -126,6 +131,16 @@ async def handle_passenger_arrived(event, player, character, ctx):
 
         from amc.guilds import check_guild_achievements
         await check_guild_achievements(character, session, log, ctx.http_client_mod)
+
+        if ctx.http_client_mod:
+            asyncio.create_task(
+                show_popup(
+                    ctx.http_client_mod,
+                    f"<Bold>{session.guild.name}</> bonus: +${bonus:,} (+{int(session.guild.passenger_requirement.bonus_pct)}%)",
+                    character_guid=str(character.guid),
+                    player_id=str(character.player.unique_id),
+                )
+            )
 
     subsidy = get_passenger_subsidy(log)
     return log.payment, subsidy, 0, 0
@@ -183,6 +198,43 @@ async def handle_accept_passenger(event, player, character, ctx):
                 player_id=str(player.unique_id),
             )
         )
+
+    passenger_data = event["data"].get("Passenger")
+    if passenger_data and ctx.http_client_mod:
+        passenger_type = int(passenger_data.get("Net_PassengerType", 0))
+        flag = passenger_data.get("Net_PassengerFlags", 0)
+        comfort = bool(flag & 1)
+        urgent = bool(flag & 2)
+        limo = bool(flag & 4)
+        offroad = bool(flag & 8)
+        comfort_rating = passenger_data.get("Net_LCComfortSatisfaction")
+
+        matched = True
+        if req.allowed_passenger_types and passenger_type not in req.allowed_passenger_types:
+            matched = False
+        if matched and req.require_comfort is not None and comfort != req.require_comfort:
+            matched = False
+        if matched and req.require_urgent is not None and urgent != req.require_urgent:
+            matched = False
+        if matched and req.require_limo is not None and limo != req.require_limo:
+            matched = False
+        if matched and req.require_offroad is not None and offroad != req.require_offroad:
+            matched = False
+        if matched and comfort and req.min_comfort_rating is not None and comfort_rating < req.min_comfort_rating:
+            matched = False
+        if matched and comfort and req.max_comfort_rating is not None and comfort_rating > req.max_comfort_rating:
+            matched = False
+
+        if matched:
+            guild = session.guild
+            asyncio.create_task(
+                show_popup(
+                    ctx.http_client_mod,
+                    f"<Bold>{guild.name}</> Taxi requirements matched!\n+{int(req.bonus_pct)}% bonus on delivery",
+                    character_guid=str(character.guid),
+                    player_id=str(player.unique_id),
+                )
+            )
 
     return 0, 0, 0, 0
 

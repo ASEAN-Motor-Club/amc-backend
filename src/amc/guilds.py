@@ -202,29 +202,50 @@ async def check_guild_passenger(
         .afirst()
     )
     if not session:
+        logger.debug(
+            "check_guild_passenger: no active session for character %s", character
+        )
         return None, 0
 
     try:
         req = session.guild.passenger_requirement
     except Exception:
+        logger.debug(
+            "check_guild_passenger: no passenger requirement for guild %s",
+            session.guild,
+        )
         return None, 0
 
     if req.allowed_passenger_types and passenger_type not in req.allowed_passenger_types:
+        logger.debug(
+            "check_guild_passenger: type mismatch — got %r (%s), allowed %r",
+            passenger_type, type(passenger_type).__name__, req.allowed_passenger_types,
+        )
         return None, 0
     if req.require_comfort is not None and comfort != req.require_comfort:
+        logger.debug("check_guild_passenger: comfort mismatch — got %s, want %s", comfort, req.require_comfort)
         return None, 0
     if req.require_urgent is not None and urgent != req.require_urgent:
+        logger.debug("check_guild_passenger: urgent mismatch — got %s, want %s", urgent, req.require_urgent)
         return None, 0
     if req.require_limo is not None and limo != req.require_limo:
+        logger.debug("check_guild_passenger: limo mismatch — got %s, want %s", limo, req.require_limo)
         return None, 0
     if req.require_offroad is not None and offroad != req.require_offroad:
+        logger.debug("check_guild_passenger: offroad mismatch — got %s, want %s", offroad, req.require_offroad)
         return None, 0
-    if comfort and req.min_comfort_rating is not None and comfort_rating < req.min_comfort_rating:
+    if comfort and req.min_comfort_rating is not None and comfort_rating is not None and comfort_rating < req.min_comfort_rating:
+        logger.debug("check_guild_passenger: comfort_rating %s < min %s", comfort_rating, req.min_comfort_rating)
         return None, 0
-    if comfort and req.max_comfort_rating is not None and comfort_rating > req.max_comfort_rating:
+    if comfort and req.max_comfort_rating is not None and comfort_rating is not None and comfort_rating > req.max_comfort_rating:
+        logger.debug("check_guild_passenger: comfort_rating %s > max %s", comfort_rating, req.max_comfort_rating)
         return None, 0
 
     bonus = int(payment * req.bonus_pct / 100)
+    logger.info(
+        "check_guild_passenger: guild %s bonus +%d (%.0f%%) for %s",
+        session.guild, bonus, req.bonus_pct, character,
+    )
     return session, bonus
 
 
