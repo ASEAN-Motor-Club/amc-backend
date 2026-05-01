@@ -110,14 +110,14 @@ async def _activate_guild(
         if guild.welcome_message:
             popup_parts.append(guild.welcome_message)
 
-        other_members = [
-            s.character.name
-            async for s in GuildSession.objects.filter(
-                guild=guild, ended_at__isnull=True
-            ).exclude(character=character).select_related("character")
+        members = [
+            gc.character.name
+            async for gc in GuildCharacter.objects.filter(
+                guild=guild
+            ).select_related("character").exclude(character=character)
         ]
-        if other_members:
-            popup_parts.append(f"<Bold>Online Members:</> {', '.join(other_members)}")
+        if members:
+            popup_parts.append(f"<Bold>Members:</> {', '.join(members)}")
 
         if popup_parts:
             await show_popup(
