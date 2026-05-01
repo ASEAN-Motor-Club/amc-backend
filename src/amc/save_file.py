@@ -1,5 +1,6 @@
 import os
 import json
+from datetime import datetime, timezone
 from Crypto.Cipher import AES
 
 KEY = b"66c5fd51a70e5e232cd236bd6895f802"
@@ -53,6 +54,11 @@ def get_world():
     return json.loads(decrypted_str)["world"]
 
 
+def get_world_last_modified():
+    path = os.path.join(SAVED_PATH, "SaveGames/Worlds/0/Island.world")
+    return os.path.getmtime(path)
+
+
 def get_character():
     path = os.path.join(SAVED_PATH, "SaveGames/Characters/0.sav")
     decrypted_bytes = decrypt_file(path)
@@ -82,7 +88,19 @@ def format_duration(seconds: int) -> str:
 
 def get_housings(world):
     housings = world["housings"]
-    return {
-        name: {"rentLeft": format_duration(h["rentLeftTimeSeconds"]), **h}
-        for name, h in housings.items()
-    }
+    mtime = get_world_last_modified()
+    result = {}
+    for name, h in housings.items():
+        rent_left = h.get("rentLeftTimeSeconds", 0)
+        expired_ts = mtime + rent_left
+        expired_on = (
+            datetime.fromtimestamp(expired_ts, tz=timezone.utc)
+            .isoformat(timespec="seconds")
+            .replace("+00:00", "Z")
+        )
+        result[name] = {
+            **h,
+            "rentLeft": format_duration(rent_left),
+            "expiredOn": expired_on,
+        }
+    return result

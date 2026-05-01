@@ -11,7 +11,8 @@ from django.db.models.functions import Ntile
 from django.shortcuts import aget_object_or_404
 from django.utils import timezone
 from ninja import Router
-from django.http import StreamingHttpResponse
+from django.http import StreamingHttpResponse, HttpResponse
+from django.utils.http import http_date, parse_http_date
 from .schema import (
     ActivePlayerSchema,
     PlayerSchema,
@@ -46,6 +47,7 @@ from .schema import (
     # Commands
     ServerCommandSchema,
     ShortcutZoneSchema,
+    DepotSchema,
 )
 from django.conf import settings
 from amc.models import (
@@ -79,6 +81,7 @@ from amc.models import (
 from amc.utils import lowercase_first_char_in_keys
 from amc.save_file import (
     get_world,
+    get_world_last_modified,
     get_character as get_save_character,
     get_housings,
     DATA_PATH,
@@ -107,6 +110,67 @@ def housing(request):
     return {
         **get_housings(get_world()),
     }
+
+
+DEPOT_OWNER_CACHE_TIMEOUT = 604800  # 1 week in seconds
+
+
+@app_router.get("/depots/", response=list[DepotSchema])
+def depots(request, owner: bool = False):
+    world_mtime = get_world_last_modified()
+
+    if_modified_since = request.headers.get("If-Modified-Since")
+    if if_modified_since:
+        try:
+            ims_ts = parse_http_date(if_modified_since)
+            if world_mtime <= ims_ts:
+                return HttpResponse(status=304)
+        except (ValueError, TypeError):
+            pass
+
+    world = get_world()
+    depots = world.get("depot", [])
+
+    if owner:
+        response_data = []
+        for d in depots:
+            building_guid = d.get("buildingGuid", "").lower()
+            cache_key = f"depot_owner:{building_guid}"
+            cached_owner = cache.get(cache_key)
+            if cached_owner is None and building_guid:
+                for b in world.get("building", []):
+                    if b.get("guid", "").lower() == building_guid:
+                        cached_owner = b.get("housingKey")
+                        cache.set(
+                            cache_key, cached_owner, timeout=DEPOT_OWNER_CACHE_TIMEOUT
+                        )
+                        break
+
+            response_data.append(
+                {
+                    "guid": building_guid,
+                    "name": d["name"],
+                    "storage": d["storage"],
+                    "taxiDispatchLevel": d["taxiDispatchLevel"],
+                    "owner": cached_owner,
+                }
+            )
+    else:
+        response_data = [
+            {
+                "guid": d.get("buildingGuid", "").lower(),
+                "name": d["name"],
+                "storage": d["storage"],
+                "taxiDispatchLevel": d["taxiDispatchLevel"],
+            }
+            for d in depots
+        ]
+
+    return HttpResponse(
+        json.dumps(response_data),
+        content_type="application/json",
+        headers={"Last-Modified": http_date(world_mtime)},
+    )
 
 
 @app_router.get("/subsidies/", response=dict)

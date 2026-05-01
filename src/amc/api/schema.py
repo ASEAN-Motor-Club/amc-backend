@@ -507,6 +507,16 @@ class ServerCommandSchema(Schema):
     deprecated: bool = False
 
 
+class DepotSchema(Schema):
+    """Depot information with optional owner"""
+
+    guid: str
+    name: str
+    storage: int
+    taxiDispatchLevel: int
+    owner: Optional[str] = None
+
+
 class ShortcutZoneSchema(Schema):
     """Active shortcut zone with polygon coordinates (SRID 3857)."""
 
