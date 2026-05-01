@@ -19,6 +19,7 @@ from amc.models import (
     JobPostingConfig,
 )
 from amc.game_server import get_players, announce
+from amc import config
 from amc_finance.services import (
     get_treasury_fund_balance,
     escrow_ministry_funds,
@@ -86,7 +87,7 @@ def calculate_adaptive_multiplier(
     return max(min_mult, min(max_mult, multiplier))
 
 
-async def cleanup_expired_jobs():
+async def cleanup_expired_jobs(http_client):
     # 1. Handle Ministry-funded expired jobs (existing)
     expired_jobs = DeliveryJob.objects.filter(
         expired_at__lt=timezone.now(),
@@ -95,6 +96,7 @@ async def cleanup_expired_jobs():
         escrowed_amount__gt=0,
     ).select_related("created_from")
     async for job in expired_jobs:
+        ## await process_player_job_contribution(job)
         await process_ministry_expiration(job)
         await _decay_template_score(job)
 
@@ -107,6 +109,7 @@ async def cleanup_expired_jobs():
         completion_bonus__gt=0,
     ).select_related("created_from")
     async for job in expired_non_ministry_jobs:
+        await payout_partial_contributors(job, http_client)
         await process_treasury_expiration_penalty(job)
         await _decay_template_score(job)
 
@@ -158,7 +161,7 @@ def weighted_shuffle(templates: list, weight_fn) -> list:
 
 
 async def monitor_jobs(ctx):
-    await cleanup_expired_jobs()
+    await cleanup_expired_jobs(ctx["http_client"])
     config = await JobPostingConfig.aget_config()
     num_active_jobs = await DeliveryJob.objects.filter_active().acount()
     players = await get_players(ctx["http_client"])
@@ -317,7 +320,7 @@ async def monitor_jobs(ctx):
             is_destination_empty = True
         else:
             is_destination_empty = (
-                (destination_amount / destination_capacity) <= 0.15
+                (destination_amount / destination_capacity) <= 0.3
             ) or (destination_capacity - destination_amount >= quantity_requested)
 
         if destination_capacity > 0:
@@ -338,15 +341,15 @@ async def monitor_jobs(ctx):
         if not is_destination_empty or not is_source_enough:
             continue
 
-        # Treasury multiplier influences bonus amounts
+        # Treasury multiplier influences bonus amounts (Bonus multiplier)
         bonus_multiplier = round(
-            template.bonus_multiplier * random.uniform(0.8, 1.2), 2
+            template.bonus_multiplier * random.uniform(0.95, 1.05), 2 # 5% random variance
         )
         bonus_multiplier = bonus_multiplier * treasury_mult
         base_bonus = int(
             template.completion_bonus * quantity_requested / template.default_quantity
         )
-        scaling_factor = max(treasury_mult * 0.5, min(2.0, treasury_mult * random.uniform(0.7, 1.3)))
+        scaling_factor = max(treasury_mult * 0.5, min(2.0, treasury_mult * random.uniform(0.95, 1.1)))
         completion_bonus = int(base_bonus * scaling_factor)
 
         if active_term:
@@ -393,6 +396,119 @@ async def monitor_jobs(ctx):
             reserved_source[key] = reserved_source.get(key, 0) + quantity_requested
 
 
+def get_cargo_fulfillment_weight(cargo_key: str | None) -> int:
+    if not cargo_key:
+        return 1
+    return config.CARGO_FULFILLMENT_WEIGHTS.get(cargo_key, 1)
+
+
+async def payout_partial_contributors(job, http_client):
+    """
+    Finds all players who contributed to a job and rewards them proportionally.
+    """
+    # Define a completion bonus. Defaults to 50,000 if not set on the job model.
+    completion_bonus = getattr(job, "completion_bonus", 50_000)
+    if completion_bonus <= 0:
+        return
+
+    if job.quantity_requested <= 0 or job.quantity_fulfilled <= 0:
+        return
+
+    ratio = min(1.0, job.quantity_fulfilled / job.quantity_requested)
+    partial_bonus = int(completion_bonus * ratio)
+    if partial_bonus <= 0:
+        return
+
+    log_qs = Delivery.objects.filter(job=job).order_by("timestamp")
+
+    # Cap each delivery to what actually counted toward fulfillment.
+    # `quantity_requested` and `quantity_fulfilled` are in *weighted* units, see amc.config.CARGO_FULFILLMENT_WEIGHTS
+    contributing_logs = []
+    qr = job.quantity_requested
+    async for log in log_qs:
+        if qr <= 0:
+            break
+        weight = get_cargo_fulfillment_weight(log.cargo_key)
+        weighted = log.quantity * weight
+        weighted = min(weighted, qr)
+        # Store the weighted contribution back on log.quantity for the
+        # downstream sum/groupby — this is a transient in-memory mutation,
+        # not persisted.
+        log.quantity = weighted
+        qr = qr - weighted
+        contributing_logs.append(log)
+
+    total_deliveries = job.quantity_fulfilled
+
+    # Group logs by player to count each player's contribution.
+    contributing_logs.sort(key=attrgetter("character_id"))
+    character_contributions = {}
+    for character_id, group in itertools.groupby(
+        contributing_logs, key=attrgetter("character_id")
+    ):
+        if character_id:
+            character_deliveries = list(group)
+            character_contributions[character_id] = {
+                "count": sum([delivery.quantity for delivery in character_deliveries]),
+                "reward": sum(
+                    [
+                        int(delivery.quantity / total_deliveries * partial_bonus)
+                        for delivery in character_deliveries
+                    ]
+                ),
+            }
+
+    if not character_contributions:
+        return
+
+    # Fetch all contributing Player objects in one query.
+    character_ids = character_contributions.keys()
+    characters = {c.id: c async for c in Character.objects.filter(id__in=character_ids)}
+
+    # Distribute the bonus proportionally.
+    contributors_names: List[str] = []
+    for character_id, character_contribution in character_contributions.items():
+        character_obj = characters.get(character_id)
+        if not character_obj:
+            continue
+        count = character_contribution["count"]
+        reward = character_contribution["reward"]
+        if reward > 0:
+            if character_obj.is_gov_employee:
+                from amc.gov_employee import redirect_income_to_treasury
+
+                # Job bonus comes from treasury's own escrowed funds,
+                # no real money moves. Only track as contribution for levels.
+                await redirect_income_to_treasury(
+                    0,
+                    character_obj,
+                    "Government Service – Job Bonus",
+                    http_client=http_client,
+                    contribution=reward,
+                )
+            else:
+                await send_fund_to_player(reward, character_obj, "Job Completion")
+            contributors_names.append(f"{character_obj.name} ({count})")
+
+    if not contributors_names:
+        return
+
+    contributors_str = ", ".join(contributors_names)
+    message = f'"{job.name}" expired at {ratio * 100:.0f}% completion. +${partial_bonus:,} has been deposited into your bank accounts. Thanks to: {contributors_str}'
+
+    # Ministry Rebate Logic
+    if job.funding_term_id:
+        await process_ministry_completion(job, completion_bonus)
+
+    # Boost template success score on completion
+    if job.created_from_id:
+        await DeliveryJobTemplate.objects.filter(pk=job.created_from_id).aupdate(
+            success_score=Least(2.0, F("success_score") * 1.15),
+            lifetime_completions=F("lifetime_completions") + 1,
+        )
+
+    asyncio.create_task(announce(message, http_client, color="90EE90"))
+
 async def on_delivery_job_fulfilled(job, http_client):
     """
     Finds all players who contributed to a job and rewards them proportionally.
@@ -405,11 +521,16 @@ async def on_delivery_job_fulfilled(job, http_client):
     log_qs = Delivery.objects.filter(job=job).order_by("timestamp")
 
     # Get the exact N logs that fulfilled the job by taking the most recent ones.
+    # `quantity_requested` / `quantity_fulfilled` are in *weighted* units
+    # (see amc.config.CARGO_FULFILLMENT_WEIGHTS), so weigh each log here too.
     contributing_logs = []
     acc = job.quantity_requested
     async for log in log_qs:
-        log.quantity = min(log.quantity, acc)
-        acc = acc - log.quantity
+        weight = get_cargo_fulfillment_weight(log.cargo_key)
+        weighted = log.quantity * weight
+        weighted = min(weighted, acc)
+        log.quantity = weighted
+        acc = acc - weighted
         contributing_logs.append(log)
 
     total_deliveries = job.quantity_fulfilled
@@ -481,3 +602,4 @@ async def on_delivery_job_fulfilled(job, http_client):
         )
 
     asyncio.create_task(announce(message, http_client, color="90EE90"))
+
