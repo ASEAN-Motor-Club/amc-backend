@@ -89,7 +89,7 @@ def migrate_to_timescaledb(apps, schema_editor):
             cursor.execute("""
                 SELECT setval(
                     pg_get_serial_sequence('amc_characterlocation', 'id'),
-                    COALESCE((SELECT MAX(id) FROM amc_characterlocation), 0)
+                    COALESCE((SELECT MAX(id) FROM amc_characterlocation), 1)
                 )
             """)
             _enable_compression(cursor)

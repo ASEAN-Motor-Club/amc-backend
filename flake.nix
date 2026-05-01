@@ -535,7 +535,10 @@
         ...
       }: let
         inherit (nixpkgs) lib;
-        pkgs = nixpkgs.legacyPackages.${system};
+        pkgs = import nixpkgs {
+          inherit system;
+          config.allowUnfree = true; # for timescaledb
+        };
 
         workspace = uv2nix.lib.workspace.loadWorkspace {workspaceRoot = ./.;};
         overlay = workspace.mkPyprojectOverlay {
@@ -620,7 +623,7 @@
           pkgs.runCommand "amc-backend-pytest" {
             buildInputs = [
               virtualenv
-              (pkgs.postgresql_16.withPackages (p: [p.postgis]))
+              (pkgs.postgresql_16.withPackages (p: [p.postgis p.timescaledb]))
               pkgs.redis
               pkgs.gdal
               pkgs.geos
@@ -636,12 +639,13 @@
             export PGDATA=$PGHOST/data
             export PGUSER=$(whoami)
             mkdir -p $PGHOST
-            initdb -D $PGDATA > /dev/null
+            initdb -D $PGDATA -c shared_memory_type=mmap > /dev/null
 
-            # Start postgres on a unix socket in the sandbox
-            pg_ctl -w -D $PGDATA -o "-k $PGHOST -h '''" start > /dev/null
+            # Start postgres on a unix socket in the sandbox (timescaledb requires shared_preload_libraries)
+            pg_ctl -w -D $PGDATA -o "-k $PGHOST -h ''' -c shared_preload_libraries=timescaledb" start > /dev/null
             createdb -h $PGHOST amc
             psql -h $PGHOST amc -c "CREATE EXTENSION IF NOT EXISTS postgis;" > /dev/null
+            psql -h $PGHOST amc -c "CREATE EXTENSION IF NOT EXISTS timescaledb;" > /dev/null
 
             # Setup local Redis in sandbox
             redis-server --port 6379 --daemonize yes > /dev/null
@@ -681,7 +685,7 @@
               pkgs.alejandra
               pkgs.nixos-rebuild
               pkgs.libspatialite
-              (pkgs.postgresql_16.withPackages (p: [p.postgis]))
+              (pkgs.postgresql_16.withPackages (p: [p.postgis p.timescaledb]))
               pkgs.redis
               pkgs.pre-commit
             ]
