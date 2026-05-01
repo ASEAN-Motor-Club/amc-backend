@@ -80,6 +80,7 @@ from amc.vehicles import spawn_registered_vehicle
 import logging
 from collections import deque
 from typing import TYPE_CHECKING
+from amc import config
 
 if TYPE_CHECKING:
     from amc.discord_client import AMCDiscordBot
@@ -225,7 +226,9 @@ def get_welcome_message(player_name, is_new, last_online=None):
     if sec_since_online > (3600 * 24 * 7):
         return f"Long time no see! Welcome back {player_name}", False
     if sec_since_online > 3600:
-        return f"Welcome back {player_name}!", False
+        return f"Welcome back {player_name}!", False        
+    if sec_since_online < 3600:
+        return f"That was quick! Welcome back {player_name}", False
     return None, False
 
 
@@ -1062,6 +1065,11 @@ async def process_log_event(
                 character=character,
                 depot_name=depot_name,
             )
+            if is_current_event:
+                subsidy_amount = config.DEPOT_RESTOCK_SUBSIDY_AMOUNT
+                asyncio.create_task(
+                    on_player_profit(character, subsidy_amount, 0, http_client_mod)
+                )
             if (
                 discord_client
                 and ctx.get("startup_time")
@@ -1070,10 +1078,6 @@ async def process_log_event(
                 forward_message = (
                     settings.DISCORD_GAME_CHAT_CHANNEL_ID,
                     f"**📦 Player Restocked Depot:** {player_name} (Depot: {depot_name})",
-                )
-                subsidy_amount = 10_000
-                asyncio.create_task(
-                    on_player_profit(character, subsidy_amount, 0, http_client_mod)
                 )
 
         case PlayerCreatedCompanyLogEvent(timestamp, player_name, company_name):

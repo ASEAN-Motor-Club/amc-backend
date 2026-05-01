@@ -43,6 +43,13 @@ test = "django-admin test"
 allowedUntypedLibraries = [
   "django"
 ]
+reportIncompatibleVariableOverride = false
+
+[tool.pyright]
+venvPath = "."
+venv = ".venv"
+reportIncompatibleVariableOverride = false
+reportMissingModuleSource = "none"
 
 [tool.hatch.build.targets.wheel]
 include = ["src/manage.py"]

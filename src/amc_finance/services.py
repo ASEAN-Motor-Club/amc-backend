@@ -1238,6 +1238,11 @@ async def process_treasury_expiration_penalty(job):
     Costs the treasury 50% of the completion bonus.
     Only applies when no MinistryTerm funded the job.
     """
+    from amc import config
+
+    if not config.TREASURY_EXPIRATION_PENALTY_ENABLED:
+        return
+
     if job.completion_bonus <= 0:
         return
 

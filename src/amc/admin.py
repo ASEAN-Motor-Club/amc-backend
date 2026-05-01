@@ -1274,6 +1274,10 @@ class SubsidyRuleAdmin(admin.ModelAdmin):
     change_list_template = "admin/amc/subsidyrule/change_list.html"
     ordering = ["-priority"]
 
+    class Media:
+        # Fixes select2 autocomplete widgets rendering at 0 width when their fieldset is collapsed at page load
+        css = {"all": ("amc/admin/subsidy_admin.css",)}
+
     fieldsets = (
         (
             None,

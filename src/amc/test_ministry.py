@@ -104,7 +104,8 @@ class MinistryFinanceTestCase(TestCase):
         job_expired.expired_at = timezone.now() - timedelta(hours=1)
         await job_expired.asave()
 
-        await cleanup_expired_jobs()
+        # Ministry-funded expiration branch does not use http_client.
+        await cleanup_expired_jobs(None)
 
         await term.arefresh_from_db()
         # Refund = 50% of 2M = 1M.

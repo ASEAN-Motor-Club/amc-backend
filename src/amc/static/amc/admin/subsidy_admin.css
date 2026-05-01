@@ -1,0 +1,8 @@
+﻿/* Fix: Select2 autocomplete widgets render at 0 width when their fieldset is
+ * collapsed at page load (the Source / Destination fieldsets on SubsidyRule
+ * use classes=("collapse",) and contain autocomplete_fields). Force a sane
+ * minimum width so the widget remains usable when empty. */
+.change-form .select2-container--admin-autocomplete,
+.change-form .admin-autocomplete + .select2-container {
+    min-width: 20em;
+}
