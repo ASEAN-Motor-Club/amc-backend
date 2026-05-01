@@ -634,6 +634,21 @@
             export HOME=$(mktemp -d)
             export DJANGO_SETTINGS_MODULE=amc_backend.settings
 
+            # Cleanup trap: stop postgres and release SysV shared memory on exit.
+            # Without this, failed builds leak shared memory segments that
+            # eventually exhaust the system-wide shmmni limit (32 on macOS).
+            cleanup() {
+              # Terminate lingering test DB connections so pytest-django can drop them
+              psql -h "$PGHOST" postgres -c "SELECT pg_terminate_backend(pid) FROM pg_stat_activity WHERE datname LIKE 'test_%';" > /dev/null 2>&1 || true
+              pg_ctl -D "$PGDATA" stop -m fast > /dev/null 2>&1 || true
+              redis-cli shutdown nosave > /dev/null 2>&1 || true
+              # Reclaim any SysV shared memory segments we own
+              ipcs -m 2>/dev/null | awk -v user="$(whoami)" '$5 == user {print $2}' | while read -r id; do
+                ipcrm -m "$id" 2>/dev/null || true
+              done
+            }
+            trap cleanup EXIT
+
             # Setup local Postgres in sandbox
             export PGHOST=$HOME/postgres
             export PGDATA=$PGHOST/data
@@ -660,11 +675,6 @@
 
             # Run pytest
             python -m pytest src/ --tb=short -q
-
-            # Cleanup: terminate lingering connections to test databases so
-            # pytest-django teardown can drop them, then stop postgres.
-            psql -h $PGHOST postgres -c "SELECT pg_terminate_backend(pid) FROM pg_stat_activity WHERE datname LIKE 'test_%';" > /dev/null 2>&1 || true
-            pg_ctl -D $PGDATA stop -m fast > /dev/null 2>&1 || true
 
             touch $out
           '';
