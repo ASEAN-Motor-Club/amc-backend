@@ -30,11 +30,10 @@ async def handle_rent_extend(event, player, character, ctx):
 
     cutoff = timezone.now() - timezone.timedelta(days=settings.RENT_REBATE_LOOKBACK_DAYS)
     total_earnings = (
-        Delivery.objects.filter(character=character, timestamp__gte=cutoff).aggregate(
+        await Delivery.objects.filter(character=character, timestamp__gte=cutoff).aaggregate(
             total=Sum(F("payment") + F("subsidy"))
-        )["total"]
-        or 0
-    )
+        )
+    )["total"] or 0
 
     rebate = min(total_earnings, rent_cost)
     if rebate > 0 and ctx.http_client_mod:
