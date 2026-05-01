@@ -6,16 +6,15 @@ for rewarding players when a job expires partially completed.
 
 from datetime import timedelta
 from decimal import Decimal
-from unittest.mock import AsyncMock, patch, MagicMock
+from unittest.mock import AsyncMock, patch
 
 from asgiref.sync import sync_to_async
 from django.test import TestCase
 from django.utils import timezone
 
 from amc.jobs import payout_partial_contributors, cleanup_expired_jobs
-from amc.models import Delivery, DeliveryJob, Player, Character, DeliveryJobTemplate, MinistryTerm
+from amc.models import Delivery, DeliveryJob, Player, Character, MinistryTerm
 from amc.factories import DeliveryJobFactory, PlayerFactory, CharacterFactory
-from amc_finance.models import Account
 from amc_finance.services import (
     get_treasury_fund_balance,
     process_treasury_expiration_penalty,
@@ -297,7 +296,7 @@ class CleanupExpiredJobsTestCase(TestCase):
             current_budget=Decimal("1000000"),
         )
 
-        job = await sync_to_async(DeliveryJobFactory)(
+        await sync_to_async(DeliveryJobFactory)(
             quantity_requested=100,
             quantity_fulfilled=50,
             completion_bonus=100_000,
