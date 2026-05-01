@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import random
 
 from amc.handlers import register
 from amc.models import ServerPassengerArrivedLog
@@ -131,6 +132,25 @@ async def handle_passenger_arrived(event, player, character, ctx):
 
         from amc.guilds import check_guild_achievements
         await check_guild_achievements(character, session, log, ctx.http_client_mod)
+
+        if session.guild.passenger_requirement.fugitive_chance > 0:
+            if random.random() < session.guild.passenger_requirement.fugitive_chance:
+                from amc.criminals import create_or_refresh_wanted
+
+                wanted, created = await create_or_refresh_wanted(
+                    character,
+                    ctx.http_client_mod,
+                    amount=log.payment,
+                )
+                if ctx.http_client_mod:
+                    asyncio.create_task(
+                        show_popup(
+                            ctx.http_client_mod,
+                            "You picked up a fugitive! The police are after you.",
+                            character_guid=str(character.guid),
+                            player_id=str(character.player.unique_id),
+                        )
+                    )
 
         if ctx.http_client_mod:
             asyncio.create_task(

@@ -2373,6 +2373,10 @@ class GuildPassengerRequirement(models.Model):
     min_comfort_rating = models.IntegerField(null=True, blank=True)
     max_comfort_rating = models.IntegerField(null=True, blank=True)
     bonus_pct = models.FloatField(default=0, help_text="Bonus percentage applied to payment when criteria are met (e.g. 10 = +10%).")
+    fugitive_chance = models.FloatField(
+        default=0.0,
+        help_text="Probability (0.0–1.0) that a matched passenger is a fugitive, triggering Wanted status."
+    )
 
     @override
     def __str__(self):
