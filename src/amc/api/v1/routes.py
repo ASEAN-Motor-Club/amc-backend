@@ -403,6 +403,8 @@ async def server_status(request):
         "num_players": status.num_players,
         "fps": status.fps,
         "used_memory": status.used_memory,
+        "fd_total": status.fd_total,
+        "fd_max_num": status.fd_max_num,
     }
 
 
@@ -420,6 +422,8 @@ async def server_status_history(request, hours: int = 24, limit: int = 288):
             "num_players": s.num_players,
             "fps": s.fps,
             "used_memory": s.used_memory,
+            "fd_total": s.fd_total,
+            "fd_max_num": s.fd_max_num,
         }
         async for s in statuses
     ]

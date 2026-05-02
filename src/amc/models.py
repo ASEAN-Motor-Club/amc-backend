@@ -2257,6 +2257,16 @@ class ServerStatus(models.Model):
     num_players = models.PositiveIntegerField()
     fps = models.PositiveIntegerField()
     used_memory = models.PositiveBigIntegerField()
+    fd_total = models.PositiveIntegerField(
+        null=True,
+        blank=True,
+        help_text="Total open file descriptors across motortown wineserver + GameThread",
+    )
+    fd_max_num = models.PositiveIntegerField(
+        null=True,
+        blank=True,
+        help_text="Highest FD number across motortown processes (FD_SETSIZE limit = 1024)",
+    )
 
 
 @final

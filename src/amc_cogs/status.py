@@ -16,6 +16,7 @@ if TYPE_CHECKING:
     from amc.discord_client import AMCDiscordBot
 from django.conf import settings
 from amc.game_server import get_players
+from amc.mod_server import get_status
 from amc.models import Character, ServerStatus
 
 logger = logging.getLogger(__name__)
@@ -103,6 +104,13 @@ class StatusCog(commands.Cog):
 
             count = len(active_players)
 
+            # Fetch mod server status (FPS, fd count, etc.)
+            mod_status = None
+            try:
+                mod_status = await get_status(self.bot.http_client_mod)
+            except Exception:
+                logger.exception("Failed to fetch mod server status")
+
             # DB Fetching
             try:
                 # Eagerly evaluate the async generator and reverse it
@@ -144,6 +152,23 @@ class StatusCog(commands.Cog):
                 inline=False,
             )
             embed.add_field(name="Player Count", value=str(count), inline=False)
+
+            # File descriptor monitoring (Wine select() limit is 1024)
+            if mod_status and mod_status.get("open_fds") is not None:
+                open_fds = mod_status["open_fds"]
+                fd_limit = mod_status.get("fd_setsize_limit", 1024)
+                if open_fds >= 950:
+                    fd_icon = "\u26a0\ufe0f"  # warning
+                elif open_fds >= 820:
+                    fd_icon = "\u26a0\ufe0f"
+                else:
+                    fd_icon = ""
+                embed.add_field(
+                    name="Open FDs",
+                    value=f"{fd_icon} {open_fds} / {fd_limit}",
+                    inline=True,
+                )
+
             embed.set_footer(text="Updated every 30 seconds")
 
             # Player List

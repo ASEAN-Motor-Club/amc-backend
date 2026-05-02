@@ -146,6 +146,8 @@ class ServerStatusSchema(Schema):
     num_players: int
     fps: int
     used_memory: int
+    fd_total: Optional[int] = None
+    fd_max_num: Optional[int] = None
 
 
 # ── Police / Rescue Schemas ──────────────────────────────────────────
