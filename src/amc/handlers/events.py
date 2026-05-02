@@ -16,9 +16,12 @@ from __future__ import annotations
 import asyncio
 import logging
 
-from django.db.models import Exists, OuterRef
+import discord
+from django.conf import settings
+from django.db.models import Exists, OuterRef, Prefetch
 from django.utils import timezone
 
+from amc.events import create_event_embed
 from amc.handlers import register
 from amc.mod_server import transfer_exp
 from amc.models import (
@@ -265,6 +268,40 @@ async def _reward_event_exp(game_event_id: int, http_client_mod):
             )
 
 
+async def _update_discord_event_embed(game_event_id: int, discord_client):
+    if discord_client is None:
+        return
+
+    channel = discord_client.get_channel(settings.DISCORD_EVENTS_CHANNEL_ID)
+    if channel is None:
+        return
+
+    game_event = await (
+        GameEvent.objects.select_related("race_setup", "scheduled_event")
+        .prefetch_related(
+            Prefetch(
+                "participants",
+                queryset=GameEventCharacter.objects.select_related("character"),
+            )
+        )
+        .aget(pk=game_event_id)
+    )
+
+    if game_event.discord_message_id is None:
+        return
+
+    embed = create_event_embed(game_event)
+
+    async def _edit_embed():
+        try:
+            message = await channel.fetch_message(game_event.discord_message_id)
+            await message.edit(content="", embed=embed)
+        except discord.NotFound:
+            pass
+
+    asyncio.run_coroutine_threadsafe(_edit_embed(), discord_client.loop)
+
+
 # ---------------------------------------------------------------------------
 # Handlers
 # ---------------------------------------------------------------------------
@@ -383,11 +420,35 @@ async def handle_remove_event(event, player, character, ctx):
 
 @register("ServerJoinEvent")
 async def handle_join_event(event, player, character, ctx):
-    """Handle ServerJoinEvent: no-op (player tracking handled by AddEvent/ChangeEventState)."""
+    """Handle ServerJoinEvent: trigger Discord embed update for the event."""
+    event_guid = event["data"].get("EventGuid", "")
+    if not event_guid:
+        return 0, 0, 0, 0
+
+    game_event = await GameEvent.objects.filter(guid=event_guid).afirst()
+    if game_event is None:
+        return 0, 0, 0, 0
+
+    asyncio.create_task(
+        _update_discord_event_embed(game_event.pk, ctx.discord_client)
+    )
+
     return 0, 0, 0, 0
 
 
 @register("ServerLeaveEvent")
 async def handle_leave_event(event, player, character, ctx):
-    """Handle ServerLeaveEvent: no-op (player tracking handled by ChangeEventState)."""
+    """Handle ServerLeaveEvent: trigger Discord embed update for the event."""
+    event_guid = event["data"].get("EventGuid", "")
+    if not event_guid:
+        return 0, 0, 0, 0
+
+    game_event = await GameEvent.objects.filter(guid=event_guid).afirst()
+    if game_event is None:
+        return 0, 0, 0, 0
+
+    asyncio.create_task(
+        _update_discord_event_embed(game_event.pk, ctx.discord_client)
+    )
+
     return 0, 0, 0, 0
