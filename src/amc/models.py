@@ -2838,6 +2838,116 @@ class TaxRule(models.Model):
 
 
 @final
+class VehiclePropertyTaxConfig(models.Model):
+    """Singleton config for the daily vehicle property tax cron.
+
+    Each owned ``CharacterVehicle`` is taxed once per ``frequency_hours``
+    interval. Per-vehicle tax = ``Cost * rate_pct`` if the dedimod can
+    resolve ``FVehicleRow.Cost`` for the vehicle's class; otherwise
+    ``flat_fallback`` is charged. The configured ``min_tax`` and (optional)
+    ``max_tax`` clamp the per-vehicle amount.
+
+    Mirrors the wealth-tax pattern: tax is debited from the owner's bank
+    LIABILITY account and credited to the Sovereign Reserves ASSET account
+    (locked, not operating treasury). For company-owned vehicles
+    (``CharacterVehicle.character IS NULL`` and ``company_guid IS NOT NULL``),
+    the bill is sent to the company's owner Character.
+    """
+
+    active = models.BooleanField(
+        default=False,
+        help_text="Master switch. Cron task is a no-op when False.",
+    )
+    rate_pct = models.DecimalField(
+        max_digits=8,
+        decimal_places=6,
+        default=Decimal("0.001"),
+        help_text=(
+            "Daily property tax rate as a fraction of FVehicleRow.Cost "
+            "(e.g. 0.001 = 0.1% of purchase price per day)."
+        ),
+    )
+    flat_fallback = models.PositiveIntegerField(
+        default=5_000,
+        help_text=(
+            "Charged per vehicle when the dedimod cannot resolve a Cost "
+            "(unknown class, /vehicle_rows endpoint unavailable, etc.)."
+        ),
+    )
+    min_tax_per_vehicle = models.PositiveIntegerField(
+        default=0,
+        help_text="Floor applied after rate calculation (0 = no floor).",
+    )
+    max_tax_per_vehicle = models.PositiveIntegerField(
+        default=0,
+        help_text="Ceiling applied after rate calculation (0 = no cap).",
+    )
+    exempt_balance_threshold = models.PositiveIntegerField(
+        default=0,
+        help_text=(
+            "If > 0, owner accounts with balance below this are skipped "
+            "(prevents driving low-balance players negative on idle assets)."
+        ),
+    )
+    frequency_hours = models.PositiveIntegerField(
+        default=24,
+        help_text="Minimum hours between successive bills for the same vehicle.",
+    )
+
+    last_run_at = models.DateTimeField(null=True, blank=True)
+
+    class Meta:
+        verbose_name = _("Vehicle Property Tax Config")
+        verbose_name_plural = _("Vehicle Property Tax Config")
+
+    @override
+    def __str__(self):
+        state = "ON" if self.active else "OFF"
+        return f"Vehicle Property Tax [{state}] rate={self.rate_pct} fallback={self.flat_fallback}"
+
+    @classmethod
+    async def aget_config(cls):
+        """Return the singleton config row, creating it (inactive) if missing."""
+        obj, _ = await cls.objects.aget_or_create(pk=1)
+        return obj
+
+
+@final
+class VehiclePropertyTaxLog(models.Model):
+    """Audit trail for the daily vehicle property tax cron.
+
+    One row per (vehicle, run) actually billed. Used both to gate the
+    next-run window (``frequency_hours``) and to support reconciliation /
+    refund tooling.
+    """
+
+    vehicle = models.ForeignKey(
+        "CharacterVehicle",
+        on_delete=models.CASCADE,
+        related_name="property_tax_logs",
+    )
+    billed_character = models.ForeignKey(
+        Character,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="vehicle_property_tax_logs",
+    )
+    amount = models.PositiveIntegerField()
+    vehicle_cost = models.PositiveIntegerField(
+        default=0,
+        help_text="FVehicleRow.Cost used at billing time (0 = fallback used).",
+    )
+    used_fallback = models.BooleanField(default=False)
+    billed_at = models.DateTimeField(default=timezone.now, db_index=True)
+
+    class Meta:
+        indexes = [
+            models.Index(fields=["vehicle", "-billed_at"]),
+        ]
+
+
+@final
 class JobPostingConfig(models.Model):
     """Server-wide job posting configuration. Singleton (pk=1 always)."""
 

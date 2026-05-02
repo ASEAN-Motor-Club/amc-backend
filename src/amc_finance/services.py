@@ -769,6 +769,295 @@ async def apply_wealth_tax(ctx):
     )
 
 
+def _bulk_create_vehicle_property_tax_entries(
+    entries_to_create, reserves_account, now
+):
+    """Create all vehicle property tax journal entries in a single transaction.
+
+    Mirrors `_bulk_create_wealth_tax_entries`: debits the owner's bank
+    LIABILITY account and debits the Sovereign Reserves ASSET account.
+    Also stamps a `VehiclePropertyTaxLog` row per billed vehicle so the
+    cron's frequency window can be enforced and admins can audit charges.
+    """
+    if not entries_to_create:
+        return
+
+    from amc.models import VehiclePropertyTaxLog
+
+    with transaction.atomic():
+        total_tax = Decimal(0)
+        log_rows = []
+        for account, vehicle, amount, vehicle_cost, used_fallback in entries_to_create:
+            je = JournalEntry.objects.create(
+                date=now,
+                description="Vehicle Property Tax",
+                creator=account.character,
+            )
+            # Debit the player's checking account (LIABILITY: debit decreases balance)
+            LedgerEntry.objects.create(
+                journal_entry=je,
+                account=account,
+                debit=amount,
+                credit=0,
+            )
+            # Debit the reserves account (ASSET: debit increases balance)
+            LedgerEntry.objects.create(
+                journal_entry=je,
+                account=reserves_account,
+                debit=amount,
+                credit=0,
+            )
+            account.balance = cast(Any, F("balance") - amount)
+            account.save(update_fields=["balance"])
+            total_tax += amount
+
+            log_rows.append(
+                VehiclePropertyTaxLog(
+                    vehicle=vehicle,
+                    billed_character=account.character,
+                    amount=int(amount),
+                    vehicle_cost=int(vehicle_cost or 0),
+                    used_fallback=used_fallback,
+                    billed_at=now,
+                )
+            )
+
+        # Standard ASSET debit: balance += debit - credit = +total_tax
+        reserves_account.balance = cast(Any, F("balance") + total_tax)
+        reserves_account.save(update_fields=["balance"])
+
+        if log_rows:
+            VehiclePropertyTaxLog.objects.bulk_create(log_rows)
+
+
+def _calculate_vehicle_property_tax(
+    config, vehicle_cost: int | None
+) -> tuple[int, bool]:
+    """Pure helper: given the configured rule and the looked-up purchase
+    price (``FVehicleRow.Cost``), return ``(tax_amount, used_fallback)``.
+
+    - ``vehicle_cost`` of ``None`` or ``<= 0`` triggers the flat fallback.
+    - Otherwise the rate is applied; the result is clamped to
+      ``[min_tax_per_vehicle, max_tax_per_vehicle]`` (max=0 means no cap).
+    """
+    if vehicle_cost is None or vehicle_cost <= 0:
+        return int(config.flat_fallback), True
+
+    raw = Decimal(str(vehicle_cost)) * Decimal(str(config.rate_pct))
+    tax = int(raw)
+
+    if config.min_tax_per_vehicle and tax < config.min_tax_per_vehicle:
+        tax = int(config.min_tax_per_vehicle)
+    if config.max_tax_per_vehicle and tax > config.max_tax_per_vehicle:
+        tax = int(config.max_tax_per_vehicle)
+    return tax, False
+
+
+async def apply_vehicle_property_tax(ctx):
+    """Daily cron: charge a property tax on every owned ``CharacterVehicle``.
+
+    Owner resolution:
+      - ``CharacterVehicle.character`` is set → bill that character.
+      - ``CharacterVehicle.character IS NULL`` and ``company_guid`` set →
+        bill the ``Company.owner`` character (corp-owned & solo-company-owned
+        vehicles both fall through here, matching the design intent that
+        ownership is what's taxed regardless of legal entity).
+
+    Tax sizing per vehicle:
+      - Lookup ``FVehicleRow.Cost`` for the vehicle's class via the
+        dedimod's ``/vehicle_rows`` endpoint (cached aggressively).
+      - If the lookup succeeds → ``Cost * config.rate_pct`` (clamped).
+      - If the lookup fails → ``config.flat_fallback`` per vehicle.
+
+    Frequency:
+      - Each vehicle has its own per-vehicle window (``config.frequency_hours``)
+        tracked via ``VehiclePropertyTaxLog``. Vehicles billed within the
+        window are skipped — safe to re-run / catch up after downtime.
+
+    Money flow mirrors ``apply_wealth_tax``: debit owner LIABILITY → debit
+    Sovereign Reserves ASSET (locked, not operating treasury). The cron is
+    a no-op when ``VehiclePropertyTaxConfig.active`` is ``False`` (default)
+    or when the dedimod ``http_client_mod`` is not in ``ctx``.
+    """
+    # Imported lazily to avoid pulling Django models during import-time
+    # resolution of this module by management commands.
+    from amc.models import (
+        CharacterVehicle,
+        Company,
+        VehiclePropertyTaxConfig,
+        VehiclePropertyTaxLog,
+    )
+    from amc.mod_server import (
+        get_vehicle_rows,
+        index_vehicle_rows_by_asset_path,
+    )
+    from amc import error_reporter
+
+    try:
+        config = await VehiclePropertyTaxConfig.aget_config()
+    except Exception as exc:
+        error_reporter.report_exception(
+            exc, subject="apply_vehicle_property_tax: config load failed"
+        )
+        return
+
+    if not config.active:
+        return
+
+    http_client_mod = ctx.get("http_client_mod") if isinstance(ctx, dict) else None
+
+    # Vehicle catalog (class -> Cost). May be None on first call after a
+    # mod restart or on an older mod build that lacks /vehicle_rows. We
+    # still proceed using the flat fallback for every vehicle so the tax
+    # remains active even when the catalog is unavailable.
+    rows = None
+    if http_client_mod is not None:
+        try:
+            rows = await get_vehicle_rows(http_client_mod)
+        except Exception as exc:
+            error_reporter.report_exception(
+                exc, subject="apply_vehicle_property_tax: get_vehicle_rows failed"
+            )
+            rows = None
+    cost_by_asset_path = index_vehicle_rows_by_asset_path(rows)
+
+    now = timezone.now()
+    cutoff = now - timedelta(hours=int(config.frequency_hours))
+
+    reserves_account, _ = await Account.objects.aget_or_create(
+        account_type=Account.AccountType.ASSET,
+        book=Account.Book.GOVERNMENT,
+        character=None,
+        name="Sovereign Reserves",
+    )
+
+    # Pull a snapshot of all owned vehicles. The set is bounded by the
+    # active player base, so a list materialisation is acceptable here
+    # (matches the wealth-tax pattern).
+    vehicles = await sync_to_async(
+        lambda: list(  # pyrefly: ignore
+            CharacterVehicle.objects.select_related("character").all()
+        )
+    )()
+
+    # Per-vehicle frequency gate: skip anything billed within the window.
+    recently_billed = await sync_to_async(
+        lambda: set(  # pyrefly: ignore
+            VehiclePropertyTaxLog.objects.filter(
+                billed_at__gte=cutoff
+            ).values_list("vehicle_id", flat=True)
+        )
+    )()
+
+    # Resolve company-owned vehicles → owner Character via a single bulk
+    # lookup keyed by company_guid (avoids N+1 over Company queries).
+    company_guids = {
+        v.company_guid
+        for v in vehicles
+        if v.character_id is None and v.company_guid
+    }
+    company_owner_by_guid = {}
+    if company_guids:
+        company_owner_by_guid = await sync_to_async(
+            lambda: {  # pyrefly: ignore
+                c.guid: c.owner_id
+                for c in Company.objects.filter(guid__in=company_guids).only(
+                    "guid", "owner_id"
+                )
+            }
+        )()
+
+    # Group billable vehicles by owner-character so we can fetch each
+    # account exactly once and still bill all their vehicles.
+    by_character_id: dict[int, list[tuple[CharacterVehicle, int | None, bool]]] = {}
+    for v in vehicles:
+        if v.id in recently_billed:
+            continue
+
+        owner_character_id = v.character_id
+        if owner_character_id is None:
+            owner_character_id = company_owner_by_guid.get(v.company_guid or "")
+        if not owner_character_id:
+            continue
+
+        asset_path = (v.config or {}).get("AssetPath") or ""
+        row = cost_by_asset_path.get(asset_path)
+        vehicle_cost = None
+        if row is not None:
+            try:
+                cost_val = int(row.get("Cost") or 0)
+            except (TypeError, ValueError):
+                cost_val = 0
+            if cost_val > 0:
+                vehicle_cost = cost_val
+
+        tax, used_fallback = _calculate_vehicle_property_tax(config, vehicle_cost)
+        if tax <= 0:
+            continue
+
+        by_character_id.setdefault(owner_character_id, []).append(
+            (v, vehicle_cost, used_fallback)
+        )
+
+    if not by_character_id:
+        config.last_run_at = now
+        await config.asave(update_fields=["last_run_at"])
+        return
+
+    # Resolve bank accounts for all owners in a single query.
+    accounts = await sync_to_async(
+        lambda: {  # pyrefly: ignore
+            acc.character_id: acc
+            for acc in Account.objects.filter(
+                account_type=Account.AccountType.LIABILITY,
+                book=Account.Book.BANK,
+                character_id__in=by_character_id.keys(),
+            ).select_related("character")
+        }
+    )()
+
+    entries_to_create: list[
+        tuple[Account, CharacterVehicle, Decimal, int | None, bool]
+    ] = []
+    for character_id, billable in by_character_id.items():
+        account = accounts.get(character_id)
+        if account is None:
+            continue
+        if (
+            config.exempt_balance_threshold
+            and account.balance < config.exempt_balance_threshold
+        ):
+            continue
+
+        # Drain available balance across this owner's vehicles in DB
+        # iteration order. Vehicles whose tax exceeds the remaining
+        # balance are skipped this cycle (no negative balances).
+        running_balance = Decimal(account.balance)
+        for vehicle, vehicle_cost, used_fallback in billable:
+            tax, _flag = _calculate_vehicle_property_tax(config, vehicle_cost)
+            tax_d = Decimal(tax)
+            if tax_d <= 0 or tax_d > running_balance:
+                continue
+            running_balance -= tax_d
+            entries_to_create.append(
+                (account, vehicle, tax_d, vehicle_cost, used_fallback)
+            )
+
+    if entries_to_create:
+        try:
+            await sync_to_async(_bulk_create_vehicle_property_tax_entries)(
+                entries_to_create, reserves_account, now
+            )
+        except Exception as exc:
+            error_reporter.report_exception(
+                exc,
+                subject="apply_vehicle_property_tax: bulk insert failed",
+            )
+
+    config.last_run_at = now
+    await config.asave(update_fields=["last_run_at"])
+
+
 async def transfer_nirc(ctx):
     """Daily cron: transfer NIRC (Net Investment Returns Contribution)
     from Sovereign Reserves to Operating Treasury.

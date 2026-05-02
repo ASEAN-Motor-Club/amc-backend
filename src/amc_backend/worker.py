@@ -35,6 +35,7 @@ import discord  # noqa: E402
 from amc.discord_client import bot as discord_client  # noqa: E402
 from amc_finance.services import (  # noqa: E402
     apply_interest_to_bank_accounts,
+    apply_vehicle_property_tax,
     apply_wealth_tax,
     transfer_nirc,
 )
@@ -256,6 +257,8 @@ class WorkerSettings:
         cron(apply_interest_to_bank_accounts, hour=None, minute=0, second=0),
         # pyrefly: ignore [bad-argument-type]
         cron(apply_wealth_tax, hour=None, minute=0, second=30),
+        # pyrefly: ignore [bad-argument-type]
+        cron(apply_vehicle_property_tax, hour=0, minute=10, second=0),
         # pyrefly: ignore [bad-argument-type]
         cron(evaluate_credit_scores, hour=0, minute=15, second=0),
         # pyrefly: ignore [bad-argument-type]

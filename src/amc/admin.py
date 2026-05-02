@@ -65,6 +65,8 @@ from .models import (
     SubsidyRule,
     TaxArea,
     TaxRule,
+    VehiclePropertyTaxConfig,
+    VehiclePropertyTaxLog,
     ShortcutZone,
     DeliveryJobTemplate,
     MinistryElection,
@@ -1447,6 +1449,57 @@ class TaxRuleAdmin(admin.ModelAdmin):
             },
         ),
     )
+
+
+@admin.register(VehiclePropertyTaxConfig)
+class VehiclePropertyTaxConfigAdmin(admin.ModelAdmin):
+    list_display = [
+        "active",
+        "rate_pct",
+        "flat_fallback",
+        "min_tax_per_vehicle",
+        "max_tax_per_vehicle",
+        "frequency_hours",
+        "last_run_at",
+    ]
+    readonly_fields = ["last_run_at"]
+
+    def has_add_permission(self, request):
+        # Singleton — only one config row.
+        return not VehiclePropertyTaxConfig.objects.exists()
+
+    def has_delete_permission(self, request, obj=None):
+        return False
+
+
+@admin.register(VehiclePropertyTaxLog)
+class VehiclePropertyTaxLogAdmin(admin.ModelAdmin):
+    list_display = [
+        "billed_at",
+        "vehicle",
+        "billed_character",
+        "amount",
+        "vehicle_cost",
+        "used_fallback",
+    ]
+    list_filter = ["used_fallback", "billed_at"]
+    search_fields = [
+        "vehicle__vehicle_id",
+        "billed_character__discord_name",
+        "billed_character__unique_id",
+    ]
+    readonly_fields = [
+        "vehicle",
+        "billed_character",
+        "amount",
+        "vehicle_cost",
+        "used_fallback",
+        "billed_at",
+    ]
+    date_hierarchy = "billed_at"
+
+    def has_add_permission(self, request):
+        return False
 
 
 @admin.register(MinistryElection)

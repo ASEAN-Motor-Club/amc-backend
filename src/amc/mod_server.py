@@ -451,6 +451,79 @@ async def get_player_last_vehicle_parts(session, character_guid, complete=False)
     return await _coalesce(cache_key, _inflight_vehicle, _fetch)
 
 
+# Vehicle catalog (FVehicleRow) cache. The dedimod's /vehicle_rows endpoint
+# returns the entire UMTGameResource.Vehicles UDataTable, which is static for
+# any given game version. Cache aggressively to avoid hammering the game
+# thread during cron iterations (e.g. daily vehicle property tax).
+_VEHICLE_ROWS_CACHE_KEY = "mod_vehicle_rows_catalog"
+_VEHICLE_ROWS_TTL = 6 * 60 * 60  # 6 hours
+
+
+async def get_vehicle_rows(session, force_refresh=False):
+    """Fetch the full FVehicleRow catalog from the dedimod, keyed by row name.
+
+    Returns a dict[str, dict] mapping row name -> serialized FVehicleRow with
+    economy/catalog fields (notably ``Cost`` for dealer purchase price and
+    ``VehicleClassFullName`` for matching against runtime ``classFullName``).
+
+    Returns ``None`` if the dedimod is unreachable or the endpoint is not
+    available (e.g. older mod build before /vehicle_rows ships). Callers
+    should treat ``None`` as a soft failure.
+
+    Aggressively cached (6h) since the catalog only changes with game/mod
+    updates. Pass ``force_refresh=True`` to bypass the cache.
+    """
+    if not force_refresh:
+        cached = cache.get(_VEHICLE_ROWS_CACHE_KEY)
+        if cached is not None:
+            return cached
+
+    try:
+        async with session.get("/vehicle_rows") as resp:
+            if resp.status == 404:
+                # Dedimod predates the /vehicle_rows endpoint
+                return None
+            if resp.status != 200:
+                return None
+            payload = await resp.json()
+    except Exception:
+        return None
+
+    rows = payload.get("data") if isinstance(payload, dict) else None
+    if not isinstance(rows, dict):
+        return None
+
+    cache.set(_VEHICLE_ROWS_CACHE_KEY, rows, timeout=_VEHICLE_ROWS_TTL)
+    return rows
+
+
+def _strip_class_prefix(class_full_name: str) -> str:
+    """Normalise an FVehicleRow.VehicleClassFullName ("Class /Game/.../X.X_C")
+    to match CharacterVehicle.config["AssetPath"] ("/Game/.../X.X_C")."""
+    if not class_full_name:
+        return ""
+    parts = class_full_name.split(" ", 1)
+    return parts[1] if len(parts) == 2 else class_full_name
+
+
+def index_vehicle_rows_by_asset_path(rows):
+    """Build an asset-path -> row dict from a /vehicle_rows payload.
+
+    Asset path is the normalised ``VehicleClassFullName`` (without the
+    ``Class `` prefix), matching what ``register_player_vehicles`` writes
+    into ``CharacterVehicle.config["AssetPath"]``.
+    """
+    if not rows:
+        return {}
+    indexed = {}
+    for row_name, row in rows.items():
+        class_full = (row or {}).get("VehicleClassFullName") or ""
+        asset_path = _strip_class_prefix(class_full)
+        if asset_path:
+            indexed[asset_path] = {**row, "_RowName": row_name}
+    return indexed
+
+
 async def despawn_player_vehicle(session, player_id, category="current"):
     await _write_limiter.acquire()
     if category == "others":
