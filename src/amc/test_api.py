@@ -551,11 +551,15 @@ class DepotsAPITest(TestCase):
     """Test the /depots/ endpoint"""
 
     def setUp(self):
-        self.api_client = TestAsyncClient(app_router)
+        from ninja.testing import TestClient
 
+        self.api_client = TestClient(app_router)
+
+    @patch("amc.api.routes.get_world_last_modified")
     @patch("amc.api.routes.get_world")
-    async def test_list_depots_without_owner(self, mock_get_world):
+    def test_list_depots_without_owner(self, mock_get_world, mock_get_mtime):
         """Test GET /depots/ without owner query param"""
+        mock_get_mtime.return_value = 946684800.0
         mock_get_world.return_value = {
             "depot": [
                 {"name": "Depot A", "storage": 100, "taxiDispatchLevel": 1, "buildingGuid": "guid-a"},
@@ -563,7 +567,7 @@ class DepotsAPITest(TestCase):
             ],
         }
 
-        response = await cast(Any, self.api_client.get("/depots/"))
+        response = self.api_client.get("/depots/")
 
         self.assertEqual(response.status_code, 200)
         data = response.json()
@@ -579,16 +583,18 @@ class DepotsAPITest(TestCase):
         self.assertEqual(data[1]["taxiDispatchLevel"], 2)
         self.assertNotIn("owner", data[1])
 
+    @patch("amc.api.routes.get_world_last_modified")
     @patch("amc.api.routes.get_world")
-    async def test_list_depots_with_owner_false(self, mock_get_world):
+    def test_list_depots_with_owner_false(self, mock_get_world, mock_get_mtime):
         """Test GET /depots/?owner=false does not include owner"""
+        mock_get_mtime.return_value = 946684800.0
         mock_get_world.return_value = {
             "depot": [
                 {"name": "Depot A", "storage": 100, "taxiDispatchLevel": 1, "buildingGuid": "guid-a"},
             ],
         }
 
-        response = await cast(Any, self.api_client.get("/depots/?owner=false"))
+        response = self.api_client.get("/depots/?owner=false")
 
         self.assertEqual(response.status_code, 200)
         data = response.json()
@@ -596,9 +602,11 @@ class DepotsAPITest(TestCase):
         self.assertEqual(data[0]["guid"], "guid-a")
         self.assertNotIn("owner", data[0])
 
+    @patch("amc.api.routes.get_world_last_modified")
     @patch("amc.api.routes.get_world")
-    async def test_list_depots_with_owner_true(self, mock_get_world):
+    def test_list_depots_with_owner_true(self, mock_get_world, mock_get_mtime):
         """Test GET /depots/?owner=true includes housingKey as owner"""
+        mock_get_mtime.return_value = 946684800.0
         mock_get_world.return_value = {
             "depot": [
                 {
@@ -627,7 +635,7 @@ class DepotsAPITest(TestCase):
             ],
         }
 
-        response = await cast(Any, self.api_client.get("/depots/?owner=true"))
+        response = self.api_client.get("/depots/?owner=true")
 
         self.assertEqual(response.status_code, 200)
         data = response.json()
@@ -642,34 +650,33 @@ class DepotsAPITest(TestCase):
         self.assertEqual(data[2]["name"], "Depot C")
         self.assertIsNone(data[2]["owner"])
 
+    @patch("amc.api.routes.get_world_last_modified")
     @patch("amc.api.routes.get_world")
-    async def test_list_depots_empty(self, mock_get_world):
+    def test_list_depots_empty(self, mock_get_world, mock_get_mtime):
         """Test GET /depots/ returns empty list when no depots"""
+        mock_get_mtime.return_value = 946684800.0
         mock_get_world.return_value = {"depot": []}
 
-        response = await cast(Any, self.api_client.get("/depots/"))
+        response = self.api_client.get("/depots/")
 
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.json(), [])
 
     @patch("amc.api.routes.get_world_last_modified")
-    async def test_list_depots_unchanged_since_last_fetch(self, mock_get_mtime):
+    def test_list_depots_unchanged_since_last_fetch(self, mock_get_mtime):
         """Test GET /depots/ with If-Modified-Since returns 304 when world unchanged"""
         mock_get_mtime.return_value = 946684800.0
 
-        response = await cast(
-            Any,
-            self.api_client.get(
-                "/depots/",
-                headers={"If-Modified-Since": "Sat, 01 Jan 2000 00:00:00 GMT"},
-            ),
+        response = self.api_client.get(
+            "/depots/",
+            headers={"If-Modified-Since": "Sat, 01 Jan 2000 00:00:00 GMT"},
         )
 
         self.assertEqual(response.status_code, 304)
 
     @patch("amc.api.routes.get_world_last_modified")
     @patch("amc.api.routes.get_world")
-    async def test_list_depots_changed_since_last_fetch(
+    def test_list_depots_changed_since_last_fetch(
         self, mock_get_world, mock_get_mtime
     ):
         """Test GET /depots/ with If-Modified-Since returns data when world changed"""
@@ -680,12 +687,9 @@ class DepotsAPITest(TestCase):
             ],
         }
 
-        response = await cast(
-            Any,
-            self.api_client.get(
-                "/depots/",
-                headers={"If-Modified-Since": "Sat, 01 Jan 2000 00:00:00 GMT"},
-            ),
+        response = self.api_client.get(
+            "/depots/",
+            headers={"If-Modified-Since": "Sat, 01 Jan 2000 00:00:00 GMT"},
         )
 
         self.assertEqual(response.status_code, 200)

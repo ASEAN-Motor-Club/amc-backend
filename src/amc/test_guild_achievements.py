@@ -741,6 +741,7 @@ class PassengerAchievementIntegrationTests(TestCase):
         await GuildSession.objects.acreate(
             guild=guild, character=character, started_at=timezone.now()
         )
+        await GuildCharacter.objects.acreate(guild=guild, character=character)
         await GuildAchievement.objects.acreate(
             guild=guild, name="Test Achievement", criteria=criteria, order=1
         )
@@ -863,6 +864,7 @@ class CargoAchievementIntegrationTests(TestCase):
         await GuildSession.objects.acreate(
             guild=guild, character=character, started_at=timezone.now()
         )
+        await GuildCharacter.objects.acreate(guild=guild, character=character)
         await GuildAchievement.objects.acreate(
             guild=guild, name="Test Achievement", criteria=criteria, order=1
         )
