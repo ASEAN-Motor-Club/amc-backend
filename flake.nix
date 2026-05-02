@@ -638,14 +638,16 @@
             # Without this, failed builds leak shared memory segments that
             # eventually exhaust the system-wide shmmni limit (32 on macOS).
             cleanup() {
+              set +e
               # Terminate lingering test DB connections so pytest-django can drop them
-              psql -h "$PGHOST" postgres -c "SELECT pg_terminate_backend(pid) FROM pg_stat_activity WHERE datname LIKE 'test_%';" > /dev/null 2>&1 || true
-              pg_ctl -D "$PGDATA" stop -m fast > /dev/null 2>&1 || true
-              redis-cli shutdown nosave > /dev/null 2>&1 || true
+              psql -h "$PGHOST" postgres -c "SELECT pg_terminate_backend(pid) FROM pg_stat_activity WHERE datname LIKE 'test_%';" > /dev/null 2>&1
+              pg_ctl -D "$PGDATA" stop -m fast > /dev/null 2>&1
+              redis-cli shutdown nosave > /dev/null 2>&1
               # Reclaim any SysV shared memory segments we own
               ipcs -m 2>/dev/null | awk -v user="$(whoami)" '$5 == user {print $2}' | while read -r id; do
-                ipcrm -m "$id" 2>/dev/null || true
+                ipcrm -m "$id" 2>/dev/null
               done
+              true
             }
             trap cleanup EXIT
 
