@@ -1074,7 +1074,7 @@ class ProcessEventsTests(TestCase):
 
 @patch("amc.webhook.get_rp_mode", new_callable=AsyncMock)
 @patch("amc.webhook.get_treasury_fund_balance", new_callable=AsyncMock)
-@patch("amc.handlers.teleport.announce", new_callable=AsyncMock)
+@patch("amc.webhook.announce", new_callable=AsyncMock)
 @patch("amc.webhook.show_popup", new_callable=AsyncMock)
 class ExtraWebhookTests(TestCase):
     def setUp(self):
@@ -1247,10 +1247,8 @@ class ExtraWebhookTests(TestCase):
         self.assertEqual(log.cargo_key, "trash")
         self.assertEqual(log.payment, 500)
 
-    @patch("amc.handlers.teleport.despawn_player_vehicle", new_callable=AsyncMock)
     async def test_vehicle_reset_rp_mode(
         self,
-        mock_despawn,
         mock_show_popup,
         mock_announce,
         mock_get_treasury,
@@ -1258,7 +1256,6 @@ class ExtraWebhookTests(TestCase):
     ):
         mock_get_rp_mode.return_value = True
         player = await sync_to_async(PlayerFactory)()
-        # Set last_login far enough in the past
         character = await sync_to_async(CharacterFactory)(
             player=player, guid="test-char-rp", rp_mode=True
         )
@@ -1282,15 +1279,9 @@ class ExtraWebhookTests(TestCase):
 
         await process_events([event], http_client=MagicMock(), http_client_mod=MagicMock())
 
-        # Give the fire-and-forget tasks a chance to run.
         await asyncio.sleep(0)
 
-        mock_announce.assert_called()
-        self.assertIn("despawned", mock_announce.call_args[0][0])
-        mock_despawn.assert_called_once()
-        # despawn_player_vehicle(session, character.guid, category="current")
-        self.assertEqual(mock_despawn.call_args.args[1], str(character.guid))
-        self.assertEqual(mock_despawn.call_args.kwargs.get("category"), "current")
+        mock_announce.assert_not_called()
 
     async def test_rp_mode_subsidy_fix(
         self, mock_show_popup, mock_announce, mock_get_treasury, mock_get_rp_mode

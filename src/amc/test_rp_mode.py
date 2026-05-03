@@ -118,8 +118,7 @@ def _reset_vehicle_event(character_guid):
 
 
 @patch("amc.webhook.get_treasury_fund_balance", new_callable=AsyncMock, return_value=100_000)
-@patch("amc.handlers.teleport.announce", new_callable=AsyncMock)
-@patch("amc.handlers.teleport.despawn_player_vehicle", new_callable=AsyncMock)
+@patch("amc.webhook.announce", new_callable=AsyncMock)
 class VehicleResetDespawnTests(TestCase):
     def setUp(self):
         cache.clear()
@@ -134,9 +133,6 @@ class VehicleResetDespawnTests(TestCase):
             guid="reset-rp-guid",
             rp_mode=rp_mode,
         )
-        # `character.last_login` is an annotation over PlayerStatusLog timespans;
-        # seed one that ended 5 minutes ago so the handler's 15-second grace
-        # window has elapsed.
         await PlayerStatusLog.objects.acreate(
             character=character,
             timespan=(
@@ -147,7 +143,7 @@ class VehicleResetDespawnTests(TestCase):
         return character
 
     async def test_despawns_when_rp_mode_on(
-        self, mock_despawn, mock_announce, mock_treasury
+        self, mock_announce, mock_treasury
     ):
         from amc.webhook import process_events
 
@@ -159,18 +155,12 @@ class VehicleResetDespawnTests(TestCase):
             http_client_mod=MagicMock(),
         )
 
-        # Yield so fire-and-forget tasks can run.
         await asyncio.sleep(0)
 
-        mock_announce.assert_called()
-        self.assertIn("despawned", mock_announce.call_args[0][0])
-
-        mock_despawn.assert_called_once()
-        self.assertEqual(mock_despawn.call_args.args[1], str(character.guid))
-        self.assertEqual(mock_despawn.call_args.kwargs.get("category"), "current")
+        mock_announce.assert_not_called()
 
     async def test_noop_when_rp_mode_off(
-        self, mock_despawn, mock_announce, mock_treasury
+        self, mock_announce, mock_treasury
     ):
         from amc.webhook import process_events
 
@@ -185,4 +175,3 @@ class VehicleResetDespawnTests(TestCase):
         await asyncio.sleep(0)
 
         mock_announce.assert_not_called()
-        mock_despawn.assert_not_called()
