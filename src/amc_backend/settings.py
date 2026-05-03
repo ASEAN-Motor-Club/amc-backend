@@ -341,9 +341,6 @@ DISCORD_CRIMINAL_STATS_CHANNEL_ID = int(
 DISCORD_COP_STATS_CHANNEL_ID = int(os.environ.get("DISCORD_COP_STATS_CHANNEL_ID", 0))
 
 # Server management
-RESTART_MOTORTOWN_SCRIPT = os.environ.get(
-    "RESTART_MOTORTOWN_SCRIPT", "/usr/local/bin/restart-motortown"
-)
 UPDATE_MOTORTOWN_SCRIPT = os.environ.get(
     "UPDATE_MOTORTOWN_SCRIPT", "/usr/local/bin/update-motortown"
 )
