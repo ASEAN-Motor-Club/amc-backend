@@ -1,9 +1,9 @@
 import asyncio
 from amc.command_framework import registry, CommandContext
 from amc.models import BotInvocationLog, SongRequestLog
-from amc.mod_server import set_character_name, show_popup
+from amc.mod_server import show_popup
+from amc.player_tags import strip_all_tags, refresh_player_name
 from django.conf import settings
-from django.core.cache import cache
 from amc.game_server import get_player_info
 from amc.auth import verify_player
 from amc.utils import add_discord_verified_role
@@ -153,23 +153,16 @@ async def cmd_verify(ctx: CommandContext, signed_message: str):
     "/rename", description=gettext_lazy("Rename your character"), category="General"
 )
 async def cmd_rename(ctx: CommandContext, name: str):
-    if len(name) > 20 or "(" in name:
+    # Strip any existing tags from the submitted name
+    clean_name = strip_all_tags(name)
+
+    if len(clean_name) > 20 or "(" in clean_name:
         await ctx.reply("Invalid name")
         return
-    # Block GOV tag for non-government-employees (legacy [GOV#] and compact [G₃])
-    import re
 
-    if (
-        re.search(r"\[GOV\d*\]|\[[CM]*G\d*\]", name, re.IGNORECASE)
-        and not ctx.character.is_gov_employee
-    ):
-        await ctx.reply("The [G] tag is reserved for government employees")
-        return
-    # RP Logic
-    ctx.character.custom_name = name
-    await ctx.character.asave()
-    await set_character_name(ctx.http_client_mod, ctx.character.guid, name)
-    await cache.aset(f"pushed_name:{ctx.character.guid}", name, timeout=3600)
+    ctx.character.name = clean_name
+    await ctx.character.asave(update_fields=["name"])
+    await refresh_player_name(ctx.character, ctx.http_client_mod)
 
 
 @registry.register(
