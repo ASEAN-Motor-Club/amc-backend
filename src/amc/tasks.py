@@ -45,7 +45,7 @@ from amc.models import (
     PoliceSession,
 )
 from amc.game_server import announce, get_players, get_player_info
-from amc.police import is_police_vehicle
+from amc.police import is_police_vehicle, deactivate_police
 from amc.utils import forward_to_discord
 from amc.mod_server import (
     show_popup,
@@ -628,6 +628,17 @@ async def handle_player_vehicle_mod_check(
                 character,
                 session,
                 has_custom_parts=should_have_mod,
+            )
+
+        if is_on_duty and should_have_mod:
+            await deactivate_police(character, None)
+            asyncio.create_task(
+                show_popup(
+                    session,
+                    "Your police session has been ended because you entered a vehicle with modded parts.",
+                    character_guid=str(character.guid),
+                    player_id=str(player.unique_id),
+                )
             )
 
 
