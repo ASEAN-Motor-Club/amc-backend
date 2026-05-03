@@ -6,10 +6,8 @@ ServerTeleportVehicle, ServerRespawnCharacter
 
 from __future__ import annotations
 
-import asyncio
 import logging
 import math
-from datetime import timedelta
 
 from amc.handlers import register
 from amc.models import (
@@ -17,8 +15,8 @@ from amc.models import (
     ServerTeleportLog,
     Wanted,
 )
-from amc.game_server import announce, get_players
-from amc.mod_server import despawn_player_vehicle, send_system_message, teleport_player
+from amc.game_server import get_players
+from amc.mod_server import send_system_message, teleport_player
 from amc.police import POLICE_STATIONS
 
 logger = logging.getLogger("amc.webhook.handlers.teleport")
@@ -31,23 +29,6 @@ logger = logging.getLogger("amc.webhook.handlers.teleport")
 
 @register("ServerResetVehicleAt")
 async def handle_reset_vehicle(event, player, character, ctx):
-    timestamp = _parse_timestamp(event)
-    if ctx.is_rp_mode and character.last_login < timestamp - timedelta(seconds=15):
-        asyncio.create_task(
-            announce(
-                f"{character.name}'s vehicle has been despawned for using roadside recovery while on RP mode",
-                ctx.http_client,
-                color="FFA500",
-            )
-        )
-        if ctx.http_client_mod:
-            asyncio.create_task(
-                despawn_player_vehicle(
-                    ctx.http_client_mod,
-                    str(character.guid),
-                    category="current",
-                )
-            )
     return 0, 0, 0, 0
 
 
