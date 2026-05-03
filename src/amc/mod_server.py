@@ -200,6 +200,11 @@ async def _coalesce(key: str, store: dict[str, asyncio.Future], coro_fn):
     except Exception as exc:
         if not future.done():
             future.set_exception(exc)
+            # Mark the exception as retrieved so asyncio doesn't log a warning
+            # when no concurrent callers are awaiting this future.  Concurrent
+            # callers that *are* awaiting will still see the exception via
+            # future.result() / __await__.
+            future.exception()
         raise
     finally:
         store.pop(key, None)
@@ -234,6 +239,7 @@ async def get_player(session, player_id, force_refresh=False):
     except Exception as exc:
         if not future.done():
             future.set_exception(exc)
+            future.exception()
         raise
     finally:
         _inflight.pop(player_id, None)
@@ -420,8 +426,10 @@ async def get_player_last_vehicle(session, character_guid):
         async with session.get(
             f"/player_vehicles/{character_guid}/last", timeout=FAST_TIMEOUT
         ) as resp:
+            if resp.status == 404:
+                return {"vehicle": None}
             if resp.status != 200:
-                raise Exception("Failed to get player last vehicle")
+                raise Exception(f"Failed to get player last vehicle ({resp.status})")
             return await resp.json()
 
     return await _coalesce(f"last_vehicle:{character_guid}", _inflight_vehicle, _fetch)
@@ -444,8 +452,10 @@ async def get_player_last_vehicle_parts(session, character_guid, complete=False)
 
     async def _fetch():
         async with session.get(url, timeout=FAST_TIMEOUT) as resp:
+            if resp.status == 404:
+                return {"parts": []}
             if resp.status != 200:
-                raise Exception("Failed to get player last vehicle parts")
+                raise Exception(f"Failed to get player last vehicle parts ({resp.status})")
             return await resp.json()
 
     return await _coalesce(cache_key, _inflight_vehicle, _fetch)
