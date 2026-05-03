@@ -38,6 +38,8 @@ ILLICIT_CARGO_KEYS: set[str] = {
     "Cocaine",
     "MoneyPallet",
     "Moonshine",
+    "CocaPaste",
+    "CocaineBricks",
 }
 
 # Wanted trigger probability constants
@@ -346,6 +348,8 @@ SPECIAL_CARGO_HANDLERS: dict[str, SpecialCargoHandler] = {
     "Cocaine": handle_contraband_cargo,
     "MoneyPallet": handle_contraband_cargo,
     "Moonshine": handle_contraband_cargo,
+    "CocaPaste": handle_contraband_cargo,
+    "CocaineBricks": handle_contraband_cargo,
 }
 
 
