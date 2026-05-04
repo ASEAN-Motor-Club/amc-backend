@@ -3,7 +3,7 @@ from amc.command_framework import registry, CommandContext
 import asyncio
 from amc.mod_server import get_player_last_vehicle, get_player_last_vehicle_parts
 from amc.game_server import get_players
-from amc.vehicles import format_vehicle_name, format_vehicle_part_game
+from amc.vehicles import format_vehicle_name, format_vehicle_part_game, despawn_personal_vehicles
 from amc.mod_detection import (
     detect_custom_parts,
     detect_incompatible_parts,
@@ -21,17 +21,24 @@ from django.utils.translation import gettext as _, gettext_lazy
     ["/despawn", "/d"],
     description=gettext_lazy("Despawn your vehicle"),
     category="Vehicle Management",
-    # deprecated=True,
-    # deprecated_message="<Title>Command Deprecated</>\nThe /despawn command is no longer available.\nVehicles now despawn automatically."
 )
 async def cmd_despawn(ctx: CommandContext, category: str = "all"):
-    from amc.mod_server import send_system_message
+    from amc.mod_server import despawn_player_vehicle
 
-    await send_system_message(
-        ctx.http_client_mod,
-        _("Despawn is temporarily disabled."),
-        character_guid=ctx.character.guid,
-    )
+    if category == "personal":
+        await despawn_personal_vehicles(ctx.http_client_mod, ctx.character)
+        await ctx.reply(_("<EffectGood>Personal vehicles despawned</>"))
+        return
+
+    try:
+        await despawn_player_vehicle(
+            ctx.http_client_mod,
+            str(ctx.character.guid),
+            category=category,
+        )
+        await ctx.reply(_("<EffectGood>Vehicle despawned</>"))
+    except Exception:
+        await ctx.reply(_("<Title>Error</>\n\nFailed to despawn vehicle."))
 
 
 @registry.register(
