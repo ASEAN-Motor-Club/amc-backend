@@ -785,9 +785,7 @@ class CommandsTestCase(TestCase):
         mock_req.asave = AsyncMock()
 
         with (
-            patch(
-                "amc.rescue_reminder.RescueRequest.objects.filter"
-            ) as mock_filter,
+            patch("amc.rescue_reminder.RescueRequest.objects.filter") as mock_filter,
             patch("amc.rescue_reminder.announce", new=AsyncMock()) as mock_announce,
             patch("amc.rescue_reminder.forward_to_discord", new=AsyncMock()),
         ):
@@ -804,9 +802,7 @@ class CommandsTestCase(TestCase):
         from amc.rescue_reminder import send_rescue_reminders
 
         with (
-            patch(
-                "amc.rescue_reminder.RescueRequest.objects.filter"
-            ) as mock_filter,
+            patch("amc.rescue_reminder.RescueRequest.objects.filter") as mock_filter,
             patch("amc.rescue_reminder.announce", new=AsyncMock()) as mock_announce,
         ):
             mock_filter.return_value.select_related.return_value.order_by.return_value = []
@@ -2379,9 +2375,11 @@ class SetWantedCooldownTestCase(TestCase):
         class _MockAsyncIterable:
             def __init__(self, items):
                 self.items = items
+
             def __aiter__(self):
                 self._index = 0
                 return self
+
             async def __anext__(self):
                 if self._index >= len(self.items):
                     raise StopAsyncIteration
@@ -2462,9 +2460,7 @@ class SetWantedCooldownTestCase(TestCase):
                 "amc.commands.police.get_player",
                 new=self.mock_get_player,
             ),
-            patch(
-                "amc.commands.police.make_suspect", new=AsyncMock()
-            ),
+            patch("amc.commands.police.make_suspect", new=AsyncMock()),
         ):
             await self.cmd_setwanted(self.ctx, "CooldownTarget")
 
@@ -2490,9 +2486,7 @@ class SetWantedCooldownTestCase(TestCase):
                 "amc.commands.police.get_player",
                 new=self.mock_get_player,
             ),
-            patch(
-                "amc.commands.police.make_suspect", new=AsyncMock()
-            ),
+            patch("amc.commands.police.make_suspect", new=AsyncMock()),
         ):
             await self.cmd_setwanted(self.ctx, "CooldownTarget")
 
@@ -2541,11 +2535,13 @@ class PoliceCommandTestCase(TestCase):
                 ),
             ),
             patch(
+                "amc.commands.police.get_player_customization",
+                new=AsyncMock(return_value={"Costume": "Costume_Police_01"}),
+            ),
+            patch(
                 "amc.commands.police.activate_police", new=AsyncMock()
             ) as mock_activate,
-            patch(
-                "amc.commands.police.teleport_player", new=AsyncMock()
-            ) as mock_tp,
+            patch("amc.commands.police.teleport_player", new=AsyncMock()) as mock_tp,
             patch("amc.player_tags.refresh_player_name", new=AsyncMock()),
         ):
             await cmd_police(self.ctx)
@@ -2574,11 +2570,13 @@ class PoliceCommandTestCase(TestCase):
                 ),
             ),
             patch(
+                "amc.commands.police.get_player_customization",
+                new=AsyncMock(return_value={"Costume": "Costume_Police_01"}),
+            ),
+            patch(
                 "amc.commands.police.activate_police", new=AsyncMock()
             ) as mock_activate,
-            patch(
-                "amc.commands.police.teleport_player", new=AsyncMock()
-            ) as mock_tp,
+            patch("amc.commands.police.teleport_player", new=AsyncMock()) as mock_tp,
             patch("amc.player_tags.refresh_player_name", new=AsyncMock()),
         ):
             await cmd_police(self.ctx)
@@ -2598,9 +2596,7 @@ class PoliceCommandTestCase(TestCase):
                 "amc.commands.police.deactivate_police", new=AsyncMock()
             ) as mock_deactivate,
             patch("amc.player_tags.refresh_player_name", new=AsyncMock()),
-            patch(
-                "amc.commands.police.teleport_player", new=AsyncMock()
-            ) as mock_tp,
+            patch("amc.commands.police.teleport_player", new=AsyncMock()) as mock_tp,
         ):
             await cmd_police(self.ctx)
             mock_deactivate.assert_called_once()
@@ -2675,6 +2671,10 @@ class PoliceCommandTestCase(TestCase):
                 ),
             ),
             patch(
+                "amc.commands.police.get_player_customization",
+                new=AsyncMock(return_value={"Costume": "Costume_Police_01"}),
+            ),
+            patch(
                 "amc.commands.police.activate_police", new=AsyncMock()
             ) as mock_activate,
             patch("amc.commands.police.teleport_player", new=AsyncMock()),
@@ -2699,6 +2699,10 @@ class PoliceCommandTestCase(TestCase):
                 ),
             ),
             patch(
+                "amc.commands.police.get_player_customization",
+                new=AsyncMock(return_value={"Costume": "Costume_Police_01"}),
+            ),
+            patch(
                 "amc.commands.police.activate_police", new=AsyncMock()
             ) as mock_activate,
             patch("amc.commands.police.teleport_player", new=AsyncMock()),
@@ -2708,3 +2712,94 @@ class PoliceCommandTestCase(TestCase):
             mock_activate.assert_called_once()
 
 
+class PoliceCostumeGateTestCase(TestCase):
+    """Tests for /police command costume gate."""
+
+    def setUp(self):
+        self.ctx = MagicMock(spec=CommandContext)
+        self.ctx.reply = AsyncMock()
+        self.ctx.announce = AsyncMock()
+        self.ctx.http_client_mod = MagicMock()
+        self.ctx.http_client = MagicMock()
+        self.ctx.discord_client = None
+        self.ctx.player_info = {}
+
+        self.ctx.http_client_mod.get.return_value = MockResponse()
+        self.ctx.http_client_mod.post.return_value = MockResponse()
+        self.ctx.http_client.get.return_value = MockResponse()
+
+        self.player = Player.objects.create(unique_id="76561198000000000")
+        self.character = Character.objects.create(
+            name="TestChar", player=self.player, guid="guid-123"
+        )
+        self.ctx.character = self.character
+        self.ctx.player = self.player
+        self.ctx.timestamp = timezone.now()
+
+    async def test_cmd_police_rejected_without_police_costume(self):
+        """Going on duty without police costume is rejected."""
+        with (
+            patch("amc.commands.police.is_police", new=AsyncMock(return_value=False)),
+            patch(
+                "amc.commands.police.get_player_customization",
+                new=AsyncMock(return_value={"Costume": "Costume_Butcher_01"}),
+            ),
+            patch(
+                "amc.commands.police.activate_police", new=AsyncMock()
+            ) as mock_activate,
+            patch(
+                "amc.commands.police.show_popup", new_callable=AsyncMock
+            ) as mock_popup,
+        ):
+            await cmd_police(self.ctx)
+            mock_popup.assert_called_once()
+            msg = mock_popup.call_args[0][1]
+            self.assertIn("police uniform", msg)
+            mock_activate.assert_not_called()
+
+    async def test_cmd_police_rejected_with_no_costume(self):
+        """Going on duty with no costume is rejected."""
+        with (
+            patch("amc.commands.police.is_police", new=AsyncMock(return_value=False)),
+            patch(
+                "amc.commands.police.get_player_customization",
+                new=AsyncMock(return_value=None),
+            ),
+            patch(
+                "amc.commands.police.activate_police", new=AsyncMock()
+            ) as mock_activate,
+            patch(
+                "amc.commands.police.show_popup", new_callable=AsyncMock
+            ) as mock_popup,
+        ):
+            await cmd_police(self.ctx)
+            mock_popup.assert_called_once()
+            mock_activate.assert_not_called()
+
+    async def test_cmd_police_allowed_with_police_costume(self):
+        """Going on duty with police costume succeeds."""
+        with (
+            patch("amc.commands.police.is_police", new=AsyncMock(return_value=False)),
+            patch(
+                "amc.commands.police.get_players",
+                new=AsyncMock(
+                    return_value=[
+                        (
+                            str(self.player.unique_id),
+                            {"name": "TestChar"},
+                        )
+                    ]
+                ),
+            ),
+            patch(
+                "amc.commands.police.get_player_customization",
+                new=AsyncMock(return_value={"Costume": "Costume_Police_01"}),
+            ),
+            patch(
+                "amc.commands.police.activate_police", new=AsyncMock()
+            ) as mock_activate,
+            patch("amc.commands.police.teleport_player", new=AsyncMock()),
+            patch("amc.player_tags.refresh_player_name", new=AsyncMock()),
+        ):
+            await cmd_police(self.ctx)
+            mock_activate.assert_called_once()

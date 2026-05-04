@@ -6,6 +6,7 @@ from amc.models import Character, Wanted
 from amc.mod_server import (
     despawn_player_vehicle,
     get_player,
+    get_player_customization,
     make_suspect,
     send_system_message,
     show_popup,
@@ -87,6 +88,22 @@ async def cmd_police(ctx: CommandContext):
                 ctx.http_client_mod,
                 _(
                     "You cannot go on police duty within 24 hours of committing a crime."
+                ),
+                character_guid=ctx.character.guid,
+            )
+            return
+
+        # Police costume check — must be wearing a police uniform
+        customization = await get_player_customization(
+            ctx.http_client_mod, ctx.character.guid
+        )
+        costume_key = customization.get("Costume") if customization else None
+        if costume_key not in settings.POLICE_COSTUMES:
+            await show_popup(
+                ctx.http_client_mod,
+                _(
+                    "<Title>Cannot Go On Duty</>\n\n"
+                    "You must equip the police uniform before going on duty."
                 ),
                 character_guid=ctx.character.guid,
             )
@@ -237,7 +254,9 @@ async def cmd_setwanted(ctx: CommandContext, target_player_name: str):
                 "<Title>Cooldown Active</>\n\n"
                 "You can set {name} as wanted again in "
                 "{mins}m {secs}s."
-            ).format(name=target_character.name, mins=remaining_mins, secs=remaining_secs)
+            ).format(
+                name=target_character.name, mins=remaining_mins, secs=remaining_secs
+            )
             await show_popup(
                 ctx.http_client_mod,
                 countdown_msg,
@@ -251,8 +270,7 @@ async def cmd_setwanted(ctx: CommandContext, target_player_name: str):
     if not target_location_str:
         await ctx.reply(
             _(
-                "<Title>Location Unknown</>\n\n"
-                "Cannot determine {name}'s location."
+                "<Title>Location Unknown</>\n\nCannot determine {name}'s location."
             ).format(name=target_character.name)
         )
         return
@@ -262,8 +280,7 @@ async def cmd_setwanted(ctx: CommandContext, target_player_name: str):
     except ValueError:
         await ctx.reply(
             _(
-                "<Title>Location Unknown</>\n\n"
-                "Cannot determine {name}'s location."
+                "<Title>Location Unknown</>\n\nCannot determine {name}'s location."
             ).format(name=target_character.name)
         )
         return
@@ -331,9 +348,7 @@ async def cmd_setwanted(ctx: CommandContext, target_player_name: str):
                 pass  # Best effort — proceed even if teleport fails
 
     # AFK check: police may not set AFK players as wanted
-    target_live = await get_player(
-        ctx.http_client, str(target_pid), force_refresh=True
-    )
+    target_live = await get_player(ctx.http_client, str(target_pid), force_refresh=True)
     if target_live and target_live.get("bAFK"):
         await ctx.reply(
             _(
@@ -381,7 +396,9 @@ async def cmd_setwanted(ctx: CommandContext, target_player_name: str):
 
 @registry.register(
     ["/suspects", "/s"],
-    description=gettext_lazy("List online wanted suspects with distance and bearing (police only)"),
+    description=gettext_lazy(
+        "List online wanted suspects with distance and bearing (police only)"
+    ),
     category="Faction",
     featured=True,
 )
@@ -419,9 +436,7 @@ async def cmd_suspects(ctx: CommandContext):
         dist = _distance_3d(officer_loc, suspect_loc)
         direction = compass_direction(dx, dy)
         metres = game_units_to_metres(dist)
-        suspect_entries.append(
-            (dist, wanted.character.name, metres, direction)
-        )
+        suspect_entries.append((dist, wanted.character.name, metres, direction))
 
     if not suspect_entries:
         await ctx.reply(
