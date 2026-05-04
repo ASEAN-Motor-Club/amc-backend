@@ -1,4 +1,5 @@
 import asyncio
+import re
 from amc.command_framework import registry, CommandContext
 from amc.models import BotInvocationLog, SongRequestLog
 from amc.mod_server import show_popup
@@ -153,7 +154,10 @@ async def cmd_verify(ctx: CommandContext, signed_message: str):
     "/rename", description=gettext_lazy("Rename your character"), category="General"
 )
 async def cmd_rename(ctx: CommandContext, name: str):
-    # Strip any existing tags from the submitted name
+    if re.search(r"\[GOV\d*\]", name, re.IGNORECASE) and not ctx.character.is_gov_employee:
+        await ctx.reply("This tag is reserved for government employees.")
+        return
+
     clean_name = strip_all_tags(name)
 
     if len(clean_name) > 20 or "(" in clean_name:

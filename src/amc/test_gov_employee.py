@@ -368,8 +368,8 @@ class RenameGovTagProtectionTests(TestCase):
         ctx.reply.assert_called_once()
         self.assertIn("reserved", ctx.reply.call_args[0][0])
 
-    @patch("amc.commands.general.set_character_name", new_callable=AsyncMock)
-    async def test_rename_allows_gov_tag_for_gov_employee(self, mock_set_name):
+    @patch("amc.commands.general.refresh_player_name", new_callable=AsyncMock)
+    async def test_rename_allows_gov_tag_for_gov_employee(self, mock_refresh):
         from amc.commands.general import cmd_rename
 
         player = await sync_to_async(PlayerFactory)()
@@ -388,7 +388,7 @@ class RenameGovTagProtectionTests(TestCase):
         await cmd_rename(ctx, "[GOV1] GovPlayer")
 
         # Should not be blocked
-        mock_set_name.assert_awaited_once()
+        mock_refresh.assert_awaited_once()
 
 
 class WorkforgovCommandTests(TestCase):
