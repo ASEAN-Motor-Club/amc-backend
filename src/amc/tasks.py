@@ -56,6 +56,8 @@ from amc.mod_server import (
     set_world_vehicle_decal,
     spawn_assets,
     spawn_garage,
+    despawn_player_vehicle,
+    force_exit_vehicle,
 )
 from amc.mailbox import send_player_messages
 from amc.utils import (
@@ -170,6 +172,26 @@ Use <Highlight>/faction</Highlight> on Discord to join the Police faction and ga
         )
     except Exception as e:
         logger.exception(f"Failed to show police popup: {e}")
+
+
+async def _despawn_police_vehicle_for_criminal(http_client_mod, character, player, vehicle_name):
+    """Despawn a police vehicle entered by a player with an active criminal record."""
+    try:
+        await force_exit_vehicle(http_client_mod, str(character.guid))
+        await despawn_player_vehicle(http_client_mod, str(character.guid))
+        await show_popup(
+            http_client_mod,
+            "You cannot use police vehicles while you have an active criminal record. The vehicle has been despawned.",
+            character_guid=str(character.guid),
+            player_id=str(player.unique_id),
+        )
+        logger.info(
+            f"Despawned police vehicle '{vehicle_name}' for wanted criminal {character.name}"
+        )
+    except Exception as e:
+        logger.exception(
+            f"Failed to despawn police vehicle for criminal {character.name}: {e}"
+        )
 
 
 async def on_vehicle_sold(character, vehicle_name, http_client_mod):
@@ -851,13 +873,24 @@ async def process_log_event(
             )
             if action == PlayerVehicleLog.Action.ENTERED:
                 if is_police_vehicle(vehicle_name):
-                    asyncio.create_task(
-                        _show_police_popup(
-                            http_client_mod,
-                            character_guid=character.guid,
-                            player_id=str(player.unique_id),
+                    has_active_record = await CriminalRecord.objects.filter(
+                        character=character, cleared_at__isnull=True
+                    ).aexists()
+
+                    if has_active_record:
+                        asyncio.create_task(
+                            _despawn_police_vehicle_for_criminal(
+                                http_client_mod, character, player, vehicle_name
+                            )
                         )
-                    )
+                    else:
+                        asyncio.create_task(
+                            _show_police_popup(
+                                http_client_mod,
+                                character_guid=character.guid,
+                                player_id=str(player.unique_id),
+                            )
+                        )
 
             if action in [
                 PlayerVehicleLog.Action.ENTERED,
