@@ -249,8 +249,7 @@ def get_welcome_message(player_name, is_new, last_online=None):
         return f"Long time no see! Welcome back {player_name}", False
     if sec_since_online > 3600:
         return f"Welcome back {player_name}!", False        
-    if sec_since_online < 3600:
-        return f"That was quick! Welcome back {player_name}", False
+
     return None, False
 
 
