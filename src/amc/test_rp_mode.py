@@ -25,11 +25,14 @@ def _clear_cache():
 @pytest.mark.asyncio
 @pytest.mark.django_db
 @patch("amc.commands.rp_rescue.refresh_player_name", new_callable=AsyncMock)
-async def test_cmd_rp_mode_toggles_on(mock_refresh):
-    """First invocation flips rp_mode from False to True, replies, refreshes name."""
+@patch("amc.commands.rp_rescue.despawn_player_vehicle", new_callable=AsyncMock)
+async def test_cmd_rp_mode_toggles_on(mock_despawn, mock_refresh):
+    """First invocation with valid code flips rp_mode from False to True, creates RPSession."""
     from amc.commands.rp_rescue import cmd_rp_mode
     from amc.command_framework import CommandContext
     from amc.factories import CharacterFactory, PlayerFactory
+    from amc.models import RPSession
+    from amc.utils import with_verification_code
 
     player = await sync_to_async(PlayerFactory)()
     character = await sync_to_async(CharacterFactory)(player=player, rp_mode=False)
@@ -41,17 +44,22 @@ async def test_cmd_rp_mode_toggles_on(mock_refresh):
     ctx.http_client_mod = http_client_mod
     ctx.reply = AsyncMock()
 
-    await cmd_rp_mode(ctx)
-    # Let the fire-and-forget refresh_player_name task run.
+    code, _ = with_verification_code(("rp_mode_on", character.id), "")
+    await cmd_rp_mode(ctx, verification_code=code)
     await asyncio.sleep(0)
 
     await character.arefresh_from_db()
     assert character.rp_mode is True
 
+    session = await RPSession.aget_active(character)
+    assert session is not None
+    assert session.expires_at is None
+
     mock_refresh.assert_awaited_once()
-    # character passed positionally; http_client_mod is session
     assert mock_refresh.await_args.args[0].pk == character.pk
     assert mock_refresh.await_args.args[1] is http_client_mod
+
+    mock_despawn.assert_awaited_once()
 
     ctx.reply.assert_awaited_once()
     reply_text = ctx.reply.await_args.args[0]
@@ -60,15 +68,14 @@ async def test_cmd_rp_mode_toggles_on(mock_refresh):
 
 @pytest.mark.asyncio
 @pytest.mark.django_db
-@patch("amc.commands.rp_rescue.refresh_player_name", new_callable=AsyncMock)
-async def test_cmd_rp_mode_toggles_off(mock_refresh):
-    """If rp_mode is already True, invocation turns it off."""
+async def test_cmd_rp_mode_shows_confirmation_when_no_code():
+    """Without a verification code, the command shows a confirmation message with restrictions."""
     from amc.commands.rp_rescue import cmd_rp_mode
     from amc.command_framework import CommandContext
     from amc.factories import CharacterFactory, PlayerFactory
 
     player = await sync_to_async(PlayerFactory)()
-    character = await sync_to_async(CharacterFactory)(player=player, rp_mode=True)
+    character = await sync_to_async(CharacterFactory)(player=player, rp_mode=False)
 
     ctx = MagicMock(spec=CommandContext)
     ctx.character = character
@@ -76,13 +83,157 @@ async def test_cmd_rp_mode_toggles_off(mock_refresh):
     ctx.http_client_mod = MagicMock()
     ctx.reply = AsyncMock()
 
-    await cmd_rp_mode(ctx)
+    await cmd_rp_mode(ctx, verification_code="")
+
+    ctx.reply.assert_awaited_once()
+    reply_text = str(ctx.reply.await_args.args[0])
+    assert "Roadside recovery" in reply_text
+    assert "Teleporting" in reply_text
+    assert "Autopilot" in reply_text
+    assert "despawned" in reply_text
+    assert "[R]" in reply_text
+    assert "/rp" in reply_text
+
+
+@pytest.mark.asyncio
+@pytest.mark.django_db
+@patch("amc.commands.rp_rescue.refresh_player_name", new_callable=AsyncMock)
+async def test_cmd_rp_mode_toggles_off(mock_refresh):
+    """If rp_mode is already True and enough time has passed, invocation with valid code turns it off."""
+    from amc.commands.rp_rescue import cmd_rp_mode
+    from amc.command_framework import CommandContext
+    from amc.factories import CharacterFactory, PlayerFactory
+    from amc.models import RPSession
+    from amc.utils import with_verification_code
+
+    player = await sync_to_async(PlayerFactory)()
+    character = await sync_to_async(CharacterFactory)(player=player, rp_mode=True)
+
+    session = await RPSession.objects.acreate(
+        character=character,
+        created_at=timezone.now() - timedelta(hours=2),
+    )
+
+    ctx = MagicMock(spec=CommandContext)
+    ctx.character = character
+    ctx.player = player
+    ctx.http_client_mod = MagicMock()
+    ctx.reply = AsyncMock()
+
+    code, _ = with_verification_code(("rp_mode_off", character.id), "")
+    await cmd_rp_mode(ctx, verification_code=code)
     await asyncio.sleep(0)
 
     await character.arefresh_from_db()
     assert character.rp_mode is False
 
+    await session.arefresh_from_db()
+    assert session.expires_at is not None
+
     mock_refresh.assert_awaited_once()
+    reply_text = ctx.reply.await_args.args[0]
+    assert "RP Mode Disabled" in str(reply_text)
+
+
+@pytest.mark.asyncio
+@pytest.mark.django_db
+async def test_cmd_rp_mode_toggle_off_shows_confirmation():
+    """Without a verification code, disabling shows confirmation message."""
+    from amc.commands.rp_rescue import cmd_rp_mode
+    from amc.command_framework import CommandContext
+    from amc.factories import CharacterFactory, PlayerFactory
+    from amc.models import RPSession
+
+    player = await sync_to_async(PlayerFactory)()
+    character = await sync_to_async(CharacterFactory)(player=player, rp_mode=True)
+
+    await RPSession.objects.acreate(
+        character=character,
+        created_at=timezone.now() - timedelta(hours=2),
+    )
+
+    ctx = MagicMock(spec=CommandContext)
+    ctx.character = character
+    ctx.player = player
+    ctx.http_client_mod = MagicMock()
+    ctx.reply = AsyncMock()
+
+    await cmd_rp_mode(ctx, verification_code="")
+
+    ctx.reply.assert_awaited_once()
+    reply_text = str(ctx.reply.await_args.args[0])
+    assert "Disable RP Mode" in reply_text
+    assert "/rp" in reply_text
+
+
+@pytest.mark.asyncio
+@pytest.mark.django_db
+async def test_cmd_rp_mode_toggle_off_blocked_before_minimum_duration():
+    """Toggle-off is rejected if less than RP_MIN_DURATION_HOURS has elapsed."""
+    from amc.commands.rp_rescue import cmd_rp_mode
+    from amc.command_framework import CommandContext
+    from amc.factories import CharacterFactory, PlayerFactory
+    from amc.models import RPSession
+    from amc.utils import with_verification_code
+
+    player = await sync_to_async(PlayerFactory)()
+    character = await sync_to_async(CharacterFactory)(player=player, rp_mode=True)
+
+    await RPSession.objects.acreate(
+        character=character,
+        created_at=timezone.now() - timedelta(minutes=30),
+    )
+
+    ctx = MagicMock(spec=CommandContext)
+    ctx.character = character
+    ctx.player = player
+    ctx.http_client_mod = MagicMock()
+    ctx.reply = AsyncMock()
+
+    code, _ = with_verification_code(("rp_mode_off", character.id), "")
+    await cmd_rp_mode(ctx, verification_code=code)
+
+    await character.arefresh_from_db()
+    assert character.rp_mode is True
+
+    ctx.reply.assert_awaited_once()
+    reply_text = str(ctx.reply.await_args.args[0])
+    assert "Time remaining" in reply_text
+
+
+@pytest.mark.asyncio
+@pytest.mark.django_db
+@patch("amc.commands.rp_rescue.refresh_player_name", new_callable=AsyncMock)
+async def test_cmd_rp_mode_toggle_off_exact_boundary(mock_refresh):
+    """Toggle-off succeeds at exactly RP_MIN_DURATION_HOURS with valid code."""
+    from amc.commands.rp_rescue import cmd_rp_mode
+    from amc.command_framework import CommandContext
+    from amc.factories import CharacterFactory, PlayerFactory
+    from amc.models import RPSession
+    from amc.config import RP_MIN_DURATION_HOURS
+    from amc.utils import with_verification_code
+
+    player = await sync_to_async(PlayerFactory)()
+    character = await sync_to_async(CharacterFactory)(player=player, rp_mode=True)
+
+    await RPSession.objects.acreate(
+        character=character,
+        created_at=timezone.now() - timedelta(hours=RP_MIN_DURATION_HOURS),
+    )
+
+    ctx = MagicMock(spec=CommandContext)
+    ctx.character = character
+    ctx.player = player
+    ctx.http_client_mod = MagicMock()
+    ctx.reply = AsyncMock()
+
+    code, _ = with_verification_code(("rp_mode_off", character.id), "")
+    await cmd_rp_mode(ctx, verification_code=code)
+    await asyncio.sleep(0)
+
+    await character.arefresh_from_db()
+    assert character.rp_mode is False
+
     reply_text = ctx.reply.await_args.args[0]
     assert "RP Mode Disabled" in str(reply_text)
 
@@ -125,7 +276,7 @@ class VehicleResetDespawnTests(TestCase):
 
     async def _setup_character(self, *, rp_mode: bool):
         from amc.factories import CharacterFactory, PlayerFactory
-        from amc.models import PlayerStatusLog
+        from amc.models import PlayerStatusLog, RPSession
 
         player = await sync_to_async(PlayerFactory)()
         character = await sync_to_async(CharacterFactory)(
@@ -140,6 +291,11 @@ class VehicleResetDespawnTests(TestCase):
                 timezone.now() - timedelta(minutes=4),
             ),
         )
+        if rp_mode:
+            await RPSession.objects.acreate(
+                character=character,
+                created_at=timezone.now() - timedelta(hours=2),
+            )
         return character
 
     async def test_despawns_when_rp_mode_on(

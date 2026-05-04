@@ -16,3 +16,6 @@ CARGO_FULFILLMENT_WEIGHTS: dict[str, int] = {
 
 # Depot restock subsidy amount. Set to 0 to disable.
 DEPOT_RESTOCK_SUBSIDY_AMOUNT = 10_000
+
+# Minimum RP mode duration in hours. Players cannot toggle RP mode off before this elapses.
+RP_MIN_DURATION_HOURS = 1

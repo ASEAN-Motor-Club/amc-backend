@@ -576,6 +576,40 @@ class PoliceSession(models.Model):
 
 
 @final
+class RPSession(models.Model):
+    character = models.ForeignKey(
+        Character, on_delete=models.CASCADE, related_name="rp_sessions"
+    )
+    created_at = models.DateTimeField(default=timezone.now)
+    expires_at = models.DateTimeField(
+        null=True,
+        blank=True,
+        help_text="NULL = active session. Set when the player toggles RP mode off.",
+    )
+
+    class Meta:
+        indexes = [models.Index(fields=["character", "expires_at"])]
+        constraints = [
+            models.UniqueConstraint(
+                fields=["character"],
+                condition=Q(expires_at__isnull=True),
+                name="unique_active_rp_session_per_character",
+            )
+        ]
+
+    @override
+    def __str__(self):
+        status = "active" if self.expires_at is None else f"ended {self.expires_at:%Y-%m-%d}"
+        return f"{self.character.name} — RP ({status})"
+
+    @classmethod
+    async def aget_active(cls, character):
+        return await cls.objects.filter(
+            character=character, expires_at__isnull=True
+        ).afirst()
+
+
+@final
 class Team(models.Model):
     name = models.CharField(max_length=200)
     tag = models.CharField(max_length=6)

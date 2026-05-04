@@ -1,6 +1,7 @@
 import asyncio
 from amc.command_framework import registry, CommandContext
-from amc.models import RescueRequest
+from amc.models import RescueRequest, RPSession
+from amc.config import RP_MIN_DURATION_HOURS
 from django.contrib.gis.geos import Point
 from amc.mod_server import (
     get_players as get_players_mod,
@@ -10,6 +11,7 @@ from amc.mod_server import (
 )
 from amc.game_server import get_player_info
 from amc.player_tags import refresh_player_name
+from amc.utils import with_verification_code
 from amc.vehicles import format_vehicle_name
 from django.utils import timezone
 from datetime import timedelta
@@ -23,24 +25,79 @@ from django.utils.translation import gettext as _, gettext_lazy
     category="RP & Rescue",
     featured=True,
 )  # type: ignore
-async def cmd_rp_mode(ctx: CommandContext):
-    ctx.character.rp_mode = not ctx.character.rp_mode
-    await ctx.character.asave(update_fields=["rp_mode"])
-    # Refresh the display-name tag so [R] appears/disappears; fire-and-forget
-    # so we don't block the reply on DB reads + the mod-server write_limiter.
-    asyncio.create_task(refresh_player_name(ctx.character, ctx.http_client_mod))
-    # Despawn all vehicles when enabling RP mode.
+async def cmd_rp_mode(ctx: CommandContext, verification_code: str = ""):
     if ctx.character.rp_mode:
+        # --- Disabling RP mode ---
+        session = await RPSession.aget_active(ctx.character)
+        if session:
+            elapsed = timezone.now() - session.created_at
+            min_duration = timedelta(hours=RP_MIN_DURATION_HOURS)
+            if elapsed < min_duration:
+                remaining = min_duration - elapsed
+                minutes = int(remaining.total_seconds() // 60)
+                await ctx.reply(
+                    _("<Title>RP Mode</>\n"
+                      "You must remain in RP mode for at least {hours}h. "
+                      "Time remaining: {minutes}min."
+                    ).format(hours=RP_MIN_DURATION_HOURS, minutes=minutes)
+                )
+                return
+
+        code_expected, verified = with_verification_code(
+            ("rp_mode_off", ctx.character.id), verification_code
+        )
+        if not verified:
+            await ctx.reply(
+                _(
+                    "<Title>Disable RP Mode</>\n"
+                    "Are you sure you want to disable RP mode?\n\n"
+                    "To confirm, type: <Highlight>/rp {code}</>"
+                ).format(code=code_expected.upper())
+            )
+            return
+
+        if session:
+            session.expires_at = timezone.now()
+            await session.asave(update_fields=["expires_at"])
+
+        ctx.character.rp_mode = False
+        await ctx.character.asave(update_fields=["rp_mode"])
+        asyncio.create_task(refresh_player_name(ctx.character, ctx.http_client_mod))
+        await ctx.reply(_("<Title>RP Mode Disabled</>"))
+    else:
+        # --- Enabling RP mode ---
+        code_expected, verified = with_verification_code(
+            ("rp_mode_on", ctx.character.id), verification_code
+        )
+        if not verified:
+            await ctx.reply(
+                _(
+                    "<Title>Enable RP Mode</>\n"
+                    "RP mode enforces realistic driving restrictions. "
+                    "You must stay in RP mode for at least <Highlight>{hours} hour(s)</>.\n\n"
+                    "<Warning>When RP mode is ON:</>\n"
+                    "- Roadside recovery is <Warning>disabled</> (use /rescue for help)\n"
+                    "- Teleporting is <Warning>disabled</>\n"
+                    "- Autopilot / AI driving is <Warning>disabled</>\n"
+                    "- Your personal vehicles will be <Warning>despawned</>\n"
+                    "- You will receive the <Highlight>[R]</> tag in your name\n\n"
+                    "To confirm, type: <Highlight>/rp {code}</>"
+                ).format(hours=RP_MIN_DURATION_HOURS, code=code_expected.upper())
+            )
+            return
+
+        await RPSession.objects.acreate(character=ctx.character)
+        ctx.character.rp_mode = True
+        await ctx.character.asave(update_fields=["rp_mode"])
+        asyncio.create_task(refresh_player_name(ctx.character, ctx.http_client_mod))
         await despawn_player_vehicle(ctx.http_client_mod, str(ctx.character.guid), category="all")
         await ctx.reply(
-            _(
-                "<EffectGood>RP Mode Enabled</>\n"
-                "You may no longer use roadside recovery to reset vehicles. "
-                "Call /rescue if you need help."
-            )
+            _("<EffectGood>RP Mode Enabled</>\n"
+              "You may no longer use roadside recovery to reset vehicles. "
+              "Call /rescue if you need help.\n"
+              "Minimum RP duration: {hours}h."
+            ).format(hours=RP_MIN_DURATION_HOURS)
         )
-    else:
-        await ctx.reply(_("<Title>RP Mode Disabled</>"))
 
 
 @registry.register(

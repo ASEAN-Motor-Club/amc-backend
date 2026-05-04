@@ -83,6 +83,7 @@ from .models import (
     Confiscation,
     ArrestZone,
     PoliceSession,
+    RPSession,
     Wanted,
     Guild,
     GuildSession,
@@ -1545,6 +1546,20 @@ class PoliceSessionAdmin(admin.ModelAdmin):
     list_filter = ["ended_at"]
     readonly_fields = ["character"]
     ordering = ["-started_at"]
+
+
+@admin.register(RPSession)
+class RPSessionAdmin(admin.ModelAdmin):
+    list_display = ["id", "character", "created_at", "expires_at", "is_active"]
+    list_select_related = ["character", "character__player"]
+    search_fields = ["character__name", "character__player__unique_id"]
+    list_filter = [("expires_at", admin.EmptyFieldListFilter)]
+    readonly_fields = ["character", "created_at"]
+    ordering = ["-created_at"]
+
+    @admin.display(boolean=True, description="Active")
+    def is_active(self, obj):
+        return obj.expires_at is None
 
 
 @admin.register(Wanted)
