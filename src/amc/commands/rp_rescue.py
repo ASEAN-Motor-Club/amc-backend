@@ -6,8 +6,8 @@ from amc.mod_server import (
     get_players as get_players_mod,
     get_player_last_vehicle,
     send_system_message,
-    despawn_spawned_vehicles,
 )
+from amc.vehicles import despawn_personal_vehicles
 from amc.game_server import get_player_info
 from amc.player_tags import refresh_player_name
 from amc.vehicles import format_vehicle_name
@@ -31,11 +31,7 @@ async def cmd_rp_mode(ctx: CommandContext):
     asyncio.create_task(refresh_player_name(ctx.character, ctx.http_client_mod))
     # Despawn personal vehicles on RP mode toggle; fire-and-forget.
     asyncio.create_task(
-        despawn_spawned_vehicles(
-            ctx.http_client_mod,
-            str(ctx.character.guid),
-            company_filter="personal",
-        )
+        despawn_personal_vehicles(ctx.http_client_mod, ctx.character)
     )
     if ctx.character.rp_mode:
         await ctx.reply(

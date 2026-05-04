@@ -10,6 +10,7 @@ from amc.mod_server import (
     get_player_last_vehicle_parts,
     spawn_vehicle,
     show_popup,
+    despawn_spawned_vehicles,
 )
 from amc.enums import VehiclePartSlot
 from amc.mod_detection import (
@@ -382,3 +383,23 @@ async def spawn_registered_vehicle(
                 await asyncio.sleep(2 * (attempt + 1))
             else:
                 raise
+
+
+async def despawn_personal_vehicles(http_client_mod, character):
+    """Despawn all personal vehicles belonging to the character.
+
+    Company vehicles are left untouched — only vehicles with no company
+    affiliation are removed.
+    """
+    try:
+        await despawn_spawned_vehicles(
+            http_client_mod,
+            str(character.guid),
+            company_filter="personal",
+        )
+    except Exception:
+        logger.warning(
+            "Failed to despawn personal vehicles for %s",
+            character.name,
+            exc_info=True,
+        )
