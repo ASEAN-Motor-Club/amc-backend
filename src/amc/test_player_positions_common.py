@@ -2,6 +2,7 @@
 
 Covers the filter_hidden parameter of get_players_mod:
 - Wanted criminals are excluded when filter_hidden=True.
+- Costume criminals (active CriminalRecord + wearing_costume) are excluded.
 - Police officers are excluded when filter_hidden=True AND an active wanted criminal exists.
 - Police officers are included when filter_hidden=True but NO active wanted criminal exists.
 - Regular players are always included.
@@ -21,7 +22,7 @@ from amc.api.player_positions_common import (
     get_players_mod,
 )
 from amc.factories import CharacterFactory, PlayerFactory
-from amc.models import PoliceSession, Wanted
+from amc.models import CriminalRecord, PoliceSession, Wanted
 
 
 def _make_mod_player(unique_id, player_name="TestPlayer", x=0, y=0, z=0, vehicle_key=""):
@@ -59,31 +60,39 @@ class _FakeSession:
 class ShouldHidePlayerTests(TestCase):
     def test_wanted_player_is_hidden(self):
         p = _make_mod_player(42)
-        self.assertTrue(_should_hide_player(p, {42}, set(), True))
+        self.assertTrue(_should_hide_player(p, {42}, set(), set(), True))
 
     def test_wanted_player_hidden_even_without_any_wanted_flag(self):
         p = _make_mod_player(42)
-        self.assertTrue(_should_hide_player(p, {42}, set(), False))
+        self.assertTrue(_should_hide_player(p, {42}, set(), set(), False))
 
     def test_police_hidden_when_any_wanted(self):
         p = _make_mod_player(99)
-        self.assertTrue(_should_hide_player(p, set(), {99}, True))
+        self.assertTrue(_should_hide_player(p, set(), {99}, set(), True))
 
     def test_police_not_hidden_when_no_wanted(self):
         p = _make_mod_player(99)
-        self.assertFalse(_should_hide_player(p, set(), {99}, False))
+        self.assertFalse(_should_hide_player(p, set(), {99}, set(), False))
+
+    def test_costume_criminal_is_hidden(self):
+        p = _make_mod_player(55)
+        self.assertTrue(_should_hide_player(p, set(), set(), {55}, False))
+
+    def test_costume_criminal_hidden_even_without_wanted(self):
+        p = _make_mod_player(55)
+        self.assertTrue(_should_hide_player(p, set(), set(), {55}, False))
 
     def test_regular_player_not_hidden(self):
         p = _make_mod_player(7)
-        self.assertFalse(_should_hide_player(p, {42}, {99}, True))
+        self.assertFalse(_should_hide_player(p, {42}, {99}, {55}, True))
 
     def test_malformed_unique_id_not_hidden(self):
         p = {"UniqueID": "not_a_number", "PlayerName": "Bad"}
-        self.assertFalse(_should_hide_player(p, {42}, {99}, True))
+        self.assertFalse(_should_hide_player(p, {42}, {99}, set(), True))
 
     def test_missing_unique_id_not_hidden(self):
         p = {"PlayerName": "NoID"}
-        self.assertFalse(_should_hide_player(p, {42}, {99}, True))
+        self.assertFalse(_should_hide_player(p, {42}, {99}, set(), True))
 
 
 class GetPlayersModFilterTests(TestCase):
@@ -120,6 +129,21 @@ class GetPlayersModFilterTests(TestCase):
             last_online=timezone.now(),
         )
         await character.asave(update_fields=["last_online"])
+        return player, character
+
+    async def _setup_costume_criminal(self):
+        player = await sync_to_async(PlayerFactory)()
+        character = await sync_to_async(CharacterFactory)(
+            player=player,
+            last_online=timezone.now(),
+            wearing_costume=True,
+            costume_item_key="Costume_Butcher_01",
+        )
+        await character.asave(update_fields=["last_online", "wearing_costume", "costume_item_key"])
+        await CriminalRecord.objects.acreate(
+            character=character,
+            reason="Wearing criminal costume",
+        )
         return player, character
 
     async def test_filter_false_returns_all(self):
@@ -226,5 +250,43 @@ class GetPlayersModFilterTests(TestCase):
         session = _FakeSession([
             {"UniqueID": "bad", "PlayerName": "Bad", "Location": {"X": 0, "Y": 0, "Z": 0}, "VehicleKey": ""},
         ])
+        result = await get_players_mod(session, filter_hidden=True)
+        self.assertEqual(len(result), 1)
+
+    async def test_costume_criminal_excluded(self):
+        costume_player, _ = await self._setup_costume_criminal()
+        session = _FakeSession([_make_mod_player(costume_player.unique_id)])
+        result = await get_players_mod(session, filter_hidden=True)
+        self.assertEqual(len(result), 0)
+
+    async def test_costume_criminal_excluded_without_wanted(self):
+        """Costume criminals are hidden even when no wanted criminals exist."""
+        costume_player, _ = await self._setup_costume_criminal()
+        regular_player, _ = await self._setup_regular_player()
+        session = _FakeSession([
+            _make_mod_player(costume_player.unique_id),
+            _make_mod_player(regular_player.unique_id),
+        ])
+        result = await get_players_mod(session, filter_hidden=True)
+        self.assertEqual(len(result), 1)
+        self.assertEqual(int(result[0]["UniqueID"]), regular_player.unique_id)
+
+    async def test_cleared_criminal_record_not_hidden(self):
+        """A costume criminal whose record was cleared should be visible."""
+        costume_player, costume_char = await self._setup_costume_criminal()
+        record = await CriminalRecord.objects.aget(character=costume_char)
+        record.cleared_at = timezone.now()
+        await record.asave(update_fields=["cleared_at"])
+        session = _FakeSession([_make_mod_player(costume_player.unique_id)])
+        result = await get_players_mod(session, filter_hidden=True)
+        self.assertEqual(len(result), 1)
+
+    async def test_costume_removed_not_hidden(self):
+        """A player who removed their costume should be visible."""
+        costume_player, costume_char = await self._setup_costume_criminal()
+        costume_char.wearing_costume = False
+        costume_char.costume_item_key = None
+        await costume_char.asave(update_fields=["wearing_costume", "costume_item_key"])
+        session = _FakeSession([_make_mod_player(costume_player.unique_id)])
         result = await get_players_mod(session, filter_hidden=True)
         self.assertEqual(len(result), 1)

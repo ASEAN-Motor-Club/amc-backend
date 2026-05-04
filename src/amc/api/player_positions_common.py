@@ -17,7 +17,7 @@ POLICE_ONLINE_THRESHOLD_SECONDS = 60
 
 
 def _get_hidden_player_unique_ids_sync():
-    from amc.models import PoliceSession, Wanted
+    from amc.models import CriminalRecord, PoliceSession, Wanted
 
     wanted_ids: set[int] = set(
         Wanted.objects.filter(
@@ -32,7 +32,15 @@ def _get_hidden_player_unique_ids_sync():
         ).values_list("character__player__unique_id", flat=True)
     )
 
-    return wanted_ids, police_ids
+    costume_ids: set[int] = set(
+        CriminalRecord.objects.filter(
+            cleared_at__isnull=True,
+            character__wearing_costume=True,
+            character__last_online__gte=online_threshold,
+        ).values_list("character__player__unique_id", flat=True)
+    )
+
+    return wanted_ids, police_ids, costume_ids
 
 
 def _get_hidden_player_unique_ids_with_retry():
@@ -48,12 +56,20 @@ async def _get_hidden_player_unique_ids():
     return await sync_to_async(_get_hidden_player_unique_ids_with_retry, thread_sensitive=True)()
 
 
-def _should_hide_player(player: dict, wanted_ids: set[int], police_ids: set[int], any_wanted: bool) -> bool:
+def _should_hide_player(
+    player: dict,
+    wanted_ids: set[int],
+    police_ids: set[int],
+    costume_ids: set[int],
+    any_wanted: bool,
+) -> bool:
     try:
         uid = int(player.get("UniqueID", 0))
     except (ValueError, TypeError):
         return False
     if uid in wanted_ids:
+        return True
+    if uid in costume_ids:
         return True
     if any_wanted and uid in police_ids:
         return True
@@ -70,13 +86,13 @@ async def get_players_mod(
     if cached_data is not None:
         if not filter_hidden:
             return cached_data
-        wanted_ids, police_ids = await _get_hidden_player_unique_ids()
+        wanted_ids, police_ids, costume_ids = await _get_hidden_player_unique_ids()
         any_wanted = bool(wanted_ids)
-        if not any_wanted and not police_ids:
+        if not any_wanted and not police_ids and not costume_ids:
             return cached_data
         return [
             p for p in cached_data
-            if not _should_hide_player(p, wanted_ids, police_ids, any_wanted)
+            if not _should_hide_player(p, wanted_ids, police_ids, costume_ids, any_wanted)
         ]
 
     async with session.get("/players") as resp:
@@ -87,12 +103,12 @@ async def get_players_mod(
     cache.set(cache_key, players, timeout=cache_ttl)
 
     if filter_hidden:
-        wanted_ids, police_ids = await _get_hidden_player_unique_ids()
+        wanted_ids, police_ids, costume_ids = await _get_hidden_player_unique_ids()
         any_wanted = bool(wanted_ids)
-        if wanted_ids or police_ids:
+        if wanted_ids or police_ids or costume_ids:
             return [
                 p for p in players
-                if not _should_hide_player(p, wanted_ids, police_ids, any_wanted)
+                if not _should_hide_player(p, wanted_ids, police_ids, costume_ids, any_wanted)
             ]
 
     return players
