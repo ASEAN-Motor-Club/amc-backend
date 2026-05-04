@@ -474,6 +474,18 @@ async def despawn_player_vehicle(session, player_id, category="current"):
             raise Exception("Failed to despawn")
 
 
+async def despawn_spawned_vehicles(session, player_id, company_filter=None, ai_filter=None):
+    await _write_limiter.acquire()
+    data = {}
+    if company_filter is not None:
+        data["companyFilter"] = company_filter
+    if ai_filter is not None:
+        data["aiFilter"] = ai_filter
+    async with session.post(f"/player_vehicles/{player_id}/despawn_spawned", json=data) as resp:
+        if resp.status not in (200, 404):
+            raise Exception("Failed to despawn spawned vehicles")
+
+
 async def force_exit_vehicle(session, character_guid):
     async with session.get(f"/player_vehicles/{character_guid}/exit") as resp:
         if resp.status != 200:
