@@ -27,7 +27,6 @@ async def cmd_despawn(ctx: CommandContext, category: str = "all"):
 
     if category == "personal":
         await despawn_personal_vehicles(ctx.http_client_mod, ctx.character)
-        await ctx.reply(_("<EffectGood>Personal vehicles despawned</>"))
         return
 
     try:
@@ -36,9 +35,8 @@ async def cmd_despawn(ctx: CommandContext, category: str = "all"):
             str(ctx.character.guid),
             category=category,
         )
-        await ctx.reply(_("<EffectGood>Vehicle despawned</>"))
     except Exception:
-        await ctx.reply(_("<Title>Error</>\n\nFailed to despawn vehicle."))
+        pass
 
 
 @registry.register(
