@@ -47,6 +47,7 @@ class HandoutUbiLoanRepaymentTest(TestCase):
         )
         return amount
 
+    @patch("amc.ubi.calculate_treasury_multiplier", return_value=1.0)
     @patch("amc.ubi.on_player_profit", new_callable=AsyncMock)
     @patch("amc.ubi.transfer_money", new_callable=AsyncMock)
     @patch("amc.ubi.send_fund_to_player_wallet", new_callable=AsyncMock)
@@ -59,6 +60,7 @@ class HandoutUbiLoanRepaymentTest(TestCase):
         mock_send,
         mock_transfer,
         mock_on_player_profit,
+        mock_treasury_mult,
     ):
         """When no loan exists, UBI is paid and on_player_profit is called."""
         mock_treasury_balance.return_value = Decimal(50_000_000)
@@ -77,6 +79,7 @@ class HandoutUbiLoanRepaymentTest(TestCase):
         assert mock_transfer.call_args[0][1] > 0
         mock_on_player_profit.assert_called_once()
 
+    @patch("amc.ubi.calculate_treasury_multiplier", return_value=1.0)
     @patch("amc.ubi.on_player_profit", new_callable=AsyncMock)
     @patch("amc.ubi.transfer_money", new_callable=AsyncMock)
     @patch("amc.ubi.send_fund_to_player_wallet", new_callable=AsyncMock)
@@ -89,6 +92,7 @@ class HandoutUbiLoanRepaymentTest(TestCase):
         mock_send,
         mock_transfer,
         mock_on_player_profit,
+        mock_treasury_mult,
     ):
         """When loan > UBI, on_player_profit handles repayment via pipeline."""
         mock_treasury_balance.return_value = Decimal(50_000_000)
@@ -109,6 +113,7 @@ class HandoutUbiLoanRepaymentTest(TestCase):
         self.assertEqual(call_args[1]["subsidy"], 0)
         self.assertEqual(call_args[1]["base_payment"], expected)
 
+    @patch("amc.ubi.calculate_treasury_multiplier", return_value=1.0)
     @patch("amc.ubi.on_player_profit", new_callable=AsyncMock)
     @patch("amc.ubi.transfer_money", new_callable=AsyncMock)
     @patch("amc.ubi.send_fund_to_player_wallet", new_callable=AsyncMock)
@@ -121,6 +126,7 @@ class HandoutUbiLoanRepaymentTest(TestCase):
         mock_send,
         mock_transfer,
         mock_on_player_profit,
+        mock_treasury_mult,
     ):
         """When loan < UBI, on_player_profit handles partial repayment via pipeline."""
         mock_treasury_balance.return_value = Decimal(50_000_000)
@@ -136,6 +142,7 @@ class HandoutUbiLoanRepaymentTest(TestCase):
 
         mock_on_player_profit.assert_called_once()
 
+    @patch("amc.ubi.calculate_treasury_multiplier", return_value=1.0)
     @patch("amc.ubi.on_player_profit", new_callable=AsyncMock)
     @patch("amc.ubi.transfer_money", new_callable=AsyncMock)
     @patch("amc.ubi.send_fund_to_player_wallet", new_callable=AsyncMock)
@@ -148,6 +155,7 @@ class HandoutUbiLoanRepaymentTest(TestCase):
         mock_send,
         mock_transfer,
         mock_on_player_profit,
+        mock_treasury_mult,
     ):
         """Gov employee gets 2x UBI with skip_gov_redirect=True so salary is kept."""
         mock_treasury_balance.return_value = Decimal(50_000_000)
@@ -201,6 +209,7 @@ class HandoutUbiLoanRepaymentTest(TestCase):
         mock_transfer.assert_not_called()
         mock_on_player_profit.assert_not_called()
 
+    @patch("amc.ubi.calculate_treasury_multiplier", return_value=0.5)
     @patch("amc.ubi.on_player_profit", new_callable=AsyncMock)
     @patch("amc.ubi.transfer_money", new_callable=AsyncMock)
     @patch("amc.ubi.send_fund_to_player_wallet", new_callable=AsyncMock)
@@ -213,9 +222,10 @@ class HandoutUbiLoanRepaymentTest(TestCase):
         mock_send,
         mock_transfer,
         mock_on_player_profit,
+        mock_treasury_mult,
     ):
-        """When treasury is between floor and ceiling, UBI scales linearly."""
-        mock_treasury_balance.return_value = Decimal(17_500_000)
+        """UBI scales via calculate_treasury_multiplier."""
+        mock_treasury_balance.return_value = Decimal(50_000_000)
         mock_get_players.return_value = self._mock_players()
 
         ctx = _make_ctx(http_client_mod=mock_transfer)
@@ -226,6 +236,7 @@ class HandoutUbiLoanRepaymentTest(TestCase):
         ):
             await handout_ubi(ctx)
 
+        mock_treasury_mult.assert_called_once()
         mock_send.assert_called_once()
         sent_amount = mock_send.call_args[0][0]
         expected_full = self._expected_amount()

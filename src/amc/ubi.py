@@ -4,8 +4,10 @@ from django.utils import timezone
 from amc.models import (
     Character,
     CharacterLocation,
+    JobPostingConfig,
 )
 from amc.game_server import get_players
+from amc.jobs import calculate_treasury_multiplier
 from amc.mod_server import transfer_money
 from amc.pipeline.profit import on_player_profit
 from amc.police import is_police
@@ -19,7 +21,6 @@ ACTIVE_GRANT_AMOUNT = 18_000 / (60 / TASK_FREQUENCY)
 AFK_GRANT_AMOUNT = 6_000 / (60 / TASK_FREQUENCY)
 MAX_LEVEL = 400
 TREASURY_UBI_FLOOR = 5_000_000
-TREASURY_UBI_CEILING = 30_000_000
 
 
 async def handout_ubi(ctx):
@@ -32,10 +33,12 @@ async def handout_ubi(ctx):
     if treasury_balance <= TREASURY_UBI_FLOOR:
         return
 
-    ubi_scale = min(
-        1.0,
-        (float(treasury_balance) - TREASURY_UBI_FLOOR)
-        / (TREASURY_UBI_CEILING - TREASURY_UBI_FLOOR),
+    config = await JobPostingConfig.aget_config()
+    ubi_scale = calculate_treasury_multiplier(
+        float(treasury_balance),
+        equilibrium=float(config.treasury_equilibrium),
+        sensitivity=float(config.treasury_sensitivity),
+        cap_ratio=float(config.treasury_cap_ratio),
     )
 
     players = await get_players(http_client)
