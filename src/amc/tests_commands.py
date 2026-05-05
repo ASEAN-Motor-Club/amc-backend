@@ -15,7 +15,7 @@ from amc.commands.admin import (
     cmd_spawn_garages,
     cmd_tp_player,
 )
-from amc.commands.vehicles import cmd_check_mods
+from amc.commands.vehicles import cmd_check_mods, cmd_rent
 from amc.commands.decals import cmd_apply_decal, cmd_decals, cmd_save_decal
 from amc.commands.events import (
     cmd_auto_grid,
@@ -2803,3 +2803,131 @@ class PoliceCostumeGateTestCase(TestCase):
         ):
             await cmd_police(self.ctx)
             mock_activate.assert_called_once()
+
+
+class RentGroupingTestCase(SimpleTestCase):
+    def setUp(self):
+        self.ctx = MagicMock(spec=CommandContext)
+        self.ctx.reply = AsyncMock()
+        self.ctx.http_client_mod = MagicMock()
+        self.ctx.player_info = {"Location": {"X": 0, "Y": 0, "Z": 0}}
+        self.ctx.character = MagicMock()
+        self.ctx.character.guid = "test-guid"
+        self.ctx.character.name = "TestRenter"
+
+    def _make_vehicle(self, pk, name, company_name=None):
+        v = MagicMock()
+        v.id = pk
+        v.pk = pk
+        v.config = {"VehicleName": name}
+        if company_name:
+            v.config["CompanyName"] = company_name
+        return v
+
+    async def test_rent_list_groups_by_company(self):
+        """Vehicles should be grouped by CompanyName in the listing."""
+        v1 = self._make_vehicle(1, "Truck A", "Corp One")
+        v2 = self._make_vehicle(2, "Truck B", "Corp One")
+        v3 = self._make_vehicle(3, "Van C", "Corp Two")
+
+        with patch("amc.commands.vehicles.CharacterVehicle.objects.filter") as mock_filter:
+            mock_qs = MagicMock()
+
+            async def async_iter(items):
+                for item in items:
+                    yield item
+
+            mock_qs.__aiter__ = lambda self_=None: async_iter([v1, v2, v3])
+            mock_filter.return_value = mock_qs
+
+            await cmd_rent(self.ctx)
+
+            self.ctx.reply.assert_called_once()
+            output = self.ctx.reply.call_args[0][0]
+            corp_one_pos = output.index("Corp One")
+            corp_two_pos = output.index("Corp Two")
+            truck_a_pos = output.index("Truck A")
+            truck_b_pos = output.index("Truck B")
+            van_c_pos = output.index("Van C")
+            self.assertLess(corp_one_pos, truck_a_pos)
+            self.assertLess(truck_a_pos, truck_b_pos)
+            self.assertLess(truck_b_pos, corp_two_pos)
+            self.assertLess(corp_two_pos, van_c_pos)
+
+    async def test_rent_list_no_rentals(self):
+        """When no rentals exist, shows appropriate message."""
+        with patch("amc.commands.vehicles.CharacterVehicle.objects.filter") as mock_filter:
+            mock_qs = MagicMock()
+
+            async def async_iter(items):
+                for item in items:
+                    yield item
+
+            mock_qs.__aiter__ = lambda self_=None: async_iter([])
+            mock_filter.return_value = mock_qs
+
+            await cmd_rent(self.ctx)
+
+            self.ctx.reply.assert_called_once()
+            output = self.ctx.reply.call_args[0][0]
+            self.assertIn("No rentals found", output)
+
+    async def test_rent_list_search_filter(self):
+        """Search term should filter vehicles by name."""
+        v1 = self._make_vehicle(1, "SportCar_X", "Corp A")
+        v2 = self._make_vehicle(2, "Truck_Y", "Corp B")
+
+        with patch("amc.commands.vehicles.CharacterVehicle.objects.filter") as mock_filter:
+            mock_qs = MagicMock()
+
+            async def async_iter(items):
+                for item in items:
+                    yield item
+
+            mock_qs.__aiter__ = lambda self_=None: async_iter([v1, v2])
+            mock_filter.return_value = mock_qs
+
+            await cmd_rent(self.ctx, "sport")
+
+            self.ctx.reply.assert_called_once()
+            output = self.ctx.reply.call_args[0][0]
+            self.assertIn("SportCar_X", output)
+            self.assertNotIn("Truck_Y", output)
+
+    async def test_rent_spawn_success(self):
+        """Renting by ID should spawn the vehicle."""
+        mock_vehicle = MagicMock()
+        mock_vehicle.config = {"VehicleName": "TestCar", "CompanyName": "Corp"}
+
+        with (
+            patch(
+                "amc.commands.vehicles.CharacterVehicle.objects.aget",
+                new=AsyncMock(return_value=mock_vehicle),
+            ),
+            patch(
+                "amc.commands.vehicles.spawn_registered_vehicle", new=AsyncMock()
+            ) as mock_spawn,
+        ):
+            await cmd_rent(self.ctx, "42")
+
+            mock_spawn.assert_called_once()
+            call_kwargs = mock_spawn.call_args
+            self.assertEqual(call_kwargs[0][0], self.ctx.http_client_mod)
+            self.assertEqual(call_kwargs[0][1], mock_vehicle)
+            self.ctx.reply.assert_called_once()
+            output = self.ctx.reply.call_args[0][0]
+            self.assertIn("Corp", output)
+
+    async def test_rent_spawn_not_found(self):
+        """Renting a nonexistent ID should show error."""
+        from amc.models import CharacterVehicle as CV
+
+        with patch(
+            "amc.commands.vehicles.CharacterVehicle.objects.aget",
+            new=AsyncMock(side_effect=CV.DoesNotExist),
+        ):
+            await cmd_rent(self.ctx, "999")
+
+            self.ctx.reply.assert_called_once()
+            output = self.ctx.reply.call_args[0][0]
+            self.assertIn("Rental not found", output)
