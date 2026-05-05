@@ -159,7 +159,10 @@ async def teleport_player(
         data["Rotation"] = rotation
     async with session.post(f"/players/{player_id}/teleport", json=data) as resp:
         if resp.status != 200:
-            raise Exception("Failed to teleport player")
+            body = await resp.text()
+            raise Exception(
+                f"Failed to teleport player (status={resp.status}, body={body[:200]})"
+            )
 
 
 async def spawn_dealership(session, vehicle_key, location, yaw):

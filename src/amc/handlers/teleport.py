@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import logging
 import math
+import asyncio
 
 from amc.handlers import register
 from amc.models import (
@@ -20,6 +21,9 @@ from amc.mod_server import send_system_message, show_popup, teleport_player
 from amc.police import POLICE_STATIONS
 
 logger = logging.getLogger("amc.webhook.handlers.teleport")
+
+_REDIRECT_MAX_ATTEMPTS = 3
+_REDIRECT_BACKOFF_BASE = 1  # seconds
 
 
 # ---------------------------------------------------------------------------
@@ -116,17 +120,39 @@ async def _redirect_police_near_wanted(character, player, ctx, action_label):
 
     if nearest:
         tx, ty, tz = nearest
-        await teleport_player(
-            ctx.http_client_mod,
-            str(player.unique_id),
-            {"X": tx, "Y": ty, "Z": tz},
-            no_vehicles=True,
-        )
-        await send_system_message(
-            ctx.http_client_mod,
-            f"{action_label} redirected — too close to a wanted suspect.",
-            character_guid=character.guid,
-        )
+        for attempt in range(_REDIRECT_MAX_ATTEMPTS):
+            try:
+                await teleport_player(
+                    ctx.http_client_mod,
+                    str(player.unique_id),
+                    {"X": tx, "Y": ty, "Z": tz},
+                    no_vehicles=True,
+                )
+                await send_system_message(
+                    ctx.http_client_mod,
+                    f"{action_label} redirected — too close to a wanted suspect.",
+                    character_guid=character.guid,
+                )
+                return
+            except Exception:
+                if attempt < _REDIRECT_MAX_ATTEMPTS - 1:
+                    delay = _REDIRECT_BACKOFF_BASE * (attempt + 1)
+                    logger.warning(
+                        "Police redirect attempt %d/%d failed, retrying in %ds",
+                        attempt + 1,
+                        _REDIRECT_MAX_ATTEMPTS,
+                        delay,
+                        exc_info=True,
+                    )
+                    await asyncio.sleep(delay)
+                else:
+                    logger.error(
+                        "Failed to redirect police %s after %d attempts — "
+                        "officer may be near a wanted suspect!",
+                        character.guid,
+                        _REDIRECT_MAX_ATTEMPTS,
+                        exc_info=True,
+                    )
 
 
 async def _handle_teleport_or_respawn(event, character, ctx):
