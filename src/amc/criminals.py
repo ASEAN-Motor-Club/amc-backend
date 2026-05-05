@@ -31,8 +31,6 @@ ESCAPE_MSG_COOLDOWN = 30  # seconds between "escape the police" popup messages
 # Underwater auto-arrest threshold (game units)
 UNDERWATER_Z_THRESHOLD = -22455
 
-# Modded-vehicle auto-arrest grace period
-MODDED_VEHICLE_GRACE_PERIOD = timedelta(minutes=2)
 
 # Time-based decay — online suspects always decay; clears in BASE_WANTED_DURATION seconds.
 BASE_WANTED_DURATION = Wanted.INITIAL_WANTED_LEVEL  # e.g. 900 s = 15 min
@@ -405,60 +403,59 @@ async def tick_wanted_countdown(http_client, http_client_mod) -> None:
             _last_escape_msg_sent.pop(sus_guid, None)
             continue
 
-        # Modded-vehicle auto-arrest after grace period
+        # Modded-vehicle auto-arrest
         if http_client_mod:
             try:
-                if timezone.now() - wanted.created_at > MODDED_VEHICLE_GRACE_PERIOD:
-                    last_vehicle, parts_data = await asyncio.gather(
-                        get_player_last_vehicle(http_client_mod, sus_guid),
-                        get_player_last_vehicle_parts(http_client_mod, sus_guid, complete=False),
+                last_vehicle, parts_data = await asyncio.gather(
+                    get_player_last_vehicle(http_client_mod, sus_guid),
+                    get_player_last_vehicle_parts(http_client_mod, sus_guid, complete=False),
+                )
+                main_vehicle = last_vehicle.get("vehicle")
+                if main_vehicle:
+                    whitelist = None
+                    is_on_duty = await PoliceSession.objects.filter(
+                        character=wanted.character, ended_at__isnull=True
+                    ).aexists()
+                    if is_on_duty:
+                        whitelist = POLICE_DUTY_WHITELIST
+                    custom_parts = detect_custom_parts(
+                        parts_data.get("parts", []), whitelist=whitelist
                     )
-                    main_vehicle = last_vehicle.get("vehicle")
-                    if main_vehicle:
-                        whitelist = None
-                        is_on_duty = await PoliceSession.objects.filter(
-                            character=wanted.character, ended_at__isnull=True
-                        ).aexists()
-                        if is_on_duty:
-                            whitelist = POLICE_DUTY_WHITELIST
-                        custom_parts = detect_custom_parts(
-                            parts_data.get("parts", []), whitelist=whitelist
-                        )
-                        if custom_parts:
-                            targets = {
-                                sus_guid: (
-                                    str(wanted.character.player.unique_id),
-                                    sus_loc,
-                                    False,
-                                )
-                            }
-                            target_chars = {sus_guid: wanted.character}
-                            try:
-                                arrested_names, total_confiscated = await execute_arrest(
-                                    officer_character=None,
-                                    targets=targets,
-                                    target_chars=target_chars,
-                                    http_client=http_client,
-                                    http_client_mod=http_client_mod,
-                                    reason="Arrested for using a modded vehicle while wanted.",
-                                )
-                                logger.info(
-                                    "modded vehicle arrest: %s — confiscated=$%d",
-                                    wanted.character.name,
-                                    total_confiscated,
-                                )
-                            except ValueError as exc:
-                                logger.warning(
-                                    "modded vehicle arrest failed (jail not configured?): %s", exc
-                                )
-                            except Exception:
-                                logger.exception(
-                                    "modded vehicle arrest failed unexpectedly for %s",
-                                    wanted.character.name,
-                                )
-                            _last_star_notified.pop(sus_guid, None)
-                            _last_escape_msg_sent.pop(sus_guid, None)
-                            continue
+                    if custom_parts:
+                        targets = {
+                            sus_guid: (
+                                str(wanted.character.player.unique_id),
+                                sus_loc,
+                                False,
+                            )
+                        }
+                        target_chars = {sus_guid: wanted.character}
+                        try:
+                            arrested_names, total_confiscated = await execute_arrest(
+                                officer_character=None,
+                                targets=targets,
+                                target_chars=target_chars,
+                                http_client=http_client,
+                                http_client_mod=http_client_mod,
+                                reason="Arrested for using a modded vehicle while wanted.",
+                            )
+                            logger.info(
+                                "modded vehicle arrest: %s — confiscated=$%d",
+                                wanted.character.name,
+                                total_confiscated,
+                            )
+                        except ValueError as exc:
+                            logger.warning(
+                                "modded vehicle arrest failed (jail not configured?): %s", exc
+                            )
+                        except Exception:
+                            logger.exception(
+                                "modded vehicle arrest failed unexpectedly for %s",
+                                wanted.character.name,
+                            )
+                        _last_star_notified.pop(sus_guid, None)
+                        _last_escape_msg_sent.pop(sus_guid, None)
+                        continue
             except Exception:
                 logger.debug(
                     "tick_wanted_countdown: mod check failed for %s, skipping",
