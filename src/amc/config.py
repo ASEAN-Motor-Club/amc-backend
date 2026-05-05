@@ -28,7 +28,7 @@ DEPOT_RESTOCK_SUBSIDY_AMOUNT = 10_000
 # at/above it, subsidy = 0 and tax = 100% of base. Set this to the wealth
 # level at which players should fully self-sustain.
 WEALTH_POOR_FLOOR = 500_000      # at/below: established-broke — 100% subsidy / TAX_FLOOR_PCT tax
-WEALTH_RICH_CEILING = 1_000_000  # at/above: established-rich — 0% subsidy / 100% tax (break-even)
+WEALTH_RICH_CEILING = 5_000_000  # at/above: established-rich — 0% subsidy / 100% tax (break-even)
 
 # Curve warp exponent. 
 # Higher value = Protection drops off slower initially, fast later
