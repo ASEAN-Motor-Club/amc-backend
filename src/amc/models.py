@@ -314,10 +314,12 @@ class Character(models.Model):
     wearing_costume = models.BooleanField(
         default=False,
         help_text="Tracks whether the character is currently wearing a costume "
-                  "(EquipmentSlot=4). Updated by ServerSetEquipmentInventory webhook.",
+        "(EquipmentSlot=4). Updated by ServerSetEquipmentInventory webhook.",
     )
     costume_item_key = models.CharField(
-        max_length=100, null=True, blank=True,
+        max_length=100,
+        null=True,
+        blank=True,
         help_text="Item key of the worn costume; NULL when not wearing one.",
     )
 
@@ -413,7 +415,11 @@ class CriminalRecord(models.Model):
 
     @override
     def __str__(self):
-        status = "active" if self.cleared_at is None else f"cleared {self.cleared_at:%Y-%m-%d}"
+        status = (
+            "active"
+            if self.cleared_at is None
+            else f"cleared {self.cleared_at:%Y-%m-%d}"
+        )
         return f"{self.character.name} — {self.reason} ({status})"
 
     @classmethod
@@ -486,8 +492,8 @@ class Wanted(models.Model):
 
     # 1/r² decay constants (game units; 100 units = 1 metre)
     REF_DISTANCE = 20_000  # 200m — distance where decay_rate = 1.0/tick
-    MIN_DISTANCE = 5000   # 50m — clamp to avoid infinity
-    MAX_DECAY = 10.0      # cap at very close range
+    MIN_DISTANCE = 5000  # 50m — clamp to avoid infinity
+    MAX_DECAY = 10.0  # cap at very close range
 
     LEVEL_PER_STAR = INITIAL_WANTED_LEVEL / 5  # equal bands for W1–W5 display
 
@@ -599,7 +605,9 @@ class RPSession(models.Model):
 
     @override
     def __str__(self):
-        status = "active" if self.expires_at is None else f"ended {self.expires_at:%Y-%m-%d}"
+        status = (
+            "active" if self.expires_at is None else f"ended {self.expires_at:%Y-%m-%d}"
+        )
         return f"{self.character.name} — RP ({status})"
 
     @classmethod
@@ -1579,6 +1587,39 @@ class CharacterAFKReminder(models.Model):
 
 
 @final
+class HousingLicense(models.Model):
+    character = models.ForeignKey(
+        Character, on_delete=models.CASCADE, related_name="housing_licenses"
+    )
+    house_key = models.CharField(
+        max_length=100,
+        null=True,
+        blank=True,
+        help_text="House GUID — null means applies to all houses",
+    )
+    rebate_pct = models.DecimalField(
+        max_digits=5,
+        decimal_places=2,
+        default=100,
+        validators=[MinValueValidator(0), MaxValueValidator(100)],
+        help_text="Rebate percentage (0–100)",
+    )
+    note = models.CharField(max_length=200, blank=True, default="")
+
+    class Meta:
+        constraints = [
+            models.CheckConstraint(
+                condition=Q(rebate_pct__gte=0) & Q(rebate_pct__lte=100),
+                name="housing_license_rebate_pct_between_0_100",
+            )
+        ]
+
+    def __str__(self):
+        target = self.house_key or "all houses"
+        return f"{self.character.name} — {self.rebate_pct}% — {target}"
+
+
+@final
 class Delivery(models.Model):
     timestamp = models.DateTimeField()
     character = models.ForeignKey(
@@ -1607,7 +1648,11 @@ class Delivery(models.Model):
         "DeliveryJob", models.SET_NULL, null=True, blank=True, related_name="deliveries"
     )
     criminal_record = models.ForeignKey(
-        "CriminalRecord", models.SET_NULL, null=True, blank=True, related_name="deliveries"
+        "CriminalRecord",
+        models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="deliveries",
     )
 
 
@@ -1640,7 +1685,11 @@ class ServerCargoArrivedLog(models.Model):
     )
     data = models.JSONField(null=True, blank=True)
     guild_session = models.ForeignKey(
-        "GuildSession", models.SET_NULL, null=True, blank=True, related_name="cargo_logs"
+        "GuildSession",
+        models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="cargo_logs",
     )
 
 
@@ -1688,7 +1737,11 @@ class ServerPassengerArrivedLog(models.Model):
     urgent_rating = models.IntegerField(null=True)
     data = models.JSONField(null=True, blank=True)
     guild_session = models.ForeignKey(
-        "GuildSession", models.SET_NULL, null=True, blank=True, related_name="passenger_logs"
+        "GuildSession",
+        models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="passenger_logs",
     )
 
 
@@ -2340,7 +2393,9 @@ class Guild(models.Model):
     name = models.CharField(max_length=128, unique=True)
     abbreviation = models.CharField(max_length=10, unique=True)
     welcome_message = models.TextField(blank=True, default="")
-    discord_thread_id = models.CharField(max_length=32, null=True, blank=True, unique=True)
+    discord_thread_id = models.CharField(
+        max_length=32, null=True, blank=True, unique=True
+    )
     created_at = models.DateTimeField(auto_now_add=True)
 
     @override
@@ -2353,7 +2408,11 @@ class GuildVehicle(models.Model):
     guild = models.ForeignKey(Guild, on_delete=models.CASCADE, related_name="vehicles")
     vehicle_key = models.CharField(max_length=100)
     decal = models.ForeignKey(
-        VehicleDecal, on_delete=models.SET_NULL, null=True, blank=True, related_name="guild_vehicles"
+        VehicleDecal,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="guild_vehicles",
     )
 
     class Meta:
@@ -2397,7 +2456,10 @@ class GuildCargoRequirement(models.Model):
     max_damage = models.FloatField(null=True, blank=True)
     min_payment = models.PositiveIntegerField(null=True, blank=True)
     max_payment = models.PositiveIntegerField(null=True, blank=True)
-    bonus_pct = models.FloatField(default=0, help_text="Bonus percentage applied to payment when criteria are met (e.g. 10 = +10%).")
+    bonus_pct = models.FloatField(
+        default=0,
+        help_text="Bonus percentage applied to payment when criteria are met (e.g. 10 = +10%).",
+    )
 
     @override
     def __str__(self):
@@ -2416,10 +2478,13 @@ class GuildPassengerRequirement(models.Model):
     require_offroad = models.BooleanField(null=True, blank=True)
     min_comfort_rating = models.IntegerField(null=True, blank=True)
     max_comfort_rating = models.IntegerField(null=True, blank=True)
-    bonus_pct = models.FloatField(default=0, help_text="Bonus percentage applied to payment when criteria are met (e.g. 10 = +10%).")
+    bonus_pct = models.FloatField(
+        default=0,
+        help_text="Bonus percentage applied to payment when criteria are met (e.g. 10 = +10%).",
+    )
     fugitive_chance = models.FloatField(
         default=0.0,
-        help_text="Probability (0.0–1.0) that a matched passenger is a fugitive, triggering Wanted status."
+        help_text="Probability (0.0–1.0) that a matched passenger is a fugitive, triggering Wanted status.",
     )
 
     @override
@@ -2454,7 +2519,9 @@ class GuildSession(models.Model):
 
 @final
 class GuildCharacter(models.Model):
-    guild = models.ForeignKey(Guild, on_delete=models.CASCADE, related_name="characters")
+    guild = models.ForeignKey(
+        Guild, on_delete=models.CASCADE, related_name="characters"
+    )
     character = models.ForeignKey(
         Character, on_delete=models.CASCADE, related_name="guild_memberships"
     )
@@ -2475,7 +2542,9 @@ class GuildCharacter(models.Model):
 
 @final
 class GuildAchievement(models.Model):
-    guild = models.ForeignKey(Guild, on_delete=models.CASCADE, related_name="achievements")
+    guild = models.ForeignKey(
+        Guild, on_delete=models.CASCADE, related_name="achievements"
+    )
     name = models.CharField(max_length=128)
     description = models.TextField(blank=True)
     icon = models.CharField(max_length=50, blank=True)

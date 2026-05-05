@@ -94,6 +94,7 @@ from .models import (
     GuildPassengerRequirement,
     GuildAchievement,
     GuildCharacterAchievement,
+    HousingLicense,
 )
 from amc_finance.services import send_fund_to_player
 from amc_finance.admin import AccountInlineAdmin
@@ -166,7 +167,9 @@ class PlayerAdmin(admin.ModelAdmin):
     def get_queryset(self, request):
         qs = super().get_queryset(request)
         return qs.annotate(
-            character_names=ArrayAgg("characters__name", filter=Q(characters__name__isnull=False)),
+            character_names=ArrayAgg(
+                "characters__name", filter=Q(characters__name__isnull=False)
+            ),
             characters_count=Count("characters"),
         )
 
@@ -522,7 +525,9 @@ class RaceSetupAdmin(admin.ModelAdmin):
             from amc.mod_server import create_event
 
             if obj.config is None:
-                self.message_user(request, "No config — cannot post event.", level="error")
+                self.message_user(
+                    request, "No config — cannot post event.", level="error"
+                )
                 return super().response_change(request, obj)
 
             async def _post():
@@ -621,7 +626,9 @@ class CharacterLocationAdmin(admin.ModelAdmin):
         start_str = request.GET.get("start")
         end_str = request.GET.get("end")
         if not start_str or not end_str:
-            return JsonResponse({"error": "start and end parameters required"}, status=400)
+            return JsonResponse(
+                {"error": "start and end parameters required"}, status=400
+            )
 
         try:
             start_time = datetime.fromisoformat(start_str)
@@ -669,9 +676,7 @@ class CharacterLocationAdmin(admin.ModelAdmin):
                 }
             )
 
-        return JsonResponse(
-            {"type": "FeatureCollection", "features": features}
-        )
+        return JsonResponse({"type": "FeatureCollection", "features": features})
 
 
 @admin.register(PlayerMailMessage)
@@ -764,7 +769,15 @@ class PoliceShiftLogAdmin(admin.ModelAdmin):
 
 @admin.register(CriminalRecord)
 class CriminalRecordAdmin(admin.ModelAdmin):
-    list_display = ["id", "character", "reason", "amount", "confiscatable_amount", "cleared_at", "created_at"]
+    list_display = [
+        "id",
+        "character",
+        "reason",
+        "amount",
+        "confiscatable_amount",
+        "cleared_at",
+        "created_at",
+    ]
     list_select_related = ["character", "character__player"]
     search_fields = ["character__name", "character__player__unique_id", "reason"]
     list_filter = ["reason", ("cleared_at", admin.EmptyFieldListFilter)]
@@ -1089,9 +1102,7 @@ class CharacterVehicleAdmin(admin.ModelAdmin):
             "opts": self.model._meta,
             "title": "Display Vehicles Map",
         }
-        return TemplateResponse(
-            request, "amc/admin/display_vehicles_map.html", context
-        )
+        return TemplateResponse(request, "amc/admin/display_vehicles_map.html", context)
 
     def display_vehicles_delete_view(self, request, object_id):
         if request.method != "POST":
@@ -1132,9 +1143,7 @@ class CharacterVehicleAdmin(admin.ModelAdmin):
                     },
                 }
             )
-        return JsonResponse(
-            {"type": "FeatureCollection", "features": features}
-        )
+        return JsonResponse({"type": "FeatureCollection", "features": features})
 
 
 @admin.register(Garage)
@@ -1610,7 +1619,12 @@ class GuildAchievementInline(admin.TabularInline):
 class GuildAdmin(admin.ModelAdmin):
     list_display = ["name", "abbreviation"]
     search_fields = ["name", "abbreviation"]
-    inlines = [GuildVehicleInline, GuildCargoRequirementInline, GuildPassengerRequirementInline, GuildAchievementInline]
+    inlines = [
+        GuildVehicleInline,
+        GuildCargoRequirementInline,
+        GuildPassengerRequirementInline,
+        GuildAchievementInline,
+    ]
 
 
 class GuildVehiclePartInline(admin.TabularInline):
@@ -1658,3 +1672,16 @@ class GuildCharacterAchievementAdmin(admin.ModelAdmin):
     list_select_related = ["guild_character", "achievement"]
     list_filter = ["achievement__guild"]
     search_fields = ["guild_character__character__name"]
+
+
+@admin.register(HousingLicense)
+class HousingLicenseAdmin(admin.ModelAdmin):
+    list_display = ["character", "house_key", "rebate_pct", "note"]
+    list_filter = ["rebate_pct"]
+    search_fields = [
+        "character__name",
+        "character__player__unique_id",
+        "house_key",
+        "note",
+    ]
+    raw_id_fields = ["character"]
