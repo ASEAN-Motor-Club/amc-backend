@@ -493,13 +493,13 @@ class WelcomeMessageFixTestCase(TestCase):
     """Tests for the welcome message fix for quick relogs."""
 
     def test_quick_relog_message(self):
-        """Player relogging within 1 hour should get 'That was quick!' message."""
+        """Player relogging within 1 hour should get no welcome message."""
         from amc.tasks import get_welcome_message
         
         last_online = timezone.now() - timedelta(minutes=30)
         message, is_new = get_welcome_message("TestPlayer", False, last_online)
         
-        self.assertIn("That was quick", message)
+        self.assertIsNone(message)
         self.assertFalse(is_new)
 
     def test_normal_relog_message(self):

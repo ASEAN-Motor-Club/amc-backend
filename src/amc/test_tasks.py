@@ -38,12 +38,12 @@ class GetWelcomeMessageTests(SimpleTestCase):
         self.assertFalse(is_new)
 
     def test_recent_login_under_1_hour(self):
-        """last_online < 1 hour ago → 'That was quick!' greeting."""
+        """last_online < 1 hour ago → no greeting (returns None)."""
         last_online = timezone.now() - timedelta(minutes=30)
         message, is_new = get_welcome_message(
             "TestPlayer", is_new=False, last_online=last_online
         )
-        self.assertEqual(message, "That was quick! Welcome back TestPlayer")
+        self.assertIsNone(message)
         self.assertFalse(is_new)
 
     def test_returning_player_over_1_hour(self):
