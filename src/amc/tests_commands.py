@@ -7,12 +7,14 @@ from amc.command_framework import registry, CommandContext, CommandRegistry
 from amc.commands.admin import (
     cmd_bill,
     cmd_exit,
+    cmd_save_vehicle,
     cmd_spawn,
     cmd_spawn_assets,
     cmd_spawn_dealerships,
     cmd_spawn_displays,
     cmd_spawn_garage_single,
     cmd_spawn_garages,
+    cmd_spawn_vehicle,
     cmd_tp_player,
 )
 from amc.commands.vehicles import cmd_check_mods, cmd_rent
@@ -2931,3 +2933,92 @@ class RentGroupingTestCase(SimpleTestCase):
             self.ctx.reply.assert_called_once()
             output = self.ctx.reply.call_args[0][0]
             self.assertIn("Rental not found", output)
+
+
+class AdminVehicleSaveTestCase(SimpleTestCase):
+    def setUp(self):
+        self.ctx = MagicMock(spec=CommandContext)
+        self.ctx.reply = AsyncMock()
+        self.ctx.http_client_mod = MagicMock()
+        self.ctx.player_info = {
+            "bIsAdmin": True,
+            "Location": {"X": 100, "Y": 200, "Z": 300},
+        }
+        self.ctx.character = MagicMock()
+        self.ctx.character.guid = "admin-guid"
+        self.ctx.character.name = "AdminChar"
+        self.ctx.player = MagicMock()
+
+    async def test_save_vehicle_no_name(self):
+        await cmd_save_vehicle(self.ctx)
+        self.ctx.reply.assert_called_once()
+        self.assertIn("Usage", self.ctx.reply.call_args[0][0])
+
+    async def test_save_vehicle_no_vehicle(self):
+        with patch(
+            "amc.commands.admin.register_player_vehicles",
+            new=AsyncMock(return_value=None),
+        ):
+            await cmd_save_vehicle(self.ctx, "MyCar")
+            self.ctx.reply.assert_called_once()
+            self.assertIn("No vehicle found", self.ctx.reply.call_args[0][0])
+
+    async def test_save_vehicle_success(self):
+        mock_v = MagicMock()
+        mock_v.id = 42
+        mock_v.config = {"VehicleName": "Jemusi"}
+        mock_v.alias = None
+        mock_v.asave = AsyncMock()
+
+        with patch(
+            "amc.commands.admin.register_player_vehicles",
+            new=AsyncMock(return_value=[mock_v]),
+        ):
+            await cmd_save_vehicle(self.ctx, "MyRide")
+
+            self.assertEqual(mock_v.alias, "MyRide")
+            mock_v.asave.assert_awaited_once_with(update_fields=["alias"])
+            self.ctx.reply.assert_called_once()
+            output = self.ctx.reply.call_args[0][0]
+            self.assertIn("MyRide", output)
+            self.assertIn("42", output)
+
+    async def test_spawn_vehicle_no_name(self):
+        await cmd_spawn_vehicle(self.ctx)
+        self.ctx.reply.assert_called_once()
+        self.assertIn("Usage", self.ctx.reply.call_args[0][0])
+
+    async def test_spawn_vehicle_not_found(self):
+        with patch(
+            "amc.commands.admin.CharacterVehicle.objects.filter"
+        ) as mock_filter:
+            mock_filter.return_value.afirst = AsyncMock(return_value=None)
+            await cmd_spawn_vehicle(self.ctx, "NoSuchCar")
+            self.ctx.reply.assert_called_once()
+            self.assertIn("No saved vehicle", self.ctx.reply.call_args[0][0])
+
+    async def test_spawn_vehicle_success(self):
+        mock_v = MagicMock()
+        mock_v.config = {"VehicleName": "Jemusi"}
+        mock_v.alias = "MyRide"
+
+        with (
+            patch(
+                "amc.commands.admin.CharacterVehicle.objects.filter"
+            ) as mock_filter,
+            patch(
+                "amc.commands.admin.spawn_registered_vehicle", new=AsyncMock()
+            ) as mock_spawn,
+        ):
+            mock_filter.return_value.afirst = AsyncMock(return_value=mock_v)
+            await cmd_spawn_vehicle(self.ctx, "MyRide")
+
+            mock_spawn.assert_awaited_once()
+            call_args = mock_spawn.call_args
+            self.assertEqual(call_args[0][0], self.ctx.http_client_mod)
+            self.assertEqual(call_args[0][1], mock_v)
+            loc = call_args[0][2]
+            self.assertEqual(loc["Z"], 200)  # 300 - 100
+            self.ctx.reply.assert_called_once()
+            output = self.ctx.reply.call_args[0][0]
+            self.assertIn("MyRide", output)

@@ -21,7 +21,7 @@ from amc.mod_server import (
     unmute_player,
 )
 from amc.game_server import get_players, add_player_role, remove_player_role
-from amc.vehicles import spawn_registered_vehicle
+from amc.vehicles import spawn_registered_vehicle, register_player_vehicles
 from amc.models import (
     Character,
     CharacterVehicle,
@@ -723,3 +723,76 @@ async def cmd_admin(ctx: CommandContext):
         await ctx.reply(
             _("<Title>Admin Granted</>\n\nYou are now an admin.")
         )
+
+
+@registry.register(
+    "/save_vehicle",
+    description=gettext_lazy("Save your current vehicle with a name (Admin)"),
+    category="Admin",
+)
+async def cmd_save_vehicle(ctx: CommandContext, name: str = None):
+    if not ctx.player_info or not ctx.player_info.get("bIsAdmin"):
+        await ctx.reply(_("Admin-only"))
+        return
+
+    if not name:
+        await ctx.reply(_("<Title>Usage</>\n\n/save_vehicle [name]"))
+        return
+
+    results = await register_player_vehicles(
+        ctx.http_client_mod, ctx.character, ctx.player
+    )
+    if not results:
+        await ctx.reply(_("<Title>No Vehicle</>\n\nNo vehicle found to save."))
+        return
+
+    v = results[0]
+    v.alias = name.strip()
+    await v.asave(update_fields=["alias"])
+    await ctx.reply(
+        _("<Title>Vehicle Saved</>\n\n{vehicle_name} saved as <Bold>{alias}</> (#{id})").format(
+            vehicle_name=v.config.get("VehicleName", "Vehicle"),
+            alias=v.alias,
+            id=v.id,
+        )
+    )
+
+
+@registry.register(
+    "/spawn_vehicle",
+    description=gettext_lazy("Spawn a saved vehicle by name (Admin)"),
+    category="Admin",
+)
+async def cmd_spawn_vehicle(ctx: CommandContext, name: str = None):
+    if not ctx.player_info or not ctx.player_info.get("bIsAdmin"):
+        await ctx.reply(_("Admin-only"))
+        return
+
+    if not name:
+        await ctx.reply(_("<Title>Usage</>\n\n/spawn_vehicle [name]"))
+        return
+
+    v = await CharacterVehicle.objects.filter(
+        character=ctx.character, alias__iexact=name.strip()
+    ).afirst()
+    if not v:
+        await ctx.reply(
+            _("<Title>Not Found</>\n\nNo saved vehicle with that name.")
+        )
+        return
+
+    loc = {**ctx.player_info["Location"]}
+    loc["Z"] -= 100
+    await spawn_registered_vehicle(
+        ctx.http_client_mod,
+        v,
+        loc,
+        driver_guid=ctx.character.guid,
+        tags=[ctx.character.name, "saved_vehicles"],
+    )
+    await ctx.reply(
+        _("<Title>Vehicle Spawned</>\n\n{vehicle_name} (<Bold>{alias}</>)").format(
+            vehicle_name=v.config.get("VehicleName", "Vehicle"),
+            alias=v.alias,
+        )
+    )
