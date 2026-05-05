@@ -16,7 +16,7 @@ from amc.models import (
     Wanted,
 )
 from amc.game_server import get_players
-from amc.mod_server import send_system_message, teleport_player
+from amc.mod_server import send_system_message, show_popup, teleport_player
 from amc.police import POLICE_STATIONS
 
 logger = logging.getLogger("amc.webhook.handlers.teleport")
@@ -29,6 +29,12 @@ logger = logging.getLogger("amc.webhook.handlers.teleport")
 
 @register("ServerResetVehicleAt")
 async def handle_reset_vehicle(event, player, character, ctx):
+    if ctx.is_rp_mode and ctx.http_client_mod:
+        await show_popup(
+            ctx.http_client_mod,
+            "Teleporting is disabled in RP mode.",
+            character_guid=character.guid,
+        )
     return 0, 0, 0, 0
 
 
@@ -147,6 +153,14 @@ async def _handle_teleport_or_respawn(event, character, ctx):
         hook=hook_name,
         data=event.get("data"),
     )
+
+    if ctx.is_rp_mode and ctx.http_client_mod:
+        await show_popup(
+            ctx.http_client_mod,
+            "Teleporting is disabled in RP mode.",
+            character_guid=character.guid,
+        )
+        return 0, 0, 0, 0
 
     # Only act on actively wanted players
     try:
