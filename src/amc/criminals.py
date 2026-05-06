@@ -633,7 +633,7 @@ async def tick_wanted_countdown(http_client, http_client_mod) -> None:
 
 CRIMINAL_RECORD_HALF_LIFE_MINUTES = 120  # 2 hours of online time
 CRIMINAL_RECORD_DECAY_FACTOR = 0.5 ** (1 / CRIMINAL_RECORD_HALF_LIFE_MINUTES)
-CRIMINAL_RECORD_DECAY_FLOOR = 100  # confiscatable amounts below this are zeroed out
+CRIMINAL_RECORD_DECAY_FLOOR = 5000  # confiscatable amounts below this are zeroed out and record is closed
 ONLINE_THRESHOLD_SECONDS = 60  # character considered online if last_online < 60s ago
 CRIMINAL_SUSPECT_DURATION = 70  # seconds — mod clamps to 60s; refresh_suspect_tags reapplies every 30s for overlap
 
@@ -946,6 +946,7 @@ async def tick_criminal_record_decay(http_client_mod=None) -> None:
                 )
 
     decayed = []
+    closed_records = []
     for record in records:
         if record.character.guid in modded_guids:
             continue
@@ -956,11 +957,18 @@ async def tick_criminal_record_decay(http_client_mod=None) -> None:
         )
         if record.confiscatable_amount < CRIMINAL_RECORD_DECAY_FLOOR:
             record.confiscatable_amount = 0
+            record.cleared_at = timezone.now()
+            closed_records.append(record)
         decayed.append(record)
 
     if not decayed:
         return
-    await CriminalRecord.objects.abulk_update(decayed, ["confiscatable_amount"])
+    await CriminalRecord.objects.abulk_update(decayed, ["confiscatable_amount", "cleared_at"])
+    if closed_records:
+        logger.info(
+            "tick_criminal_record_decay: closed %d record(s) that decayed below floor",
+            len(closed_records),
+        )
     logger.debug(
         "tick_criminal_record_decay: decayed %d record(s) (skipped %d modded, %d afk)",
         len(decayed),
