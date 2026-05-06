@@ -43,6 +43,7 @@ from amc.models import (
     CriminalRecord,
     FactionMembership,
     PoliceSession,
+    TeleportPoint,
 )
 from amc.game_server import announce, get_players, get_player_info
 from amc.police import is_police_vehicle, deactivate_police
@@ -172,6 +173,33 @@ Use <Highlight>/faction</Highlight> on Discord to join the Police faction and ga
         )
     except Exception as e:
         logger.exception(f"Failed to show police popup: {e}")
+
+
+async def _welcome_new_player(http_client_mod, character, player):
+    """Exit vehicle and teleport a brand new player to the skydive point."""
+    try:
+        await force_exit_vehicle(http_client_mod, str(character.guid))
+    except Exception as e:
+        logger.exception(f"Failed to exit vehicle for new player {character.name}: {e}")
+
+    try:
+        skydive_tp = await TeleportPoint.objects.aget(name__iexact="skydive")
+        location = {
+            "X": skydive_tp.location.x,
+            "Y": skydive_tp.location.y,
+            "Z": skydive_tp.location.z,
+        }
+        await teleport_player(
+            http_client_mod,
+            str(player.unique_id),
+            location,
+            no_vehicles=True,
+        )
+        logger.info(f"Teleported new player {character.name} to skydive point")
+    except TeleportPoint.DoesNotExist:
+        logger.warning("'skydive' TeleportPoint not found — skipping teleport for new player")
+    except Exception as e:
+        logger.exception(f"Failed to teleport new player {character.name} to skydive: {e}")
 
 
 async def _despawn_police_vehicle_for_criminal(http_client_mod, character, player, vehicle_name):
@@ -528,6 +556,10 @@ async def _login_guid_dependent_actions(
                     character_guid=character_guid,
                     player_id=str(player.unique_id),
                 )
+            )
+            # Exit vehicle and teleport to skydive so new players start fresh
+            asyncio.create_task(
+                _welcome_new_player(http_client_mod, character, player)
             )
 
         # --- News popup ---
