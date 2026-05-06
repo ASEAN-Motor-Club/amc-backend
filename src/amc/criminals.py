@@ -979,13 +979,19 @@ async def tick_criminal_record_decay(http_client_mod=None) -> None:
     decayed = []
     closed_records = []
     for record in records:
-        if record.character.guid in modded_guids:
-            continue
-        if str(record.character.player.unique_id) in afk_player_ids:
-            continue
-        record.confiscatable_amount = int(
-            record.confiscatable_amount * CRIMINAL_RECORD_DECAY_FACTOR
+        preserve_amount = (
+            record.character.guid in modded_guids
+            or str(record.character.player.unique_id) in afk_player_ids
         )
+        if not preserve_amount:
+            record.confiscatable_amount = int(
+                record.confiscatable_amount * CRIMINAL_RECORD_DECAY_FACTOR
+            )
+        # Close when below floor, unless the character is wearing a criminal
+        # costume (the C tag must persist for the full duration of wear).
+        # Closure runs even for modded/AFK players — the preservation above
+        # keeps their amount intact, but once it's below floor there is
+        # nothing left to preserve and the record has served its purpose.
         if record.confiscatable_amount < CRIMINAL_RECORD_DECAY_FLOOR and not record.character.wearing_costume:
             record.confiscatable_amount = 0
             record.cleared_at = timezone.now()

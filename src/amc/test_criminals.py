@@ -1641,6 +1641,50 @@ class CriminalRecordDecayTests(TestCase):
         record = await CriminalRecord.objects.aget(pk=record.pk)
         self.assertEqual(record.confiscatable_amount, 10000)
 
+    async def test_modded_vehicle_closes_record_at_zero(
+        self,
+        mock_make_suspect,
+    ):
+        """Modded-vehicle players still have records closed when already below floor.
+
+        Regression test: previously the modded-vehicle ``continue`` skipped
+        both decay AND closure, so a record that had already decayed to 0
+        (or was created at 0 via a costume equip) would stay open forever
+        as long as the player was in a vehicle with any custom parts.
+        """
+        record = await self._setup_criminal_record(confiscatable_amount=0)
+        mock_http_mod = AsyncMock()
+
+        with patch("amc.mod_server.get_player", new_callable=AsyncMock, return_value={"bAFK": False}), \
+             patch("amc.mod_server.get_player_last_vehicle", new_callable=AsyncMock, return_value={"vehicle": {"id": 1}}), \
+             patch("amc.mod_server.get_player_last_vehicle_parts", new_callable=AsyncMock, return_value={"parts": [{"Key": "mod_part", "Slot": 0}]}), \
+             patch("amc.mod_detection.detect_custom_parts", return_value=[{"key": "mod_part"}]):
+            await tick_criminal_record_decay(mock_http_mod)
+
+        record = await CriminalRecord.objects.aget(pk=record.pk)
+        self.assertEqual(record.confiscatable_amount, 0)
+        self.assertIsNotNone(record.cleared_at)
+
+    async def test_modded_costume_wearer_record_stays_open_at_zero(
+        self,
+        mock_make_suspect,
+    ):
+        """Costume wearers in modded vehicles keep the record open even at 0."""
+        record = await self._setup_criminal_record(confiscatable_amount=0)
+        record.character.wearing_costume = True
+        await record.character.asave(update_fields=["wearing_costume"])
+        mock_http_mod = AsyncMock()
+
+        with patch("amc.mod_server.get_player", new_callable=AsyncMock, return_value={"bAFK": False}), \
+             patch("amc.mod_server.get_player_last_vehicle", new_callable=AsyncMock, return_value={"vehicle": {"id": 1}}), \
+             patch("amc.mod_server.get_player_last_vehicle_parts", new_callable=AsyncMock, return_value={"parts": [{"Key": "mod_part", "Slot": 0}]}), \
+             patch("amc.mod_detection.detect_custom_parts", return_value=[{"key": "mod_part"}]):
+            await tick_criminal_record_decay(mock_http_mod)
+
+        record = await CriminalRecord.objects.aget(pk=record.pk)
+        self.assertEqual(record.confiscatable_amount, 0)
+        self.assertIsNone(record.cleared_at)
+
     async def test_applies_suspect_to_online_criminals_via_refresh_suspect_tags(
         self,
         mock_make_suspect,
