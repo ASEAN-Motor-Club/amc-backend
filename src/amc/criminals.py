@@ -969,6 +969,15 @@ async def tick_criminal_record_decay(http_client_mod=None) -> None:
             "tick_criminal_record_decay: closed %d record(s) that decayed below floor",
             len(closed_records),
         )
+        if http_client_mod:
+            for record in closed_records:
+                try:
+                    await refresh_player_name(record.character, http_client_mod)
+                except Exception:
+                    logger.warning(
+                        "Failed to refresh name for %s after criminal record closed",
+                        record.character.name,
+                    )
     logger.debug(
         "tick_criminal_record_decay: decayed %d record(s) (skipped %d modded, %d afk)",
         len(decayed),
