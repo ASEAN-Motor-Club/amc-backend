@@ -1277,7 +1277,8 @@ class ExtraWebhookTests(TestCase):
             },
         }
 
-        await process_events([event], http_client=MagicMock(), http_client_mod=MagicMock())
+        with patch("amc.handlers.teleport.show_popup", new_callable=AsyncMock):
+            await process_events([event], http_client=MagicMock(), http_client_mod=MagicMock())
 
         await asyncio.sleep(0)
 

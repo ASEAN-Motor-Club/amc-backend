@@ -13,7 +13,7 @@ from amc.commands.faction import _build_player_locations, _distance_3d, execute_
 from amc.game_server import announce, get_players
 from amc.models import CriminalRecord, PoliceSession, Wanted
 from amc.mod_detection import detect_custom_parts, POLICE_DUTY_WHITELIST
-from amc.mod_server import clear_suspect, get_player_customization, get_player_last_vehicle, get_player_last_vehicle_parts, make_suspect, send_system_message
+from amc.mod_server import clear_suspect, despawn_player_vehicle, force_exit_vehicle, get_player_customization, get_player_last_vehicle, get_player_last_vehicle_parts, make_suspect, send_system_message, show_popup
 from amc.player_tags import refresh_player_name
 from amc.special_cargo import announce_money_secured, WANTED_MIN_BOUNTY
 
@@ -82,6 +82,13 @@ _costume_reconciled_guids: set[str] = set()
 # who was wanted last tick but is now only a costume suspect retains the
 # GE (no clear_suspect call) — only true transition-to-nothing clears.
 _last_suspect_guids: set[str] = set()
+
+# Tracks GUIDs that were in a modded vehicle at the end of the previous
+# tick_wanted_countdown pass.  Used to avoid despawning vehicles that a
+# wanted player was already sitting in when they became wanted — we only
+# despawn on a *transition* from not-in-modded to in-modded (i.e. the
+# player entered a modded vehicle while already wanted).
+_last_modded_vehicle_guids: set[str] = set()
 
 
 def _calculate_logout_heat(min_police_distance: float) -> float:
@@ -282,6 +289,32 @@ async def create_or_refresh_wanted(
                 character.name, character.guid, exc_info=True,
             )
 
+    # Seed modded-vehicle tracking so the first tick after becoming
+    # wanted does not immediately despawn a vehicle the player was
+    # already sitting in.  Only transition from not-in-modded →
+    # in-modded triggers despawn.
+    if http_client_mod and character.guid:
+        try:
+            last_vehicle, parts_data = await asyncio.gather(
+                get_player_last_vehicle(http_client_mod, character.guid),
+                get_player_last_vehicle_parts(http_client_mod, character.guid, complete=False),
+            )
+            main_vehicle = last_vehicle.get("vehicle")
+            if main_vehicle:
+                whitelist = None
+                is_on_duty = await PoliceSession.objects.filter(
+                    character=character, ended_at__isnull=True
+                ).aexists()
+                if is_on_duty:
+                    whitelist = POLICE_DUTY_WHITELIST
+                custom_parts = detect_custom_parts(
+                    parts_data.get("parts", []), whitelist=whitelist
+                )
+                if custom_parts:
+                    _last_modded_vehicle_guids.add(character.guid)
+        except Exception:
+            pass  # Best effort — if we can't determine vehicle state, skip seeding
+
     return active_wanted, created
 
 
@@ -353,6 +386,7 @@ async def tick_wanted_countdown(http_client, http_client_mod) -> None:
     expired_characters = []
     star_change_notifications = []  # (wanted, message) for deferred processing
     escape_popups = []              # guids to send escape popup to
+    _current_modded_guids: set[str] = set()  # modded vehicle state this tick
 
     for wanted in wanted_list:
         sus_guid = wanted.character.guid
@@ -403,7 +437,12 @@ async def tick_wanted_countdown(http_client, http_client_mod) -> None:
             _last_escape_msg_sent.pop(sus_guid, None)
             continue
 
-        # Modded-vehicle auto-arrest
+        # Modded-vehicle despawn for wanted players
+        # Only despawn when a wanted player *enters* a modded vehicle
+        # (transition from not-in-modded → in-modded).  Players who
+        # were already in a modded vehicle when they became wanted are
+        # seeded into _last_modded_vehicle_guids by create_or_refresh_wanted.
+        currently_in_modded = False
         if http_client_mod:
             try:
                 last_vehicle, parts_data = await asyncio.gather(
@@ -422,45 +461,34 @@ async def tick_wanted_countdown(http_client, http_client_mod) -> None:
                         parts_data.get("parts", []), whitelist=whitelist
                     )
                     if custom_parts:
-                        targets = {
-                            sus_guid: (
-                                str(wanted.character.player.unique_id),
-                                sus_loc,
-                                False,
-                            )
-                        }
-                        target_chars = {sus_guid: wanted.character}
-                        try:
-                            arrested_names, total_confiscated = await execute_arrest(
-                                officer_character=None,
-                                targets=targets,
-                                target_chars=target_chars,
-                                http_client=http_client,
-                                http_client_mod=http_client_mod,
-                                reason="Arrested for using a modded vehicle while wanted.",
-                            )
-                            logger.info(
-                                "modded vehicle arrest: %s — confiscated=$%d",
-                                wanted.character.name,
-                                total_confiscated,
-                            )
-                        except ValueError as exc:
-                            logger.warning(
-                                "modded vehicle arrest failed (jail not configured?): %s", exc
-                            )
-                        except Exception:
-                            logger.exception(
-                                "modded vehicle arrest failed unexpectedly for %s",
-                                wanted.character.name,
-                            )
-                        _last_star_notified.pop(sus_guid, None)
-                        _last_escape_msg_sent.pop(sus_guid, None)
-                        continue
+                        currently_in_modded = True
+                        if sus_guid not in _last_modded_vehicle_guids:
+                            try:
+                                await force_exit_vehicle(http_client_mod, sus_guid)
+                                await despawn_player_vehicle(http_client_mod, sus_guid)
+                                await show_popup(
+                                    http_client_mod,
+                                    "Your modded vehicle has been despawned because you are wanted by police.",
+                                    character_guid=sus_guid,
+                                    player_id=str(wanted.character.player.unique_id),
+                                )
+                                logger.info(
+                                    "modded vehicle despawn: %s",
+                                    wanted.character.name,
+                                )
+                            except Exception:
+                                logger.exception(
+                                    "modded vehicle despawn failed for %s",
+                                    wanted.character.name,
+                                )
             except Exception:
                 logger.debug(
                     "tick_wanted_countdown: mod check failed for %s, skipping",
                     wanted.character.name,
                 )
+
+        if currently_in_modded:
+            _current_modded_guids.add(sus_guid)
 
         # Default: full base decay rate
         effective_decay = BASE_DECAY_PER_TICK * TICK_INTERVAL
@@ -508,6 +536,10 @@ async def tick_wanted_countdown(http_client, http_client_mod) -> None:
                 _last_star_notified[sus_guid] = new_stars
                 msg = STAR_MESSAGES.get(new_stars)
                 star_change_notifications.append((wanted, msg))
+
+    # Update modded-vehicle tracking for next tick
+    _last_modded_vehicle_guids.clear()
+    _last_modded_vehicle_guids.update(_current_modded_guids)
 
     # Bulk save — must happen BEFORE refresh_player_name so it reads correct DB state
     await Wanted.objects.abulk_update(wanted_list, ["wanted_remaining", "amount"])
@@ -887,7 +919,6 @@ async def tick_criminal_record_decay(http_client_mod=None) -> None:
         r
         async for r in CriminalRecord.objects.filter(
             cleared_at__isnull=True,
-            confiscatable_amount__gt=0,
             character__last_online__gte=online_cutoff,
         ).select_related("character__player")
     ]
@@ -955,7 +986,7 @@ async def tick_criminal_record_decay(http_client_mod=None) -> None:
         record.confiscatable_amount = int(
             record.confiscatable_amount * CRIMINAL_RECORD_DECAY_FACTOR
         )
-        if record.confiscatable_amount < CRIMINAL_RECORD_DECAY_FLOOR:
+        if record.confiscatable_amount < CRIMINAL_RECORD_DECAY_FLOOR and not record.character.wearing_costume:
             record.confiscatable_amount = 0
             record.cleared_at = timezone.now()
             closed_records.append(record)

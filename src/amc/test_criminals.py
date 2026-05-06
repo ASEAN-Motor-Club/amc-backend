@@ -901,74 +901,68 @@ class WantedCountdownTickTests(TestCase):
         self.assertLess(wanted_b.wanted_remaining, 200)
 
     # -----------------------------------------------------------------------
-    # Modded-vehicle auto-arrest
+    # Modded-vehicle transition-based despawn
     # -----------------------------------------------------------------------
 
-    async def test_modded_vehicle_within_grace_period_no_arrest(
+    async def test_modded_vehicle_already_occupied_no_despawn(
         self,
         mock_sys_msg,
         mock_refresh,
     ):
-        """Wanted record created now (< 2 min old): no arrest, decays normally."""
+        """Player already in a modded vehicle when wanted: no despawn."""
+        from amc.criminals import _last_modded_vehicle_guids
+
         criminal = await self._setup_criminal(wanted_remaining=200)
-        players = _make_players_list(
-            [_make_player_data(criminal.player.unique_id, criminal.guid, *_SUSPECT_LOC)]
-        )
-        mock_http = AsyncMock()
-        mock_http_mod = AsyncMock()
-
-        with patch("amc.criminals.get_players", new_callable=AsyncMock, return_value=players), \
-             patch("amc.criminals.get_player_last_vehicle", new_callable=AsyncMock) as mock_vehicle, \
-             patch("amc.criminals.get_player_last_vehicle_parts", new_callable=AsyncMock) as mock_parts, \
-             patch("amc.criminals.execute_arrest", new_callable=AsyncMock) as mock_arrest:
-            await tick_wanted_countdown(mock_http, mock_http_mod)
-
-        mock_vehicle.assert_not_called()
-        mock_parts.assert_not_called()
-        mock_arrest.assert_not_called()
-        wanted = await Wanted.objects.aget(character=criminal)
-        self.assertLess(wanted.wanted_remaining, 200)
-        self.assertIsNone(wanted.expired_at)
-
-    async def test_modded_vehicle_after_grace_period_auto_arrest(
-        self,
-        mock_sys_msg,
-        mock_refresh,
-    ):
-        """Wanted record > 2 min old with modded vehicle: auto-arrested."""
-        criminal = await self._setup_criminal(wanted_remaining=200)
-        wanted = await Wanted.objects.aget(character=criminal)
-        wanted.created_at = timezone.now() - timedelta(minutes=3)
-        await wanted.asave(update_fields=["created_at"])
+        _last_modded_vehicle_guids.add(criminal.guid)
 
         players = _make_players_list(
             [_make_player_data(criminal.player.unique_id, criminal.guid, *_SUSPECT_LOC)]
         )
         mock_http = AsyncMock()
         mock_http_mod = AsyncMock()
-
-        async def _mock_arrest(*args, **kwargs):
-            w = await Wanted.objects.aget(character=criminal, expired_at__isnull=True)
-            w.wanted_remaining = 0
-            w.expired_at = timezone.now()
-            await w.asave(update_fields=["wanted_remaining", "expired_at"])
-            return ([criminal.name], 1000)
 
         with patch("amc.criminals.get_players", new_callable=AsyncMock, return_value=players), \
              patch("amc.criminals.get_player_last_vehicle", new_callable=AsyncMock, return_value={"vehicle": {"id": 1}}), \
              patch("amc.criminals.get_player_last_vehicle_parts", new_callable=AsyncMock, return_value={"parts": [{"Key": "mod_part", "Slot": 0}]}), \
              patch("amc.criminals.detect_custom_parts", return_value=[{"key": "mod_part"}]), \
-             patch("amc.criminals.execute_arrest", new_callable=AsyncMock, side_effect=_mock_arrest) as mock_arrest:
+             patch("amc.criminals.force_exit_vehicle", new_callable=AsyncMock) as mock_exit, \
+             patch("amc.criminals.despawn_player_vehicle", new_callable=AsyncMock) as mock_despawn:
             await tick_wanted_countdown(mock_http, mock_http_mod)
 
-        mock_arrest.assert_awaited_once()
-        call_kwargs = mock_arrest.call_args.kwargs
-        self.assertIsNone(call_kwargs["officer_character"])
-        self.assertEqual(call_kwargs["http_client"], mock_http)
-        self.assertEqual(call_kwargs["http_client_mod"], mock_http_mod)
-
+        mock_exit.assert_not_called()
+        mock_despawn.assert_not_called()
         wanted = await Wanted.objects.aget(character=criminal)
-        self.assertIsNotNone(wanted.expired_at)
+        self.assertLess(wanted.wanted_remaining, 200)
+        self.assertIsNone(wanted.expired_at)
+
+        _last_modded_vehicle_guids.discard(criminal.guid)
+
+    async def test_modded_vehicle_entered_while_wanted_despawn(
+        self,
+        mock_sys_msg,
+        mock_refresh,
+    ):
+        """Wanted player enters a modded vehicle: vehicle is despawned."""
+
+        criminal = await self._setup_criminal(wanted_remaining=200)
+
+        players = _make_players_list(
+            [_make_player_data(criminal.player.unique_id, criminal.guid, *_SUSPECT_LOC)]
+        )
+        mock_http = AsyncMock()
+        mock_http_mod = AsyncMock()
+
+        with patch("amc.criminals.get_players", new_callable=AsyncMock, return_value=players), \
+             patch("amc.criminals.get_player_last_vehicle", new_callable=AsyncMock, return_value={"vehicle": {"id": 1}}), \
+             patch("amc.criminals.get_player_last_vehicle_parts", new_callable=AsyncMock, return_value={"parts": [{"Key": "mod_part", "Slot": 0}]}), \
+             patch("amc.criminals.detect_custom_parts", return_value=[{"key": "mod_part"}]), \
+             patch("amc.criminals.force_exit_vehicle", new_callable=AsyncMock) as mock_exit, \
+             patch("amc.criminals.despawn_player_vehicle", new_callable=AsyncMock) as mock_despawn, \
+             patch("amc.criminals.show_popup", new_callable=AsyncMock):
+            await tick_wanted_countdown(mock_http, mock_http_mod)
+
+        mock_exit.assert_awaited_once()
+        mock_despawn.assert_awaited_once()
 
     async def test_stock_vehicle_after_grace_period_no_arrest(
         self,

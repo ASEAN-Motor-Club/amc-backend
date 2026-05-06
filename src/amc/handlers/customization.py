@@ -12,6 +12,7 @@ logger = logging.getLogger("amc.webhook.handlers.customization")
 
 COSTUME_SLOT = 4
 CRIMINAL_SUSPECT_DURATION = 70  # seconds — mod clamps to 60s; refresh_suspect_tags reapplies every 30s for overlap
+COSTUME_MIN_BOUNTY = 10_000
 
 
 @register("ServerSetEquipmentInventory")
@@ -62,6 +63,11 @@ async def handle_set_equipment_inventory(event, player, character, ctx):
                     character.name,
                     exc_info=True,
                 )
+        await CriminalRecord.objects.filter(
+            character=character,
+            cleared_at__isnull=True,
+            confiscatable_amount__lt=COSTUME_MIN_BOUNTY,
+        ).aupdate(confiscatable_amount=COSTUME_MIN_BOUNTY)
         try:
             await make_suspect(
                 ctx.http_client_mod,

@@ -305,11 +305,12 @@ class VehicleResetDespawnTests(TestCase):
 
         character = await self._setup_character(rp_mode=True)
 
-        await process_events(
-            [_reset_vehicle_event(character.guid)],
-            http_client=MagicMock(),
-            http_client_mod=MagicMock(),
-        )
+        with patch("amc.handlers.teleport.show_popup", new_callable=AsyncMock):
+            await process_events(
+                [_reset_vehicle_event(character.guid)],
+                http_client=MagicMock(),
+                http_client_mod=MagicMock(),
+            )
 
         await asyncio.sleep(0)
 
