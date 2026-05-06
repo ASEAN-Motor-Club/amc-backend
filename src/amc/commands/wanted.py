@@ -111,7 +111,7 @@ async def cmd_wanted(ctx: CommandContext):
     other_records = [
         r
         async for r in CriminalRecord.objects.filter(cleared_at__isnull=True)
-        .order_by("-confiscatable_amount")
+        .order_by("-amount")
         .exclude(character_id__in=active_character_ids)
         .exclude(character_id__in=active_cop_ids)
         .exclude(character_id__in=cooldown_character_ids)
@@ -139,6 +139,7 @@ async def cmd_wanted(ctx: CommandContext):
                 "guid": guid,
                 "level": level,
                 "laundered": laundered,
+                "cumulative_amount": record.amount,
                 "confiscatable_amount": record.confiscatable_amount,
                 "online": guid in online_guids,
                 "decay_per_min": decay_per_min,
@@ -146,12 +147,12 @@ async def cmd_wanted(ctx: CommandContext):
         )
     other_online = sorted(
         [e for e in other_entries if e["online"]],
-        key=lambda e: e["confiscatable_amount"],
+        key=lambda e: e["cumulative_amount"],
         reverse=True,
     )
     other_offline = sorted(
         [e for e in other_entries if not e["online"]],
-        key=lambda e: e["confiscatable_amount"],
+        key=lambda e: e["cumulative_amount"],
         reverse=True,
     )
 
@@ -164,13 +165,18 @@ async def cmd_wanted(ctx: CommandContext):
         return f"{_stars(e['stars'])} {e['name']} <Secondary>{amount_str}</>\n"
 
     def _row_record(e: dict) -> str:
+        cumulative = e["cumulative_amount"]
         confiscatable = e["confiscatable_amount"]
-        amount_str = f"${confiscatable:,}" if confiscatable > 0 else "no bounty"
-        decay = e.get("decay_per_min", 0)
-        decay_str = f" (-${decay:,}/min)" if decay > 0 else ""
+        total_str = f"${cumulative:,}" if cumulative > 0 else "$0"
+        if confiscatable > 0:
+            decay = e.get("decay_per_min", 0)
+            decay_str = f", -${decay:,}/min" if decay > 0 else ""
+            detail = f" <Secondary>(${confiscatable:,} bounty{decay_str})</>"
+        else:
+            detail = ""
         return (
             f"<Highlight>C{e['level']}</> {e['name']}"
-            f" <Secondary>{amount_str}{decay_str}</>\n"
+            f" <Secondary>{total_str}</>{detail}\n"
         )
 
     def _row_cooldown(e: dict) -> str:
