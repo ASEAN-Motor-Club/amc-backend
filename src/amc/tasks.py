@@ -971,6 +971,19 @@ async def process_log_event(
             login_guid, login_player_info = await _resolve_guid_for_login(
                 http_client, http_client_mod, player_id, player_name,
             )
+
+            # Race-safe new-player detection: check DB *before*
+            # aget_or_create_character, because sibling log events
+            # (vehicle-entered, level-changed) that arrive within
+            # milliseconds of the login may create the Character row
+            # concurrently, causing aget_or_create_character to return
+            # character_created=False even for a genuinely new player.
+            is_new_player = False
+            if login_guid:
+                is_new_player = not await Character.objects.filter(
+                    guid=login_guid
+                ).aexists()
+
             (
                 character,
                 player,
@@ -998,7 +1011,7 @@ async def process_log_event(
                 try:
                     welcome_message, _is_new = get_welcome_message(
                         character.name,
-                        is_new=character_created,
+                        is_new=is_new_player,
                         last_online=character.last_online,
                     )
                     if welcome_message:
@@ -1017,7 +1030,7 @@ async def process_log_event(
                         player_id,
                         http_client,
                         http_client_mod,
-                        character_created,
+                        is_new_player,
                     )
                 )
 
