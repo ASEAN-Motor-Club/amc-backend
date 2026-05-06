@@ -49,10 +49,9 @@ async def handle_rent_extend(event, player, character, ctx):
         else HousingLicense.objects.none()
     )
     general = licenses.filter(house_key__isnull=True)
-    license = (
-        exact.order_by("-rebate_pct").afirst()
-        or general.order_by("-rebate_pct").afirst()
-    )
+    license = await exact.order_by("-rebate_pct").afirst()
+    if license is None:
+        license = await general.order_by("-rebate_pct").afirst()
 
     if license:
         effective_cost = int(rent_cost * license.rebate_pct / 100)
