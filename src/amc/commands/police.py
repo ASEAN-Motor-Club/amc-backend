@@ -70,24 +70,17 @@ async def cmd_police(ctx: CommandContext):
             )
             return
 
-        # Recent criminal delivery (any delivery linked to a CriminalRecord
-        # within the last 24h) blocks police duty
-        from amc.models import Delivery
+        # Active criminal record blocks police duty
+        from amc.models import CriminalRecord
 
-        last_criminal_delivery = (
-            await Delivery.objects.filter(
-                character=ctx.character,
-                criminal_record__isnull=False,
-                timestamp__gte=timezone.now() - timezone.timedelta(hours=24),
-            )
-            .order_by("-timestamp")
-            .afirst()
-        )
-        if last_criminal_delivery:
+        has_active_record = await CriminalRecord.objects.filter(
+            character=ctx.character, cleared_at__isnull=True
+        ).aexists()
+        if has_active_record:
             await send_system_message(
                 ctx.http_client_mod,
                 _(
-                    "You cannot go on police duty within 24 hours of committing a crime."
+                    "You cannot go on police duty while you have an active criminal record."
                 ),
                 character_guid=ctx.character.guid,
             )
