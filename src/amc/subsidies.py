@@ -466,27 +466,24 @@ async def apply_subsidy_player_cuts(
     if getattr(character, "is_gov_employee", False):
         return 0
 
-    if wealth_state is None:
-        state = await compute_wealth_state(character)
-    else:
-        state = wealth_state
-    if state is None:
-        # Lookup failed — fail OPEN: pay the full subsidy. The error
-        # reporter already pinged Discord from compute_wealth_state, and
-        # punishing the player for a transient DB hiccup feels worse than
-        # rare overpayment. Skip the wealth ramp; treasury cap + modded
-        # cut still apply below.
-        is_established, wealth_t = False, 0.0
-    else:
-        is_established, wealth_t = state
-    if is_established:
-        punish_exp = max(0.0001, float(amc_config.WEALTH_EXPONENT))
-        # Warp wealth_t so broke-established keep more support and rich get
-        # punished harder than linear. EXP > 1 keeps the curve near full
-        # payout at low wealth_t, then collapses sharply near the ceiling.
-        t_warp = wealth_t ** punish_exp
-        subsidy_pct = max(0.0, 1.0 - t_warp)
-        subsidy = int(subsidy * subsidy_pct)
+
+    wealth_curve_enabled = bool(amc_config.WEALTH_TAX_SYSTEM_ENABLED)
+
+    if wealth_curve_enabled:
+        if wealth_state is None:
+            state = await compute_wealth_state(character)
+        else:
+            state = wealth_state
+        if state is None:
+            # Lookup failed — fail OPEN: pay the full subsidy. 
+            is_established, wealth_t = False, 0.0
+        else:
+            is_established, wealth_t = state
+        if is_established:
+            punish_exp = max(0.0001, float(amc_config.WEALTH_EXPONENT))
+            # Warp wealth_t so broke-established keep more support and rich get punished harder than linear
+            subsidy_pct = max(0.0, 1.0 - t_warp)
+            subsidy = int(subsidy * subsidy_pct)
 
     if treasury_balance is not None:
         # Hard cap: never pay more than the treasury holds.
@@ -516,6 +513,12 @@ async def clamp_subsidy_for_treasury_health(
     if subsidy <= 0:
         return 0
     if treasury_balance is None or character is None:
+        return subsidy
+
+    # Feature toggle: when subsidy protection is off, the clamp is a
+    # passthrough — subsidies stay at full strength regardless of treasury
+    # health (master-branch behavior before the self-healing clamp landed).
+    if not amc_config.SUBSIDY_PROTECTION_ENABLED:
         return subsidy
 
     floor = float(amc_config.TREASURY_FLOOR)

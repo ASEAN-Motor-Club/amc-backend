@@ -94,6 +94,12 @@ async def get_tax_for_cargo(cargo, treasury_balance=None, character=None):
     Mirrors `amc.subsidies.get_subsidy_for_cargo` matching logic exactly.
     Treasury cap is inverted: high treasury → tax scales down to 0.
     """
+
+    from amc import config as _cfg
+
+    if not _cfg.WEALTH_TAX_SYSTEM_ENABLED:
+        return 0, 0.0, None
+
     rules = TaxRule.objects.filter(active=True).order_by("-priority")
 
     # 1. Cargo Key Filter
@@ -203,8 +209,13 @@ async def apply_tax_player_cuts(tax_amount, character, treasury_balance=None, we
     if tax_amount <= 0 or character is None:
         return 0
 
-    from amc.subsidies import compute_wealth_state
     from amc import config
+
+
+    if not config.WEALTH_TAX_SYSTEM_ENABLED:
+        return 0
+
+    from amc.subsidies import compute_wealth_state
 
     # Tax hardcutoff once the treasury is at/above CEILING.
     if treasury_balance is not None:

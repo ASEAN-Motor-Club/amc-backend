@@ -5,6 +5,15 @@ Lightweight switches that don't need to live in the database.
 Toggle these in code (and redeploy) rather than at runtime.
 """
 
+#########
+# FEATURE FLAGS
+#########
+
+WEALTH_TAX_SYSTEM_ENABLED = False
+SUBSIDY_PROTECTION_ENABLED = False
+RESPONSIVE_SCALING_ENABLED = False
+
+
 # When False, process_treasury_expiration_penalty() becomes a no-op so the treasury is not charged the 50% penalty for expired non-Ministry jobs.
 TREASURY_EXPIRATION_PENALTY_ENABLED = False
 

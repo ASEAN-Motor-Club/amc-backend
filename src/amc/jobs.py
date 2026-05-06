@@ -160,6 +160,8 @@ async def get_economy_treasury_multiplier(treasury_balance: float | None = None)
 def calculate_treasury_scale(treasury_balance: float) -> float:
     """Economy driven payout adjustment
     """
+    if not config.RESPONSIVE_SCALING_ENABLED:
+        return 1.0
     floor = float(config.TREASURY_FLOOR)
     ceiling = float(config.TREASURY_CEILING)
     boom_cap = max(1.0, float(config.TREASURY_BOOM_CAP))
@@ -208,6 +210,8 @@ async def compute_payout_factor_for_character(
     result for callers that already fetched it (kept for API symmetry with
     the subsidy/tax player cuts; payout flow currently fetches per-contributor).
     """
+    if not config.WEALTH_TAX_SYSTEM_ENABLED:
+        return 1.0
     floor = float(config.TREASURY_FLOOR)
     ceiling = float(config.TREASURY_CEILING)
     if ceiling <= floor:

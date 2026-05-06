@@ -13,6 +13,7 @@ from operator import attrgetter
 from django.contrib.gis.geos import Point
 from django.db.models import F
 
+from amc import config
 from amc.handlers import register
 from amc.models import (
     Delivery,
@@ -180,7 +181,12 @@ async def handle_cargo_arrived(event, player, character, ctx):
         # pass it through so we don't issue 3 duplicate aggregate queries
         # (lifetime income + bank balance) per cargo line.
         wealth_state = None
-        if character and not character.is_gov_employee and not is_illicit:
+        if (
+            config.WEALTH_TAX_SYSTEM_ENABLED
+            and character
+            and not character.is_gov_employee
+            and not is_illicit
+        ):
             from amc.subsidies import compute_wealth_state
 
             wealth_state = await compute_wealth_state(character)
