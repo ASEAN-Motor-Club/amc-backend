@@ -561,7 +561,7 @@ class DepotsAPITest(TestCase):
         """Test GET /depots/ without owner query param"""
         mock_get_mtime.return_value = 946684800.0
         mock_get_world.return_value = {
-            "depot": [
+            "depots": [
                 {"name": "Depot A", "storage": 100, "taxiDispatchLevel": 1, "buildingGuid": "guid-a"},
                 {"name": "Depot B", "storage": 200, "taxiDispatchLevel": 2, "buildingGuid": "guid-b"},
             ],
@@ -589,7 +589,7 @@ class DepotsAPITest(TestCase):
         """Test GET /depots/?owner=false does not include owner"""
         mock_get_mtime.return_value = 946684800.0
         mock_get_world.return_value = {
-            "depot": [
+            "depots": [
                 {"name": "Depot A", "storage": 100, "taxiDispatchLevel": 1, "buildingGuid": "guid-a"},
             ],
         }
@@ -608,7 +608,7 @@ class DepotsAPITest(TestCase):
         """Test GET /depots/?owner=true includes housingKey as owner"""
         mock_get_mtime.return_value = 946684800.0
         mock_get_world.return_value = {
-            "depot": [
+            "depots": [
                 {
                     "name": "Depot A",
                     "storage": 100,
@@ -655,7 +655,7 @@ class DepotsAPITest(TestCase):
     def test_list_depots_empty(self, mock_get_world, mock_get_mtime):
         """Test GET /depots/ returns empty list when no depots"""
         mock_get_mtime.return_value = 946684800.0
-        mock_get_world.return_value = {"depot": []}
+        mock_get_world.return_value = {"depots": []}
 
         response = self.api_client.get("/depots/")
 
@@ -682,7 +682,7 @@ class DepotsAPITest(TestCase):
         """Test GET /depots/ with If-Modified-Since returns data when world changed"""
         mock_get_mtime.return_value = 946684801.0
         mock_get_world.return_value = {
-            "depot": [
+            "depots": [
                 {"name": "Depot A", "storage": 100, "taxiDispatchLevel": 1, "buildingGuid": "guid-a"}
             ],
         }

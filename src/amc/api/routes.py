@@ -129,7 +129,7 @@ def depots(request, owner: bool = False):
             pass
 
     world = get_world()
-    depots = world.get("depot", [])
+    depots = world.get("depots", [])
 
     if owner:
         response_data = []
