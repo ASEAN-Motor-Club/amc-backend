@@ -2326,10 +2326,10 @@ class CompassTickTests(TestCase):
     # Speed-based throttle — stationary / walking cutoff
     # -------------------------------------------------------------------
 
-    async def test_walking_speed_suspect_no_compass(
+    async def test_walking_speed_suspect_sends_at_15s_interval(
         self, mock_get_players, mock_get_locations, mock_police, mock_sys_msg,
     ):
-        """Walking speed (< 5 m/s = 500 game units/s) → no compass update."""
+        """Walking speed (300 game units/s = 3 m/s) → compass sent at 15s interval."""
         criminal = await self._setup_criminal()
         officer = await self._setup_police()
 
@@ -2337,7 +2337,6 @@ class CompassTickTests(TestCase):
             _make_player_data(criminal.player.unique_id, criminal.guid, *_COMPASS_SUSPECT_LOC),
             _make_player_data(officer.player.unique_id, officer.guid, *_COMPASS_COP_FAR),
         ])
-        # 300 game units/s = 3 m/s → below 5 m/s cutoff
         mock_get_locations.return_value = [
             _make_mgmt_entry(criminal.guid, 300),
         ]
@@ -2346,14 +2345,26 @@ class CompassTickTests(TestCase):
         mock_http_mod = AsyncMock()
         mock_http_mgmt = AsyncMock()
 
+        # First tick — sends compass
         await tick_police_suspect_locations(mock_http, mock_http_mod, mock_http_mgmt)
+        mock_sys_msg.assert_awaited_once()
 
+        # Backdate to 14s → not yet 15s
+        _last_compass_sent[criminal.guid] = time.monotonic() - 14
+        mock_sys_msg.reset_mock()
+        await tick_police_suspect_locations(mock_http, mock_http_mod, mock_http_mgmt)
         mock_sys_msg.assert_not_called()
 
-    async def test_exact_cutoff_speed_no_compass(
+        # Backdate to 16s → past 15s
+        _last_compass_sent[criminal.guid] = time.monotonic() - 16
+        mock_sys_msg.reset_mock()
+        await tick_police_suspect_locations(mock_http, mock_http_mod, mock_http_mgmt)
+        mock_sys_msg.assert_awaited_once()
+
+    async def test_slow_speed_sends_at_15s_interval(
         self, mock_get_players, mock_get_locations, mock_police, mock_sys_msg,
     ):
-        """Exactly at cutoff (499 game units/s = 4.99 m/s) → no compass update."""
+        """Slow speed (499 game units/s = 4.99 m/s) → compass at 15s interval."""
         criminal = await self._setup_criminal()
         officer = await self._setup_police()
 
@@ -2369,14 +2380,26 @@ class CompassTickTests(TestCase):
         mock_http_mod = AsyncMock()
         mock_http_mgmt = AsyncMock()
 
+        # First tick — sends compass
         await tick_police_suspect_locations(mock_http, mock_http_mod, mock_http_mgmt)
+        mock_sys_msg.assert_awaited_once()
 
+        # Backdate to 14s → not yet 15s
+        _last_compass_sent[criminal.guid] = time.monotonic() - 14
+        mock_sys_msg.reset_mock()
+        await tick_police_suspect_locations(mock_http, mock_http_mod, mock_http_mgmt)
         mock_sys_msg.assert_not_called()
 
-    async def test_zero_speed_suspect_no_compass(
+        # Backdate to 16s → past 15s
+        _last_compass_sent[criminal.guid] = time.monotonic() - 16
+        mock_sys_msg.reset_mock()
+        await tick_police_suspect_locations(mock_http, mock_http_mod, mock_http_mgmt)
+        mock_sys_msg.assert_awaited_once()
+
+    async def test_zero_speed_sends_at_15s_interval(
         self, mock_get_players, mock_get_locations, mock_police, mock_sys_msg,
     ):
-        """Zero speed (stationary) → no compass update."""
+        """Zero speed (stationary) → compass sent at 15s interval."""
         criminal = await self._setup_criminal()
         officer = await self._setup_police()
 
@@ -2392,9 +2415,21 @@ class CompassTickTests(TestCase):
         mock_http_mod = AsyncMock()
         mock_http_mgmt = AsyncMock()
 
+        # First tick — sends compass
         await tick_police_suspect_locations(mock_http, mock_http_mod, mock_http_mgmt)
+        mock_sys_msg.assert_awaited_once()
 
+        # Backdate to 14s → not yet 15s
+        _last_compass_sent[criminal.guid] = time.monotonic() - 14
+        mock_sys_msg.reset_mock()
+        await tick_police_suspect_locations(mock_http, mock_http_mod, mock_http_mgmt)
         mock_sys_msg.assert_not_called()
+
+        # Backdate to 16s → past 15s
+        _last_compass_sent[criminal.guid] = time.monotonic() - 16
+        mock_sys_msg.reset_mock()
+        await tick_police_suspect_locations(mock_http, mock_http_mod, mock_http_mgmt)
+        mock_sys_msg.assert_awaited_once()
 
     # -------------------------------------------------------------------
     # Speed-based throttle — vehicle speed sends compass
@@ -2604,10 +2639,10 @@ class CompassTickTests(TestCase):
         await tick_police_suspect_locations(mock_http, mock_http_mod, mock_http_mgmt)
         mock_sys_msg.assert_awaited_once()
 
-    async def test_slow_speed_clamped_to_60s_interval(
+    async def test_slow_speed_clamped_to_15s_interval(
         self, mock_get_players, mock_get_locations, mock_police, mock_sys_msg,
     ):
-        """Slow vehicle speed → interval clamped to 60s maximum."""
+        """Slow vehicle speed → interval clamped to 15s maximum."""
         criminal = await self._setup_criminal()
         officer = await self._setup_police()
 
@@ -2615,7 +2650,7 @@ class CompassTickTests(TestCase):
             _make_player_data(criminal.player.unique_id, criminal.guid, *_COMPASS_SUSPECT_LOC),
             _make_player_data(officer.player.unique_id, officer.guid, *_COMPASS_COP_FAR),
         ])
-        # 500 game units/s = 5 m/s → interval = 300/5 = 60s (at max clamp)
+        # 500 game units/s = 5 m/s → raw interval = 300/5 = 60 → clamped to 15s
         mock_get_locations.return_value = [
             _make_mgmt_entry(criminal.guid, 500),
         ]
@@ -2627,14 +2662,14 @@ class CompassTickTests(TestCase):
         # First tick
         await tick_police_suspect_locations(mock_http, mock_http_mod, mock_http_mgmt)
 
-        # Backdate to 59s → not yet 60s
-        _last_compass_sent[criminal.guid] = time.monotonic() - 59
+        # Backdate to 14s → not yet 15s
+        _last_compass_sent[criminal.guid] = time.monotonic() - 14
         mock_sys_msg.reset_mock()
         await tick_police_suspect_locations(mock_http, mock_http_mod, mock_http_mgmt)
         mock_sys_msg.assert_not_called()
 
-        # Backdate to 61s → past 60s
-        _last_compass_sent[criminal.guid] = time.monotonic() - 61
+        # Backdate to 16s → past 15s
+        _last_compass_sent[criminal.guid] = time.monotonic() - 16
         mock_sys_msg.reset_mock()
         await tick_police_suspect_locations(mock_http, mock_http_mod, mock_http_mgmt)
         mock_sys_msg.assert_awaited_once()
@@ -2869,10 +2904,10 @@ class CompassTickTests(TestCase):
         msg = mock_sys_msg.call_args.args[1]
         self.assertIn(criminal.name, msg)
 
-    async def test_guid_not_in_speed_map_treated_as_zero_speed(
+    async def test_guid_not_in_speed_map_sends_at_15s_interval(
         self, mock_get_players, mock_get_locations, mock_police, mock_sys_msg,
     ):
-        """Suspect GUID missing from speed_map → treated as 0 speed → no compass."""
+        """Suspect GUID missing from speed_map → treated as 0 speed → 15s interval."""
         criminal = await self._setup_criminal()
         officer = await self._setup_police()
 
@@ -2889,9 +2924,10 @@ class CompassTickTests(TestCase):
         mock_http_mod = AsyncMock()
         mock_http_mgmt = AsyncMock()
 
+        # First tick — sent at 15s interval (0 speed → clamped)
         await tick_police_suspect_locations(mock_http, mock_http_mod, mock_http_mgmt)
-
-        mock_sys_msg.assert_not_called()
+        mock_sys_msg.assert_awaited_once()
+        self.assertIn(criminal.guid, _last_compass_sent)
 
     # -------------------------------------------------------------------
     # Stale GUID cleanup
@@ -2946,7 +2982,7 @@ class CompassTickTests(TestCase):
     async def test_two_suspects_different_speeds_independent_throttle(
         self, mock_get_players, mock_get_locations, mock_police, mock_sys_msg,
     ):
-        """Two suspects at different speeds → fast one sent, slow one not."""
+        """Two suspects at different speeds → fast updates more frequently."""
         criminal_fast = await self._setup_criminal()
         criminal_slow = await self._setup_criminal()
         officer = await self._setup_police()
@@ -2960,16 +2996,25 @@ class CompassTickTests(TestCase):
             _make_player_data(officer.player.unique_id, officer.guid, *_COMPASS_COP_FAR),
         ])
         mock_get_locations.return_value = [
-            _make_mgmt_entry(criminal_fast.guid, 3000),
-            _make_mgmt_entry(criminal_slow.guid, 300),
+            _make_mgmt_entry(criminal_fast.guid, 3000),   # 30 m/s → 10s interval
+            _make_mgmt_entry(criminal_slow.guid, 300),    # 3 m/s → 15s interval (clamped)
         ]
         mock_police.return_value = _AsyncList([officer])
         mock_http = AsyncMock()
         mock_http_mod = AsyncMock()
         mock_http_mgmt = AsyncMock()
 
+        # First tick — both sent
         await tick_police_suspect_locations(mock_http, mock_http_mod, mock_http_mgmt)
+        msg = mock_sys_msg.call_args.args[1]
+        self.assertIn(criminal_fast.name, msg)
+        self.assertIn(criminal_slow.name, msg)
 
+        # After 11s — fast's interval (10s) elapsed, slow's (15s) not yet
+        _last_compass_sent[criminal_fast.guid] = time.monotonic() - 11
+        _last_compass_sent[criminal_slow.guid] = time.monotonic() - 11
+        mock_sys_msg.reset_mock()
+        await tick_police_suspect_locations(mock_http, mock_http_mod, mock_http_mgmt)
         msg = mock_sys_msg.call_args.args[1]
         self.assertIn(criminal_fast.name, msg)
         self.assertNotIn(criminal_slow.name, msg)

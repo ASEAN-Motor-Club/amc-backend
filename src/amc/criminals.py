@@ -824,8 +824,8 @@ async def tick_police_suspect_locations(http_client, http_client_mod, http_clien
     distance and bearing for each online wanted suspect.
 
     Update frequency is speed-based: faster suspects get more frequent
-    compass updates (down to every 5 s), while suspects on foot
-    (< 5 m/s) receive no compass updates at all.
+    compass updates (down to every 5 s), while stationary suspects
+    update every 15 s.
     """
     wanted_list = [
         w
@@ -879,9 +879,7 @@ async def tick_police_suspect_locations(http_client, http_client_mod, http_clien
         for character, suspect_loc in online_suspects:
             speed = speed_map.get(character.guid.upper(), 0.0)
             speed_mps = speed / 100  # game units/s → m/s
-            if speed_mps < 5:
-                continue  # walking/running — no compass update
-            interval = max(5, min(60, 300 / max(speed_mps, 1)))
+            interval = max(5, min(15, 300 / max(speed_mps, 1)))
             last_sent = _last_compass_sent.get(character.guid, 0)
             if now - last_sent >= interval:
                 throttled.append((character, suspect_loc))
