@@ -849,16 +849,39 @@ async def tick_police_suspect_locations(http_client, http_client_mod) -> None:
     from amc.utils import compass_heading, game_units_to_metres
 
     police_chars = await get_active_police_characters()
+
+    # Collect all officer locations first so we can filter suspects
+    officer_entries = []  # (officer, officer_loc)
     async for officer in police_chars:
         officer_guid = officer.guid
         if not officer_guid or officer_guid not in locations:
             continue
-
         _, officer_loc, _ = locations[officer_guid]
+        officer_entries.append((officer, officer_loc))
+
+    if not officer_entries:
+        return
+
+    # Filter out suspects that have any police officer within 500m (50000 units)
+    PROXIMITY_HIDE_DISTANCE = 50_000
+    visible_suspects = []
+    for character, suspect_loc in online_suspects:
+        if any(
+            _distance_3d(suspect_loc, cop_loc) < PROXIMITY_HIDE_DISTANCE
+            for _, cop_loc in officer_entries
+        ):
+            continue
+        visible_suspects.append((character, suspect_loc))
+
+    if not visible_suspects:
+        return
+
+    for officer, officer_loc in officer_entries:
+        officer_guid = officer.guid
         officer_x, officer_y, officer_z = officer_loc
 
         entries = []  # (distance, formatted_line)
-        for character, suspect_loc in online_suspects:
+        for character, suspect_loc in visible_suspects:
             # Wanted players should never be police, but guard anyway
             if character.guid == officer_guid:
                 continue
