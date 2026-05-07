@@ -19,14 +19,13 @@ from amc.police import (
     is_police,
     POLICE_STATIONS,
 )
-from amc.utils import game_units_to_metres, compass_direction
 from amc.criminals import create_or_refresh_wanted
 from amc.utils import fuzzy_find_player
 from django.conf import settings
 from django.utils import timezone
 from django.utils.translation import gettext as _, gettext_lazy
 
-from amc.commands.faction import parse_location_string, _build_player_locations
+from amc.commands.faction import parse_location_string
 
 SETWANTED_COOLDOWN = timezone.timedelta(minutes=settings.SETWANTED_COOLDOWN_MINUTES)
 SETWANTED_MIN_DISTANCE = 100_000  # 1km = 100,000 units (1m = 100 units)
@@ -387,63 +386,3 @@ async def cmd_setwanted(ctx: CommandContext, target_player_name: str):
     )
 
 
-@registry.register(
-    ["/suspects", "/s"],
-    description=gettext_lazy(
-        "List online wanted suspects with distance and bearing (police only)"
-    ),
-    category="Faction",
-    featured=True,
-)
-async def cmd_suspects(ctx: CommandContext):
-    if not await is_police(ctx.character):
-        await ctx.reply(_("You must be on police duty to use this command."))
-        return
-
-    players = await get_players(ctx.http_client)
-    locations = _build_player_locations(players) if players else {}
-
-    officer_entry = locations.get(str(ctx.character.guid))
-    if not officer_entry:
-        await ctx.reply(_("Cannot determine your location."))
-        return
-
-    _officer_name, officer_loc, _officer_vehicle = officer_entry
-    officer_x, officer_y, officer_z = officer_loc
-
-    suspect_entries = []
-    async for wanted in Wanted.objects.filter(
-        expired_at__isnull=True,
-        wanted_remaining__gt=0,
-    ).select_related("character"):
-        guid = wanted.character.guid
-        if not guid or guid == str(ctx.character.guid):
-            continue
-        entry = locations.get(guid)
-        if not entry:
-            continue
-        _suspect_name, suspect_loc, _suspect_vehicle = entry
-        suspect_x, suspect_y, suspect_z = suspect_loc
-        dx = suspect_x - officer_x
-        dy = suspect_y - officer_y
-        dist = _distance_3d(officer_loc, suspect_loc)
-        direction = compass_direction(dx, dy)
-        metres = game_units_to_metres(dist)
-        suspect_entries.append((dist, wanted.character.name, metres, direction))
-
-    if not suspect_entries:
-        await ctx.reply(
-            _("<Title>No Suspects</>\n\nNo wanted suspects are currently online.")
-        )
-        return
-
-    suspect_entries.sort(key=lambda x: x[0])
-    lines = ["<Title>Suspects</>", ""]
-    for _entry_dist, name, metres, direction in suspect_entries:
-        if metres < 1000:
-            dist_str = f"{metres}m"
-        else:
-            dist_str = f"{metres / 1000:.1f}km"
-        lines.append(f"{name} — {dist_str} {direction}")
-
-    await ctx.reply("\n".join(lines))
