@@ -691,12 +691,25 @@ async def cmd_spawn_asset(ctx: CommandContext, asset_path: str):
         ctx.http_client_mod, str(ctx.player.unique_id), force_refresh=True
     )
     rot = player_data.get("Rotation", {}) if player_data else {}
+    yaw = rot.get("Yaw", 0.0)
 
     await spawn_assets(
         ctx.http_client_mod,
         [{"AssetPath": asset_path, "Location": loc, "Rotation": rot}],
     )
-    await ctx.reply(_("Spawned asset: {path}").format(path=asset_path))
+
+    world_obj = await WorldObject.objects.acreate(
+        asset_path=asset_path,
+        location_x=loc['X'],
+        location_y=loc['Y'],
+        location_z=loc['Z'],
+        yaw=yaw,
+    )
+    await ctx.reply(
+        _("Spawned asset: {path} (#{id})").format(
+            path=asset_path, id=world_obj.pk
+        )
+    )
 
 
 @registry.register(
