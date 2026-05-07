@@ -129,7 +129,7 @@ def depots(request, owner: bool = False):
             pass
 
     world = get_world()
-    depots = world.get("depot", [])
+    depots = world.get("depots", [])
 
     if owner:
         response_data = []
@@ -138,7 +138,7 @@ def depots(request, owner: bool = False):
             cache_key = f"depot_owner:{building_guid}"
             cached_owner = cache.get(cache_key)
             if cached_owner is None and building_guid:
-                for b in world.get("building", []):
+                for b in world.get("buildings", []):
                     if b.get("guid", "").lower() == building_guid:
                         cached_owner = b.get("housingKey")
                         cache.set(
