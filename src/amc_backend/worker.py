@@ -204,7 +204,7 @@ async def suspect_tag_refresh_tick(ctx):
 
 
 async def police_suspect_locations_tick(ctx):
-    await tick_police_suspect_locations(ctx["http_client"], ctx["http_client_mod"])
+    await tick_police_suspect_locations(ctx["http_client"], ctx["http_client_mod"], ctx["http_client_mgmt"])
 
 
 async def criminal_record_decay_tick(ctx):
@@ -233,7 +233,7 @@ class WorkerSettings:
         # pyrefly: ignore [bad-argument-type]
         cron(suspect_tag_refresh_tick, second=set(range(0, 60, 30))),
         # pyrefly: ignore [bad-argument-type]
-        cron(police_suspect_locations_tick, second=set(range(5, 60, 15))),
+        cron(police_suspect_locations_tick, second=set(range(5, 60, 5))),
         # pyrefly: ignore [bad-argument-type]
         cron(criminal_record_decay_tick, minute=None, second=30),  # every minute at :30s
         # pyrefly: ignore [bad-argument-type]

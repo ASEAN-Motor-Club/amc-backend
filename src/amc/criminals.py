@@ -10,7 +10,7 @@ from django.db.models import F
 from django.utils import timezone
 
 from amc.commands.faction import _build_player_locations, _distance_3d, execute_arrest
-from amc.game_server import announce, get_players
+from amc.game_server import announce, get_players, get_players_locations
 from amc.models import CriminalRecord, PoliceSession, Wanted
 from amc.mod_detection import detect_custom_parts, POLICE_DUTY_WHITELIST
 from amc.mod_server import clear_suspect, despawn_player_vehicle, force_exit_vehicle, get_player_customization, get_player_last_vehicle, get_player_last_vehicle_parts, make_suspect, send_system_message, show_popup
@@ -89,6 +89,10 @@ _last_suspect_guids: set[str] = set()
 # despawn on a *transition* from not-in-modded to in-modded (i.e. the
 # player entered a modded vehicle while already wanted).
 _last_modded_vehicle_guids: set[str] = set()
+
+# Tracks when each suspect last received a compass update (monotonic clock).
+# Used for speed-based throttle: faster suspects get more frequent updates.
+_last_compass_sent: dict[str, float] = {}
 
 
 def _calculate_logout_heat(min_police_distance: float) -> float:
@@ -815,9 +819,13 @@ async def refresh_suspect_tags(http_client_mod) -> None:
     _last_suspect_guids.update(wanted_guids)
 
 
-async def tick_police_suspect_locations(http_client, http_client_mod) -> None:
+async def tick_police_suspect_locations(http_client, http_client_mod, http_client_mgmt) -> None:
     """Send every on-duty police officer a combined system message showing
-    distance and bearing for each online wanted suspect.  Runs every 10 s.
+    distance and bearing for each online wanted suspect.
+
+    Update frequency is speed-based: faster suspects get more frequent
+    compass updates (down to every 5 s), while suspects on foot
+    (< 5 m/s) receive no compass updates at all.
     """
     wanted_list = [
         w
@@ -827,6 +835,7 @@ async def tick_police_suspect_locations(http_client, http_client_mod) -> None:
         ).select_related("character")
     ]
     if not wanted_list:
+        _last_compass_sent.clear()
         return
 
     players = await get_players(http_client)
@@ -834,13 +843,51 @@ async def tick_police_suspect_locations(http_client, http_client_mod) -> None:
     if not locations:
         return
 
+    # Speed telemetry from mod management API (game units/s).
+    # Falls back to None if the API is unavailable — in that case we send
+    # all suspects unthrottled (graceful degradation).
+    mgmt_locations = await get_players_locations(http_client_mgmt)
+    speed_map: dict[str, float] = {}
+    if mgmt_locations is not None:
+        speed_map = {e["CharacterGuid"]: e["Speed"] for e in mgmt_locations}
+
     # Pre-compute online suspect (character, location) pairs
+    wanted_guids: set[str] = set()
     online_suspects = []
     for wanted in wanted_list:
         guid = wanted.character.guid
-        if not guid or guid not in locations:
+        if not guid:
+            continue
+        wanted_guids.add(guid)
+        if guid not in locations:
             continue
         online_suspects.append((wanted.character, locations[guid][1]))
+
+    if not online_suspects:
+        # Purge stale compass timestamps
+        for stale in set(_last_compass_sent) - wanted_guids:
+            del _last_compass_sent[stale]
+        return
+
+    # Speed-based throttle: build a set of suspect GUIDs eligible by
+    # speed + interval.  We do NOT update _last_compass_sent here —
+    # that happens after the proximity filter so that suspects hidden
+    # by proximity don't consume their interval slot.
+    now = time.monotonic()
+    if speed_map:
+        throttled = []
+        for character, suspect_loc in online_suspects:
+            speed = speed_map.get(character.guid.upper(), 0.0)
+            speed_mps = speed / 100  # game units/s → m/s
+            if speed_mps < 5:
+                continue  # walking/running — no compass update
+            interval = max(5, min(60, 300 / max(speed_mps, 1)))
+            last_sent = _last_compass_sent.get(character.guid, 0)
+            if now - last_sent >= interval:
+                throttled.append((character, suspect_loc))
+        online_suspects = throttled
+    # If the mod management API is unavailable (speed_map empty),
+    # send all suspects unthrottled (graceful degradation).
 
     if not online_suspects:
         return
@@ -875,6 +922,11 @@ async def tick_police_suspect_locations(http_client, http_client_mod) -> None:
 
     if not visible_suspects:
         return
+
+    # NOW update _last_compass_sent for suspects that survived both
+    # the speed throttle AND the proximity filter.
+    for character, _ in visible_suspects:
+        _last_compass_sent[character.guid] = now
 
     for officer, officer_loc in officer_entries:
         officer_guid = officer.guid
@@ -919,6 +971,10 @@ async def tick_police_suspect_locations(http_client, http_client_mod) -> None:
             logger.warning(
                 "Failed to send suspect locations to officer %s", officer.name
             )
+
+    # Purge stale compass timestamps
+    for stale in set(_last_compass_sent) - wanted_guids:
+        del _last_compass_sent[stale]
 
 
 async def tick_criminal_record_decay(http_client_mod=None) -> None:
