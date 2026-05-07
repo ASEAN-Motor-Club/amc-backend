@@ -92,6 +92,7 @@ from .player_positions_common import (
     POSITION_UPDATE_SLEEP,
     HEARTBEAT_INTERVAL,
     get_players_mod,
+    PlayerPositionsSubscription,
 )
 
 app_router = Router()
@@ -379,25 +380,22 @@ player_positions_router = Router()
 
 @player_positions_router.get("/")
 async def streaming_player_positions(request):
-    session = request.state["aiohttp_client"]
+    session = aiohttp.ClientSession(base_url=settings.MOD_SERVER_API_URL)
 
     async def event_stream():
-        while True:
-            players = await get_players_mod(session, filter_hidden=True)
+        async for players in PlayerPositionsSubscription.subscribe(session):
             player_positions = {
-                player["PlayerName"]: {
-                    **{
-                        axis.lower(): value
-                        for axis, value in player["Location"].items()
-                    },
-                    "vehicle_key": player["VehicleKey"],
-                    "unique_id": player["UniqueID"],
+                p["player_name"]: {
+                    "x": p["x"],
+                    "y": p["y"],
+                    "z": p["z"],
+                    "vehicle_key": p["vehicle_key"],
+                    "unique_id": p["unique_id"],
+                    "hidden": p["hidden"],
                 }
-                for player in players
+                for p in players
             }
-
             yield f"data: {json.dumps(player_positions)}\n\n"
-            await asyncio.sleep(POSITION_UPDATE_SLEEP)
 
     return StreamingHttpResponse(event_stream(), content_type="text/event-stream")
 
@@ -413,7 +411,7 @@ async def streaming_player_count(request):
         last_count = None
         ticks_since_heartbeat = 0
         while True:
-            players = await get_players_mod(session, filter_hidden=True)
+            players = await get_players_mod(session)
             count = len(players)
             if count != last_count:
                 yield f"data: {count}\n\n"
