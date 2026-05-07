@@ -682,14 +682,18 @@ async def cmd_spawn_asset(ctx: CommandContext, asset_path: str):
         await ctx.reply(_("Admin-only"))
         return
 
-    loc = {
-      'X': ctx.player_info["Location"]['X'],
-      'Y': ctx.player_info["Location"]['Y'],
-      'Z': ctx.player_info["Location"]['Z'] - 30,
-    }
     player_data = await get_player(
         ctx.http_client_mod, str(ctx.player.unique_id), force_refresh=True
     )
+    view_loc = player_data.get("ViewLocation") if player_data else None
+    if view_loc:
+        loc = {'X': view_loc['X'], 'Y': view_loc['Y'], 'Z': view_loc['Z']}
+    else:
+        loc = {
+            'X': ctx.player_info["Location"]['X'],
+            'Y': ctx.player_info["Location"]['Y'],
+            'Z': ctx.player_info["Location"]['Z'] - 30,
+        }
     rot = player_data.get("Rotation", {}) if player_data else {}
     yaw = rot.get("Yaw", 0.0)
 
