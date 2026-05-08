@@ -12,7 +12,7 @@ from django.db.models import F, Sum
 from django.utils import timezone
 
 from amc.handlers import register
-from amc.mod_server import transfer_money
+from amc.mod_server import show_popup, transfer_money
 from amc.models import Delivery, HousingLicense
 from amc_finance.services import record_treasury_rent_income, send_fund_to_player_wallet
 
@@ -22,11 +22,21 @@ logger = logging.getLogger("amc.webhook.handlers.house")
 @register("ServerRentHouse")
 async def handle_rent(event, player, character, ctx):
     logger.info(
-        "ServerRentHouse: player=%s character=%s house=%s",
+        "ServerRentHouse: player=%s character=%s house=%s blocked=%s",
         player.unique_id,
         character.guid,
         event["data"].get("HouseGuid"),
+        event["data"].get("Blocked"),
     )
+    if event["data"].get("Blocked") and ctx.http_client_mod:
+        try:
+            await show_popup(
+                ctx.http_client_mod,
+                "House rentals must be done through Discord. Use /house buy in Discord.",
+                character_guid=str(character.guid),
+            )
+        except Exception:
+            logger.warning("Failed to send rent-blocked popup to %s", character.guid, exc_info=True)
     return 0, 0, 0, 0
 
 
@@ -35,6 +45,17 @@ async def handle_rent_extend(event, player, character, ctx):
     data = event["data"]
     rent_cost = int(data.get("Money", 0))
     if rent_cost <= 0:
+        return 0, 0, 0, 0
+
+    if data.get("Blocked") and ctx.http_client_mod:
+        try:
+            await show_popup(
+                ctx.http_client_mod,
+                "House rent extensions must be done through Discord. Use /house extend in Discord.",
+                character_guid=str(character.guid),
+            )
+        except Exception:
+            logger.warning("Failed to send extend-blocked popup to %s", character.guid, exc_info=True)
         return 0, 0, 0, 0
 
     await record_treasury_rent_income(rent_cost, f"House Rent — {character.guid}")
