@@ -342,7 +342,7 @@ class ContrabandCriminalRecordTests(TestCase):
         self.assertEqual(len(records), 1, "Should not create a second record")
         # Amount accumulates
         self.assertEqual(records[0].amount, 25_000)
-        self.assertEqual(records[0].confiscatable_amount, 25_000)
+        self.assertEqual(records[0].confiscatable_amount, 24_000)  # 20_000 + 80% of 5_000
 
     @patch("amc.special_cargo.refresh_player_name", new_callable=AsyncMock)
     @patch("amc.special_cargo.record_treasury_expense", new_callable=AsyncMock)

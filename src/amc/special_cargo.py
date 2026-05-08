@@ -187,17 +187,23 @@ async def ensure_criminal_record(
     return record
 
 
+CONFISCATABLE_FRACTION = 0.8  # 80% of delivery payment is at risk of confiscation
+
+
 async def accumulate_criminal_record_amount(character, payment: int) -> None:
     """Add delivery payment to BOTH amount and confiscatable_amount.
 
     amount = permanent audit total (never decays).
     confiscatable_amount = decaying total (cron reduces when online).
+    Only 80% of the payment is added to confiscatable_amount — the remaining
+    20% is guaranteed safe from confiscation.
     """
+    confiscatable_portion = int(payment * CONFISCATABLE_FRACTION)
     await CriminalRecord.objects.filter(
         character=character, cleared_at__isnull=True
     ).aupdate(
         amount=F("amount") + payment,
-        confiscatable_amount=F("confiscatable_amount") + payment,
+        confiscatable_amount=F("confiscatable_amount") + confiscatable_portion,
     )
 
 

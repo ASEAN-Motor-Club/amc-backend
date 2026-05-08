@@ -77,7 +77,7 @@ class MoneyLaunderingTests(TestCase):
         self.assertIsNone(record.cleared_at)
         # Amount should be accumulated
         self.assertEqual(record.amount, 10_000)
-        self.assertEqual(record.confiscatable_amount, 10_000)
+        self.assertEqual(record.confiscatable_amount, 8_000)  # 80% of 10_000
 
     async def test_money_delivery_reuses_existing_criminal_record(
         self, mock_sc_announce, mock_announce, mock_get_treasury, mock_get_rp_mode, mock_check_floor
@@ -107,7 +107,7 @@ class MoneyLaunderingTests(TestCase):
         record = await CriminalRecord.objects.aget(character=character, cleared_at__isnull=True)
         # Amount should be the original + new delivery
         self.assertEqual(record.amount, 55_000)
-        self.assertEqual(record.confiscatable_amount, 55_000)
+        self.assertEqual(record.confiscatable_amount, 54_000)  # 50_000 + 80% of 5_000
 
     @patch("amc.handlers.cargo.should_trigger_wanted", return_value=True)
     async def test_money_delivery_server_announcement(

@@ -72,7 +72,7 @@ class MoneyCargoHandlerTests(TestCase):
         # Active record has cleared_at = None
         self.assertIsNone(record.cleared_at)
         self.assertEqual(record.amount, 5_000)
-        self.assertEqual(record.confiscatable_amount, 5_000)
+        self.assertEqual(record.confiscatable_amount, 4_000)  # 80% of 5_000
 
     @patch("amc.special_cargo.refresh_player_name", new_callable=AsyncMock)
     @patch("amc.special_cargo.record_treasury_expense", new_callable=AsyncMock)
@@ -103,7 +103,7 @@ class MoneyCargoHandlerTests(TestCase):
         self.assertEqual(len(records), 1, "Should not create a second record")
         # Amount should accumulate
         self.assertEqual(records[0].amount, 35_000)
-        self.assertEqual(records[0].confiscatable_amount, 35_000)
+        self.assertEqual(records[0].confiscatable_amount, 34_000)  # 30_000 + 80% of 5_000
 
     @patch("amc.special_cargo.refresh_player_name", new_callable=AsyncMock)
     @patch("amc.special_cargo.record_treasury_expense", new_callable=AsyncMock)
