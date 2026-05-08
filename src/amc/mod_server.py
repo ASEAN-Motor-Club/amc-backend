@@ -59,6 +59,39 @@ async def transfer_money(session, amount, message, player_id):
             raise Exception("Failed to transfer money")
 
 
+async def rent_house(session, house_guid, character_guid):
+    await _write_limiter.acquire()
+    async with session.post(f"/houses/{house_guid}/rent", json={"CharacterGuid": character_guid}) as resp:
+        data = await resp.json()
+        if resp.status != 200 or data.get("status") != "success":
+            raise Exception(f"Failed to rent house: {data}")
+        return data
+
+
+async def extend_house_rent(session, house_guid, character_guid, seconds):
+    await _write_limiter.acquire()
+    async with session.post(
+        f"/houses/{house_guid}/rent/extend",
+        json={"CharacterGuid": character_guid, "Seconds": seconds},
+    ) as resp:
+        data = await resp.json()
+        if resp.status != 200 or data.get("status") != "success":
+            raise Exception(f"Failed to extend house rent: {data}")
+        return data
+
+
+async def get_houses(session):
+    async with session.get("/houses", timeout=FAST_TIMEOUT) as resp:
+        data = await resp.json()
+        return data.get("data", [])
+
+
+async def get_rent_info(session, house_guid):
+    async with session.get(f"/houses/{house_guid}/rentinfo", timeout=FAST_TIMEOUT) as resp:
+        data = await resp.json()
+        return data.get("data", {})
+
+
 async def transfer_exp(session, player_id, level_type, exp, message=""):
     """Grant experience points to a player.
 

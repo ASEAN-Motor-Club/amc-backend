@@ -19,6 +19,7 @@ from amc_cogs.tuning_workshop import TuningWorkshopCog
 from amc_cogs.faction import FactionCog
 from amc_cogs.crime_stats import CrimeStatsCog
 from amc_cogs.faction_stats import FactionStatsCog
+from amc_cogs.housing import HousingCog
 
 
 class AMCDiscordBot(commands.Bot):
@@ -57,6 +58,7 @@ class AMCDiscordBot(commands.Bot):
         await self.add_cog(FactionCog(self), guild=guild)
         await self.add_cog(CrimeStatsCog(self), guild=guild)
         await self.add_cog(FactionStatsCog(self), guild=guild)
+        await self.add_cog(HousingCog(self), guild=guild)
         await self.tree.sync(guild=guild)
 
 

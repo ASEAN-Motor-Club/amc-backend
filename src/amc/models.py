@@ -1587,6 +1587,26 @@ class CharacterAFKReminder(models.Model):
 
 
 @final
+class House(models.Model):
+    """Game DataTable row for a housing plot. Populated from PAK extraction."""
+
+    key = models.CharField(
+        max_length=100,
+        unique=True,
+        help_text="DataTable RowName (e.g. GimNyungBeach_01)",
+    )
+    cost = models.PositiveIntegerField(
+        help_text="Base house cost from FMTHouseRow.Cost",
+    )
+
+    class Meta:
+        ordering = ["key"]
+
+    def __str__(self):
+        return f"{self.key} (₱{self.cost:,})"
+
+
+@final
 class HousingLicense(models.Model):
     character = models.ForeignKey(
         Character, on_delete=models.CASCADE, related_name="housing_licenses"

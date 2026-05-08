@@ -1,6 +1,6 @@
 """House event handlers.
 
-Handles: ServerRentExtendHouse
+Handles: ServerRentHouse, ServerRentExtendHouse
 """
 
 from __future__ import annotations
@@ -17,6 +17,17 @@ from amc.models import Delivery, HousingLicense
 from amc_finance.services import record_treasury_rent_income, send_fund_to_player_wallet
 
 logger = logging.getLogger("amc.webhook.handlers.house")
+
+
+@register("ServerRentHouse")
+async def handle_rent(event, player, character, ctx):
+    logger.info(
+        "ServerRentHouse: player=%s character=%s house=%s",
+        player.unique_id,
+        character.guid,
+        event["data"].get("HouseGuid"),
+    )
+    return 0, 0, 0, 0
 
 
 @register("ServerRentExtendHouse")
