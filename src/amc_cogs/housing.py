@@ -22,7 +22,6 @@ from amc_finance.loans import get_player_bank_balance
 from amc_finance.services import (
     record_treasury_rent_income,
     register_player_withdrawal,
-    send_fund_to_player_wallet,
 )
 
 if TYPE_CHECKING:
@@ -355,25 +354,6 @@ class ExtendConfirmView(ui.View):
             await record_treasury_rent_income(
                 self.net_cost, f"House Rent Extend — {self.character.guid}"
             )
-
-        if self.rebate > 0:
-            try:
-                await transfer_money(
-                    self.mod_session,
-                    self.rebate,
-                    "House Rent Rebate",
-                    str(self.player.unique_id),
-                )
-                await send_fund_to_player_wallet(
-                    self.rebate, self.character, "House Rent Rebate"
-                )
-            except Exception:
-                logger.warning(
-                    "Failed to send rent rebate of %d to %s",
-                    self.rebate,
-                    self.character.guid,
-                    exc_info=True,
-                )
 
         embed = discord.Embed(
             title="House Rent Extended",
