@@ -156,17 +156,11 @@ async def _redirect_police_near_wanted(character, player, ctx, action_label):
 
 
 async def _handle_teleport_or_respawn(event, character, ctx):
-    """Send wanted criminals to jail when they teleport via the game.
+    """Log teleport/respawn events and show RP mode popup if applicable.
 
     Fires on ServerTeleportCharacter / ServerTeleportVehicle /
-    ServerRespawnCharacter.
-
-    For wanted players the outcome is:
-      - Teleport to jail (+ activate jail boundary via jailed_until).
-      - Show a popup explaining why.
-      - Wanted record is left active — police must still make a proper arrest.
-
-    For non-wanted players, the event is a no-op (just logged).
+    ServerRespawnCharacter.  All teleports are logged to ServerTeleportLog
+    for audit purposes.  No auto-arrest or other side-effects.
     """
     timestamp = _parse_timestamp(event)
 
@@ -186,39 +180,6 @@ async def _handle_teleport_or_respawn(event, character, ctx):
             "Teleporting is disabled in RP mode.",
             character_guid=character.guid,
         )
-        return 0, 0, 0, 0
-
-    # Only act on actively wanted players
-    try:
-        wanted = await Wanted.objects.aget(
-            character=character, expired_at__isnull=True, wanted_remaining__gt=0
-        )
-    except Wanted.DoesNotExist:
-        return 0, 0, 0, 0
-
-    # Skip police officers
-    is_police = await PoliceSession.objects.filter(
-        character=character, ended_at__isnull=True
-    ).aexists()
-    if is_police:
-        return 0, 0, 0, 0
-
-    logger.info(
-        "Wanted criminal %s triggered %s — sending to jail",
-        character.name,
-        hook_name,
-    )
-
-    from amc.commands.teleport import _auto_arrest_wanted_criminal
-
-    hook_display = hook_name or "teleport"
-    await _auto_arrest_wanted_criminal(
-        wanted,
-        character,
-        character.player,
-        ctx.http_client_mod,
-        reason=f"Arrested for teleporting ({hook_display}) while wanted.",
-    )
 
     return 0, 0, 0, 0
 

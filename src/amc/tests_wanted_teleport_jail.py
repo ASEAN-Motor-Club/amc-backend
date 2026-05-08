@@ -1,11 +1,11 @@
-"""Tests: wanted criminals are arrested (full flow) on any teleport attempt.
+"""Tests: portal auto-arrest + /tp and webhook no-arrest behavior.
 
 Three entry points are tested:
-  1. /tp command (cmd_tp_name)
-  2. Portal zones (_check_pois_and_portals)
-  3. Webhook events (_handle_teleport_or_respawn)
+  1. /tp command (cmd_tp_name) — wanted criminals can teleport freely (no arrest)
+  2. Portal zones (_check_pois_and_portals) — wanted criminals ARE arrested
+  3. Webhook events (_handle_teleport_or_respawn) — no arrest (just logging)
 
-Since the auto-arrest now calls execute_arrest (which lives in faction.py),
+Since portal auto-arrest calls execute_arrest (which lives in faction.py),
 mocks are applied at amc.commands.faction.* — the location where the
 functions are actually looked up at call time.
 
@@ -99,45 +99,7 @@ def _faction_patches():
 
 
 class TpCommandWantedJailTests(TestCase):
-    """Wanted criminals who use /tp get the full arrest, not their destination."""
-
-    async def test_wanted_criminal_auto_arrested(self):
-        """A wanted criminal's /tp triggers a full system arrest."""
-        from amc.command_framework import CommandContext
-        from amc.commands.teleport import cmd_tp_name
-
-        await _make_jail_tp()
-        player, character, _ = await _make_wanted_character()
-
-        ctx = MagicMock(spec=CommandContext)
-        ctx.character = character
-        ctx.player = player
-        ctx.player_info = {"bIsAdmin": False}
-        ctx.http_client_mod = _make_http_client_mod()
-        ctx.reply = AsyncMock()
-
-        mocks = _faction_patches()
-        with patch.multiple("amc.commands.faction", **{k.split("amc.commands.faction.")[1]: v for k, v in mocks.items() if "faction" in k}), \
-             patch("asyncio.sleep", new_callable=AsyncMock), \
-             patch("amc.commands.teleport.get_player_last_vehicle", new_callable=AsyncMock, return_value={"vehicle": None}):
-            await cmd_tp_name(ctx, "someplace")
-
-        mock_tp = mocks["amc.commands.faction.teleport_player"]
-
-        # Teleport went to jail
-        mock_tp.assert_awaited()
-        dest = mock_tp.call_args[0][2]
-        self.assertEqual(dest["X"], JAIL_POINT.x)
-        self.assertEqual(dest["Y"], JAIL_POINT.y)
-        self.assertEqual(dest["Z"], JAIL_POINT.z)
-
-        # Wanted was expired during arrest
-        wanted = await Wanted.objects.aget(character=character)
-        self.assertIsNotNone(wanted.expired_at)
-
-        # Character is jailed
-        await character.arefresh_from_db()
-        self.assertIsNotNone(character.jailed_until)
+    """Wanted criminals can /tp freely — no arrest or block."""
 
     async def test_clean_player_not_arrested(self):
         """A player without a Wanted record can /tp normally — no arrest."""
@@ -172,8 +134,8 @@ class TpCommandWantedJailTests(TestCase):
         await character.arefresh_from_db()
         self.assertIsNone(character.jailed_until)
 
-    async def test_admin_wanted_criminal_can_still_tp(self):
-        """Admins bypass the wanted check — they can always teleport."""
+    async def test_wanted_criminal_can_tp(self):
+        """Wanted criminals can /tp freely — no arrest, goes to destination."""
         from amc.command_framework import CommandContext
         from amc.commands.teleport import cmd_tp_name
 
@@ -187,22 +149,20 @@ class TpCommandWantedJailTests(TestCase):
         ctx = MagicMock(spec=CommandContext)
         ctx.character = character
         ctx.player = player
-        ctx.player_info = {"bIsAdmin": True, "VehicleKey": "None"}
+        ctx.player_info = {"bIsAdmin": False}
         ctx.http_client_mod = _make_http_client_mod()
         ctx.reply = AsyncMock()
 
-        faction_tp_mock = AsyncMock()
-        with patch("amc.commands.faction.teleport_player", faction_tp_mock), \
-             patch("amc.commands.teleport.get_player_last_vehicle", new_callable=AsyncMock, return_value={"vehicle": None}), \
+        with patch("amc.commands.teleport.get_player_last_vehicle", new_callable=AsyncMock, return_value={"vehicle": None}), \
              patch("amc.commands.teleport.teleport_player", new_callable=AsyncMock) as mock_cmd_tp, \
              patch("amc.commands.teleport.PoliceSession") as mock_ps:
             mock_ps.objects.filter.return_value.aexists = AsyncMock(return_value=False)
             await cmd_tp_name(ctx, "hub")
 
-        # Arrest flow NOT triggered — faction teleport_player not called
-        faction_tp_mock.assert_not_awaited()
-        # Admin went directly to destination
+        # Went directly to destination — no arrest
         mock_cmd_tp.assert_awaited_once()
+        dest = mock_cmd_tp.call_args[0][2]
+        self.assertEqual(dest["X"], dest_point.x)
 
         await character.arefresh_from_db()
         self.assertIsNone(character.jailed_until)
@@ -299,8 +259,8 @@ class PortalWantedJailTests(TestCase):
 # ---------------------------------------------------------------------------
 
 
-class WebhookTeleportWantedJailTests(TestCase):
-    """ServerTeleportCharacter / ServerRespawnCharacter auto-arrest wanted criminals."""
+class WebhookTeleportNoArrestTests(TestCase):
+    """Webhook teleport events no longer trigger auto-arrest."""
 
     def _make_event(self, hook="ServerTeleportCharacter"):
         return {
@@ -312,54 +272,10 @@ class WebhookTeleportWantedJailTests(TestCase):
     def _make_ctx(self):
         from amc.webhook_context import EventContext
         ctx = MagicMock(spec=EventContext)
+        ctx.is_rp_mode = False
         ctx.http_client_mod = _make_http_client_mod()
         ctx.http_client = AsyncMock()
         return ctx
-
-    async def _run_and_verify_arrest(self, hook_name):
-        """Helper: run _handle_teleport_or_respawn and verify full arrest happened."""
-        from amc.handlers.teleport import _handle_teleport_or_respawn
-
-        await _make_jail_tp()
-        player, character, _ = await _make_wanted_character()
-        event = self._make_event(hook_name)
-        ctx = self._make_ctx()
-
-        faction_tp_mock = AsyncMock()
-        with patch("amc.commands.faction.teleport_player", faction_tp_mock), \
-             patch("amc.commands.faction.force_exit_vehicle", new_callable=AsyncMock), \
-             patch("amc.commands.faction.transfer_money", new_callable=AsyncMock), \
-             patch("amc.commands.faction.record_treasury_confiscation_income", new_callable=AsyncMock), \
-             patch("amc.commands.faction.send_fund_to_player_wallet", new_callable=AsyncMock), \
-             patch("amc.commands.faction.refresh_player_name", new_callable=AsyncMock), \
-             patch("amc.commands.faction.show_popup", new_callable=AsyncMock), \
-             patch("amc.commands.faction.get_active_police_characters", _faction_patches()["amc.commands.faction.get_active_police_characters"]), \
-             patch("asyncio.sleep", new_callable=AsyncMock):
-            result = await _handle_teleport_or_respawn(event, character, ctx)
-
-        self.assertEqual(result, (0, 0, 0, 0))
-
-        # Teleported to jail
-        faction_tp_mock.assert_awaited()
-        dest = faction_tp_mock.call_args[0][2]
-        self.assertEqual(dest["X"], JAIL_POINT.x)
-
-        # Wanted expired
-        wanted = await Wanted.objects.aget(character=character)
-        self.assertIsNotNone(wanted.expired_at)
-
-        # Character jailed
-        await character.arefresh_from_db()
-        self.assertIsNotNone(character.jailed_until)
-
-    async def test_server_teleport_character_arrests_criminal(self):
-        await self._run_and_verify_arrest("ServerTeleportCharacter")
-
-    async def test_server_respawn_character_arrests_criminal(self):
-        await self._run_and_verify_arrest("ServerRespawnCharacter")
-
-    async def test_server_teleport_vehicle_arrests_criminal(self):
-        await self._run_and_verify_arrest("ServerTeleportVehicle")
 
     async def test_clean_player_not_arrested_on_teleport_event(self):
         from amc.handlers.teleport import _handle_teleport_or_respawn
@@ -395,3 +311,28 @@ class WebhookTeleportWantedJailTests(TestCase):
             await _handle_teleport_or_respawn(event, character, ctx)
 
         faction_tp_mock.assert_not_awaited()
+
+    async def test_wanted_player_not_arrested_on_teleport_event(self):
+        """Active wanted players are NOT arrested by webhook teleport events."""
+        from amc.handlers.teleport import _handle_teleport_or_respawn
+
+        player, character, wanted = await _make_wanted_character()
+        event = self._make_event("ServerTeleportCharacter")
+        ctx = self._make_ctx()
+
+        faction_tp_mock = AsyncMock()
+        with patch("amc.commands.faction.teleport_player", faction_tp_mock):
+            result = await _handle_teleport_or_respawn(event, character, ctx)
+
+        self.assertEqual(result, (0, 0, 0, 0))
+
+        # No arrest — faction teleport_player not called
+        faction_tp_mock.assert_not_awaited()
+
+        # Wanted not expired
+        await wanted.arefresh_from_db()
+        self.assertIsNone(wanted.expired_at)
+
+        # Character not jailed
+        await character.arefresh_from_db()
+        self.assertIsNone(character.jailed_until)

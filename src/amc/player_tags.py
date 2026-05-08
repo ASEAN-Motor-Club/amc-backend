@@ -60,7 +60,7 @@ def build_display_name(
     """Build the definitive display name with a single compact tag.
 
     Tag format: [RMP1*****C1G3] BaseName[ABV]  (order: R, M, P, stars, C, G; guild suffix at end)
-      R = RP mode toggled on
+      R = RP mode toggled on OR wanted (forced onto all wanted players)
       M = Modded vehicle parts
       P1 = Police level (active session)
       ***** = Wanted level (1–5 stars, based on wanted_remaining heat)
@@ -81,7 +81,7 @@ def build_display_name(
     clean_name = strip_all_tags(base_name)
     tag = ""
 
-    if rp_mode:
+    if rp_mode or wanted_stars > 0:
         tag += "R"
 
     if has_custom_parts:

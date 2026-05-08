@@ -156,35 +156,35 @@ def test_build_display_name_police_level_10():
 def test_build_display_name_wanted_only():
     assert (
         build_display_name("PlayerOne", wanted_stars=5)
-        == "[*****] PlayerOne"
+        == "[R*****] PlayerOne"
     )
 
 
 def test_build_display_name_wanted_w1():
     assert (
         build_display_name("PlayerOne", wanted_stars=1)
-        == "[*] PlayerOne"
+        == "[R*] PlayerOne"
     )
 
 
 def test_build_display_name_wanted_w3():
     assert (
         build_display_name("PlayerOne", wanted_stars=3)
-        == "[***] PlayerOne"
+        == "[R***] PlayerOne"
     )
 
 
 def test_build_display_name_wanted_and_crim():
     assert (
         build_display_name("PlayerOne", criminal_level=3, wanted_stars=4)
-        == "[****C3] PlayerOne"
+        == "[R****C3] PlayerOne"
     )
 
 
 def test_build_display_name_wanted_and_mods():
     assert (
         build_display_name("PlayerOne", has_custom_parts=True, wanted_stars=2)
-        == "[M**] PlayerOne"
+        == "[RM**] PlayerOne"
     )
 
 
@@ -192,7 +192,7 @@ def test_build_display_name_wanted_with_police():
     """Wanted tag shows even when police is active."""
     assert (
         build_display_name("PlayerOne", police_level=1, wanted_stars=5)
-        == "[P1*****] PlayerOne"
+        == "[RP1*****] PlayerOne"
     )
 
 
@@ -200,7 +200,7 @@ def test_build_display_name_wanted_with_gov():
     """Wanted tag shows even when gov is active."""
     assert (
         build_display_name("PlayerOne", gov_level=3, wanted_stars=5)
-        == "[*****G3] PlayerOne"
+        == "[R*****G3] PlayerOne"
     )
 
 
@@ -208,7 +208,7 @@ def test_build_display_name_wanted_with_police_and_gov():
     """Wanted tag shows even when both police and gov are active."""
     assert (
         build_display_name("PlayerOne", police_level=1, gov_level=3, wanted_stars=5)
-        == "[P1*****G3] PlayerOne"
+        == "[RP1*****G3] PlayerOne"
     )
 
 
@@ -218,7 +218,7 @@ def test_build_display_name_wanted_with_crim_police_gov():
         build_display_name(
             "PlayerOne", criminal_level=3, police_level=1, gov_level=3, wanted_stars=5
         )
-        == "[P1*****G3] PlayerOne"
+        == "[RP1*****G3] PlayerOne"
     )
 
 
@@ -227,7 +227,7 @@ def test_build_display_name_wanted_with_crim_mods():
         build_display_name(
             "PlayerOne", criminal_level=1, has_custom_parts=True, wanted_stars=3
         )
-        == "[M***C1] PlayerOne"
+        == "[RM***C1] PlayerOne"
     )
 
 
