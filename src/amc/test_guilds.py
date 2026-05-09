@@ -1144,6 +1144,9 @@ class CheckGuildPassengerTests(TestCase):
 
 @patch("amc.webhook.get_rp_mode", new_callable=AsyncMock)
 @patch("amc.webhook.get_treasury_fund_balance", new_callable=AsyncMock)
+@patch("amc_finance.services.send_fund_to_player_wallet", new_callable=AsyncMock)
+@patch("amc_finance.services.check_treasury_floor", new_callable=AsyncMock)
+@patch("amc.handlers.cargo.transfer_money", new_callable=AsyncMock)
 class CargoGuildBonusIntegrationTests(TestCase):
     """Integration tests for guild bonus applied in cargo handler."""
 
@@ -1190,9 +1193,10 @@ class CargoGuildBonusIntegrationTests(TestCase):
             },
         }
 
-    async def test_bonus_applied_to_payment(self, mock_treasury, mock_rp):
+    async def test_bonus_applied_to_payment(self, mock_transfer, mock_floor, mock_wallet, mock_treasury, mock_rp):
         mock_rp.return_value = False
         mock_treasury.return_value = 100_000
+        mock_floor.return_value = True
         player, character = await self._setup()
         await self._activate_guild_session(character, {"bonus_pct": 20})
 
@@ -1200,6 +1204,7 @@ class CargoGuildBonusIntegrationTests(TestCase):
             self._cargo_event(character, player, payment=10_000),
             player,
             character,
+            http_client_mod=AsyncMock(),
         )
 
         log = await ServerCargoArrivedLog.objects.afirst()
@@ -1207,9 +1212,10 @@ class CargoGuildBonusIntegrationTests(TestCase):
         self.assertEqual(base_pay, 12_000)
         self.assertIsNotNone(log.guild_session_id)
 
-    async def test_bonus_not_applied_when_no_requirement(self, mock_treasury, mock_rp):
+    async def test_bonus_not_applied_when_no_requirement(self, mock_transfer, mock_floor, mock_wallet, mock_treasury, mock_rp):
         mock_rp.return_value = False
         mock_treasury.return_value = 100_000
+        mock_floor.return_value = True
         player, character = await self._setup()
         await self._activate_guild_session(character)
 
@@ -1217,15 +1223,17 @@ class CargoGuildBonusIntegrationTests(TestCase):
             self._cargo_event(character, player, payment=10_000),
             player,
             character,
+            http_client_mod=AsyncMock(),
         )
 
         log = await ServerCargoArrivedLog.objects.afirst()
         self.assertEqual(log.payment, 10_000)
         self.assertIsNone(log.guild_session_id)
 
-    async def test_bonus_not_applied_when_filter_fails(self, mock_treasury, mock_rp):
+    async def test_bonus_not_applied_when_filter_fails(self, mock_transfer, mock_floor, mock_wallet, mock_treasury, mock_rp):
         mock_rp.return_value = False
         mock_treasury.return_value = 100_000
+        mock_floor.return_value = True
         player, character = await self._setup()
         await self._activate_guild_session(
             character, {"allowed_cargo_keys": ["Fuel"], "bonus_pct": 20}
@@ -1235,15 +1243,17 @@ class CargoGuildBonusIntegrationTests(TestCase):
             self._cargo_event(character, player, cargo_key="SmallBox", payment=10_000),
             player,
             character,
+            http_client_mod=AsyncMock(),
         )
 
         log = await ServerCargoArrivedLog.objects.afirst()
         self.assertEqual(log.payment, 10_000)
         self.assertIsNone(log.guild_session_id)
 
-    async def test_bonus_on_multiple_cargos(self, mock_treasury, mock_rp):
+    async def test_bonus_on_multiple_cargos(self, mock_transfer, mock_floor, mock_wallet, mock_treasury, mock_rp):
         mock_rp.return_value = False
         mock_treasury.return_value = 100_000
+        mock_floor.return_value = True
         player, character = await self._setup()
         await self._activate_guild_session(character, {"bonus_pct": 10})
 
@@ -1274,7 +1284,7 @@ class CargoGuildBonusIntegrationTests(TestCase):
             },
         }
 
-        base_pay, _, _, _ = await process_event(event, player, character)
+        base_pay, _, _, _ = await process_event(event, player, character, http_client_mod=AsyncMock())
 
         logs = [log async for log in ServerCargoArrivedLog.objects.all()]
         self.assertEqual(len(logs), 2)
@@ -1283,9 +1293,10 @@ class CargoGuildBonusIntegrationTests(TestCase):
             self.assertIsNotNone(log.guild_session_id)
         self.assertEqual(base_pay, 11_000)
 
-    async def test_damage_filter_blocks_bonus(self, mock_treasury, mock_rp):
+    async def test_damage_filter_blocks_bonus(self, mock_transfer, mock_floor, mock_wallet, mock_treasury, mock_rp):
         mock_rp.return_value = False
         mock_treasury.return_value = 100_000
+        mock_floor.return_value = True
         player, character = await self._setup()
         await self._activate_guild_session(
             character, {"max_damage": 0.3, "bonus_pct": 20}
@@ -1295,6 +1306,7 @@ class CargoGuildBonusIntegrationTests(TestCase):
             self._cargo_event(character, player, payment=10_000, damage=0.5),
             player,
             character,
+            http_client_mod=AsyncMock(),
         )
 
         log = await ServerCargoArrivedLog.objects.afirst()
@@ -1304,6 +1316,9 @@ class CargoGuildBonusIntegrationTests(TestCase):
 
 @patch("amc.webhook.get_rp_mode", new_callable=AsyncMock)
 @patch("amc.webhook.get_treasury_fund_balance", new_callable=AsyncMock)
+@patch("amc_finance.services.send_fund_to_player_wallet", new_callable=AsyncMock)
+@patch("amc_finance.services.check_treasury_floor", new_callable=AsyncMock)
+@patch("amc.handlers.passenger.transfer_money", new_callable=AsyncMock)
 class PassengerGuildBonusIntegrationTests(TestCase):
     """Integration tests for guild bonus applied in passenger handler."""
 
@@ -1342,9 +1357,10 @@ class PassengerGuildBonusIntegrationTests(TestCase):
             },
         }
 
-    async def test_bonus_applied_to_passenger_payment(self, mock_treasury, mock_rp):
+    async def test_bonus_applied_to_passenger_payment(self, mock_transfer, mock_floor, mock_wallet, mock_treasury, mock_rp):
         mock_rp.return_value = False
         mock_treasury.return_value = 100_000
+        mock_floor.return_value = True
         player, character = await self._setup()
         await self._activate_guild_session(character, {"bonus_pct": 15})
 
@@ -1352,6 +1368,7 @@ class PassengerGuildBonusIntegrationTests(TestCase):
             self._passenger_event(character, player, payment=4000),
             player,
             character,
+            http_client_mod=AsyncMock(),
         )
 
         log = await ServerPassengerArrivedLog.objects.afirst()
@@ -1359,9 +1376,10 @@ class PassengerGuildBonusIntegrationTests(TestCase):
         self.assertEqual(base_pay, 4600)
         self.assertIsNotNone(log.guild_session_id)
 
-    async def test_bonus_not_applied_when_no_requirement(self, mock_treasury, mock_rp):
+    async def test_bonus_not_applied_when_no_requirement(self, mock_transfer, mock_floor, mock_wallet, mock_treasury, mock_rp):
         mock_rp.return_value = False
         mock_treasury.return_value = 100_000
+        mock_floor.return_value = True
         player, character = await self._setup()
         await self._activate_guild_session(character)
 
@@ -1369,15 +1387,17 @@ class PassengerGuildBonusIntegrationTests(TestCase):
             self._passenger_event(character, player, payment=4000),
             player,
             character,
+            http_client_mod=AsyncMock(),
         )
 
         log = await ServerPassengerArrivedLog.objects.afirst()
         self.assertEqual(log.payment, 4000)
         self.assertIsNone(log.guild_session_id)
 
-    async def test_bonus_not_applied_when_type_filter_fails(self, mock_treasury, mock_rp):
+    async def test_bonus_not_applied_when_type_filter_fails(self, mock_transfer, mock_floor, mock_wallet, mock_treasury, mock_rp):
         mock_rp.return_value = False
         mock_treasury.return_value = 100_000
+        mock_floor.return_value = True
         player, character = await self._setup()
         await self._activate_guild_session(
             character, {"allowed_passenger_types": [3], "bonus_pct": 15}
@@ -1387,15 +1407,17 @@ class PassengerGuildBonusIntegrationTests(TestCase):
             self._passenger_event(character, player, passenger_type=2, payment=4000),
             player,
             character,
+            http_client_mod=AsyncMock(),
         )
 
         log = await ServerPassengerArrivedLog.objects.afirst()
         self.assertEqual(log.payment, 4000)
         self.assertIsNone(log.guild_session_id)
 
-    async def test_bonus_applied_when_type_matches(self, mock_treasury, mock_rp):
+    async def test_bonus_applied_when_type_matches(self, mock_transfer, mock_floor, mock_wallet, mock_treasury, mock_rp):
         mock_rp.return_value = False
         mock_treasury.return_value = 100_000
+        mock_floor.return_value = True
         player, character = await self._setup()
         await self._activate_guild_session(
             character, {"allowed_passenger_types": [2], "bonus_pct": 10}
@@ -1405,16 +1427,18 @@ class PassengerGuildBonusIntegrationTests(TestCase):
             self._passenger_event(character, player, passenger_type=2, payment=5000),
             player,
             character,
+            http_client_mod=AsyncMock(),
         )
 
         log = await ServerPassengerArrivedLog.objects.afirst()
         self.assertEqual(log.payment, 5500)
         self.assertIsNotNone(log.guild_session_id)
 
-    async def test_bonus_applied_after_taxi_bonus(self, mock_treasury, mock_rp):
+    async def test_bonus_applied_after_taxi_bonus(self, mock_transfer, mock_floor, mock_wallet, mock_treasury, mock_rp):
         """Guild bonus applies to the already-adjusted payment (after taxi comfort bonus)."""
         mock_rp.return_value = False
         mock_treasury.return_value = 100_000
+        mock_floor.return_value = True
         player, character = await self._setup()
         await self._activate_guild_session(character, {"bonus_pct": 10})
 
@@ -1436,7 +1460,7 @@ class PassengerGuildBonusIntegrationTests(TestCase):
             },
         }
 
-        base_pay, _, _, _ = await process_event(event, player, character)
+        base_pay, _, _, _ = await process_event(event, player, character, http_client_mod=AsyncMock())
 
         log = await ServerPassengerArrivedLog.objects.afirst()
         # Taxi bonus: 1000 + 1000 * 3 * 0.2 = 1600

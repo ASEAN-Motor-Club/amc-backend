@@ -35,6 +35,7 @@ from amc.mod_server import (
     get_player_last_vehicle,
     get_player_last_vehicle_parts,
     show_popup,
+    transfer_money,
 )
 from amc.fraud_detection import validate_cargo_payment
 from amc.pipeline.discord import post_discord_delivery_embed
@@ -128,16 +129,47 @@ async def handle_cargo_arrived(event, player, character, ctx):
     from amc.guilds import check_guild_cargo
 
     guild_bonus_total = 0
+    guild_session_bonuses: list[tuple[object, int]] = []
     for log in logs:
         session, bonus = await check_guild_cargo(
             character, log.cargo_key, log.payment, log.damage or 0
         )
         if session:
             log.guild_session = session
-            log.payment += bonus
+            guild_session_bonuses.append((log, bonus))
             guild_bonus_total += bonus
+
+    # Fund the guild bonus from the treasury.  Check the floor first so
+    # we never add money to the wallet that we can't account for.
+    funded = False
+    if guild_bonus_total > 0 and ctx.http_client_mod:
+        from amc_finance.services import (
+            check_treasury_floor,
+            send_fund_to_player_wallet,
+        )
+
+        if await check_treasury_floor(int(guild_bonus_total)):
+            funded = True
+            await transfer_money(
+                ctx.http_client_mod,
+                int(guild_bonus_total),
+                "Guild Bonus",
+                str(character.player.unique_id),
+            )
+            await send_fund_to_player_wallet(
+                int(guild_bonus_total),
+                character,
+                "Guild Cargo Bonus",
+            )
+
+    # Apply bonuses to log payments only when treasury-funded.
+    if funded:
+        for log, bonus in guild_session_bonuses:
+            log.payment += bonus
     if guild_bonus_total > 0:
-        await ServerCargoArrivedLog.objects.abulk_update(logs, ["guild_session", "payment"])
+        await ServerCargoArrivedLog.objects.abulk_update(
+            logs, ["guild_session", "payment"]
+        )
 
     for log in logs:
         if log.guild_session:
