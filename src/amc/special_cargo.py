@@ -20,7 +20,7 @@ from django.core.cache import cache
 from django.utils import timezone
 
 from amc.game_server import announce
-from amc.mod_server import transfer_money
+from amc.mod_server import show_popup, transfer_money
 from amc.models import Confiscation, CriminalRecord, ServerCargoArrivedLog
 from amc.player_tags import refresh_player_name
 from amc_finance.services import record_treasury_expense
@@ -252,14 +252,28 @@ async def handle_money_cargo(
         await character.asave(update_fields=["criminal_laundered_total"])
         await character.arefresh_from_db(fields=["criminal_laundered_total"])
 
-    # --- Zero out wallet payment for modded vehicle deliveries ---
-    if is_modded and money_payment > 0 and http_client_mod:
+    # --- Zero out wallet payment for modded vehicle or invalid delivery (DeliveryId == -1) ---
+    delivery_ids = [log.data.get("Net_DeliveryId") for log in logs if log.data]
+    is_invalid_delivery = any(did == -1 for did in delivery_ids)
+    if (is_modded or is_invalid_delivery) and money_payment > 0 and http_client_mod:
+        message = "Invalid Delivery" if is_invalid_delivery else "Modded Vehicle Confiscation"
         await transfer_money(
             http_client_mod,
             int(-money_payment),
-            "Modded Vehicle Confiscation",
+            message,
             str(character.player.unique_id),
         )
+        if is_invalid_delivery:
+            asyncio.create_task(
+                show_popup(
+                    http_client_mod,
+                    "Your illicit delivery payment was nullified. "
+                    "The entire delivery — from pickup to destination — must be completed "
+                    "while fully connected to the server.",
+                    character_guid=character.guid,
+                    player_id=str(character.player.unique_id),
+                )
+            )
 
     # --- Criminal record (refresh tag if newly created) ---
     await ensure_criminal_record(character, reason="Money delivery", http_client_mod=http_client_mod)
@@ -320,14 +334,28 @@ async def handle_contraband_cargo(
         await character.asave(update_fields=["criminal_laundered_total"])
         await character.arefresh_from_db(fields=["criminal_laundered_total"])
 
-    # --- Zero out wallet payment for modded vehicle deliveries ---
-    if is_modded and delivery_payment > 0 and http_client_mod:
+    # --- Zero out wallet payment for modded vehicle or invalid delivery (DeliveryId == -1) ---
+    delivery_ids = [log.data.get("Net_DeliveryId") for log in logs if log.data]
+    is_invalid_delivery = any(did == -1 for did in delivery_ids)
+    if (is_modded or is_invalid_delivery) and delivery_payment > 0 and http_client_mod:
+        message = "Invalid Delivery" if is_invalid_delivery else "Modded Vehicle Confiscation"
         await transfer_money(
             http_client_mod,
             int(-delivery_payment),
-            "Modded Vehicle Confiscation",
+            message,
             str(character.player.unique_id),
         )
+        if is_invalid_delivery:
+            asyncio.create_task(
+                show_popup(
+                    http_client_mod,
+                    "Your illicit delivery payment was nullified. "
+                    "The entire delivery — from pickup to destination — must be completed "
+                    "while fully connected to the server.",
+                    character_guid=character.guid,
+                    player_id=str(character.player.unique_id),
+                )
+            )
 
     # --- Criminal record (refresh tag if newly created) ---
     cargo_key = logs[0].cargo_key if logs else "Contraband"

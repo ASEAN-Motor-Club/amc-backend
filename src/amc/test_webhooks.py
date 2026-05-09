@@ -716,6 +716,76 @@ class ProcessEventTests(TestCase):
         mock_show_popup.assert_called_once()
         self.assertIn("profits were zeroed out", mock_show_popup.call_args[0][1])
 
+    @patch("amc.special_cargo.cache")
+    @patch("amc.mod_server.send_system_message", new_callable=AsyncMock)
+    @patch("amc.special_cargo.refresh_player_name", new_callable=AsyncMock)
+    @patch("amc.handlers.cargo.show_popup", new_callable=AsyncMock)
+    @patch("amc.special_cargo.show_popup", new_callable=AsyncMock)
+    @patch("amc.special_cargo.transfer_money", new_callable=AsyncMock)
+    @patch("amc.handlers.cargo.get_player_last_vehicle_parts", new_callable=AsyncMock)
+    @patch("amc.handlers.cargo.get_player_last_vehicle", new_callable=AsyncMock)
+    async def test_cargo_arrived_illicit_delivery_id_neg_one(
+        self,
+        mock_get_last_vehicle,
+        mock_get_last_parts,
+        mock_transfer,
+        mock_sc_show_popup,
+        mock_cargo_show_popup,
+        mock_refresh,
+        mock_send_sys_msg,
+        mock_cache,
+        mock_get_treasury,
+        mock_get_rp_mode,
+    ):
+        """Illicit cargo with DeliveryId == -1 should be nullified via transfer_money."""
+        mock_get_rp_mode.return_value = False
+        mock_get_treasury.return_value = 100_000
+        mock_get_last_vehicle.return_value = {"vehicle": None}
+        mock_get_last_parts.return_value = {"parts": []}
+        mock_cache.aget = AsyncMock(return_value=None)
+        mock_cache.aset = AsyncMock()
+
+        player = await sync_to_async(PlayerFactory)()
+        character = await sync_to_async(CharacterFactory)(player=player)
+        await CharacterLocation.objects.acreate(
+            character=character, location=Point(0, 0, 0), vehicle_key="TestVehicle"
+        )
+        await DeliveryPoint.objects.acreate(guid="1", name="mine", coord=Point(0, 0, 0))
+        await DeliveryPoint.objects.acreate(
+            guid="2", name="factory", coord=Point(1000, 1000, 0)
+        )
+
+        event = {
+            "hook": "ServerCargoArrived",
+            "timestamp": int(time.time()),
+            "data": {
+                "Cargos": [
+                    {
+                        "Net_CargoKey": "Money",
+                        "Net_Payment": 10_000,
+                        "Net_Weight": 100.0,
+                        "Net_Damage": 0.0,
+                        "Net_DeliveryId": -1,
+                        "Net_SenderAbsoluteLocation": {"X": 0, "Y": 0, "Z": 0},
+                        "Net_DestinationLocation": {"X": 1000, "Y": 1000, "Z": 0},
+                    }
+                ],
+                "PlayerId": str(player.unique_id),
+                "CharacterGuid": str(character.guid),
+            },
+        }
+        http_client_mod = MagicMock()
+        await process_event(event, player, character, http_client_mod=http_client_mod)
+
+        mock_transfer.assert_any_call(
+            http_client_mod,
+            -10_000,
+            "Invalid Delivery",
+            str(player.unique_id),
+        )
+        mock_sc_show_popup.assert_called_once()
+        self.assertIn("nullified", mock_sc_show_popup.call_args[0][1])
+
     @patch("amc.handlers.smuggling.ensure_criminal_record", new_callable=AsyncMock)
     @patch("amc.mod_server.send_system_message", new_callable=AsyncMock)
     @patch("amc.player_tags.refresh_player_name", new_callable=AsyncMock)
