@@ -47,14 +47,20 @@ def decrypt_file(path: str) -> bytes:
     return decrypt(data)
 
 
-def get_world():
+def get_world() -> dict:
+    """
+    Decrypt and return the MotorTown world save dict.
+
+    See `.agents/skills/get_world.md` for the full structure.
+    """
     path = os.path.join(SAVED_PATH, "SaveGames/Worlds/0/Island.world")
     decrypted_bytes = decrypt_file(path)
     decrypted_str = decrypted_bytes.decode("utf-8")
     return json.loads(decrypted_str)["world"]
 
 
-def get_world_last_modified():
+def get_world_last_modified() -> float:
+    """Return the mtime (seconds since epoch) of the world save file."""
     path = os.path.join(SAVED_PATH, "SaveGames/Worlds/0/Island.world")
     return os.path.getmtime(path)
 
