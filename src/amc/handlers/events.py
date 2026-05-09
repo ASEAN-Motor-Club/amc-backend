@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import time
 
 import discord
 from django.conf import settings
@@ -35,6 +36,21 @@ from amc.models import (
 from amc.utils import delay
 
 logger = logging.getLogger("amc.webhook.handlers.events")
+
+# Throttle embed updates: at most one per event every 5 seconds.
+# Prevents Discord rate-limit issues during busy races with many section passes.
+_embed_update_times: dict[int, float] = {}
+_EMBED_UPDATE_COOLDOWN = 5.0  # seconds
+
+
+async def _throttled_update_embed(game_event_id: int, discord_client, force: bool = False):
+    """Update embed with per-event rate limiting. force=True bypasses cooldown."""
+    now = time.monotonic()
+    last = _embed_update_times.get(game_event_id, 0)
+    if not force and (now - last) < _EMBED_UPDATE_COOLDOWN:
+        return
+    _embed_update_times[game_event_id] = now
+    await _update_discord_event_embed(game_event_id, discord_client)
 
 
 # ---------------------------------------------------------------------------
@@ -320,6 +336,12 @@ async def handle_add_event(event, player, character, ctx):
     for player_info in event_data.get("Players", []):
         await _upsert_game_event_character(game_event, player_info)
 
+    # Update Discord embed if one already exists for this event
+    if game_event.discord_message_id:
+        asyncio.create_task(
+            _throttled_update_embed(game_event.pk, ctx.discord_client, force=True)
+        )
+
     return 0, 0, 0, 0
 
 
@@ -339,6 +361,12 @@ async def handle_change_event_state(event, player, character, ctx):
     if transition and transition[1] == 3:
         asyncio.create_task(
             delay(_reward_event_exp(game_event.pk, ctx.http_client_mod), 10)
+        )
+
+    # Update Discord embed on any state transition (force=True to bypass throttle)
+    if transition:
+        asyncio.create_task(
+            _throttled_update_embed(game_event.pk, ctx.discord_client, force=True)
         )
 
     return 0, 0, 0, 0
@@ -408,6 +436,11 @@ async def handle_passed_race_section(event, player, character, ctx):
             await GameEventCharacter.objects.filter(pk=game_event_char.pk).aupdate(
                 first_section_total_time_seconds=0
             )
+
+    # Update Discord embed to reflect section progress (throttled)
+    asyncio.create_task(
+        _throttled_update_embed(game_event.pk, ctx.discord_client)
+    )
 
     return 0, 0, 0, 0
 
