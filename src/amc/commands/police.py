@@ -170,7 +170,7 @@ async def cmd_police(ctx: CommandContext):
 
 
 @registry.register(
-    "/setwanted",
+    ["/setwanted", '/sw'],
     description=gettext_lazy("Set a player as wanted (police only)"),
     category="Faction",
 )
