@@ -28,7 +28,6 @@ from amc.special_cargo import (
     ILLICIT_CARGO_KEYS,
     accumulate_illicit_delivery,
     link_delivery_to_criminal_record,
-    should_trigger_wanted,
 )
 from amc.mod_detection import detect_custom_parts, POLICE_DUTY_WHITELIST
 from amc.mod_server import (
@@ -283,14 +282,16 @@ async def handle_cargo_arrived(event, player, character, ctx):
             delivery_amount = payment * quantity
             # Accumulate within the debounce window so splitting across multiple
             # small deliveries (~5 s apart) is treated the same as one big one.
-            accumulated_amount = await accumulate_illicit_delivery(
+            await accumulate_illicit_delivery(
                 character.guid, delivery_amount
             )
             # Check if already wanted (always refresh) or roll probability
             already_wanted = await Wanted.objects.filter(
                 character=character, expired_at__isnull=True
             ).aexists()
-            if already_wanted or should_trigger_wanted(accumulated_amount):
+            # DEPRECATED: random wanted trigger — may be restored in the future
+            # if already_wanted or should_trigger_wanted(accumulated_amount):
+            if already_wanted:
                 # Bounty (Wanted.amount) starts at 0 — it only grows from police
                 # proximity during chase, tracked in tick_wanted_countdown.
                 # Delivery payments are confiscated via CriminalRecord.confiscatable_amount.

@@ -286,22 +286,28 @@ async def _reward_event_exp(game_event_id: int, http_client_mod):
 
 async def _update_discord_event_embed(game_event_id: int, discord_client):
     if discord_client is None:
+        logger.debug("_update_discord_event_embed: discord_client is None, skipping")
         return
 
     channel = discord_client.get_channel(settings.DISCORD_EVENTS_CHANNEL_ID)
     if channel is None:
+        logger.debug("_update_discord_event_embed: channel not found, skipping")
         return
 
-    game_event = await (
-        GameEvent.objects.select_related("race_setup", "scheduled_event")
-        .prefetch_related(
-            Prefetch(
-                "participants",
-                queryset=GameEventCharacter.objects.select_related("character"),
+    try:
+        game_event = await (
+            GameEvent.objects.select_related("race_setup", "scheduled_event")
+            .prefetch_related(
+                Prefetch(
+                    "participants",
+                    queryset=GameEventCharacter.objects.select_related("character"),
+                )
             )
+            .aget(pk=game_event_id)
         )
-        .aget(pk=game_event_id)
-    )
+    except GameEvent.DoesNotExist:
+        logger.warning("_update_discord_event_embed: GameEvent %s not found", game_event_id)
+        return
 
     if game_event.discord_message_id is None:
         return
@@ -312,8 +318,20 @@ async def _update_discord_event_embed(game_event_id: int, discord_client):
         try:
             message = await channel.fetch_message(game_event.discord_message_id)
             await message.edit(content="", embed=embed)
+            logger.info(
+                "Updated Discord embed for event %s (state=%s)",
+                game_event.name, game_event.state,
+            )
         except discord.NotFound:
-            pass
+            logger.warning(
+                "Discord message %s not found for event %s",
+                game_event.discord_message_id, game_event.name,
+            )
+        except Exception:
+            logger.exception(
+                "Failed to edit Discord embed for event %s (msg=%s)",
+                game_event.name, game_event.discord_message_id,
+            )
 
     asyncio.run_coroutine_threadsafe(_edit_embed(), discord_client.loop)
 
@@ -353,6 +371,11 @@ async def handle_change_event_state(event, player, character, ctx):
         return 0, 0, 0, 0
 
     game_event, transition = await _upsert_game_event(event_data)
+
+    logger.info(
+        "ServerChangeEventState: guid=%s state=%s transition=%s",
+        event_data.get("EventGuid"), game_event.state, transition,
+    )
 
     # Process all players
     for player_info in event_data.get("Players", []):

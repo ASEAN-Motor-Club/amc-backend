@@ -87,15 +87,16 @@ def build_display_name(
     if has_custom_parts:
         tag += "M"
 
-    if police_level > 0:
-        tag += f"P{police_level}"
+    # DEPRECATED: P and C tags — may be restored in the future
+    # if police_level > 0:
+    #     tag += f"P{police_level}"
 
     if wanted_stars > 0:
         tag += "*" * wanted_stars
 
-    # C is suppressed when police is active
-    if criminal_level > 0 and police_level == 0:
-        tag += f"C{criminal_level}"
+    # DEPRECATED: P and C tags — may be restored in the future
+    # if criminal_level > 0 and police_level == 0:
+    #     tag += f"C{criminal_level}"
 
     if gov_level > 0:
         tag += f"G{gov_level}"
@@ -139,19 +140,20 @@ async def refresh_player_name(
 
         gov_level = calculate_gov_level(character.gov_employee_contributions)
 
-    # Determine CRIM state
-    from amc.models import CriminalRecord
-
-    has_criminal_record = await CriminalRecord.objects.filter(
-        character=character, cleared_at__isnull=True
-    ).aexists()
-
-    # Compute criminal level from cumulative laundered total
+    # DEPRECATED: C tag — may be restored in the future
+    # from amc.models import CriminalRecord
+    #
+    # has_criminal_record = await CriminalRecord.objects.filter(
+    #     character=character, cleared_at__isnull=True
+    # ).aexists()
+    #
+    # # Compute criminal level from cumulative laundered total
+    # criminal_level = 0
+    # if has_criminal_record:
+    #     from amc.special_cargo import calculate_criminal_level
+    #
+    #     criminal_level = calculate_criminal_level(character.criminal_laundered_total)
     criminal_level = 0
-    if has_criminal_record:
-        from amc.special_cargo import calculate_criminal_level
-
-        criminal_level = calculate_criminal_level(character.criminal_laundered_total)
 
     # Determine WANTED state (W-level based on wanted_remaining heat)
     from amc.models import Wanted
@@ -168,12 +170,13 @@ async def refresh_player_name(
     except Exception:
         pass
 
-    # Determine POLICE state
-    from amc.police import is_police as check_police, calculate_police_level
-
+    # DEPRECATED: P tag — may be restored in the future
+    # from amc.police import is_police as check_police, calculate_police_level
+    #
+    # police_level = 0
+    # if await check_police(character):
+    #     police_level = calculate_police_level(character.police_confiscated_total)
     police_level = 0
-    if await check_police(character):
-        police_level = calculate_police_level(character.police_confiscated_total)
 
     # Determine GUILD state
     from amc.models import GuildSession

@@ -173,6 +173,7 @@ async def cmd_police(ctx: CommandContext):
     ["/setwanted", '/sw'],
     description=gettext_lazy("Set a player as wanted (police only)"),
     category="Faction",
+    deprecated=True,
 )
 async def cmd_setwanted(ctx: CommandContext, target_player_name: str):
     from amc.models import CriminalRecord
