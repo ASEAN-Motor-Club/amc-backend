@@ -108,6 +108,29 @@ class CharacterSelect(ui.Select):
 
         rent_cost = int(cost * ratio)
 
+        lookback_days = settings.RENT_REBATE_LOOKBACK_DAYS
+        cutoff = timezone.now() - timedelta(days=lookback_days)
+        total_earnings = (
+            await Delivery.objects.filter(
+                character=character, timestamp__gte=cutoff
+            ).aaggregate(total=Sum(F("payment") + F("subsidy")))
+        )["total"] or 0
+
+        licenses = HousingLicense.objects.filter(character=character)
+        exact = licenses.filter(house_key=house_guid)
+        general = licenses.filter(house_key__isnull=True)
+        license = await exact.order_by("-rebate_pct").afirst()
+        if license is None:
+            license = await general.order_by("-rebate_pct").afirst()
+
+        if license:
+            effective_cost = int(rent_cost * license.rebate_pct / 100)
+        else:
+            effective_cost = rent_cost
+
+        rebate = min(total_earnings, effective_cost)
+        net_cost = max(0, rent_cost - rebate)
+
         mod_session = interaction.client.http_client_mod
         game_session = interaction.client.http_client_game
 
@@ -118,22 +141,22 @@ class CharacterSelect(ui.Select):
             return
 
         balance = await get_player_bank_balance(character)
-        if balance < rent_cost:
+        if balance < net_cost:
             await interaction.followup.send(
-                f"Insufficient bank balance. Need **₱{rent_cost:,}**, have **₱{balance:,}**.",
+                f"Insufficient bank balance. Need **₱{net_cost:,}**, have **₱{balance:,}**.",
                 ephemeral=True,
             )
             return
 
         try:
-            await register_player_withdrawal(rent_cost, character, player)
+            await register_player_withdrawal(net_cost, character, player)
         except ValueError as e:
             await interaction.followup.send(f"Bank error: {e}", ephemeral=True)
             return
 
         try:
             await transfer_money(
-                mod_session, rent_cost, "House Rent", str(player.unique_id)
+                mod_session, net_cost, "House Rent", str(player.unique_id)
             )
         except Exception:
             logger.warning(
@@ -149,13 +172,15 @@ class CharacterSelect(ui.Select):
             )
             return
 
-        await record_treasury_rent_income(rent_cost, f"House Rent — {character.guid}")
+        await record_treasury_rent_income(net_cost, f"House Rent — {character.guid}")
 
         embed = discord.Embed(
             title="House Rented",
             description=(
                 f"**{character.name}** has rented **{house_key}**.\n"
                 f"Cost: **₱{rent_cost:,}**\n"
+                + (f"Rebate: **-₱{rebate:,}**\n" if rebate > 0 else "")
+                + f"Net Cost: **₱{net_cost:,}**\n"
                 f"Duration: **{max_days} days**"
             ),
             color=discord.Color.green(),
