@@ -12,11 +12,38 @@ from django.db.models import F, Sum
 from django.utils import timezone
 
 from amc.handlers import register
-from amc.mod_server import show_popup, transfer_money
-from amc.models import Delivery, HousingLicense
+from amc.mod_server import get_rent_info, show_popup, transfer_money
+from amc.models import Delivery, House, HousingLicense
 from amc_finance.services import record_treasury_rent_income, send_fund_to_player_wallet
 
 logger = logging.getLogger("amc.webhook.handlers.house")
+
+DEFAULT_HOUSING_RATIO = 5.0
+
+
+async def _compute_rent_cost(http_client_mod, house_guid):
+    """Compute the rent cost for a house from the mod's server config + House model."""
+    if not house_guid:
+        return 0
+
+    try:
+        rent_info = await get_rent_info(http_client_mod, house_guid)
+    except Exception:
+        logger.warning("Failed to get rent info for house %s", house_guid, exc_info=True)
+        return 0
+
+    ratio = rent_info.get("HousingPlotRentalPriceRatio", DEFAULT_HOUSING_RATIO)
+    house_key = rent_info.get("HousegKey", "")
+    if not house_key:
+        return 0
+
+    try:
+        house_obj = await House.objects.aget(key=house_key)
+    except House.DoesNotExist:
+        logger.warning("House model not found for key=%s (guid=%s)", house_key, house_guid)
+        return 0
+
+    return int(house_obj.cost * ratio)
 
 
 @register("ServerRentHouse")
@@ -29,10 +56,31 @@ async def handle_rent(event, player, character, ctx):
         event["data"].get("Blocked"),
     )
     if event["data"].get("Blocked") and ctx.http_client_mod:
+        house_guid = event["data"].get("HouseGuid")
+        rent_cost = await _compute_rent_cost(ctx.http_client_mod, house_guid)
+
+        if rent_cost > 0:
+            try:
+                await transfer_money(
+                    ctx.http_client_mod,
+                    rent_cost,
+                    "House Rent Refund",
+                    str(player.unique_id),
+                )
+                logger.info(
+                    "Refunded rent of %d to player=%s character=%s house=%s",
+                    rent_cost, player.unique_id, character.guid, house_guid,
+                )
+            except Exception:
+                logger.warning(
+                    "Failed to refund rent of %d to %s",
+                    rent_cost, character.guid, exc_info=True,
+                )
+
         try:
             await show_popup(
                 ctx.http_client_mod,
-                "House rentals must be done through Discord. Use /house buy in Discord.",
+                "House rentals must be done through Discord. Use /house buy in Discord. Your money has been refunded.",
                 character_guid=str(character.guid),
             )
         except Exception:
