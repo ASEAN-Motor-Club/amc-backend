@@ -5,7 +5,7 @@ description = "ASEAN Motor Club backend"
 readme = "README.md"
 requires-python = ">=3.12,<3.13"
 dependencies = [
-    "django>=5.2.3",
+    "django>=5.2.14",
     "django-ninja>=1.4.3",
     "gunicorn>=23.0.0",
     "psycopg[binary]>=3.2.9",
