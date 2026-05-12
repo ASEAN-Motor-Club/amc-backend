@@ -28,6 +28,11 @@ INCOME_CATEGORIES = {
         "emoji": "❤️",
         "match": lambda d: d in ("Player Donation", "Public service bill"),
     },
+    "rent": {
+        "label": "House Rent",
+        "emoji": "🏠",
+        "match": lambda d: d.startswith("House Rent"),
+    },
     "nirc": {
         "label": "NIRC (Sovereign Fund Dividend)",
         "emoji": "🏦",
