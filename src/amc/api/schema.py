@@ -248,6 +248,7 @@ class DeliveryJobSchema(ModelSchema):
     source_points: List[DeliveryPointSchema]
     destination_points: List[DeliveryPointSchema]
     deliveries: List[DeliverySchema]
+    bonus_multiplier: float = 0
 
     class Meta:
         model = DeliveryJob
@@ -259,7 +260,6 @@ class DeliveryJobSchema(ModelSchema):
             "requested_at",
             "fulfilled_at",
             "expired_at",
-            "bonus_multiplier",
             "completion_bonus",
             # 'discord_message_id',
             "description",
@@ -300,6 +300,7 @@ class DeliveryJobSummarySchema(ModelSchema):
     source_points: list[str]
     destination_points: list[str]
     deliveries: List[DeliverySlimSchema]
+    bonus_multiplier: float = 0
 
     class Meta:
         model = DeliveryJob
@@ -311,7 +312,6 @@ class DeliveryJobSummarySchema(ModelSchema):
             "requested_at",
             "fulfilled_at",
             "expired_at",
-            "bonus_multiplier",
             "completion_bonus",
             "description",
             "fulfilled",

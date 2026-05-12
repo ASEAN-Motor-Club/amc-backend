@@ -2022,7 +2022,7 @@ class DeliveryJobTemplate(models.Model):
     default_quantity = models.PositiveIntegerField(
         help_text="Default quantity requested"
     )
-    bonus_multiplier = models.FloatField(default=1.0)
+    bonus_multiplier = models.FloatField(default=0)
     completion_bonus = models.PositiveIntegerField(default=50000)
     rp_mode = models.BooleanField(
         default=False, help_text="Requires the job to be done in RP mode"
@@ -2195,7 +2195,7 @@ class DeliveryJob(models.Model):
     expired_at = models.DateTimeField(
         null=True, blank=True, help_text="Required for non-template jobs"
     )
-    bonus_multiplier = models.FloatField()
+    bonus_multiplier = models.FloatField(default=0)
     completion_bonus = models.PositiveIntegerField(default=0)
     cargos = models.ManyToManyField(
         "Cargo",

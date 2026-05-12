@@ -37,16 +37,5 @@ def atomic_process_delivery(job_id, quantity, delivery_data):
                 job.save(update_fields=["quantity_fulfilled"])
                 job.refresh_from_db(fields=["quantity_fulfilled"])
 
-        bonus = 0
-        if job and quantity_to_add > 0:
-            multiplier = max(0, job.bonus_multiplier)
-            bonus = int(
-                delivery_data["payment"]
-                * (quantity_to_add / weighted_quantity)
-                * multiplier
-                + 0.5
-            )
-            delivery_data["subsidy"] += bonus
-
         Delivery.objects.create(job=job, **delivery_data)
         return job

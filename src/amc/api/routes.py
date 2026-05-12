@@ -687,7 +687,7 @@ async def list_webui_deliveryjobs(request):
                 "requested_at": job.requested_at,
                 "fulfilled_at": job.fulfilled_at,
                 "expired_at": job.expired_at,
-                "bonus_multiplier": job.bonus_multiplier,
+                "bonus_multiplier": 0,
                 "completion_bonus": job.completion_bonus,
                 "description": job.description,
                 "fulfilled": job.fulfilled,

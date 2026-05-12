@@ -62,7 +62,7 @@ async def cmd_jobs(ctx: CommandContext):
             if job.cargo_key
             else ", ".join([c.label for c in job.cargos.all()])
         )
-        title = f"({job.quantity_fulfilled}/{job.quantity_requested}) {job.name} · <EffectGood>{job.bonus_multiplier * 100:.0f}%</> · <Money>{job.completion_bonus:,}</>"
+        title = f"({job.quantity_fulfilled}/{job.quantity_requested}) {job.name} · <Money>{job.completion_bonus:,}</>"
         title += "\n" + _("<Secondary>Expiring in {time}</>").format(
             time=get_time_difference_string(ctx.timestamp, job.expired_at)
         )

@@ -902,7 +902,7 @@ class DeliveryJobAdmin(admin.ModelAdmin):
                 ]
             },
         ),
-        ("Payout", {"fields": ["bonus_multiplier", "completion_bonus"]}),
+        ("Payout", {"fields": ["completion_bonus"]}),
         ("Description", {"fields": ["description"]}),
         ("Discord integration", {"fields": ["discord_message_id"]}),
     ]
@@ -948,7 +948,6 @@ class DeliveryJobAdmin(admin.ModelAdmin):
                         "name": template.name,
                         "description": template.description,
                         "quantity_requested": template.default_quantity,
-                        "bonus_multiplier": template.bonus_multiplier,
                         "completion_bonus": template.completion_bonus,
                         "rp_mode": template.rp_mode,
                         "created_from": template,
@@ -1440,7 +1439,7 @@ class MinistryDashboardAdmin(admin.ModelAdmin):
                 )[:5]
             )
             for job in recent_jobs:
-                job.bonus_percentage = int(job.bonus_multiplier * 100)
+                job.bonus_percentage = 0
         else:
             recent_jobs = []
 

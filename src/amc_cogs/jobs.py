@@ -43,7 +43,6 @@ class JobsCog(commands.Cog):
         if job.completion_bonus:
             description += "\n**Completion Reward**: "
             description += f"{job.completion_bonus:,}"
-        description += f"\n**Bonus multiplier**: {job.bonus_multiplier * 100:.0f}%"
 
         if not stale:
             description += f"\n**Expires in**: <t:{int(job.expired_at.timestamp())}:R>"
@@ -499,9 +498,6 @@ class JobsCog(commands.Cog):
         )
 
         quantity_requested = tmpl.default_quantity
-        bonus_multiplier = (
-            round(tmpl.bonus_multiplier * random.uniform(0.8, 1.2), 2) * treasury_mult
-        )
         base_bonus = tmpl.completion_bonus
         scaling_factor = max(treasury_mult * 0.5, min(2.0, treasury_mult * random.uniform(0.7, 1.3)))
         completion_bonus = int(base_bonus * scaling_factor)
@@ -513,7 +509,7 @@ class JobsCog(commands.Cog):
             name=tmpl.name,
             quantity_requested=quantity_requested,
             expired_at=timezone.now() + timedelta(hours=duration_hours),
-            bonus_multiplier=bonus_multiplier,
+            bonus_multiplier=0,
             completion_bonus=completion_bonus,
             description=tmpl.description,
             rp_mode=False,

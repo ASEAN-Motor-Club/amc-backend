@@ -341,11 +341,6 @@ async def monitor_jobs(ctx):
         if not is_destination_empty or not is_source_enough:
             continue
 
-        # Treasury multiplier influences bonus amounts (Bonus multiplier)
-        bonus_multiplier = round(
-            template.bonus_multiplier * random.uniform(0.95, 1.05), 2 # 5% random variance
-        )
-        bonus_multiplier = bonus_multiplier * treasury_mult
         base_bonus = int(
             template.completion_bonus * quantity_requested / template.default_quantity
         )
@@ -363,7 +358,7 @@ async def monitor_jobs(ctx):
             name=template.name,
             quantity_requested=quantity_requested,
             expired_at=timezone.now() + timedelta(hours=duration_hours),
-            bonus_multiplier=bonus_multiplier,
+            bonus_multiplier=0,
             completion_bonus=completion_bonus,
             description=template.description,
             rp_mode=False,

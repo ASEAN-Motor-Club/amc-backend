@@ -564,7 +564,7 @@ class CommandsTestCase(TestCase):
         mock_job.quantity_fulfilled = 0
         mock_job.quantity_requested = 10
         mock_job.name = "Test Job"
-        mock_job.bonus_multiplier = 0.5
+        mock_job.bonus_multiplier = 0
         mock_job.completion_bonus = 1000
         mock_job.rp_mode = False
         mock_job.expired_at = self.ctx.timestamp + timedelta(hours=1)
