@@ -2,6 +2,8 @@ import logging
 import asyncio
 from typing import Optional, Any, TYPE_CHECKING, cast
 
+logger = logging.getLogger(__name__)
+
 if TYPE_CHECKING:
     from amc.discord_client import AMCDiscordBot
 from datetime import timedelta
@@ -442,7 +444,10 @@ This notice was issued by Officer {interaction.user.display_name}. If you wish t
         )
         character_names = ", ".join([c.name for c in player.characters.all()])
         await ban_player(self.bot.http_client_game, player_id, hours, reason)
-        await ban_player(self.bot.event_http_client_game, player_id, hours, reason)
+        try:
+            await ban_player(self.bot.event_http_client_game, player_id, hours, reason)
+        except Exception:
+            logger.warning("Failed to ban player on event server (may be offline)")
         await ctx.response.send_message(
             f"Banned {player_id} (Aliases: {character_names}) for {hours} hours, due to: {reason}"
         )
@@ -460,7 +465,10 @@ This notice was issued by Officer {interaction.user.display_name}. If you wish t
             return
 
         await kick_player(self.bot.http_client_game, player_id)
-        await kick_player(self.bot.event_http_client_game, player_id)
+        try:
+            await kick_player(self.bot.event_http_client_game, player_id)
+        except Exception:
+            logger.warning("Failed to kick player on event server (may be offline)")
         await interaction.response.send_message(
             f"Kicked {player_id} (Aliases: {character_names})"
         )
