@@ -176,8 +176,38 @@ btnEndNow.addEventListener('click', function() {
 endTimeInput.addEventListener('input', updateRangeDisplay);
 durationSlider.addEventListener('input', updateRangeDisplay);
 
-endTimeInput.value = setToTimezoneOffset(new Date());
-updateRangeDisplay();
+function readUrlParams() {
+    var params = new URLSearchParams(window.location.search);
+    var end = params.get('end');
+    var duration = params.get('duration');
+    if (end) {
+        endTimeInput.value = end;
+    } else {
+        endTimeInput.value = setToTimezoneOffset(new Date());
+    }
+    if (duration) {
+        var dur = parseInt(duration, 10);
+        if (dur >= 5 && dur <= 360) {
+            durationSlider.value = dur;
+        }
+    }
+    updateRangeDisplay();
+}
+
+function updateUrlParams() {
+    var params = new URLSearchParams(window.location.search);
+    params.set('end', endTimeInput.value);
+    params.set('duration', durationSlider.value);
+    var newUrl = window.location.pathname + '?' + params.toString();
+    window.history.replaceState(null, '', newUrl);
+}
+
+readUrlParams();
+
+var initialParams = new URLSearchParams(window.location.search);
+if (initialParams.has('end')) {
+    loadData();
+}
 
 function toLocalISOString(d) {
     var pad = function(n) { return n < 10 ? '0' + n : n; };
@@ -201,6 +231,11 @@ btnLoad.addEventListener('click', function() {
         return;
     }
 
+    updateUrlParams();
+    loadData();
+});
+
+function loadData() {
     stopPlayback();
     characterNames = {};
     characterTimeline = {};
@@ -297,7 +332,7 @@ btnLoad.addEventListener('click', function() {
             alert('Error loading data: ' + err.message);
             loadingIndicator.style.display = 'none';
         });
-});
+}
 
 var TELEPORT_THRESHOLD = 10000;
 var showTrailsCheckbox = document.getElementById('show-trails');
