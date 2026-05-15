@@ -82,6 +82,8 @@ if (!configEl) {
             }));
         }
 
+        var gateSource = new ol.source.Vector();
+
         for (var j = 0; j < waypoints.length; j++) {
             var w = waypoints[j];
             var l = w.Location || {};
@@ -96,6 +98,24 @@ if (!configEl) {
                 scale: w.Scale3D || {},
                 rotation: w.Rotation || {},
             }));
+
+            var rot = w.Rotation || {};
+            var sc = w.Scale3D || {};
+            if (rot.Z != null && rot.W != null && sc.Y != null) {
+                var yaw = 2 * Math.atan2(rot.Z, rot.W);
+                var scaleY = sc.Y;
+                var halfWidth = (scaleY * 100) / 2;
+                var perpAngle = -(yaw + Math.PI / 2);
+                var g1 = gameToMap(l.X + Math.cos(perpAngle) * halfWidth, l.Y + Math.sin(perpAngle) * halfWidth);
+                var g2 = gameToMap(l.X - Math.cos(perpAngle) * halfWidth, l.Y - Math.sin(perpAngle) * halfWidth);
+                gateSource.addFeature(new ol.Feature({
+                    geometry: new ol.geom.LineString([g1, g2]),
+                    waypoint_index: j,
+                    game_x: l.X,
+                    game_y: l.Y,
+                    scale: sc,
+                }));
+            }
         }
 
         var vectorLayer = new ol.layer.Vector({
@@ -110,19 +130,37 @@ if (!configEl) {
                 var isStart = idx === 0;
                 return new ol.style.Style({
                     image: new ol.style.Circle({
-                        radius: isStart ? 10 : 6,
-                        fill: new ol.style.Fill({ color: isStart ? '#2e8b57' : '#fff' }),
-                        stroke: new ol.style.Stroke({ color: isStart ? '#1a5c38' : '#417690', width: 2 }),
-                    }),
-                    text: new ol.style.Text({
-                        text: String(idx + 1),
-                        font: (isStart ? 'bold 11px' : '10px') + ' sans-serif',
-                        fill: new ol.style.Fill({ color: isStart ? '#fff' : '#333' }),
+                        radius: isStart ? 8 : 5,
+                        fill: new ol.style.Fill({ color: isStart ? '#2e8b57' : '#417690' }),
+                        stroke: new ol.style.Stroke({ color: '#fff', width: 2 }),
                     }),
                 });
             },
         });
         map.addLayer(vectorLayer);
+
+        var gateLayer = new ol.layer.Vector({
+            source: gateSource,
+            style: function (feature) {
+                var idx = feature.get('waypoint_index');
+                var isStart = idx === 0;
+                return [
+                    new ol.style.Style({
+                        stroke: new ol.style.Stroke({ color: isStart ? '#2e8b57' : '#f5a623', width: 4 }),
+                    }),
+                    new ol.style.Style({
+                        text: new ol.style.Text({
+                            text: String(idx + 1),
+                            font: (isStart ? 'bold 11px' : '10px') + ' sans-serif',
+                            fill: new ol.style.Fill({ color: '#333' }),
+                            stroke: new ol.style.Stroke({ color: '#fff', width: 3 }),
+                            offsetY: -14,
+                        }),
+                    }),
+                ];
+            },
+        });
+        map.addLayer(gateLayer);
 
         var popup = document.getElementById('popup');
         var popupContent = document.getElementById('popup-content');
@@ -142,8 +180,9 @@ if (!configEl) {
 
         map.on('singleclick', function (ev) {
             var feature = map.forEachFeatureAtPixel(ev.pixel, function (f) { return f; });
-            if (feature && feature.getGeometry().getType() === 'Point') {
-                var coords = feature.getGeometry().getCoordinates();
+            if (feature && feature.get('waypoint_index') != null) {
+                var geom = feature.getGeometry();
+                var coords = geom.getType() === 'Point' ? geom.getCoordinates() : ol.extent.getCenter(geom.getExtent());
                 var idx = feature.get('waypoint_index');
                 var gx = feature.get('game_x');
                 var gy = feature.get('game_y');
@@ -152,7 +191,7 @@ if (!configEl) {
                 popupContent.innerHTML =
                     '<strong>Waypoint ' + (idx + 1) + '</strong><br>' +
                     '<span style="font-size:12px;color:#555;">X: ' + gx + ', Y: ' + gy + '</span>' +
-                    (scaleY != null ? '<br><span style="font-size:12px;color:#555;">Section length: ' + scaleY.toFixed(1) + '</span>' : '');
+                    (scaleY != null ? '<br><span style="font-size:12px;color:#555;">Gate width: ' + (scaleY * 100).toFixed(0) + '</span>' : '');
                 overlay.setPosition(coords);
             } else {
                 overlay.setPosition(undefined);
@@ -165,7 +204,9 @@ if (!configEl) {
         });
 
         if (lineCoords.length > 0) {
-            var extent = vectorSource.getExtent();
+            var extent = ol.extent.createEmpty();
+            ol.extent.extend(extent, vectorSource.getExtent());
+            ol.extent.extend(extent, gateSource.getExtent());
             map.getView().fit(extent, { minResolution: 1, padding: [40, 40, 40, 40] });
         }
 
