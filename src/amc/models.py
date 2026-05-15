@@ -2233,6 +2233,10 @@ class DeliveryJob(models.Model):
         output_field=models.BooleanField(),
         db_persist=True,
     )
+    expiration_processed = models.BooleanField(
+        default=False,
+        help_text="True after cleanup_expired_jobs has paid out partial contributors",
+    )
 
     if TYPE_CHECKING:
         bonus_percentage: int

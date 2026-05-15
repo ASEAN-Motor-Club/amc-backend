@@ -278,12 +278,16 @@ class CleanupExpiredJobsTestCase(TestCase):
         )
 
         http_client = AsyncMock()
-        with patch("amc.jobs.payout_partial_contributors", new_callable=AsyncMock) as mock_payout, \
-             patch("amc.jobs.process_treasury_expiration_penalty", new_callable=AsyncMock) as mock_penalty:
+        with patch("amc.jobs.payout_partial_contributors", new_callable=AsyncMock) as mock_payout:
             await cleanup_expired_jobs(http_client)
 
             mock_payout.assert_called_once()
-            mock_penalty.assert_called_once()
+
+        # Job should be marked as processed to prevent re-processing
+        await job.arefresh_from_db()
+        self.assertTrue(job.expiration_processed)
+        # completion_bonus should be preserved for audit
+        self.assertEqual(job.completion_bonus, 100_000)
 
     async def test_ministry_job_no_partial_payout(self):
         """Ministry-funded expired job should NOT call payout_partial_contributors."""
