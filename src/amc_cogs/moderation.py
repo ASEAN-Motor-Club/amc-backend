@@ -1,12 +1,8 @@
 import logging
 import asyncio
+from datetime import timedelta
 from typing import Optional, Any, TYPE_CHECKING, cast
 
-logger = logging.getLogger(__name__)
-
-if TYPE_CHECKING:
-    from amc.discord_client import AMCDiscordBot
-from datetime import timedelta
 import discord
 from discord import app_commands
 from discord.ext import commands
@@ -40,6 +36,11 @@ from amc.game_server import (
     get_players,
 )
 from amc.vehicles import format_vehicle_name, format_vehicle_parts
+
+if TYPE_CHECKING:
+    from amc.discord_client import AMCDiscordBot
+
+logger = logging.getLogger(__name__)
 
 
 class VoteKickView(discord.ui.View):
