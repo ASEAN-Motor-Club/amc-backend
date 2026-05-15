@@ -118,12 +118,15 @@ map.on('pointermove', function(ev) {
 var characterNames = {};
 var characterTimeline = {};
 var uniqueTimestamps = [];
+var uniqueTimestampsMs = [];
 var isPlaying = false;
 var isReversed = false;
 var playbackSpeed = 1;
 var currentFrame = 0;
 var playInterval = null;
-var BASE_INTERVAL_MS = 1000;
+var TICK_INTERVAL_MS = 50;
+var playbackStartWall = 0;
+var playbackCursorMs = 0;
 
 var endTimeInput = document.getElementById('end-time');
 var durationSlider = document.getElementById('duration-slider');
@@ -286,6 +289,7 @@ function loadData() {
             });
 
             uniqueTimestamps = Array.from(tsSet).sort();
+            uniqueTimestampsMs = uniqueTimestamps.map(function(ts) { return new Date(ts).getTime(); });
             var charIds = Object.keys(characterTimeline).map(Number).sort(function(a, b) { return a - b; });
 
             charIds.forEach(function(cid) {
@@ -413,6 +417,17 @@ function stopPlayback() {
     btnReverse.classList.remove('active');
 }
 
+function findFrameForMs(targetMs) {
+    // Find the last frame whose timestamp <= targetMs
+    var lo = 0, hi = uniqueTimestampsMs.length;
+    while (lo < hi) {
+        var mid = (lo + hi) >> 1;
+        if (uniqueTimestampsMs[mid] <= targetMs) lo = mid + 1;
+        else hi = mid;
+    }
+    return Math.max(0, lo - 1);
+}
+
 function startPlayback() {
     stopPlayback();
     isPlaying = true;
@@ -423,27 +438,40 @@ function startPlayback() {
         btnPlay.textContent = '\u23F8';
     }
 
-    var intervalMs = BASE_INTERVAL_MS / playbackSpeed;
+    playbackStartWall = performance.now();
+    playbackCursorMs = uniqueTimestampsMs[currentFrame];
+
     playInterval = setInterval(function() {
+        var elapsedWall = performance.now() - playbackStartWall;
+        var deltaMs = elapsedWall * playbackSpeed;
         if (isReversed) {
-            currentFrame--;
-            if (currentFrame < 0) {
+            playbackCursorMs -= deltaMs;
+            if (playbackCursorMs <= uniqueTimestampsMs[0]) {
+                playbackCursorMs = uniqueTimestampsMs[0];
                 currentFrame = 0;
+                timelineSlider.value = 0;
+                showFrame(0);
+                updateTimelineLabel();
                 stopPlayback();
                 return;
             }
         } else {
-            currentFrame++;
-            if (currentFrame >= uniqueTimestamps.length) {
+            playbackCursorMs += deltaMs;
+            if (playbackCursorMs >= uniqueTimestampsMs[uniqueTimestampsMs.length - 1]) {
                 currentFrame = uniqueTimestamps.length - 1;
+                timelineSlider.value = currentFrame;
+                showFrame(currentFrame);
+                updateTimelineLabel();
                 stopPlayback();
                 return;
             }
         }
+        playbackStartWall = performance.now();
+        currentFrame = findFrameForMs(playbackCursorMs);
         timelineSlider.value = currentFrame;
         showFrame(currentFrame);
         updateTimelineLabel();
-    }, intervalMs);
+    }, TICK_INTERVAL_MS);
 }
 
 btnPlay.addEventListener('click', function() {
@@ -473,6 +501,7 @@ btnReverse.addEventListener('click', function() {
 btnRewind.addEventListener('click', function() {
     stopPlayback();
     currentFrame = 0;
+    playbackCursorMs = uniqueTimestampsMs[0] || 0;
     isReversed = false;
     timelineSlider.value = 0;
     showFrame(0);
@@ -482,6 +511,7 @@ btnRewind.addEventListener('click', function() {
 btnForward.addEventListener('click', function() {
     stopPlayback();
     currentFrame = uniqueTimestamps.length - 1;
+    playbackCursorMs = uniqueTimestampsMs[currentFrame] || 0;
     isReversed = false;
     timelineSlider.value = currentFrame;
     showFrame(currentFrame);
@@ -497,6 +527,8 @@ speedSelect.addEventListener('change', function() {
 
 timelineSlider.addEventListener('input', function() {
     currentFrame = parseInt(timelineSlider.value);
+    playbackCursorMs = uniqueTimestampsMs[currentFrame] || 0;
+    playbackStartWall = performance.now();
     showFrame(currentFrame);
     updateTimelineLabel();
 });
