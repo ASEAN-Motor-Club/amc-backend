@@ -1005,6 +1005,7 @@ async def process_log_event(
             if character:
                 await process_login_event(character.id, timestamp)
                 asyncio.create_task(send_player_messages(http_client_mod, player))
+                await refresh_player_name(character, http_client_mod)
 
             if is_current_event:
                 # Welcome announcement in global chat (doesn't need GUID)
