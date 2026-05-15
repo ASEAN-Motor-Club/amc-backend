@@ -1,6 +1,62 @@
 {% extends "admin/change_form.html" %}
 {% load i18n %}
 
+{% block extrahead %}
+{{ block.super }}
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/ol@v7.2.2/ol.css">
+<script src="https://cdn.jsdelivr.net/npm/ol@v7.2.2/dist/ol.js"></script>
+<style>
+    #track-map {
+        width: 100%;
+        height: 500px;
+        border: 1px solid #ddd;
+        border-radius: 4px;
+    }
+    #track-summary {
+        font-size: 14px;
+        font-weight: 600;
+        color: #333;
+        margin-bottom: 6px;
+    }
+    .ol-popup {
+        position: absolute;
+        background: #fff;
+        border: 1px solid #ccc;
+        border-radius: 4px;
+        padding: 8px 12px;
+        font-size: 13px;
+        box-shadow: 0 2px 8px rgba(0,0,0,0.15);
+        white-space: nowrap;
+        pointer-events: auto;
+    }
+    .ol-popup-closer {
+        text-decoration: none;
+        color: #666;
+        float: right;
+        margin-left: 8px;
+    }
+    .ol-popup-closer:hover {
+        color: #000;
+    }
+</style>
+{% endblock %}
+
+{% block content %}
+<div style="margin: 10px 0;">
+    <div id="track-summary"></div>
+    <div id="track-map-container">
+        <div id="track-map"></div>
+    </div>
+    <div id="popup" class="ol-popup">
+        <a href="#" id="popup-closer" class="ol-popup-closer">&times;</a>
+        <div id="popup-content"></div>
+    </div>
+</div>
+{{ original.config|json_script:"racesetup-config" }}
+<script src="/static/amc/js/race_track_map.js"></script>
+{{ block.super }}
+{% endblock %}
+
 {% block submit_buttons_bottom %}
 {{ block.super }}
 <div class="submit-row">
