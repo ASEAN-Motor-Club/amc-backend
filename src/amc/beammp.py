@@ -56,5 +56,5 @@ async def query_beammp(host: str, port: int, timeout: float = 5.0) -> dict | Non
         }
 
     except Exception:
-        logger.debug("BeamMP query failed for %s:%s", host, port, exc_info=True)
+        logger.warning("BeamMP query failed for %s:%s", host, port, exc_info=True)
         return None

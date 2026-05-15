@@ -82,7 +82,7 @@ class BeamMPStatusCog(commands.Cog):
         if self.last_embed_message:
             try:
                 await self.last_embed_message.edit(embed=embed)
-            except discord.NotFound:
+            except (discord.NotFound, discord.HTTPException):
                 self.last_embed_message = await channel.send(embed=embed)
             except discord.Forbidden:
                 logger.exception("Forbidden to edit BeamMP message")
@@ -96,4 +96,5 @@ class BeamMPStatusCog(commands.Cog):
 
     @update_status.error
     async def update_status_error(self, error):
-        logger.exception("BeamMP status loop error")
+        logger.exception("BeamMP status loop error, restarting in 30s")
+        self.update_status.restart()
