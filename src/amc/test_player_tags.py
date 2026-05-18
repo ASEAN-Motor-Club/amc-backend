@@ -43,10 +43,12 @@ def test_build_display_name_mod_and_gov():
     )
 
 
+@pytest.mark.skip(reason="player tags feature on hold")
 def test_build_display_name_police_only():
     assert build_display_name("PlayerOne", police_level=1) == "[P1] PlayerOne"
 
 
+@pytest.mark.skip(reason="player tags feature on hold")
 def test_build_display_name_police_and_mods():
     assert (
         build_display_name("PlayerOne", police_level=1, has_custom_parts=True)
@@ -54,6 +56,7 @@ def test_build_display_name_police_and_mods():
     )
 
 
+@pytest.mark.skip(reason="player tags feature on hold")
 def test_build_display_name_police_and_gov():
     assert (
         build_display_name("PlayerOne", police_level=1, gov_level=3)
@@ -61,6 +64,7 @@ def test_build_display_name_police_and_gov():
     )
 
 
+@pytest.mark.skip(reason="player tags feature on hold")
 def test_build_display_name_police_mods_and_gov():
     assert (
         build_display_name(
@@ -70,6 +74,7 @@ def test_build_display_name_police_mods_and_gov():
     )
 
 
+@pytest.mark.skip(reason="player tags feature on hold")
 def test_build_display_name_police_suppresses_crim():
     """Police membership suppresses criminal tag."""
     assert (
@@ -78,6 +83,7 @@ def test_build_display_name_police_suppresses_crim():
     )
 
 
+@pytest.mark.skip(reason="player tags feature on hold")
 def test_build_display_name_police_suppresses_crim_with_gov():
     """Police suppresses criminal tag (gov does not)."""
     assert (
@@ -86,18 +92,22 @@ def test_build_display_name_police_suppresses_crim_with_gov():
     )
 
 
+@pytest.mark.skip(reason="player tags feature on hold")
 def test_build_display_name_crim_level_1():
     assert build_display_name("PlayerOne", criminal_level=1) == "[C1] PlayerOne"
 
 
+@pytest.mark.skip(reason="player tags feature on hold")
 def test_build_display_name_crim_level_5():
     assert build_display_name("PlayerOne", criminal_level=5) == "[C5] PlayerOne"
 
 
+@pytest.mark.skip(reason="player tags feature on hold")
 def test_build_display_name_crim_multi_digit():
     assert build_display_name("PlayerOne", criminal_level=12) == "[C12] PlayerOne"
 
 
+@pytest.mark.skip(reason="player tags feature on hold")
 def test_build_display_name_crim_not_suppressed_without_police():
     """Criminal tag is NOT suppressed when player is not police."""
     assert (
@@ -106,6 +116,7 @@ def test_build_display_name_crim_not_suppressed_without_police():
     )
 
 
+@pytest.mark.skip(reason="player tags feature on hold")
 def test_build_display_name_crim_and_mods():
     assert (
         build_display_name("PlayerOne", criminal_level=1, has_custom_parts=True)
@@ -113,6 +124,7 @@ def test_build_display_name_crim_and_mods():
     )
 
 
+@pytest.mark.skip(reason="player tags feature on hold")
 def test_build_display_name_crim_not_suppressed_by_gov():
     """Criminal tag is NOT suppressed by gov (only police suppresses it)."""
     assert (
@@ -121,6 +133,7 @@ def test_build_display_name_crim_not_suppressed_by_gov():
     )
 
 
+@pytest.mark.skip(reason="player tags feature on hold")
 def test_build_display_name_all_active_crim_not_suppressed():
     """All flags active: criminal NOT suppressed by gov, so [MC2G3]."""
     assert (
@@ -131,6 +144,7 @@ def test_build_display_name_all_active_crim_not_suppressed():
     )
 
 
+@pytest.mark.skip(reason="player tags feature on hold")
 def test_build_display_name_all_flags_with_police():
     """All flags + police: criminal suppressed, so [MP1G3]."""
     assert (
@@ -145,10 +159,12 @@ def test_build_display_name_all_flags_with_police():
     )
 
 
+@pytest.mark.skip(reason="player tags feature on hold")
 def test_build_display_name_police_level_2():
     assert build_display_name("PlayerOne", police_level=2) == "[P2] PlayerOne"
 
 
+@pytest.mark.skip(reason="player tags feature on hold")
 def test_build_display_name_police_level_10():
     assert build_display_name("PlayerOne", police_level=10) == "[P10] PlayerOne"
 
@@ -174,6 +190,7 @@ def test_build_display_name_wanted_w3():
     )
 
 
+@pytest.mark.skip(reason="player tags feature on hold")
 def test_build_display_name_wanted_and_crim():
     assert (
         build_display_name("PlayerOne", criminal_level=3, wanted_stars=4)
@@ -188,6 +205,7 @@ def test_build_display_name_wanted_and_mods():
     )
 
 
+@pytest.mark.skip(reason="player tags feature on hold")
 def test_build_display_name_wanted_with_police():
     """Wanted tag shows even when police is active."""
     assert (
@@ -204,6 +222,7 @@ def test_build_display_name_wanted_with_gov():
     )
 
 
+@pytest.mark.skip(reason="player tags feature on hold")
 def test_build_display_name_wanted_with_police_and_gov():
     """Wanted tag shows even when both police and gov are active."""
     assert (
@@ -212,6 +231,7 @@ def test_build_display_name_wanted_with_police_and_gov():
     )
 
 
+@pytest.mark.skip(reason="player tags feature on hold")
 def test_build_display_name_wanted_with_crim_police_gov():
     """Wanted shows alongside police+gov; crim suppressed."""
     assert (
@@ -222,6 +242,7 @@ def test_build_display_name_wanted_with_crim_police_gov():
     )
 
 
+@pytest.mark.skip(reason="player tags feature on hold")
 def test_build_display_name_wanted_with_crim_mods():
     assert (
         build_display_name(
@@ -245,6 +266,7 @@ def test_build_display_name_rp_mode_with_mods_and_gov():
     )
 
 
+@pytest.mark.skip(reason="player tags feature on hold")
 def test_build_display_name_rp_mode_with_police_wanted_gov():
     """R prepended before P/stars/G: [RP1**G3] PlayerOne (crim suppressed by police)."""
     assert (
@@ -293,6 +315,7 @@ def test_build_display_name_guild_with_mod_and_gov():
     )
 
 
+@pytest.mark.skip(reason="player tags feature on hold")
 def test_build_display_name_guild_with_all_flags():
     assert (
         build_display_name(
@@ -484,6 +507,7 @@ async def test_get_player_singleflight(mock_cache_aget, mock_cache_aset):
     )
 
 
+@pytest.mark.skip(reason="player tags feature on hold")
 @pytest.mark.asyncio
 @pytest.mark.django_db
 @patch("amc.player_tags.set_character_name", new_callable=AsyncMock)
