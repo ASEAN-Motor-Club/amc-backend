@@ -449,8 +449,13 @@ async def handle_passed_race_section(event, player, character, ctx):
             },
         )
 
-    # First section time tracking
-    if section_index == 0 and game_event_char.laps == 1:
+    # First section time tracking — set once on the very first crossing of
+    # section 0 so that net_time = last_section - first_section is the full
+    # race duration.  We guard on ``is None`` rather than ``laps == 1``
+    # because the SSE handler never receives lap count updates; the ``laps``
+    # field in the DB would stay at 1 throughout the race, causing every
+    # subsequent section-0 crossing to overwrite the value.
+    if section_index == 0 and game_event_char.first_section_total_time_seconds is None:
         if total_time_seconds < 10_000_000:
             await GameEventCharacter.objects.filter(pk=game_event_char.pk).aupdate(
                 first_section_total_time_seconds=total_time_seconds
