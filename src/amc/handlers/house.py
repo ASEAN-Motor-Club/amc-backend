@@ -12,8 +12,9 @@ from django.db.models import F, Sum
 from django.utils import timezone
 
 from amc.handlers import register
-from amc.mod_server import get_rent_info, show_popup, transfer_money
+from amc.mod_server import get_houses, get_rent_info, show_popup, transfer_money
 from amc.models import Delivery, House, HousingLicense
+from amc_cogs.housing_market import get_market_multiplier
 from amc_finance.services import record_treasury_rent_income, send_fund_to_player_wallet
 
 logger = logging.getLogger("amc.webhook.handlers.house")
@@ -33,6 +34,7 @@ async def _compute_rent_cost(http_client_mod, house_guid):
         return 0
 
     ratio = rent_info.get("HousingPlotRentalPriceRatio", DEFAULT_HOUSING_RATIO)
+    max_days = rent_info.get("MaxHousingPlotRentalDays", 15)
     house_key = rent_info.get("HousegKey", "")
     if not house_key:
         return 0
@@ -43,7 +45,16 @@ async def _compute_rent_cost(http_client_mod, house_guid):
         logger.warning("House model not found for key=%s (guid=%s)", house_key, house_guid)
         return 0
 
-    return int(house_obj.cost * ratio)
+    base_cost = int(house_obj.cost * ratio)
+
+    try:
+        houses = await get_houses(http_client_mod)
+        multiplier, _ = await get_market_multiplier(houses, max_days)
+    except Exception:
+        logger.warning("Failed to compute market multiplier, using 1.0", exc_info=True)
+        multiplier = 1.0
+
+    return int(base_cost * multiplier)
 
 
 @register("ServerRentHouse")
