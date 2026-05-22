@@ -107,9 +107,31 @@ def world(request):
 
 @app_router.get("/housing/", response=dict)
 def housing(request):
-    return {
-        **get_housings(get_world()),
+    housings = get_housings(get_world())
+
+    owner_names = {
+        h.get("ownerName") for h in housings.values() if h.get("ownerName")
     }
+    if owner_names:
+        name_to_discord = {}
+        for name in owner_names:
+            char = (
+                Character.objects.filter(
+                    name=name, player__discord_user_id__isnull=False
+                )
+                .select_related("player")
+                .order_by("-last_online")
+                .first()
+            )
+            if char:
+                name_to_discord[name] = char.player.discord_user_id
+
+        for h in housings.values():
+            discord_id = name_to_discord.get(h.get("ownerName"))
+            if discord_id:
+                h["discord_user_id"] = discord_id
+
+    return housings
 
 
 DEPOT_OWNER_CACHE_TIMEOUT = 604800  # 1 week in seconds
