@@ -184,6 +184,7 @@ message PlayerPosition {
         VehicleKey vehicle_key_enum = 6;
         string vehicle_key_unknown = 7;
     }
+    bool hidden = 8;
 }
 
 message PlayerPositions {

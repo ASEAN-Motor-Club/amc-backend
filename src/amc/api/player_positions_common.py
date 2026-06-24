@@ -1,3 +1,4 @@
+import asyncio
 import logging
 from datetime import timedelta
 
@@ -112,3 +113,77 @@ async def get_players_mod(
             ]
 
     return players
+
+
+class PlayerPositionsSubscription:
+    """Shared scheduled task that emits player positions to all subscribers.
+
+    One background loop fetches + processes mod player data every
+    `POSITION_UPDATE_SLEEP` seconds.  Consumers subscribe with an
+    ``async for`` loop and unsubscribe automatically on `break`.
+    When the subscriber count drops to zero the loop stops to save
+    resources.
+    """
+
+    _task: asyncio.Task | None = None
+    _subs: set[asyncio.Queue] = set()
+    _lock = asyncio.Lock()
+
+    @classmethod
+    async def subscribe(cls, session) -> list[dict]:
+        """Yield fresh player positions every tick, stopping when the caller
+        breaks out of the loop (e.g. WebSocket disconnect or stream ends).
+        """
+        queue: asyncio.Queue = asyncio.Queue(maxsize=1)
+        async with cls._lock:
+            cls._subs.add(queue)
+            if cls._task is None or cls._task.done():
+                cls._task = asyncio.create_task(cls._run(session))
+        try:
+            while True:
+                yield await queue.get()
+        finally:
+            async with cls._lock:
+                cls._subs.discard(queue)
+                if not cls._subs and cls._task is not None:
+                    cls._task.cancel()
+                    cls._task = None
+
+    @classmethod
+    async def _run(cls, session) -> None:
+        while True:
+            try:
+                raw = await get_players_mod(session)
+                wanted_ids, police_ids, costume_ids = await _get_hidden_player_unique_ids()
+                any_wanted = bool(wanted_ids)
+                processed = []
+                for p in raw:
+                    loc = p.get("Location", {})
+                    try:
+                        uid = int(p.get("UniqueID", 0))
+                    except (ValueError, TypeError):
+                        uid = 0
+                    hidden = _should_hide_player(
+                        p, wanted_ids, police_ids, costume_ids, any_wanted
+                    )
+                    processed.append(
+                        {
+                            "unique_id": uid,
+                            "player_name": p.get("PlayerName", ""),
+                            "x": 0.0 if hidden else float(loc.get("X", 0)),
+                            "y": 0.0 if hidden else float(loc.get("Y", 0)),
+                            "z": 0.0 if hidden else float(loc.get("Z", 0)),
+                            "hidden": hidden,
+                            "vehicle_key": p.get("VehicleKey", ""),
+                        }
+                    )
+                for q in list(cls._subs):
+                    try:
+                        q.put_nowait(processed)
+                    except asyncio.QueueFull:
+                        pass  # subscriber is slow; drop stale frame
+            except asyncio.CancelledError:
+                raise
+            except Exception:
+                logger.exception("Error in PlayerPositionsSubscription loop")
+            await asyncio.sleep(POSITION_UPDATE_SLEEP)
