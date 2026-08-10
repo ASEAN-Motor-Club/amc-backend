@@ -824,9 +824,9 @@ def _validate_forced_name(new_name: str) -> str | None:
     return clean
 
 
-async def _resolve_online_character_by_name(ctx, target_player_name):
+async def _resolve_online_character_by_name(mod_session, target_player_name):
     """Find the online Character whose display name matches target_player_name."""
-    players = await get_players_mod(ctx.http_client_mod)
+    players = await get_players_mod(mod_session)
     if not players:
         return None, None
     for p in players:
@@ -843,6 +843,40 @@ async def _resolve_online_character_by_name(ctx, target_player_name):
                 continue
             return character, p
     return None, None
+
+
+async def _resolve_offline_player_by_name(target_player_name):
+    """DB-only lookup of a Player by stored character name (exact or stripped)."""
+    stripped = strip_all_tags(target_player_name).strip()
+    if not stripped:
+        return None, None
+    qs = Character.objects.select_related("player").filter(name__iexact=stripped)
+    async for character in qs:
+        return character.player, character
+    matches = (
+        Character.objects.select_related("player")
+        .filter(name__icontains=stripped)
+        .order_by("id")[:50]
+    )
+    async for character in matches:
+        if strip_all_tags(character.name).lower() == stripped.lower():
+            return character.player, character
+    return None, None
+
+
+async def _resolve_player_for_force_rename(mod_session, target_player_name):
+    """Resolve a Player (and an online Character, if any) for a force-rename.
+
+    Tries the online mod player list first, then falls back to a DB lookup by
+    stored character name so that offline players can still be locked.
+    Shared by both the in-game and Discord admin commands.
+    """
+    character, _entry = await _resolve_online_character_by_name(
+        mod_session, target_player_name
+    )
+    if character is not None:
+        return character.player, character
+    return await _resolve_offline_player_by_name(target_player_name)
 
 
 @registry.register(
@@ -866,21 +900,22 @@ async def cmd_force_rename(ctx: CommandContext, target_player_name: str, new_nam
         )
         return
 
-    character, _player_entry = await _resolve_online_character_by_name(
-        ctx, target_player_name
+    target_player, character = await _resolve_player_for_force_rename(
+        ctx.http_client_mod, target_player_name
     )
-    if character is None:
+    if target_player is None:
         await ctx.reply(
-            _("Player '{name}' not found online.").format(name=target_player_name)
+            _("Player '{name}' not found.").format(name=target_player_name)
         )
         return
 
-    target_player = character.player
     target_player.forced_name = clean_name
     await target_player.asave(update_fields=["forced_name"])
 
-    # Re-apply immediately so the change is visible without a re-login.
-    await refresh_player_name(character, ctx.http_client_mod)
+    # Re-apply immediately so the change is visible without a re-login
+    # (no-op if the player is offline).
+    if character is not None:
+        await refresh_player_name(character, ctx.http_client_mod)
 
     await ctx.reply(
         _(
@@ -902,16 +937,15 @@ async def cmd_clear_forced_name(ctx: CommandContext, target_player_name: str):
         await ctx.reply(_("Admin-only"))
         return
 
-    character, _player_entry = await _resolve_online_character_by_name(
-        ctx, target_player_name
+    target_player, character = await _resolve_player_for_force_rename(
+        ctx.http_client_mod, target_player_name
     )
-    if character is None:
+    if target_player is None:
         await ctx.reply(
-            _("Player '{name}' not found online.").format(name=target_player_name)
+            _("Player '{name}' not found.").format(name=target_player_name)
         )
         return
 
-    target_player = character.player
     if not target_player.forced_name:
         await ctx.reply(
             _("{name} does not have a forced name.").format(name=target_player_name)
@@ -921,8 +955,9 @@ async def cmd_clear_forced_name(ctx: CommandContext, target_player_name: str):
     target_player.forced_name = None
     await target_player.asave(update_fields=["forced_name"])
 
-    # Restore their chosen name.
-    await refresh_player_name(character, ctx.http_client_mod)
+    # Restore their chosen name (no-op if offline).
+    if character is not None:
+        await refresh_player_name(character, ctx.http_client_mod)
 
     await ctx.reply(
         _("<Title>Name Lock Removed</>\n\n{name} can now choose their own name again.").format(

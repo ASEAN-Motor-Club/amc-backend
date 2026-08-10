@@ -162,6 +162,94 @@ class ModerationCog(commands.Cog):
             )
         await ctx.response.send_message(f"Popup sent to {player.unique_id}: {message}")
 
+
+    @admin.command(
+        name="force_rename",
+        description="Force rename a player and lock their name (Admin)",
+    )
+    @app_commands.checks.has_any_role(settings.DISCORD_ADMIN_ROLE_ID)
+    @app_commands.describe(
+        player="Player name (online or stored in DB)",
+        new_name="The forced name (<=20 chars, no '('). Cleared with /admin clear_forced_name",
+    )
+    async def discord_force_rename(
+        self, ctx: discord.Interaction, player: str, new_name: str
+    ):
+        from amc.commands.admin import (
+            _validate_forced_name,
+            _resolve_player_for_force_rename,
+        )
+        from amc.player_tags import refresh_player_name
+
+        clean_name = _validate_forced_name(new_name)
+        if clean_name is None:
+            await ctx.response.send_message(
+                "Invalid name — names must be at most 20 characters and cannot contain '('.",
+                ephemeral=True,
+            )
+            return
+
+        target_player, character = await _resolve_player_for_force_rename(
+            self.bot.http_client_mod, player
+        )
+        if target_player is None:
+            await ctx.response.send_message(
+                f"Player '{player}' not found.", ephemeral=True
+            )
+            return
+
+        target_player.forced_name = clean_name
+        await target_player.asave(update_fields=["forced_name"])
+
+        # Re-apply immediately if online (no-op if offline; applies on next login).
+        if character is not None:
+            await refresh_player_name(character, self.bot.http_client_mod)
+
+        await ctx.response.send_message(
+            f"✅ **{player}** is now forced to the name **{clean_name}**. "
+            "They cannot change it via /rename or by switching characters.",
+            ephemeral=True,
+        )
+
+    @admin.command(
+        name="clear_forced_name",
+        description="Remove an admin-imposed name lock (Admin)",
+    )
+    @app_commands.checks.has_any_role(settings.DISCORD_ADMIN_ROLE_ID)
+    @app_commands.describe(player="Player name (online or stored in DB)")
+    async def discord_clear_forced_name(
+        self, ctx: discord.Interaction, player: str
+    ):
+        from amc.commands.admin import _resolve_player_for_force_rename
+        from amc.player_tags import refresh_player_name
+
+        target_player, character = await _resolve_player_for_force_rename(
+            self.bot.http_client_mod, player
+        )
+        if target_player is None:
+            await ctx.response.send_message(
+                f"Player '{player}' not found.", ephemeral=True
+            )
+            return
+
+        if not target_player.forced_name:
+            await ctx.response.send_message(
+                f"**{player}** does not have a forced name.", ephemeral=True
+            )
+            return
+
+        target_player.forced_name = None
+        await target_player.asave(update_fields=["forced_name"])
+
+        # Restore their chosen name (no-op if offline).
+        if character is not None:
+            await refresh_player_name(character, self.bot.http_client_mod)
+
+        await ctx.response.send_message(
+            f"✅ Name lock removed — **{player}** can now choose their own name again.",
+            ephemeral=True,
+        )
+
     @admin_teleport.command(name="add", description="Create a new teleport point")
     @app_commands.checks.has_any_role(settings.DISCORD_ADMIN_ROLE_ID)
     async def add_teleport_point(self, ctx, name: str):

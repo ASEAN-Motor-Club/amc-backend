@@ -7,6 +7,8 @@ from amc.commands.admin import (
     cmd_force_rename,
     cmd_clear_forced_name,
     _validate_forced_name,
+    _resolve_player_for_force_rename,
+    _resolve_offline_player_by_name,
 )
 from amc.commands.general import cmd_rename
 
@@ -172,6 +174,64 @@ def test_validate_forced_name():
     assert _validate_forced_name("  [M] HasTag  ") == "HasTag"
     assert _validate_forced_name("x" * 21) is None  # too long
     assert _validate_forced_name("Bad(Name") is None  # contains "("
+
+
+@pytest.mark.asyncio
+@pytest.mark.django_db
+async def test_resolve_player_offline_fallback():
+    """A player not online can still be resolved from the DB by stored name."""
+    from amc.factories import CharacterFactory, PlayerFactory
+
+    target_player = await sync_to_async(PlayerFactory)()
+    await sync_to_async(CharacterFactory)(
+        player=target_player, name="OfflineGuy", guid="guid-offline-1"
+    )
+
+    # No online players reported by the mod server.
+    with patch(
+        "amc.commands.admin.get_players_mod",
+        new_callable=AsyncMock,
+        return_value=None,
+    ):
+        player, character = await _resolve_player_for_force_rename(
+            MagicMock(), "OfflineGuy"
+        )
+
+    assert player is not None
+    assert player.pk == target_player.pk
+    # Offline → no online character to push to
+    assert character is None
+
+    # Also resolve straight through the offline helper ignoring online list.
+    player2, _char2 = await _resolve_offline_player_by_name("OfflineGuy")
+    assert player2 is not None and player2.pk == target_player.pk
+
+
+@pytest.mark.asyncio
+@pytest.mark.django_db
+async def test_resolve_player_online_takes_precedence():
+    """The online player's character (with GUID) is preferred over DB fallback."""
+    from amc.factories import CharacterFactory, PlayerFactory
+
+    target_player = await sync_to_async(PlayerFactory)()
+    await sync_to_async(CharacterFactory)(
+        player=target_player, name="OnlineGuy", guid="guid-online-1"
+    )
+
+    mod_session = MagicMock()
+    with patch(
+        "amc.commands.admin.get_players_mod",
+        new_callable=AsyncMock,
+    ) as mock_players:
+        mock_players.return_value = [
+            {"PlayerName": "OnlineGuy", "CharacterGuid": "guid-online-1"}
+        ]
+        player, character = await _resolve_player_for_force_rename(
+            mod_session, "OnlineGuy"
+        )
+
+    assert player is not None and player.pk == target_player.pk
+    assert character is not None and character.guid == "guid-online-1"
 
 
 @pytest.mark.asyncio
