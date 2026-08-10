@@ -77,6 +77,18 @@ class Player(models.Model):
     displayer = models.BooleanField(
         default=False, help_text="Livery artists, showcase etc"
     )
+    # Admin-imposed name lock. When set, this overrides the player's chosen
+    # name on every character — they cannot change it via /rename or by
+    # switching characters until an admin clears it.
+    forced_name = models.CharField(
+        max_length=200,
+        null=True,
+        blank=True,
+        help_text=(
+            "Admin-imposed display name that overrides the player's chosen name "
+            "across all their characters. Cleared by /clear_forced_name."
+        ),
+    )
     social_score = models.IntegerField(default=0)
     language = models.CharField(
         max_length=10,

@@ -25,6 +25,7 @@ from amc.vehicles import spawn_registered_vehicle, register_player_vehicles
 from amc.models import (
     Character,
     CharacterVehicle,
+    Player,
     VehicleDealership,
     WorldText,
     WorldObject,
@@ -35,7 +36,7 @@ from amc.enums import VehicleKey
 from django.utils import timezone
 from django.utils.translation import gettext as _, gettext_lazy
 from amc.utils import fuzzy_find_player
-from amc.player_tags import strip_all_tags
+from amc.player_tags import strip_all_tags, refresh_player_name
 from amc_finance.services import player_donation
 
 
@@ -812,4 +813,122 @@ async def cmd_spawn_vehicle(ctx: CommandContext, name: str = None):
             vehicle_name=v.config.get("VehicleName", "Vehicle"),
             alias=v.alias,
         )
+    )
+
+
+def _validate_forced_name(new_name: str) -> str | None:
+    """Return the cleaned forced name, or None if invalid."""
+    clean = strip_all_tags(new_name).strip()
+    if len(clean) > 20 or "(" in clean:
+        return None
+    return clean
+
+
+async def _resolve_online_character_by_name(ctx, target_player_name):
+    """Find the online Character whose display name matches target_player_name."""
+    players = await get_players_mod(ctx.http_client_mod)
+    if not players:
+        return None, None
+    for p in players:
+        pname = p.get("PlayerName") or ""
+        if pname == target_player_name or strip_all_tags(pname) == target_player_name:
+            guid = p.get("CharacterGuid")
+            if not guid:
+                continue
+            try:
+                character = await (
+                    Character.objects.select_related("player").aget(guid=guid)
+                )
+            except Character.DoesNotExist:
+                continue
+            return character, p
+    return None, None
+
+
+@registry.register(
+    "/force_rename",
+    description=gettext_lazy(
+        "Force rename a player (locked vs /rename & character switch) (Admin)"
+    ),
+    category="Admin",
+)
+async def cmd_force_rename(ctx: CommandContext, target_player_name: str, new_name: str):
+    if not ctx.player_info or not ctx.player_info.get("bIsAdmin"):
+        await ctx.reply(_("Admin-only"))
+        return
+
+    clean_name = _validate_forced_name(new_name)
+    if clean_name is None:
+        await ctx.reply(
+            _(
+                "<Title>Invalid Name</>\n\nNames must be at most 20 characters and cannot contain '('."
+            )
+        )
+        return
+
+    character, _player_entry = await _resolve_online_character_by_name(
+        ctx, target_player_name
+    )
+    if character is None:
+        await ctx.reply(
+            _("Player '{name}' not found online.").format(name=target_player_name)
+        )
+        return
+
+    target_player = character.player
+    target_player.forced_name = clean_name
+    await target_player.asave(update_fields=["forced_name"])
+
+    # Re-apply immediately so the change is visible without a re-login.
+    await refresh_player_name(character, ctx.http_client_mod)
+
+    await ctx.reply(
+        _(
+            "<Title>Forced Rename</>\n\n{old} is now forced to the name <Bold>{new}</>. They cannot change it via /rename or by switching characters."
+        ).format(new=clean_name, old=target_player_name)
+    )
+    await ctx.announce(
+        f"{ctx.character.name} force-renamed {target_player_name} to {clean_name}."
+    )
+
+
+@registry.register(
+    "/clear_forced_name",
+    description=gettext_lazy("Remove an admin-imposed name lock (Admin)"),
+    category="Admin",
+)
+async def cmd_clear_forced_name(ctx: CommandContext, target_player_name: str):
+    if not ctx.player_info or not ctx.player_info.get("bIsAdmin"):
+        await ctx.reply(_("Admin-only"))
+        return
+
+    character, _player_entry = await _resolve_online_character_by_name(
+        ctx, target_player_name
+    )
+    if character is None:
+        await ctx.reply(
+            _("Player '{name}' not found online.").format(name=target_player_name)
+        )
+        return
+
+    target_player = character.player
+    if not target_player.forced_name:
+        await ctx.reply(
+            _("{name} does not have a forced name.").format(name=target_player_name)
+        )
+        return
+
+    target_player.forced_name = None
+    await target_player.asave(update_fields=["forced_name"])
+
+    # Restore their chosen name.
+    await refresh_player_name(character, ctx.http_client_mod)
+
+    await ctx.reply(
+        _("<Title>Name Lock Removed</>\n\n{name} can now choose their own name again.").format(
+            name=target_player_name
+        )
+    )
+    await ctx.announce(
+        f"{ctx.character.name} removed the forced name on {target_player_name}."
     )

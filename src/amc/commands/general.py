@@ -158,6 +158,13 @@ async def cmd_rename(ctx: CommandContext, name: str):
         await ctx.reply("This tag is reserved for government employees.")
         return
 
+    # Admin-imposed name lock — cannot be lifted by the player via /rename.
+    if ctx.player.forced_name:
+        await ctx.reply(
+            "Your name is locked by an admin and cannot be changed."
+        )
+        return
+
     clean_name = strip_all_tags(name)
 
     if len(clean_name) > 20 or "(" in clean_name:
