@@ -819,7 +819,10 @@ async def cmd_spawn_vehicle(ctx: CommandContext, name: str = None):
 def _validate_forced_name(new_name: str) -> str | None:
     """Return the cleaned forced name, or None if invalid."""
     clean = strip_all_tags(new_name).strip()
-    if len(clean) > 20 or "(" in clean:
+    # Reject empty / tag-only results too — a falsy forced_name would save
+    # an inert lock ('') that neither blocks /rename nor reports via
+    # /clear_forced_name, silently defeating the feature.
+    if not clean or len(clean) > 20 or "(" in clean:
         return None
     return clean
 

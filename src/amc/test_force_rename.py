@@ -174,6 +174,12 @@ def test_validate_forced_name():
     assert _validate_forced_name("  [M] HasTag  ") == "HasTag"
     assert _validate_forced_name("x" * 21) is None  # too long
     assert _validate_forced_name("Bad(Name") is None  # contains "("
+    # Empty / whitespace / tag-only results must be rejected, otherwise the
+    # saved lock would be a falsy '' that blocks neither /rename nor reports.
+    assert _validate_forced_name("") is None
+    assert _validate_forced_name("   ") is None
+    assert _validate_forced_name("[M]") is None
+    assert _validate_forced_name("[GOV1]") is None
 
 
 @pytest.mark.asyncio

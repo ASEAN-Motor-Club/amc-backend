@@ -1,6 +1,7 @@
 import re
 import logging
 from django.core.cache import cache
+from django.core.exceptions import ObjectDoesNotExist
 from amc.mod_server import set_character_name
 
 logger = logging.getLogger(__name__)
@@ -194,8 +195,9 @@ async def refresh_player_name(
     forced_name = None
     try:
         forced_name = character.player.forced_name
-    except Exception:
-        pass
+    except ObjectDoesNotExist:
+        # player relation missing (shouldn't happen: non-null FK) — no lock.
+        forced_name = None
     base_name = (forced_name or character.name).strip() or character.name
 
     # Reconstruct name
