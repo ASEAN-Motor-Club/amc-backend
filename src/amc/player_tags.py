@@ -1,6 +1,7 @@
 import re
 import logging
 from django.core.cache import cache
+from django.core.exceptions import ObjectDoesNotExist
 from amc.mod_server import set_character_name
 
 logger = logging.getLogger(__name__)
@@ -188,9 +189,20 @@ async def refresh_player_name(
     if active_guild_session:
         guild_abbreviation = active_guild_session.guild.abbreviation
 
+    # Determine base name — an admin-imposed forced name overrides the
+    # player's chosen name across ALL of their characters, so switching
+    # characters or re-running /rename can't escape it.
+    forced_name = None
+    try:
+        forced_name = character.player.forced_name
+    except ObjectDoesNotExist:
+        # player relation missing (shouldn't happen: non-null FK) — no lock.
+        forced_name = None
+    base_name = (forced_name or character.name).strip() or character.name
+
     # Reconstruct name
     new_name = build_display_name(
-        character.name,
+        base_name,
         criminal_level=criminal_level,
         has_custom_parts=has_custom_parts,
         police_level=police_level,
