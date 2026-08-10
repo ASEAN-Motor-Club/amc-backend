@@ -41,6 +41,33 @@ async def _make_ctx(player, character, *, is_admin=False, mod_session=None):
 @pytest.mark.asyncio
 @pytest.mark.django_db
 @patch("amc.player_tags.set_character_name", new_callable=AsyncMock)
+async def test_refresh_player_name_forced_name_async_safe_unprefetched_player(mock_set_name):
+    """Regression: the login path fetches the character WITHOUT
+    select_related('player'), so refresh must read forced_name async-safely
+    (via player_id + a query), not via the lazy character.player relation
+    (which raises SynchronousOnlyOperation in the async worker).
+    """
+    from amc.factories import CharacterFactory, PlayerFactory
+    from amc.models import Character
+
+    player = await sync_to_async(PlayerFactory)(forced_name="Fishy")
+    await sync_to_async(CharacterFactory)(
+        player=player, name="Arisu", guid="guid-async-1"
+    )
+
+    # Fetch exactly like aget_or_create_character_player does (no prefetch).
+    character = await Character.objects.aget(guid="guid-async-1")
+
+    session = MagicMock()
+    await refresh_player_name(character, session, has_custom_parts=False)
+
+    await character.arefresh_from_db()
+    assert character.custom_name == "Fishy"
+
+
+@pytest.mark.asyncio
+@pytest.mark.django_db
+@patch("amc.player_tags.set_character_name", new_callable=AsyncMock)
 async def test_refresh_player_name_uses_forced_name(mock_set_name):
     from amc.factories import CharacterFactory, PlayerFactory
 

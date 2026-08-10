@@ -1,7 +1,6 @@
 import re
 import logging
 from django.core.cache import cache
-from django.core.exceptions import ObjectDoesNotExist
 from amc.mod_server import set_character_name
 
 logger = logging.getLogger(__name__)
@@ -192,12 +191,24 @@ async def refresh_player_name(
     # Determine base name — an admin-imposed forced name overrides the
     # player's chosen name across ALL of their characters, so switching
     # characters or re-running /rename can't escape it.
+    #
+    # NOTE: read forced_name via character.player_id + an async-safe query,
+    # NOT character.player.forced_name. Accessing the `.player` relation
+    # on a character that wasn't select_related("player") triggers a LAZY FK
+    # query, which raises Django's SynchronousOnlyOperation in the async arq
+    # worker context and silently aborts name enforcement.
     forced_name = None
-    try:
-        forced_name = character.player.forced_name
-    except ObjectDoesNotExist:
-        # player relation missing (shouldn't happen: non-null FK) — no lock.
-        forced_name = None
+    if character.player_id:
+        try:
+            from amc.models import Player
+
+            forced_name = await (
+                Player.objects.filter(unique_id=character.player_id)
+                .values_list("forced_name", flat=True)
+                .afirst()
+            )
+        except Exception:
+            forced_name = None
     base_name = (forced_name or character.name).strip() or character.name
 
     # Reconstruct name
