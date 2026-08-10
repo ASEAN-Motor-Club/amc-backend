@@ -169,4 +169,8 @@ VEHICLE_KEY_MAP: dict[str, int] = {
     "Goliath4": VehicleKey.VEHICLE_KEY_GOLIATH4,
     "Goliath6": VehicleKey.VEHICLE_KEY_GOLIATH6,
     "Goliath10": VehicleKey.VEHICLE_KEY_GOLIATH10,
+    "Civo": VehicleKey.VEHICLE_KEY_CIVO,
+    "Elisa2": VehicleKey.VEHICLE_KEY_ELISA2,
+    "Elisa2_Police": VehicleKey.VEHICLE_KEY_ELISA2_POLICE,
+    "Longhorn_Semi_4x2": VehicleKey.VEHICLE_KEY_LONGHORN_SEMI_4X2,
 }
