@@ -119,6 +119,7 @@ class VehicleKey(models.TextChoices):
     Trophy_Air = "Trophy_Air", "Trophy Air"
     Elisa = "Elisa", "Elisa"
     Taxi_01 = "Taxi_01", "Elisa Taxi"
+    Elisa2 = "Elisa2", "Elisa 2"
     Duke = "Duke", "Duke"
     Cervos = "Cervos", "Cervos"
     Nimo = "Nimo", "Nimo"
@@ -140,6 +141,7 @@ class VehicleKey(models.TextChoices):
     Muhan = "Muhan", "Muhan"
     PoliceInterceptor_01 = "PoliceInterceptor_01", "Police Interceptor 1"
     Elisa_Police = "Elisa_Police", "Elisa Police"
+    Elisa2_Police = "Elisa2_Police", "Elisa 2 Police"
     Police_01 = "Police_01", "Police"
     Muhan_Police = "Muhan_Police", "Muhan Police"
     Zydro_Police = "Zydro_Police", "Zydro Police"
@@ -148,6 +150,7 @@ class VehicleKey(models.TextChoices):
     Liliput = "Liliput", "Liliput"
     SchoolBus_01 = "SchoolBus_01", "SV200"
     Bus = "Bus", "Air City"
+    Civo = "Civo", "Civo"
     Dumbi = "Dumbi", "Dumbi"
     CheetahMk1 = "CheetahMk1", "Cheetah Mk1"
     Pickup_02 = "Pickup_02", "Ranchy"
@@ -192,6 +195,7 @@ class VehicleKey(models.TextChoices):
     Goliath6 = "Goliath6", "Goliath 6x4"
     Goliath10 = "Goliath10", "Goliath 10x4"
     Longhorn_Semi = "Longhorn_Semi", "Longhorn Semi"
+    Longhorn_Semi_4x2 = "Longhorn_Semi_4x2", "Longhorn Semi 4x2"
     Brutus_Tanker = "Brutus_Tanker", "Brutus Tanker"
     Bongo = "Bongo", "Bongo"
     Bongo_Bus = "Bongo_Bus", "Bongo"
@@ -339,6 +343,11 @@ VEHICLE_DATA = {
         "object_name": "ElisaTaxi_C",
         "cost": 30000,
     },
+    "Elisa2": {
+        "asset_path": "/Game/Cars/Models/Elisa2/Elisa2.Elisa2_C",
+        "object_name": "Elisa2_C",
+        "cost": 20000,
+    },
     "Duke": {
         "asset_path": "/Game/Cars/Models/Duke/Duke.Duke_C",
         "object_name": "Duke_C",
@@ -449,6 +458,11 @@ VEHICLE_DATA = {
         "object_name": "Elisa_Police_C",
         "cost": 40000,
     },
+    "Elisa2_Police": {
+        "asset_path": "/Game/Cars/Models/Elisa2/Elisa2_Police.Elisa2_Police_C",
+        "object_name": "Elisa2_Police_C",
+        "cost": 50000,
+    },
     "Police_01": {
         "asset_path": "/Game/Cars/Models/Police/Police.Police_C",
         "object_name": "Police_C",
@@ -488,6 +502,11 @@ VEHICLE_DATA = {
         "asset_path": "/Game/Cars/Models/Bus/AirCity.AirCity_C",
         "object_name": "AirCity_C",
         "cost": 120000,
+    },
+    "Civo": {
+        "asset_path": "/Game/Cars/Models/Civo/Civo.Civo_C",
+        "object_name": "Civo_C",
+        "cost": 130000,
     },
     "Dumbi": {
         "asset_path": "/Game/Cars/Models/Dumbi/Dumbi.Dumbi_C",
@@ -723,6 +742,11 @@ VEHICLE_DATA = {
         "asset_path": "/Game/Cars/Models/Longhorn/Longhorn_Semi.Longhorn_Semi_C",
         "object_name": "Longhorn_Semi_C",
         "cost": 400000,
+    },
+    "Longhorn_Semi_4x2": {
+        "asset_path": "/Game/Cars/Models/Longhorn_Semi_4x2/Longhorn_Semi_4x2.Longhorn_Semi_4x2_C",
+        "object_name": "Longhorn_Semi_4x2_C",
+        "cost": 240000,
     },
     "Brutus_Tanker": {
         "asset_path": "/Game/Cars/Models/Brutus/Brutus_Tanker.Brutus_Tanker_C",
