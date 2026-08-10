@@ -387,6 +387,39 @@ class Character(models.Model):
         ]
 
 
+class ForcedNameLog(models.Model):
+    """Audit trail for admin force-renames and their later removal.
+
+    Records who set/cleared a player's name lock, the before/after values,
+    and when. One row per set/clear action, signed by either an in-game
+    character+player or a Discord user.
+    """
+
+    class Action(models.TextChoices):
+        SET = "set"
+        CLEAR = "clear"
+
+    player = models.ForeignKey(
+        Player, on_delete=models.CASCADE, related_name="forced_name_logs"
+    )
+    action = models.CharField(max_length=10, choices=Action.choices)
+    old_name = models.CharField(max_length=200, null=True, blank=True)
+    new_name = models.CharField(max_length=200, null=True, blank=True)
+    # In-game actor (admin's character / player account).
+    actor_character = models.ForeignKey(
+        Character, on_delete=models.SET_NULL, null=True, blank=True, related_name="+"
+    )
+    actor_player = models.ForeignKey(
+        Player, on_delete=models.SET_NULL, null=True, blank=True, related_name="+"
+    )
+    # Discord actor (slash-command user id).
+    actor_discord_id = models.PositiveBigIntegerField(null=True, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ["-created_at"]
+
+
 @final
 class CriminalRecord(models.Model):
     character = models.ForeignKey(

@@ -37,6 +37,7 @@ from django.utils import timezone
 from django.utils.translation import gettext as _, gettext_lazy
 from amc.utils import fuzzy_find_player
 from amc.player_tags import strip_all_tags, refresh_player_name
+from amc.forced_name import log_forced_name_change
 from amc_finance.services import player_donation
 
 
@@ -849,22 +850,47 @@ async def _resolve_online_character_by_name(mod_session, target_player_name):
 
 
 async def _resolve_offline_player_by_name(target_player_name):
-    """DB-only lookup of a Player by stored character name (exact or stripped)."""
+    """DB-only lookup of a Player by stored character name (exact or stripped).
+
+    Dedupes by Player: if more than one distinct player account shares the
+    given name, returns (None, None) rather than silently locking whichever
+    character happened to sort first — an admin should not lock the wrong
+    account on an ambiguous name.
+    """
     stripped = strip_all_tags(target_player_name).strip()
     if not stripped:
         return None, None
-    qs = Character.objects.select_related("player").filter(name__iexact=stripped)
-    async for character in qs:
-        return character.player, character
-    matches = (
-        Character.objects.select_related("player")
-        .filter(name__icontains=stripped)
-        .order_by("id")[:50]
-    )
-    async for character in matches:
-        if strip_all_tags(character.name).lower() == stripped.lower():
-            return character.player, character
-    return None, None
+
+    matched_player_ids = set()
+    matched_characters = []
+
+    async for character in (
+        Character.objects.select_related("player").filter(name__iexact=stripped)
+    ):
+        matched_player_ids.add(character.player_id)
+        matched_characters.append(character)
+
+    if not matched_characters:
+        matches = (
+            Character.objects.select_related("player")
+            .filter(name__icontains=stripped)
+            .order_by("id")[:50]
+        )
+        async for character in matches:
+            if strip_all_tags(character.name).lower() == stripped.lower():
+                matched_player_ids.add(character.player_id)
+                matched_characters.append(character)
+
+    if len(matched_player_ids) != 1:
+        # Ambiguous (or missing) — refuse to guess.
+        return None, None
+
+    player = await Player.objects.aget(pk=next(iter(matched_player_ids)))
+    # Return the most recently stored matching character for that player.
+    for character in reversed(matched_characters):
+        if character.player_id == player.pk:
+            return player, character
+    return player, None
 
 
 async def _resolve_player_for_force_rename(mod_session, target_player_name):
@@ -912,8 +938,18 @@ async def cmd_force_rename(ctx: CommandContext, target_player_name: str, new_nam
         )
         return
 
+    old_name = target_player.forced_name
     target_player.forced_name = clean_name
     await target_player.asave(update_fields=["forced_name"])
+
+    await log_forced_name_change(
+        target_player,
+        action="set",
+        old_name=old_name,
+        new_name=clean_name,
+        actor_character=ctx.character,
+        actor_player=ctx.player,
+    )
 
     # Re-apply immediately so the change is visible without a re-login
     # (no-op if the player is offline).
@@ -955,8 +991,18 @@ async def cmd_clear_forced_name(ctx: CommandContext, target_player_name: str):
         )
         return
 
+    old_name = target_player.forced_name
     target_player.forced_name = None
     await target_player.asave(update_fields=["forced_name"])
+
+    await log_forced_name_change(
+        target_player,
+        action="clear",
+        old_name=old_name,
+        new_name=None,
+        actor_character=ctx.character,
+        actor_player=ctx.player,
+    )
 
     # Restore their chosen name (no-op if offline).
     if character is not None:

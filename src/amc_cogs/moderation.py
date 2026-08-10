@@ -179,6 +179,7 @@ class ModerationCog(commands.Cog):
             _validate_forced_name,
             _resolve_player_for_force_rename,
         )
+        from amc.forced_name import log_forced_name_change
         from amc.player_tags import refresh_player_name
 
         clean_name = _validate_forced_name(new_name)
@@ -198,8 +199,17 @@ class ModerationCog(commands.Cog):
             )
             return
 
+        old_name = target_player.forced_name
         target_player.forced_name = clean_name
         await target_player.asave(update_fields=["forced_name"])
+
+        await log_forced_name_change(
+            target_player,
+            action="set",
+            old_name=old_name,
+            new_name=clean_name,
+            actor_discord_id=ctx.user.id,
+        )
 
         # Re-apply immediately if online (no-op if offline; applies on next login).
         if character is not None:
@@ -221,6 +231,7 @@ class ModerationCog(commands.Cog):
         self, ctx: discord.Interaction, player: str
     ):
         from amc.commands.admin import _resolve_player_for_force_rename
+        from amc.forced_name import log_forced_name_change
         from amc.player_tags import refresh_player_name
 
         target_player, character = await _resolve_player_for_force_rename(
@@ -238,8 +249,17 @@ class ModerationCog(commands.Cog):
             )
             return
 
+        old_name = target_player.forced_name
         target_player.forced_name = None
         await target_player.asave(update_fields=["forced_name"])
+
+        await log_forced_name_change(
+            target_player,
+            action="clear",
+            old_name=old_name,
+            new_name=None,
+            actor_discord_id=ctx.user.id,
+        )
 
         # Restore their chosen name (no-op if offline).
         if character is not None:

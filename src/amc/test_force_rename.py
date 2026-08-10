@@ -242,6 +242,139 @@ async def test_resolve_player_online_takes_precedence():
 
 @pytest.mark.asyncio
 @pytest.mark.django_db
+async def test_resolve_offline_ambiguous_name_returns_none():
+    """Two distinct players sharing a name: refuse rather than lock the wrong one."""
+    from amc.factories import CharacterFactory, PlayerFactory
+
+    p1 = await sync_to_async(PlayerFactory)()
+    p2 = await sync_to_async(PlayerFactory)()
+    await sync_to_async(CharacterFactory)(player=p1, name="SharedName", guid="g-a-1")
+    await sync_to_async(CharacterFactory)(player=p2, name="SharedName", guid="g-a-2")
+
+    player, character = await _resolve_offline_player_by_name("SharedName")
+    assert player is None
+    assert character is None
+
+
+@pytest.mark.asyncio
+@pytest.mark.django_db
+async def test_resolve_offline_single_player_still_resolves():
+    """A shared-name subset where only one distinct player matches is fine."""
+    from amc.factories import CharacterFactory, PlayerFactory
+
+    only_player = await sync_to_async(PlayerFactory)()
+    # Same player, multiple characters — dedupes to one distinct player.
+    await sync_to_async(CharacterFactory)(
+        player=only_player, name="MultiChar", guid="g-m-1"
+    )
+    await sync_to_async(CharacterFactory)(
+        player=only_player, name="MultiChar", guid="g-m-2"
+    )
+
+    player, character = await _resolve_offline_player_by_name("MultiChar")
+    assert player is not None and player.pk == only_player.pk
+    assert character is not None
+
+
+@pytest.mark.asyncio
+@pytest.mark.django_db
+async def test_force_rename_creates_audit_log():
+    from amc.factories import CharacterFactory, PlayerFactory
+    from amc.models import ForcedNameLog
+
+    target_player = await sync_to_async(PlayerFactory)()
+    await sync_to_async(CharacterFactory)(
+        player=target_player, name="OffensiveName", guid="guid-log-1"
+    )
+    admin_player = await sync_to_async(PlayerFactory)()
+    admin_character = await sync_to_async(CharacterFactory)(
+        player=admin_player, name="AdminLog", guid="guid-log-admin"
+    )
+
+    with patch(
+        "amc.commands.admin.get_players_mod",
+        new_callable=AsyncMock,
+    ) as mock_players:
+        mock_players.return_value = [
+            {"PlayerName": "OffensiveName", "CharacterGuid": "guid-log-1"}
+        ]
+        ctx = await _make_ctx(admin_player, admin_character, is_admin=True)
+        await cmd_force_rename(ctx, "OffensiveName", "Renamed")
+
+    await target_player.arefresh_from_db()
+    assert target_player.forced_name == "Renamed"
+
+    log_entry = await ForcedNameLog.objects.filter(
+        player=target_player, action="set"
+    ).afirst()
+    assert log_entry is not None
+    assert log_entry.new_name == "Renamed"
+    assert log_entry.old_name is None
+    # Actor is the in-game admin character/player.
+    assert log_entry.actor_character_id == admin_character.pk
+    assert log_entry.actor_player_id == admin_player.pk
+    assert log_entry.created_at is not None
+
+
+@pytest.mark.asyncio
+@pytest.mark.django_db
+async def test_clear_forced_name_creates_audit_log():
+    from amc.factories import CharacterFactory, PlayerFactory
+    from amc.models import ForcedNameLog
+
+    target_player = await sync_to_async(PlayerFactory)(forced_name="Locked")
+    await sync_to_async(CharacterFactory)(
+        player=target_player, name="Original", guid="guid-log-2"
+    )
+    admin_player = await sync_to_async(PlayerFactory)()
+    admin_character = await sync_to_async(CharacterFactory)(
+        player=admin_player, name="AdminLog2", guid="guid-log-admin-2"
+    )
+
+    with patch(
+        "amc.commands.admin.get_players_mod",
+        new_callable=AsyncMock,
+    ) as mock_players:
+        mock_players.return_value = [
+            {"PlayerName": "Locked", "CharacterGuid": "guid-log-2"}
+        ]
+        ctx = await _make_ctx(admin_player, admin_character, is_admin=True)
+        await cmd_clear_forced_name(ctx, "Locked")
+
+    await target_player.arefresh_from_db()
+    assert target_player.forced_name is None
+
+    log_entry = await ForcedNameLog.objects.filter(
+        player=target_player, action="clear"
+    ).afirst()
+    assert log_entry is not None
+    assert log_entry.old_name == "Locked"
+    assert log_entry.new_name is None
+    assert log_entry.actor_character_id == admin_character.pk
+
+
+@pytest.mark.asyncio
+@pytest.mark.django_db
+async def test_offline_forced_name_applies_on_reconnect():
+    """Locking an offline player still takes effect once they log back in."""
+    from amc.factories import CharacterFactory, PlayerFactory
+
+    player = await sync_to_async(PlayerFactory)(forced_name="PreLocked")
+    character = await sync_to_async(CharacterFactory)(
+        player=player, name="OfflineName", guid="guid-reconnect-1"
+    )
+
+    # Simulate reconnect: refresh_player_name runs on login.
+    with patch("amc.player_tags.set_character_name", new_callable=AsyncMock):
+        session = MagicMock()
+        await refresh_player_name(character, session, has_custom_parts=False)
+
+    await character.arefresh_from_db()
+    assert character.custom_name == "PreLocked"
+
+
+@pytest.mark.asyncio
+@pytest.mark.django_db
 async def test_cmd_force_rename_sets_lock_and_applies():
     from amc.factories import CharacterFactory, PlayerFactory
     from amc.models import Character
