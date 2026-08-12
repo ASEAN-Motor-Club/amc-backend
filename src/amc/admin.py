@@ -1684,3 +1684,34 @@ class HousingLicenseAdmin(admin.ModelAdmin):
         "note",
     ]
     raw_id_fields = ["character"]
+
+
+@admin.register(ScheduledAnnouncement)
+class ScheduledAnnouncementAdmin(admin.ModelAdmin):
+    """Manage the server-wide pinned announcement schedule from the dashboard."""
+
+    list_display = [
+        "message",
+        "scheduled_at",
+        "repeat",
+        "active_minutes",
+        "enabled",
+        "updated_at",
+    ]
+    list_filter = ["enabled", "repeat"]
+    search_fields = ["message"]
+    ordering = ["-scheduled_at"]
+    fieldsets = (
+        (
+            None,
+            {
+                "fields": (
+                    "message",
+                    "scheduled_at",
+                    "repeat",
+                    "active_minutes",
+                    "enabled",
+                )
+            },
+        ),
+    )

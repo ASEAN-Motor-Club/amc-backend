@@ -29,6 +29,24 @@ async def send_system_message(session, message, character_guid=None):
     await session.post("/messages/system", json=params)
 
 
+async def set_pinned_announcement(session, message):
+    """Set the server's pinned announcement board (the `/ap` message) on the mod.
+
+    Backend-driven: Django computes the currently-live pinned message from the
+    admin-scheduled announcements and pushes it to the mod's `POST /pin`
+    endpoint. The mod stays dumb — no polling, no recurrence logic — it just
+    writes the value to Net_ServerConfig.PinnedAnnounce.
+    """
+    await _write_limiter.acquire()
+    data = {"message": message}
+    async with session.post("/pin", json=data) as resp:
+        if resp.status != 200:
+            raise Exception(
+                f"Failed to set pinned announcement "
+                f"(status={resp.status}, body={(await resp.text())[:200]})"
+            )
+
+
 async def set_config(session, max_vehicles_per_player=12):
     await _write_limiter.acquire()
     params = {"MaxVehiclePerPlayer": max_vehicles_per_player}
