@@ -1272,9 +1272,71 @@ class ExtraWebhookTests(TestCase):
         char, total_subsidy, total_payment, _ = player_profits[0]
         self.assertEqual(total_subsidy, 0)
 
-        # Timestamp should be cleared after consumption
+        # The taint timestamp persists after consumption — a second delivery
+        # within the 1h window must ALSO be unsubsidised. It only ages out
+        # once `shortcut_zone_entered_at` is older than an hour.
         await character.arefresh_from_db()
-        self.assertIsNone(character.shortcut_zone_entered_at)
+        self.assertIsNotNone(character.shortcut_zone_entered_at)
+
+    async def test_shortcut_taint_ages_out_after_1h(
+        self, mock_show_popup, mock_announce, mock_get_treasury, mock_get_rp_mode
+    ):
+        """A delivery more than 1h after a shortcut pass keeps its subsidy.
+
+        The taint window is bounded: once `shortcut_zone_entered_at` is older
+        than an hour, subsidy returns.
+        """
+        mock_get_rp_mode.return_value = False
+        mock_get_treasury.return_value = 100_000
+
+        player = await sync_to_async(PlayerFactory)()
+        character = await sync_to_async(CharacterFactory)(
+            player=player,
+            guid="test-char-shortcut-stale",
+            shortcut_zone_entered_at=timezone.now() - timedelta(hours=2),
+        )
+        await CharacterLocation.objects.acreate(
+            character=character, location=Point(0, 0, 0), vehicle_key="TestVehicle"
+        )
+
+        await DeliveryPoint.objects.acreate(guid="s1", name="S1", coord=Point(0, 0, 0))
+        await DeliveryPoint.objects.acreate(
+            guid="d1", name="D1", coord=Point(100, 100, 0)
+        )
+
+        event = {
+            "hook": "ServerCargoArrived",
+            "timestamp": int(time.time()),
+            "data": {
+                "CharacterGuid": str(character.guid),
+                "Cargos": [
+                    {
+                        "Net_CargoKey": "apples",
+                        "Net_Payment": 1000,
+                        "Net_Weight": 10.0,
+                        "Net_Damage": 0.0,
+                        "Net_SenderAbsoluteLocation": {"X": 0, "Y": 0, "Z": 0},
+                        "Net_DestinationLocation": {"X": 100, "Y": 100, "Z": 0},
+                    }
+                ],
+            },
+        }
+
+        await PlayerStatusLog.objects.acreate(
+            character=character,
+            timespan=(timezone.now() - timedelta(minutes=5), timezone.now()),
+        )
+
+        with patch(
+            "amc.webhook.on_player_profits", new_callable=AsyncMock
+        ) as mock_profits:
+            await process_events([event], http_client_mod=MagicMock())
+            await asyncio.sleep(0)
+            player_profits = mock_profits.call_args[0][0]
+
+        # Not zeroed — the 2-hour-old timestamp is outside the window
+        char, total_subsidy, total_payment, _ = player_profits[0]
+        self.assertGreater(total_subsidy, 0)
 
     async def test_cargo_dumped(
         self, mock_show_popup, mock_announce, mock_get_treasury, mock_get_rp_mode
