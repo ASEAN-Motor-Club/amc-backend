@@ -3,7 +3,7 @@ import json
 import logging
 import math
 import os
-from datetime import datetime, timezone as dt_timezone
+from datetime import datetime, timedelta, timezone as dt_timezone
 
 import aiohttp
 from django.contrib.gis.geos import Point
@@ -72,6 +72,12 @@ For any other purposes, <Highlight>please contact the admins on the discord</>.
 
 SHORTCUT_ZONE_WARNING_RADIUS = 2000  # game units (~20m)
 
+# How recently a player must have been inside a shortcut zone (via
+# shortcut_zone_entered_at) before we suppress the entry popup. Re-crossing
+# the boundary within this window means they already saw the warning, so we
+# don't spam the popup on every touch.
+SHORTCUT_ZONE_ENTRY_POPUP_WINDOW = timedelta(minutes=2)
+
 SHORTCUT_ZONE_WARNING_MESSAGE = """\
 <Title>⚠️ Shortcut Zone Ahead</>
 <Warning>You are near a shortcut zone!</>
@@ -128,6 +134,10 @@ async def _check_shortcut_zones(character, old_location, new_location, ctx):
         is_inside_polygon = distance_new == 0
 
         if is_inside_polygon:
+            # Capture the prior timestamp before refreshing below, so the
+            # entry popup can be debounced against it.
+            prev_entered_at = character.shortcut_zone_entered_at
+
             # Refresh the "last time inside a shortcut zone" timestamp on
             # every inside tick (not just the entry crossing) so the 1-hour
             # taint window tracks actual occupancy. This also covers cases
@@ -137,13 +147,22 @@ async def _check_shortcut_zones(character, old_location, new_location, ctx):
             # text promises.
             character.shortcut_zone_entered_at = timezone.now()
 
-        if was_outside_polygon and is_inside_polygon:
-            await show_popup(
-                http_client_mod,
-                SHORTCUT_ZONE_ENTRY_MESSAGE,
-                player_id=player.unique_id,
+            now = timezone.now()
+            recently_inside = (
+                prev_entered_at is not None
+                and prev_entered_at > now - SHORTCUT_ZONE_ENTRY_POPUP_WINDOW
             )
-            await asyncio.sleep(0.1)
+
+            # Only show the entry popup on a real (re)entry — suppress it if
+            # the player was already inside a shortcut zone very recently, so a
+            # player drifting across the boundary doesn't get spammed.
+            if was_outside_polygon and not recently_inside:
+                await show_popup(
+                    http_client_mod,
+                    SHORTCUT_ZONE_ENTRY_MESSAGE,
+                    player_id=player.unique_id,
+                )
+                await asyncio.sleep(0.1)
 
 
 async def _check_jail_boundary(character, new_location, ctx):

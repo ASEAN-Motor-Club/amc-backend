@@ -165,3 +165,60 @@ class ShortcutZoneWarningTests(TestCase):
 
         stale = timezone.now() - timedelta(hours=3)
         self.assertGreater(character.shortcut_zone_entered_at, stale)
+
+    @patch("amc.locations.show_popup", new_callable=AsyncMock)
+    async def test_entry_popup_debounced_by_shortcut_zone_entered_at(
+        self, mock_show_popup
+    ):
+        """Re-entering a shortcut zone shortly after leaving doesn't re-popup.
+
+        The entry popup is suppressed while `shortcut_zone_entered_at` is
+        still within the popup window, so a player drifting across the
+        boundary isn't spammed.
+        """
+        await self._create_zone()
+        character = await sync_to_async(CharacterFactory)()
+        ctx = self._make_ctx(AsyncMock())
+
+        # First entry — popup fires (no prior taint)
+        await _check_shortcut_zones(
+            character, Point(-1000, 1000, 0, srid=0), Point(1000, 1000, 0, srid=0), ctx
+        )
+        mock_show_popup.assert_called_once()
+
+        # Leave, then re-enter almost immediately — taint is recent, no popup
+        mock_show_popup.reset_mock()
+        await _check_shortcut_zones(
+            character, Point(1000, 1000, 0, srid=0), Point(-1000, 1000, 0, srid=0), ctx
+        )
+        await _check_shortcut_zones(
+            character, Point(-1000, 1000, 0, srid=0), Point(1000, 1000, 0, srid=0), ctx
+        )
+        mock_show_popup.assert_not_called()
+
+    @patch("amc.locations.show_popup", new_callable=AsyncMock)
+    async def test_entry_popup_fires_after_window_elapses(self, mock_show_popup):
+        """Re-entering after the popup window has elapsed triggers the popup again."""
+        await self._create_zone()
+        character = await sync_to_async(CharacterFactory)()
+        ctx = self._make_ctx(AsyncMock())
+
+        # First entry → popup
+        await _check_shortcut_zones(
+            character, Point(-1000, 1000, 0, srid=0), Point(1000, 1000, 0, srid=0), ctx
+        )
+        mock_show_popup.assert_called_once()
+
+        # Make the taint go stale (older than the popup window)
+        character.shortcut_zone_entered_at = timezone.now() - timedelta(minutes=10)
+        await character.asave()
+
+        # Leave then re-enter → popup fires again
+        mock_show_popup.reset_mock()
+        await _check_shortcut_zones(
+            character, Point(1000, 1000, 0, srid=0), Point(-1000, 1000, 0, srid=0), ctx
+        )
+        await _check_shortcut_zones(
+            character, Point(-1000, 1000, 0, srid=0), Point(1000, 1000, 0, srid=0), ctx
+        )
+        mock_show_popup.assert_called_once()
