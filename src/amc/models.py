@@ -1,6 +1,6 @@
 import math
 import asyncstdlib as a
-from datetime import timedelta
+from datetime import datetime, timedelta
 from deepdiff import DeepHash
 from django.contrib import admin
 from django.contrib.gis.db import models
@@ -3301,3 +3301,125 @@ class NewsItem(models.Model):
     @override
     def __str__(self):
         return self.title
+
+
+@final
+class ScheduledAnnouncement(models.Model):
+    """Server-wide pinned announcement, optionally recurring.
+
+    The in-game pinned board (the ``/ap`` admin command) mirrors the active
+    entry. An entry is "live" once its scheduled time passes — and, for
+    recurring entries, at every repeat boundary thereafter (with an optional
+    per-occurrence active window). The backend worker periodically computes the
+    currently-live entry and pushes it to the mod's ``POST /pin`` endpoint,
+    which writes it to the board. Admin edits made here therefore propagate
+    within the push cadence and are re-asserted after server restarts.
+    """
+
+    class Repeat(models.TextChoices):
+        NONE = "none", "None"
+        HOURLY = "hourly", "Hourly"
+        DAILY = "daily", "Daily"
+        WEEKLY = "weekly", "Weekly"
+        MONTHLY = "monthly", "Monthly"
+
+    message = models.TextField(
+        help_text="Text shown as the server's pinned announcement (`/ap`)."
+    )
+    scheduled_at = models.DateTimeField(
+        help_text="First time this announcement goes live."
+    )
+    repeat = models.CharField(
+        max_length=10,
+        choices=Repeat.choices,
+        default=Repeat.NONE,
+        help_text="How often the announcement re-occurs after the first fire.",
+    )
+    active_minutes = models.PositiveIntegerField(
+        null=True,
+        blank=True,
+        help_text=(
+            "How long each occurrence stays live (minutes). Blank = stays live "
+            "until the next occurrence."
+        ),
+    )
+    enabled = models.BooleanField(default=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    if TYPE_CHECKING:
+        objects: ClassVar[models.Manager["ScheduledAnnouncement"]]
+
+    class Meta:
+        ordering = ["scheduled_at"]
+        verbose_name = "Scheduled Announcement"
+        verbose_name_plural = "Scheduled Announcements"
+
+    def __str__(self) -> str:
+        return f"{self.message[:40]} @ {self.scheduled_at:%Y-%m-%d %H:%M}"
+
+    def occurrence_at(self, index: int) -> datetime:
+        """The occurrence ``index`` repeat-periods after the first (0 = first).
+
+        Monthly occurrences are anchored to the original day-of-month of
+        ``scheduled_at`` so clamping to a shorter month (e.g. Jan 31 → Feb 28)
+        does not drift the day permanently (it returns to the 31st in March).
+        """
+        base = self.scheduled_at
+        if index <= 0 or self.repeat == self.Repeat.NONE:
+            return base
+        if self.repeat == self.Repeat.HOURLY:
+            return base + timedelta(hours=index)
+        if self.repeat == self.Repeat.DAILY:
+            return base + timedelta(days=index)
+        if self.repeat == self.Repeat.WEEKLY:
+            return base + timedelta(weeks=index)
+        if self.repeat == self.Repeat.MONTHLY:
+            anchor_day = base.day
+            total_months = base.year * 12 + (base.month - 1) + index
+            year, month0 = divmod(total_months, 12)
+            month = month0 + 1
+            day = min(anchor_day, _days_in_month(year, month))
+            return base.replace(year=year, month=month, day=day)
+        return base
+
+    def latest_occurrence(self, now: datetime | None = None) -> datetime | None:
+        """Most recent occurrence at or before ``now`` that is still live.
+
+        Returns ``None`` if the announcement has not yet gone live, or if its
+        most recent occurrence has fallen outside its active window.
+        """
+        now = now or timezone.now()
+        if self.scheduled_at > now:
+            return None  # not yet live
+
+        elapsed = now - self.scheduled_at
+        if self.repeat == self.Repeat.NONE:
+            candidate = self.scheduled_at
+        elif self.repeat == self.Repeat.HOURLY:
+            candidate = self.occurrence_at(int(elapsed.total_seconds() // 3600))
+        elif self.repeat == self.Repeat.DAILY:
+            candidate = self.occurrence_at(max(0, elapsed.days))
+        elif self.repeat == self.Repeat.WEEKLY:
+            candidate = self.occurrence_at(max(0, elapsed.days // 7))
+        else:  # MONTHLY — durations vary; estimate by month delta, then step back if needed
+            months = (now.year - self.scheduled_at.year) * 12 + (
+                now.month - self.scheduled_at.month
+            )
+            index = max(0, months)
+            candidate = self.occurrence_at(index)
+            while candidate > now and index > 0:
+                index -= 1
+                candidate = self.occurrence_at(index)
+
+        if self.active_minutes is None:
+            return candidate
+        if now <= candidate + timedelta(minutes=self.active_minutes):
+            return candidate
+        return None
+
+
+def _days_in_month(year: int, month: int) -> int:
+    import calendar
+
+    return calendar.monthrange(year, month)[1]

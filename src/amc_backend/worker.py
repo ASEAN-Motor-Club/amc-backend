@@ -30,6 +30,7 @@ from amc.status import monitor_server_status  # noqa: E402
 from amc.gov_employee import expire_gov_employees  # noqa: E402
 from amc.supply_chain import monitor_supply_chain_events  # noqa: E402
 from amc.rescue_reminder import send_rescue_reminders  # noqa: E402
+from amc.pinned_announcement import drive_pinned_announcement  # noqa: E402
 import discord  # noqa: E402
 from amc.discord_client import bot as discord_client  # noqa: E402
 from amc_finance.services import (  # noqa: E402
@@ -266,6 +267,9 @@ class WorkerSettings:
         cron(monitor_supply_chain_events, second=47),
         # pyrefly: ignore [bad-argument-type]
         cron(send_rescue_reminders, second=set(range(0, 60, 15))),
+        # Push the admin-scheduled /ap pinned announcement to the mod (every minute)
+        # pyrefly: ignore [bad-argument-type]
+        cron(drive_pinned_announcement, minute=None),
         # pyrefly: ignore [bad-argument-type]
         cron(post_random_events, hour={0, 3, 6, 9, 12, 15, 18, 21}, minute=0, second=15),
         # cron(monitor_server_condition, minute=set(range(3, 60, 5))),
