@@ -1,19 +1,28 @@
+import asyncio
 import logging
 import re
 from dataclasses import dataclass
 from pathlib import Path
 
 import psutil  # type: ignore[import-untyped]
+from django.core.cache import cache
 from amc.mod_server import get_status, set_config
 from amc.game_server import get_players, announce
 from amc.models import ServerStatus
 from amc.utils import skip_if_running
+from amc.pinned_announcement import announce_server_restart
 
 logger = logging.getLogger(__name__)
 
 FD_MONITOR_LOG = Path("/var/log/motortown-fd-monitor.log")
 FD_SETSIZE = 1024  # glibc hard limit for select()
 FD_WARN_THRESHOLD = 850  # warn when max FD number exceeds this
+
+# Tracks whether the game server was reachable on the previous status tick, so
+# we can detect the down→up transition (crash/restart recovery). Defaults to
+# True so the backend doesn't announce a restart on its own first observation
+# while the server is already up.
+_WAS_UP_KEY = "server_status:was_up"
 
 # Tracks the last FD alert level to avoid spamming:
 #   None  = never alerted
@@ -137,6 +146,15 @@ async def monitor_server_status(ctx):
 
     if status is None:
         status = {}
+
+    # Detect a crash/restart: the mod is unreachable when the game is down.
+    up = bool(status)
+    was_up = cache.get(_WAS_UP_KEY, True)
+    cache.set(_WAS_UP_KEY, up)
+    if up and not was_up:
+        # Server just came back — announce the restart via the /ap pin, in the
+        # background and without awaiting a response from the endpoint.
+        asyncio.create_task(announce_server_restart(ctx))
 
     mem = psutil.virtual_memory()
 

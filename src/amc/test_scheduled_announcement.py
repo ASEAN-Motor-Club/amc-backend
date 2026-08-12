@@ -5,7 +5,12 @@ from django.test import TestCase
 from django.utils import timezone
 
 from amc.models import ScheduledAnnouncement
-from amc.pinned_announcement import current_pinned_message, drive_pinned_announcement
+from amc.pinned_announcement import (
+    current_pinned_message,
+    drive_pinned_announcement,
+    announce_server_restart,
+    RESTART_MESSAGE,
+)
 
 
 class ScheduledAnnouncementModelTestCase(TestCase):
@@ -121,3 +126,20 @@ class DrivePinnedAnnouncementTestCase(TestCase):
         )
         # Should not raise even with no client.
         await drive_pinned_announcement({"http_client_mod": None})
+
+
+class AnnounceServerRestartTestCase(TestCase):
+    async def test_pushes_restart_message_to_mod(self):
+        mod = AsyncMock()
+        mod.post = AsyncMock()
+        await announce_server_restart({"http_client_mod": mod})
+        mod.post.assert_called_once_with("/pin", json={"message": RESTART_MESSAGE})
+
+    async def test_swallows_mod_failure(self):
+        mod = AsyncMock()
+        mod.post = AsyncMock(side_effect=RuntimeError("mod unreachable"))
+        # Should not raise even when the mod rejects the push.
+        await announce_server_restart({"http_client_mod": mod})
+
+    async def test_no_mod_session_skips(self):
+        await announce_server_restart({"http_client_mod": None})

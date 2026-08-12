@@ -23,6 +23,10 @@ _LAST_TS_KEY = "pinned_announce:last_push_ts"
 # server restart even when the message hasn't changed.
 _STALE_AFTER = 5 * 60
 
+# Shown on the /ap board for a short window after the game server recovers
+# from a crash/restart, before any admin-scheduled pin is re-applied.
+RESTART_MESSAGE = "Server restarted, welcome back!"
+
 
 async def current_pinned_message() -> str:
     """Return the currently-live pinned announcement message ("" if none)."""
@@ -79,3 +83,23 @@ async def drive_pinned_announcement(ctx):
 
     cache.set(_LAST_MSG_KEY, message)
     cache.set(_LAST_TS_KEY, now_ts)
+
+
+async def announce_server_restart(ctx):
+    """Push a "server restarted" pin to the mod, fire-and-forget.
+
+    Called by the server-status monitor when the game server transitions from
+    down/unreachable to up (e.g. after a crash). Runs as a background task so
+    the monitor never blocks on it, and never propagates errors. No response is
+    awaited from the mod's /pin endpoint.
+    """
+    mod_session = ctx.get("http_client_mod")
+    if mod_session is None:
+        return
+
+    from amc.mod_server import set_pinned_announcement
+
+    try:
+        await set_pinned_announcement(mod_session, RESTART_MESSAGE)
+    except Exception:  # noqa: BLE001 — best-effort; swallow so caller never faults
+        logger.warning("Failed to push server-restart announce to mod", exc_info=True)
