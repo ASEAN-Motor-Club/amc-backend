@@ -338,18 +338,11 @@ async def process_events(
         )
         if party_result is not None:
             player_profits.extend(party_result)
-            if used_shortcut:
-                await Character.objects.filter(pk=character.pk).aupdate(
-                    shortcut_zone_entered_at=None
-                )
             continue
 
         # Solo path: shortcut zones zero out subsidy
         if used_shortcut:
             total_subsidy = 0
-            await Character.objects.filter(pk=character.pk).aupdate(
-                shortcut_zone_entered_at=None
-            )
 
         player_profits.append(
             (character, total_subsidy, total_base_payment, total_contract_payment)

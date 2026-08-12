@@ -1,7 +1,9 @@
 from unittest.mock import AsyncMock, patch
 from asgiref.sync import sync_to_async
+from datetime import timedelta
 from django.contrib.gis.geos import Point, Polygon
 from django.test import TestCase
+from django.utils import timezone
 from amc.models import ShortcutZone
 from amc.factories import CharacterFactory
 from amc.locations import (
@@ -111,3 +113,55 @@ class ShortcutZoneWarningTests(TestCase):
         await _check_shortcut_zones(character, old_loc, new_loc, ctx)
 
         mock_show_popup.assert_not_called()
+
+    @patch("amc.locations.show_popup", new_callable=AsyncMock)
+    async def test_taint_set_on_entry_and_not_cleared_on_exit(self, mock_show_popup):
+        """Passing through a shortcut zone taints the character for 1h.
+
+        The timestamp is set on entry and MUST persist after leaving all
+        zones, so a delivery shortly after passing through is still
+        unsubsidised.
+        """
+        await self._create_zone()
+        character = await sync_to_async(CharacterFactory)()
+
+        # Enter the zone → taint set
+        old_loc = Point(-1000, 1000, 0, srid=0)
+        new_loc = Point(1000, 1000, 0, srid=0)
+        ctx = self._make_ctx(AsyncMock())
+        await _check_shortcut_zones(character, old_loc, new_loc, ctx)
+        await character.arefresh_from_db()
+        self.assertIsNotNone(character.shortcut_zone_entered_at)
+
+        # Leave all zones → taint MUST persist (NOT cleared on exit)
+        old_loc = Point(1000, 1000, 0, srid=0)
+        new_loc = Point(-1000, 1000, 0, srid=0)
+        await _check_shortcut_zones(character, old_loc, new_loc, ctx)
+        await character.arefresh_from_db()
+        self.assertIsNotNone(character.shortcut_zone_entered_at)
+
+    @patch("amc.locations.show_popup", new_callable=AsyncMock)
+    async def test_taint_refreshed_while_inside(self, mock_show_popup):
+        """Remaining inside a zone keeps the taint within the 1h window.
+
+        The timestamp is refreshed on every inside tick, so a player camping
+        a shortcut zone for >1h stays tainted while physically inside (the
+        entry-only path would otherwise let the timestamp go stale).
+        """
+        await self._create_zone()
+        character = await sync_to_async(CharacterFactory)()
+
+        # Stay inside the polygon — location updates keep coming
+        old_loc = Point(1000, 1000, 0, srid=0)
+        new_loc = Point(1002, 1000, 0, srid=0)
+
+        # Simulate an entry timestamp that has already gone stale (>1h old)
+        character.shortcut_zone_entered_at = timezone.now() - timedelta(hours=3)
+        await character.asave()
+
+        ctx = self._make_ctx(AsyncMock())
+        await _check_shortcut_zones(character, old_loc, new_loc, ctx)
+        await character.arefresh_from_db()
+
+        stale = timezone.now() - timedelta(hours=3)
+        self.assertGreater(character.shortcut_zone_entered_at, stale)
