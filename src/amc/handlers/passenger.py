@@ -127,7 +127,29 @@ async def handle_passenger_arrived(event, player, character, ctx):
     )
     if session:
         log.guild_session = session
-        log.payment += bonus
+
+        # Fund the guild bonus from the treasury.  Check the floor first
+        # so we never add money to the wallet that we can't account for.
+        funded_bonus = 0
+        if bonus > 0 and ctx.http_client_mod:
+            from amc_finance.services import (
+                check_treasury_floor,
+                send_fund_to_player_wallet,
+            )
+
+            if await check_treasury_floor(int(bonus)):
+                funded_bonus = int(bonus)
+                await transfer_money(
+                    ctx.http_client_mod,
+                    funded_bonus,
+                    "Guild Bonus",
+                    str(character.player.unique_id),
+                )
+                await send_fund_to_player_wallet(
+                    funded_bonus, character, "Guild Passenger Bonus"
+                )
+
+        log.payment += funded_bonus
         await log.asave(update_fields=["guild_session", "payment"])
 
         from amc.guilds import check_guild_achievements

@@ -1,0 +1,59 @@
+# AMC Backend — direnv environment
+#
+# This file is loaded by direnv when you cd into amc-backend/.
+# It sets up a local PostgreSQL + Redis and activates the Nix devShell.
+#
+# Setup:
+#   1. Install direnv + nix (https://direnv.net, https://nixos.org/download)
+#   2. Copy .env.example to .env and fill in your secrets
+#   3. Run: direnv allow
+#
+# The devShell provides: python, postgresql (with PostGIS + TimescaleDB),
+# redis, uv, ruff, pyrefly, pre-commit, gettext, and the editable Python env.
+
+# Load the Nix devShell (packages + env vars like GEOS_LIBRARY_PATH, GDAL_LIBRARY_PATH)
+use flake . -Lv
+
+# Load .env secrets (DISCORD_TOKEN, channel IDs, etc.)
+dotenv
+
+# ── PostgreSQL ──────────────────────────────────────────────────────
+# Runs a local Postgres instance under .direnv/postgres/.
+# First entry creates the cluster; subsequent entries auto-start if stopped.
+# Uses Unix sockets only (no TCP) with aggressive perf tuning for tests.
+
+export PGDATA="$(direnv_layout_dir)/postgres"
+export PGHOST="$PGDATA"
+
+if [[ ! -d "$PGDATA" ]]; then
+  # First-time setup
+  initdb -D "$PGDATA" -c shared_memory_type=mmap
+  cat > "$PGDATA/postgresql.conf" <<EOF
+listen_addresses = ''
+unix_socket_directories = '$PGHOST'
+shared_preload_libraries = 'timescaledb'
+work_mem = '500MB'
+fsync = off
+synchronous_commit = off
+full_page_writes = off
+client_encoding = 'UTF8'
+timezone = 'UTC'
+EOF
+  pg_ctl -D "$PGDATA" -l "$PGDATA/server.log" start
+  createdb -h "$PGHOST" amc
+  psql -h "$PGHOST" amc -c "CREATE EXTENSION IF NOT EXISTS postgis;"
+  psql -h "$PGHOST" amc -c "CREATE EXTENSION IF NOT EXISTS timescaledb;"
+else
+  # Ensure postgres is running (idempotent)
+  pg_ctl -D "$PGDATA" status > /dev/null 2>&1 || \
+    pg_ctl -D "$PGDATA" -l "$PGDATA/server.log" start
+fi
+
+# ── Redis ───────────────────────────────────────────────────────────
+# Starts a local Redis on port 6379 if not already running.
+# Data and logs are stored under .direnv/.
+
+export REDIS_PORT=6379
+redis-cli -p "$REDIS_PORT" ping > /dev/null 2>&1 || \
+  redis-server --port "$REDIS_PORT" --daemonize yes \
+    --dir "$(direnv_layout_dir)" --logfile "$(direnv_layout_dir)/redis.log"

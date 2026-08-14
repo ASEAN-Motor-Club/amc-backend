@@ -107,7 +107,7 @@ def treasury_spending(request, days: int = 7):
             fulfilled_at__date__range=[start_date, end_date],
             completion_bonus__gt=0,
         )
-        .values("name", "completion_bonus", "bonus_multiplier", "quantity_requested", "quantity_fulfilled", "escrowed_amount")
+        .values("name", "completion_bonus", "quantity_requested", "quantity_fulfilled", "escrowed_amount")
         .order_by("-completion_bonus")[:20]
     )
 
@@ -177,7 +177,6 @@ def treasury_spending(request, days: int = 7):
             {
                 "name": row["name"] or "Unnamed",
                 "completion_bonus": row["completion_bonus"],
-                "bonus_multiplier": round(row["bonus_multiplier"], 2),
                 "quantity_requested": row["quantity_requested"],
                 "quantity_fulfilled": row["quantity_fulfilled"],
                 "escrowed_amount": row["escrowed_amount"],

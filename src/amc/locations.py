@@ -274,13 +274,17 @@ async def _check_pois_and_portals(character, old_location, new_location, ctx):
             await asyncio.sleep(0.1)
 
 
-async def _process_location_batch(ctx, players, has_telemetry):
-    """Process a batch of player location data: checks, DB writes, character updates."""
+async def _process_location_checks(ctx, players, has_telemetry):
+    """Run real-time checks (jail, POIs, portals, shortcut zones) and build DB objects.
+
+    Returns ``(new_locations, characters_to_update)`` — the caller is
+    responsible for flushing these to the database (via ``_flush_locations_to_db``).
+    """
     guid_to_player_info = {
         p["CharacterGuid"]: p for p in players if p.get("CharacterGuid")
     }
     if not guid_to_player_info:
-        return
+        return [], []
 
     characters = {
         c.guid: c
@@ -344,6 +348,11 @@ async def _process_location_batch(ctx, players, has_telemetry):
         character.last_online = now
         characters_to_update.append(character)
 
+    return new_locations, characters_to_update
+
+
+async def _flush_locations_to_db(new_locations, characters_to_update):
+    """Persist accumulated location rows and character updates to the database."""
     if new_locations:
         await CharacterLocation.objects.abulk_create(
             new_locations, ignore_conflicts=True
@@ -362,15 +371,21 @@ async def _process_location_batch(ctx, players, has_telemetry):
         )
 
 
+async def _process_location_batch(ctx, players, has_telemetry):
+    """Process a batch of player location data: checks + immediate DB flush."""
+    new_locations, characters_to_update = await _process_location_checks(
+        ctx, players, has_telemetry,
+    )
+    await _flush_locations_to_db(new_locations, characters_to_update)
+
+
 def _transform_snapshots(snapshots):
     """Transform C++ mod SSE snapshots into the player-info dicts expected by _process_location_batch.
 
     Each snapshot has shape: {"timestamp_ms": N, "entries": [{"character_guid", "location": {x,y,z}, ...}]}
     Output shape per player: {"CharacterGuid", "Location": {X,Y,Z}, "VehicleKey", "Yaw", "Speed", "Velocity": {X,Y,Z}, "RPM", "Gear", "_capture_ts"}
     """
-    # Keep only the latest snapshot per character to avoid duplicate rows when
-    # multiple snapshots are buffered in one flush window.
-    latest = {}
+    result = []
     for snap in snapshots:
         ts_ms = snap.get("timestamp_ms", 0)
         capture_ts = (
@@ -387,7 +402,7 @@ def _transform_snapshots(snapshots):
             vx, vy, vz = vel.get("x", 0), vel.get("y", 0), vel.get("z", 0)
             speed = math.sqrt(vx * vx + vy * vy + vz * vz)
             vehicle_key = e.get("vehicle_key", "") or None
-            latest[guid] = {
+            result.append({
                 "CharacterGuid": guid,
                 "Location": {"X": loc["x"], "Y": loc["y"], "Z": loc["z"]},
                 "VehicleKey": vehicle_key,
@@ -397,8 +412,8 @@ def _transform_snapshots(snapshots):
                 "RPM": e.get("rpm", 0),
                 "Gear": e.get("gear", 0),
                 "_capture_ts": capture_ts,
-            }
-    return list(latest.values())
+            })
+    return result
 
 
 async def run_location_listener(ctx):
@@ -434,7 +449,8 @@ async def run_location_listener(ctx):
     INITIAL_BACKOFF = 1
     MAX_BACKOFF = 30
     HEALTHY_SESSION_SECONDS = 60
-    FLUSH_INTERVAL = 1.0
+    FLUSH_INTERVAL = 0.5
+    DB_FLUSH_INTERVAL = 2.0
     SSE_TIMEOUT = aiohttp.ClientTimeout(
         total=None, sock_connect=10, sock_read=90,
     )
@@ -467,6 +483,9 @@ async def run_location_listener(ctx):
                     event_buffer: list[dict] = []
                     current_lines: list[str] = []
                     last_flush = event_loop.time()
+                    pending_locations: list = []
+                    pending_characters: list = []
+                    last_db_flush = event_loop.time()
 
                     try:
                         while True:
@@ -516,9 +535,22 @@ async def run_location_listener(ctx):
                                         players = _transform_snapshots(event_buffer)
                                         event_buffer.clear()
                                         last_flush = now
-                                        await _process_location_batch(
+                                        locs, chars = await _process_location_checks(
                                             ctx, players, has_telemetry=True,
                                         )
+                                        pending_locations.extend(locs)
+                                        pending_characters.extend(chars)
+
+                                    if (
+                                        pending_locations
+                                        and now - last_db_flush >= DB_FLUSH_INTERVAL
+                                    ):
+                                        await _flush_locations_to_db(
+                                            pending_locations, pending_characters,
+                                        )
+                                        pending_locations.clear()
+                                        pending_characters.clear()
+                                        last_db_flush = now
                             else:
                                 current_lines.append(line)
 
@@ -526,8 +558,14 @@ async def run_location_listener(ctx):
                         if event_buffer:
                             players = _transform_snapshots(event_buffer)
                             event_buffer.clear()
-                            await _process_location_batch(
+                            locs, chars = await _process_location_checks(
                                 ctx, players, has_telemetry=True,
+                            )
+                            pending_locations.extend(locs)
+                            pending_characters.extend(chars)
+                        if pending_locations:
+                            await _flush_locations_to_db(
+                                pending_locations, pending_characters,
                             )
 
         except asyncio.CancelledError:

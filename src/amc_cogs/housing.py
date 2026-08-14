@@ -18,6 +18,7 @@ from amc.mod_server import (
     rent_house,
     transfer_money,
 )
+from amc_cogs.housing_market import get_market_multiplier
 from amc_finance.loans import get_player_bank_balance
 from amc_finance.services import (
     record_treasury_rent_income,
@@ -34,7 +35,7 @@ SECONDS_PER_DAY = 86400
 
 
 class CharacterSelect(ui.Select):
-    def __init__(self, characters, action, house_data, rent_info):
+    def __init__(self, characters, action, house_data, rent_info, houses):
         options = []
         for c in characters:
             last = ""
@@ -59,6 +60,7 @@ class CharacterSelect(ui.Select):
         self.action = action
         self.house_data = house_data
         self.rent_info = rent_info
+        self.houses = houses
 
     async def callback(self, interaction: discord.Interaction):
         character_id = int(self.values[0])
@@ -108,6 +110,34 @@ class CharacterSelect(ui.Select):
 
         rent_cost = int(cost * ratio)
 
+        market_multiplier, market_breakdown = await get_market_multiplier(
+            self.houses, max_days
+        )
+        rent_cost = int(rent_cost * market_multiplier)
+
+        lookback_days = settings.RENT_REBATE_LOOKBACK_DAYS
+        cutoff = timezone.now() - timedelta(days=lookback_days)
+        total_earnings = (
+            await Delivery.objects.filter(
+                character=character, timestamp__gte=cutoff
+            ).aaggregate(total=Sum(F("payment") + F("subsidy")))
+        )["total"] or 0
+
+        licenses = HousingLicense.objects.filter(character=character)
+        exact = licenses.filter(house_key=house_guid)
+        general = licenses.filter(house_key__isnull=True)
+        license = await exact.order_by("-rebate_pct").afirst()
+        if license is None:
+            license = await general.order_by("-rebate_pct").afirst()
+
+        if license:
+            effective_cost = int(rent_cost * license.rebate_pct / 100)
+        else:
+            effective_cost = rent_cost
+
+        rebate = min(total_earnings, effective_cost)
+        net_cost = max(0, rent_cost - rebate)
+
         mod_session = interaction.client.http_client_mod
         game_session = interaction.client.http_client_game
 
@@ -118,22 +148,22 @@ class CharacterSelect(ui.Select):
             return
 
         balance = await get_player_bank_balance(character)
-        if balance < rent_cost:
+        if balance < net_cost:
             await interaction.followup.send(
-                f"Insufficient bank balance. Need **₱{rent_cost:,}**, have **₱{balance:,}**.",
+                f"Insufficient bank balance. Need **₱{net_cost:,}**, have **₱{balance:,}**.",
                 ephemeral=True,
             )
             return
 
         try:
-            await register_player_withdrawal(rent_cost, character, player)
+            await register_player_withdrawal(net_cost, character, player)
         except ValueError as e:
             await interaction.followup.send(f"Bank error: {e}", ephemeral=True)
             return
 
         try:
             await transfer_money(
-                mod_session, rent_cost, "House Rent", str(player.unique_id)
+                mod_session, net_cost, "House Rent", str(player.unique_id)
             )
         except Exception:
             logger.warning(
@@ -149,16 +179,29 @@ class CharacterSelect(ui.Select):
             )
             return
 
-        await record_treasury_rent_income(rent_cost, f"House Rent — {character.guid}")
+        await record_treasury_rent_income(net_cost, f"House Rent — {character.guid}")
 
         embed = discord.Embed(
             title="House Rented",
             description=(
                 f"**{character.name}** has rented **{house_key}**.\n"
                 f"Cost: **₱{rent_cost:,}**\n"
+                + (f"Rebate: **-₱{rebate:,}**\n" if rebate > 0 else "")
+                + f"Net Cost: **₱{net_cost:,}**\n"
                 f"Duration: **{max_days} days**"
             ),
             color=discord.Color.green(),
+        )
+        embed.add_field(
+            name="Market Rate",
+            value=(
+                f"**{market_breakdown['multiplier']}x**\n"
+                f"Avg players (7d): {market_breakdown['avg_players']} "
+                f"(factor {market_breakdown['player_factor']})\n"
+                f"Avg rent remaining: {market_breakdown['avg_rent_pct']}% "
+                f"(health {market_breakdown['rent_health']})"
+            ),
+            inline=False,
         )
         await interaction.followup.send(embed=embed, ephemeral=True)
 
@@ -203,6 +246,11 @@ class CharacterSelect(ui.Select):
         extend_seconds = int(extend_days * SECONDS_PER_DAY)
         cost_per_day = int(cost * ratio / max_days)
         rent_cost = cost_per_day * int(extend_days)
+
+        market_multiplier, market_breakdown = await get_market_multiplier(
+            self.houses, max_days
+        )
+        rent_cost = int(rent_cost * market_multiplier)
 
         lookback_days = settings.RENT_REBATE_LOOKBACK_DAYS
         cutoff = timezone.now() - timedelta(days=lookback_days)
@@ -255,6 +303,7 @@ class CharacterSelect(ui.Select):
             rebate=rebate,
             net_cost=net_cost,
             mod_session=mod_session,
+            market_breakdown=market_breakdown,
         )
 
         embed = discord.Embed(
@@ -272,6 +321,15 @@ class CharacterSelect(ui.Select):
             value=f"{int(extend_days)} days",
             inline=True,
         )
+        embed.add_field(
+            name="Market Rate",
+            value=(
+                f"**{market_breakdown['multiplier']}x** "
+                f"(players {market_breakdown['player_factor']}, "
+                f"rent health {market_breakdown['rent_health']})"
+            ),
+            inline=True,
+        )
         embed.add_field(name="\u200b", value="\u200b", inline=False)
         embed.add_field(name="Rent", value=f"₱{rent_cost:,}", inline=True)
         if rebate > 0:
@@ -282,9 +340,9 @@ class CharacterSelect(ui.Select):
 
 
 class CharacterSelectView(ui.View):
-    def __init__(self, characters, action, house_data, rent_info):
+    def __init__(self, characters, action, house_data, rent_info, houses):
         super().__init__(timeout=120)
-        self.add_item(CharacterSelect(characters, action, house_data, rent_info))
+        self.add_item(CharacterSelect(characters, action, house_data, rent_info, houses))
 
 
 class ExtendConfirmView(ui.View):
@@ -300,6 +358,7 @@ class ExtendConfirmView(ui.View):
         rebate,
         net_cost,
         mod_session,
+        market_breakdown=None,
     ):
         super().__init__(timeout=120)
         self.character = character
@@ -312,6 +371,7 @@ class ExtendConfirmView(ui.View):
         self.rebate = rebate
         self.net_cost = net_cost
         self.mod_session = mod_session
+        self.market_breakdown = market_breakdown
 
     @ui.button(label="Confirm", style=discord.ButtonStyle.green)
     async def confirm(self, interaction: discord.Interaction, button: ui.Button):
@@ -364,6 +424,17 @@ class ExtendConfirmView(ui.View):
             ),
             color=discord.Color.green(),
         )
+        if self.market_breakdown:
+            mb = self.market_breakdown
+            embed.add_field(
+                name="Market Rate",
+                value=(
+                    f"**{mb['multiplier']}x** "
+                    f"(players {mb['player_factor']}, "
+                    f"rent health {mb['rent_health']})"
+                ),
+                inline=False,
+            )
         await interaction.followup.send(embed=embed, ephemeral=True)
         self.stop()
 
@@ -451,7 +522,7 @@ class HousingCog(commands.Cog):
             )
             return
 
-        view = CharacterSelectView(characters, "buy", house_data, rent_info)
+        view = CharacterSelectView(characters, "buy", house_data, rent_info, houses)
         cost = rent_info.get("Cost")
         ratio = rent_info.get("HousingPlotRentalPriceRatio", 5.0)
         max_days = rent_info.get("MaxHousingPlotRentalDays", 15)
@@ -465,14 +536,28 @@ class HousingCog(commands.Cog):
 
         rent_cost = int(cost * ratio) if cost else None
 
+        market_multiplier, market_breakdown = await get_market_multiplier(
+            houses, max_days
+        )
+
         embed = discord.Embed(
             title="Rent House",
             description=f"**{house_data.get('HousegKey', plot_key)}**",
             color=discord.Color.blue(),
         )
         if rent_cost is not None:
-            embed.add_field(name="Cost", value=f"₱{rent_cost:,}", inline=True)
+            market_rent_cost = int(rent_cost * market_multiplier)
+            embed.add_field(name="Cost", value=f"₱{market_rent_cost:,}", inline=True)
             embed.add_field(name="Duration", value=f"{max_days} days", inline=True)
+        embed.add_field(
+            name="Market Rate",
+            value=(
+                f"**{market_breakdown['multiplier']}x** "
+                f"(players {market_breakdown['player_factor']}, "
+                f"rent health {market_breakdown['rent_health']})"
+            ),
+            inline=False,
+        )
 
         await interaction.followup.send(
             "Select the character to rent with:", embed=embed, view=view, ephemeral=True
@@ -529,9 +614,29 @@ class HousingCog(commands.Cog):
             )
             return
 
-        view = CharacterSelectView(owning_characters, "extend", house_data, rent_info)
+        view = CharacterSelectView(owning_characters, "extend", house_data, rent_info, houses)
+
+        rent_info_max_days = rent_info.get("MaxHousingPlotRentalDays", 15)
+        _, market_breakdown = await get_market_multiplier(houses, rent_info_max_days)
+
+        embed = discord.Embed(
+            title="Extend House Rent",
+            description=f"**{house_data.get('HousegKey', plot_key)}**",
+            color=discord.Color.blue(),
+        )
+        embed.add_field(
+            name="Market Rate",
+            value=(
+                f"**{market_breakdown['multiplier']}x** "
+                f"(players {market_breakdown['player_factor']}, "
+                f"rent health {market_breakdown['rent_health']})"
+            ),
+            inline=False,
+        )
+
         await interaction.followup.send(
             "Select the character that owns this house:",
+            embed=embed,
             view=view,
             ephemeral=True,
         )

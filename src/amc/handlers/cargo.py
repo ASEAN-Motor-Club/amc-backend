@@ -28,13 +28,13 @@ from amc.special_cargo import (
     ILLICIT_CARGO_KEYS,
     accumulate_illicit_delivery,
     link_delivery_to_criminal_record,
-    should_trigger_wanted,
 )
 from amc.mod_detection import detect_custom_parts, POLICE_DUTY_WHITELIST
 from amc.mod_server import (
     get_player_last_vehicle,
     get_player_last_vehicle_parts,
     show_popup,
+    transfer_money,
 )
 from amc.fraud_detection import validate_cargo_payment
 from amc.pipeline.discord import post_discord_delivery_embed
@@ -128,16 +128,47 @@ async def handle_cargo_arrived(event, player, character, ctx):
     from amc.guilds import check_guild_cargo
 
     guild_bonus_total = 0
+    guild_session_bonuses: list[tuple[object, int]] = []
     for log in logs:
         session, bonus = await check_guild_cargo(
             character, log.cargo_key, log.payment, log.damage or 0
         )
         if session:
             log.guild_session = session
-            log.payment += bonus
+            guild_session_bonuses.append((log, bonus))
             guild_bonus_total += bonus
+
+    # Fund the guild bonus from the treasury.  Check the floor first so
+    # we never add money to the wallet that we can't account for.
+    funded = False
+    if guild_bonus_total > 0 and ctx.http_client_mod:
+        from amc_finance.services import (
+            check_treasury_floor,
+            send_fund_to_player_wallet,
+        )
+
+        if await check_treasury_floor(int(guild_bonus_total)):
+            funded = True
+            await transfer_money(
+                ctx.http_client_mod,
+                int(guild_bonus_total),
+                "Guild Bonus",
+                str(character.player.unique_id),
+            )
+            await send_fund_to_player_wallet(
+                int(guild_bonus_total),
+                character,
+                "Guild Cargo Bonus",
+            )
+
+    # Apply bonuses to log payments only when treasury-funded.
+    if funded:
+        for log, bonus in guild_session_bonuses:
+            log.payment += bonus
     if guild_bonus_total > 0:
-        await ServerCargoArrivedLog.objects.abulk_update(logs, ["guild_session", "payment"])
+        await ServerCargoArrivedLog.objects.abulk_update(
+            logs, ["guild_session", "payment"]
+        )
 
     for log in logs:
         if log.guild_session:
@@ -251,14 +282,16 @@ async def handle_cargo_arrived(event, player, character, ctx):
             delivery_amount = payment * quantity
             # Accumulate within the debounce window so splitting across multiple
             # small deliveries (~5 s apart) is treated the same as one big one.
-            accumulated_amount = await accumulate_illicit_delivery(
+            await accumulate_illicit_delivery(
                 character.guid, delivery_amount
             )
             # Check if already wanted (always refresh) or roll probability
             already_wanted = await Wanted.objects.filter(
                 character=character, expired_at__isnull=True
             ).aexists()
-            if already_wanted or should_trigger_wanted(accumulated_amount):
+            # DEPRECATED: random wanted trigger — may be restored in the future
+            # if already_wanted or should_trigger_wanted(accumulated_amount):
+            if already_wanted:
                 # Bounty (Wanted.amount) starts at 0 — it only grows from police
                 # proximity during chase, tracked in tick_wanted_countdown.
                 # Delivery payments are confiscated via CriminalRecord.confiscatable_amount.

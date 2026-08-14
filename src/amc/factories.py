@@ -170,7 +170,7 @@ class DeliveryJobFactory(DjangoModelFactory):
         model = DeliveryJob
 
     quantity_requested = LazyAttribute(lambda _: random.randint(1, 1000))
-    bonus_multiplier = LazyAttribute(lambda _: random.random())
+    bonus_multiplier = 0
     expired_at = LazyAttribute(
         lambda _: timezone.now() + timedelta(hours=random.randint(2, 8))
     )
@@ -182,7 +182,7 @@ class DeliveryJobTemplateFactory(DjangoModelFactory):
 
     name = Faker("bs")
     default_quantity = LazyAttribute(lambda _: random.randint(1, 1000))
-    bonus_multiplier = LazyAttribute(lambda _: random.random())
+    bonus_multiplier = 0
     duration_hours = LazyAttribute(lambda _: random.randint(2, 8))
 
     @factory.post_generation

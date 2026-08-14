@@ -9,6 +9,8 @@ from __future__ import annotations
 import logging
 import os
 
+from django.conf import settings
+
 from amc.models import Character
 from amc.mod_server import transfer_money
 from amc.subsidies import set_aside_player_savings, subsidise_player
@@ -110,6 +112,18 @@ async def on_player_profit(
     if subsidy != 0:
         await subsidise_player(subsidy, character, session)
     actual_income = base_payment + subsidy + contract_payment
+
+    if character.rp_mode and not skip_gov_redirect:
+        rp_bonus = int(actual_income * settings.RP_MODE_BONUS_RATE)
+        if rp_bonus > 0:
+            await transfer_money(
+                session,
+                int(rp_bonus),
+                "RP Mode Bonus",
+                str(character.player.unique_id),
+            )
+            actual_income += rp_bonus
+
     loan_repayment = await repay_loan_for_profit(character, actual_income, session)
     savings = actual_income - loan_repayment
     if savings > 0:

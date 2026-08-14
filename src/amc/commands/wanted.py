@@ -23,6 +23,7 @@ def _stars(n: int) -> str:
     "/wanted",
     description=gettext_lazy("List wanted criminals"),
     category="Faction",
+    deprecated=True,
 )
 async def cmd_wanted(ctx: CommandContext):
     timezone.now()

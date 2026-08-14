@@ -759,6 +759,27 @@ class TreasurySummaryTestCase(TestCase):
             result["income"]["breakdown"]["gov_employee"]["amount"], Decimal(20_000)
         )
 
+    def test_income_categorization_rent(self):
+        """House Rent entries should be categorized as rent."""
+        from amc_finance.treasury_summary import get_treasury_summary
+
+        treasury_fund, revenue, _, _ = self._create_gov_accounts()
+
+        self._create_journal_entry(
+            "House Rent — some-guid",
+            [
+                {"account": treasury_fund, "debit": Decimal(5_000), "credit": 0},
+                {"account": revenue, "debit": 0, "credit": Decimal(5_000)},
+            ],
+        )
+
+        result = get_treasury_summary(target_date=timezone.now().date())
+        self.assertEqual(result["income"]["total"], Decimal(5_000))
+        self.assertIn("rent", result["income"]["breakdown"])
+        self.assertEqual(
+            result["income"]["breakdown"]["rent"]["amount"], Decimal(5_000)
+        )
+
     def test_income_nirc_transfer(self):
         """NIRC Transfer should appear in income breakdown as nirc."""
         from amc_finance.treasury_summary import get_treasury_summary

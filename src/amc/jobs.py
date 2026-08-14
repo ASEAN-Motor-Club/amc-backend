@@ -26,7 +26,6 @@ from amc_finance.services import (
     process_ministry_expiration,
     send_fund_to_player,
     process_ministry_completion,
-    process_treasury_expiration_penalty,
 )
 
 
@@ -100,18 +99,20 @@ async def cleanup_expired_jobs(http_client):
         await process_ministry_expiration(job)
         await _decay_template_score(job)
 
-    # 2. Handle non-Ministry expired jobs (government shutdown)
-    # Treasury pays penalty of 50% of completion_bonus
+    # 2. Handle non-Ministry expired jobs
+    # Payout partial contributors for any progress made before expiry.
     expired_non_ministry_jobs = DeliveryJob.objects.filter(
         expired_at__lt=timezone.now(),
         fulfilled_at__isnull=True,
         funding_term__isnull=True,
         completion_bonus__gt=0,
+        expiration_processed=False,
     ).select_related("created_from")
     async for job in expired_non_ministry_jobs:
         await payout_partial_contributors(job, http_client)
-        await process_treasury_expiration_penalty(job)
         await _decay_template_score(job)
+        job.expiration_processed = True
+        await job.asave(update_fields=["expiration_processed"])
 
 
 def calculate_treasury_multiplier(
@@ -341,11 +342,6 @@ async def monitor_jobs(ctx):
         if not is_destination_empty or not is_source_enough:
             continue
 
-        # Treasury multiplier influences bonus amounts (Bonus multiplier)
-        bonus_multiplier = round(
-            template.bonus_multiplier * random.uniform(0.95, 1.05), 2 # 5% random variance
-        )
-        bonus_multiplier = bonus_multiplier * treasury_mult
         base_bonus = int(
             template.completion_bonus * quantity_requested / template.default_quantity
         )
@@ -363,7 +359,7 @@ async def monitor_jobs(ctx):
             name=template.name,
             quantity_requested=quantity_requested,
             expired_at=timezone.now() + timedelta(hours=duration_hours),
-            bonus_multiplier=bonus_multiplier,
+            bonus_multiplier=0,
             completion_bonus=completion_bonus,
             description=template.description,
             rp_mode=False,

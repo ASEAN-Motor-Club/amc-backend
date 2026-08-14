@@ -1,10 +1,8 @@
 import logging
 import asyncio
+from datetime import timedelta
 from typing import Optional, Any, TYPE_CHECKING, cast
 
-if TYPE_CHECKING:
-    from amc.discord_client import AMCDiscordBot
-from datetime import timedelta
 import discord
 from discord import app_commands
 from discord.ext import commands
@@ -38,6 +36,11 @@ from amc.game_server import (
     get_players,
 )
 from amc.vehicles import format_vehicle_name, format_vehicle_parts
+
+if TYPE_CHECKING:
+    from amc.discord_client import AMCDiscordBot
+
+logger = logging.getLogger(__name__)
 
 
 class VoteKickView(discord.ui.View):
@@ -158,6 +161,114 @@ class ModerationCog(commands.Cog):
                 to_player=player, content=mail_message
             )
         await ctx.response.send_message(f"Popup sent to {player.unique_id}: {message}")
+
+
+    @admin.command(
+        name="force_rename",
+        description="Force rename a player and lock their name (Admin)",
+    )
+    @app_commands.checks.has_any_role(settings.DISCORD_ADMIN_ROLE_ID)
+    @app_commands.describe(
+        player="Player name (online or stored in DB)",
+        new_name="The forced name (<=20 chars, no '('). Cleared with /admin clear_forced_name",
+    )
+    async def discord_force_rename(
+        self, ctx: discord.Interaction, player: str, new_name: str
+    ):
+        from amc.commands.admin import (
+            _validate_forced_name,
+            _resolve_player_for_force_rename,
+        )
+        from amc.forced_name import log_forced_name_change
+        from amc.player_tags import refresh_player_name
+
+        clean_name = _validate_forced_name(new_name)
+        if clean_name is None:
+            await ctx.response.send_message(
+                "Invalid name — names must be at most 20 characters and cannot contain '('.",
+                ephemeral=True,
+            )
+            return
+
+        target_player, character = await _resolve_player_for_force_rename(
+            self.bot.http_client_mod, player
+        )
+        if target_player is None:
+            await ctx.response.send_message(
+                f"Player '{player}' not found.", ephemeral=True
+            )
+            return
+
+        old_name = target_player.forced_name
+        target_player.forced_name = clean_name
+        await target_player.asave(update_fields=["forced_name"])
+
+        await log_forced_name_change(
+            target_player,
+            action="set",
+            old_name=old_name,
+            new_name=clean_name,
+            actor_discord_id=ctx.user.id,
+        )
+
+        # Re-apply immediately if online (no-op if offline; applies on next login).
+        if character is not None:
+            await refresh_player_name(character, self.bot.http_client_mod)
+
+        await ctx.response.send_message(
+            f"✅ **{player}** is now forced to the name **{clean_name}**. "
+            "They cannot change it via /rename or by switching characters.",
+            ephemeral=True,
+        )
+
+    @admin.command(
+        name="clear_forced_name",
+        description="Remove an admin-imposed name lock (Admin)",
+    )
+    @app_commands.checks.has_any_role(settings.DISCORD_ADMIN_ROLE_ID)
+    @app_commands.describe(player="Player name (online or stored in DB)")
+    async def discord_clear_forced_name(
+        self, ctx: discord.Interaction, player: str
+    ):
+        from amc.commands.admin import _resolve_player_for_force_rename
+        from amc.forced_name import log_forced_name_change
+        from amc.player_tags import refresh_player_name
+
+        target_player, character = await _resolve_player_for_force_rename(
+            self.bot.http_client_mod, player
+        )
+        if target_player is None:
+            await ctx.response.send_message(
+                f"Player '{player}' not found.", ephemeral=True
+            )
+            return
+
+        if not target_player.forced_name:
+            await ctx.response.send_message(
+                f"**{player}** does not have a forced name.", ephemeral=True
+            )
+            return
+
+        old_name = target_player.forced_name
+        target_player.forced_name = None
+        await target_player.asave(update_fields=["forced_name"])
+
+        await log_forced_name_change(
+            target_player,
+            action="clear",
+            old_name=old_name,
+            new_name=None,
+            actor_discord_id=ctx.user.id,
+        )
+
+        # Restore their chosen name (no-op if offline).
+        if character is not None:
+            await refresh_player_name(character, self.bot.http_client_mod)
+
+        await ctx.response.send_message(
+            f"✅ Name lock removed — **{player}** can now choose their own name again.",
+            ephemeral=True,
+        )
 
     @admin_teleport.command(name="add", description="Create a new teleport point")
     @app_commands.checks.has_any_role(settings.DISCORD_ADMIN_ROLE_ID)
@@ -442,7 +553,10 @@ This notice was issued by Officer {interaction.user.display_name}. If you wish t
         )
         character_names = ", ".join([c.name for c in player.characters.all()])
         await ban_player(self.bot.http_client_game, player_id, hours, reason)
-        await ban_player(self.bot.event_http_client_game, player_id, hours, reason)
+        try:
+            await ban_player(self.bot.event_http_client_game, player_id, hours, reason)
+        except Exception:
+            logger.warning("Failed to ban player on event server (may be offline)")
         await ctx.response.send_message(
             f"Banned {player_id} (Aliases: {character_names}) for {hours} hours, due to: {reason}"
         )
@@ -460,7 +574,10 @@ This notice was issued by Officer {interaction.user.display_name}. If you wish t
             return
 
         await kick_player(self.bot.http_client_game, player_id)
-        await kick_player(self.bot.event_http_client_game, player_id)
+        try:
+            await kick_player(self.bot.event_http_client_game, player_id)
+        except Exception:
+            logger.warning("Failed to kick player on event server (may be offline)")
         await interaction.response.send_message(
             f"Kicked {player_id} (Aliases: {character_names})"
         )

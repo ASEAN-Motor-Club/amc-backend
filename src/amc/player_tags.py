@@ -87,15 +87,16 @@ def build_display_name(
     if has_custom_parts:
         tag += "M"
 
-    if police_level > 0:
-        tag += f"P{police_level}"
+    # DEPRECATED: P and C tags — may be restored in the future
+    # if police_level > 0:
+    #     tag += f"P{police_level}"
 
     if wanted_stars > 0:
         tag += "*" * wanted_stars
 
-    # C is suppressed when police is active
-    if criminal_level > 0 and police_level == 0:
-        tag += f"C{criminal_level}"
+    # DEPRECATED: P and C tags — may be restored in the future
+    # if criminal_level > 0 and police_level == 0:
+    #     tag += f"C{criminal_level}"
 
     if gov_level > 0:
         tag += f"G{gov_level}"
@@ -139,19 +140,20 @@ async def refresh_player_name(
 
         gov_level = calculate_gov_level(character.gov_employee_contributions)
 
-    # Determine CRIM state
-    from amc.models import CriminalRecord
-
-    has_criminal_record = await CriminalRecord.objects.filter(
-        character=character, cleared_at__isnull=True
-    ).aexists()
-
-    # Compute criminal level from cumulative laundered total
+    # DEPRECATED: C tag — may be restored in the future
+    # from amc.models import CriminalRecord
+    #
+    # has_criminal_record = await CriminalRecord.objects.filter(
+    #     character=character, cleared_at__isnull=True
+    # ).aexists()
+    #
+    # # Compute criminal level from cumulative laundered total
+    # criminal_level = 0
+    # if has_criminal_record:
+    #     from amc.special_cargo import calculate_criminal_level
+    #
+    #     criminal_level = calculate_criminal_level(character.criminal_laundered_total)
     criminal_level = 0
-    if has_criminal_record:
-        from amc.special_cargo import calculate_criminal_level
-
-        criminal_level = calculate_criminal_level(character.criminal_laundered_total)
 
     # Determine WANTED state (W-level based on wanted_remaining heat)
     from amc.models import Wanted
@@ -168,12 +170,13 @@ async def refresh_player_name(
     except Exception:
         pass
 
-    # Determine POLICE state
-    from amc.police import is_police as check_police, calculate_police_level
-
+    # DEPRECATED: P tag — may be restored in the future
+    # from amc.police import is_police as check_police, calculate_police_level
+    #
+    # police_level = 0
+    # if await check_police(character):
+    #     police_level = calculate_police_level(character.police_confiscated_total)
     police_level = 0
-    if await check_police(character):
-        police_level = calculate_police_level(character.police_confiscated_total)
 
     # Determine GUILD state
     from amc.models import GuildSession
@@ -185,9 +188,32 @@ async def refresh_player_name(
     if active_guild_session:
         guild_abbreviation = active_guild_session.guild.abbreviation
 
+    # Determine base name — an admin-imposed forced name overrides the
+    # player's chosen name across ALL of their characters, so switching
+    # characters or re-running /rename can't escape it.
+    #
+    # NOTE: read forced_name via character.player_id + an async-safe query,
+    # NOT character.player.forced_name. Accessing the `.player` relation
+    # on a character that wasn't select_related("player") triggers a LAZY FK
+    # query, which raises Django's SynchronousOnlyOperation in the async arq
+    # worker context and silently aborts name enforcement.
+    forced_name = None
+    if character.player_id:
+        try:
+            from amc.models import Player
+
+            forced_name = await (
+                Player.objects.filter(unique_id=character.player_id)
+                .values_list("forced_name", flat=True)
+                .afirst()
+            )
+        except Exception:
+            forced_name = None
+    base_name = (forced_name or character.name).strip() or character.name
+
     # Reconstruct name
     new_name = build_display_name(
-        character.name,
+        base_name,
         criminal_level=criminal_level,
         has_custom_parts=has_custom_parts,
         police_level=police_level,

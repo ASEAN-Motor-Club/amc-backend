@@ -521,7 +521,40 @@ async def send_event_embeds(ctx):
         .filter(rank=1, guid__in=event_guids)
     )
 
+    # Also include recently-finished events that still have an embed to refresh.
+    # Once the mod server removes a finished event from /events, the main query
+    # above won't pick it up.  Grab any event with a discord_message_id that was
+    # updated in the last 10 minutes so the embed shows final results.
+    recently_finished_qs = (
+        GameEvent.objects.select_related("race_setup", "scheduled_event")
+        .prefetch_related(
+            Prefetch(
+                "participants",
+                queryset=GameEventCharacter.objects.select_related("character"),
+            )
+        )
+        .annotate(
+            rank=Window(
+                expression=RowNumber(),
+                partition_by=[F("guid")],
+                order_by=[F("last_updated").desc()],
+            )
+        )
+        .filter(
+            rank=1,
+            discord_message_id__isnull=False,
+            state=3,
+            last_updated__gte=timezone.now() - timedelta(minutes=10),
+        )
+        .exclude(guid__in=event_guids)
+    )
+
     async for game_event in qs:
+        asyncio.run_coroutine_threadsafe(
+            send_event_embed(game_event, channel), discord_client.loop
+        )
+
+    async for game_event in recently_finished_qs:
         asyncio.run_coroutine_threadsafe(
             send_event_embed(game_event, channel), discord_client.loop
         )

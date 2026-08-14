@@ -278,12 +278,16 @@ class CleanupExpiredJobsTestCase(TestCase):
         )
 
         http_client = AsyncMock()
-        with patch("amc.jobs.payout_partial_contributors", new_callable=AsyncMock) as mock_payout, \
-             patch("amc.jobs.process_treasury_expiration_penalty", new_callable=AsyncMock) as mock_penalty:
+        with patch("amc.jobs.payout_partial_contributors", new_callable=AsyncMock) as mock_payout:
             await cleanup_expired_jobs(http_client)
 
             mock_payout.assert_called_once()
-            mock_penalty.assert_called_once()
+
+        # Job should be marked as processed to prevent re-processing
+        await job.arefresh_from_db()
+        self.assertTrue(job.expiration_processed)
+        # completion_bonus should be preserved for audit
+        self.assertEqual(job.completion_bonus, 100_000)
 
     async def test_ministry_job_no_partial_payout(self):
         """Ministry-funded expired job should NOT call payout_partial_contributors."""
@@ -423,8 +427,8 @@ class WeightedDeliveryBonusTestCase(TestCase):
         from amc.pipeline.delivery import atomic_process_delivery
         atomic_process_delivery(job.id, 20, delivery_data)
 
-        # Only 10 added (capped at remaining), bonus = 10000 * (10/20) = 5000
-        self.assertEqual(delivery_data["subsidy"], 5000)
+        # bonus_multiplier is deprecated — no subsidy added
+        self.assertEqual(delivery_data["subsidy"], 0)
 
     def test_weighted_bonus_prorated_when_capped(self):
         """Weighted delivery capped should prorate bonus correctly."""
@@ -455,8 +459,8 @@ class WeightedDeliveryBonusTestCase(TestCase):
         # 80 + 20 = 100 (capped)
         self.assertEqual(job.quantity_fulfilled, 100)
         
-        # bonus = 10000 * (20/40) = 5000 (prorated)
-        self.assertEqual(delivery_data["subsidy"], 5000)
+        # bonus_multiplier is deprecated — no subsidy added
+        self.assertEqual(delivery_data["subsidy"], 0)
 
     def test_unweighted_cargo_unchanged(self):
         """Regular cargo (not in CARGO_FULFILLMENT_WEIGHTS) should behave normally."""
@@ -485,8 +489,8 @@ class WeightedDeliveryBonusTestCase(TestCase):
         # Normal behavior: 20 added
         self.assertEqual(job.quantity_fulfilled, 20)
         
-        # Full bonus: 10000 * (20/20) = 10000
-        self.assertEqual(delivery_data["subsidy"], 10_000)
+        # bonus_multiplier is deprecated — no subsidy added
+        self.assertEqual(delivery_data["subsidy"], 0)
 
 
 class WelcomeMessageFixTestCase(TestCase):

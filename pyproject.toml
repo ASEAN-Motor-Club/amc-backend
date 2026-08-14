@@ -63,6 +63,11 @@ project_includes = [
     "**/*.ipynb",
 ]
 
+[tool.pytest.ini_options]
+DJANGO_SETTINGS_MODULE = "amc_backend.settings"
+pythonpath = ["src"]
+addopts = "--tb=short"
+
 [tool.uv.workspace]
 members = [
     "packages/scripts",
