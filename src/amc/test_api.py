@@ -628,7 +628,7 @@ class DepotsAPITest(TestCase):
                     "buildingGuid": "guid-missing",
                 },
             ],
-            "building": [
+            "buildings": [
                 {"guid": "guid-1", "housingKey": "House1"},
                 {"guid": "guid-2", "housingKey": "House2"},
                 {"guid": "guid-3", "housingKey": "House3"},
