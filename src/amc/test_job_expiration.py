@@ -20,37 +20,52 @@ class TreasuryExpirationPenaltyTestCase(TestCase):
 
     async def test_treasury_penalty_for_expired_job(self):
         """50% of completion_bonus should be charged to treasury."""
-        # Setup: Get initial treasury balance
-        initial_balance = await get_treasury_fund_balance()
+        from amc import config
 
-        # Create a non-ministry funded job (government shutdown scenario)
-        job = await sync_to_async(DeliveryJobFactory)(
-            completion_bonus=100_000,
-            expired_at=timezone.now() - timedelta(hours=1),
-            funding_term=None,
-            escrowed_amount=0,
-        )
+        # The penalty is gated by the TREASURY_EXPIRATION_PENALTY_ENABLED flag.
+        original = config.TREASURY_EXPIRATION_PENALTY_ENABLED
+        config.TREASURY_EXPIRATION_PENALTY_ENABLED = True
+        try:
+            # Setup: Get initial treasury balance
+            initial_balance = await get_treasury_fund_balance()
 
-        # Execute
-        await process_treasury_expiration_penalty(job)
+            # Create a non-ministry funded job (government shutdown scenario)
+            job = await sync_to_async(DeliveryJobFactory)(
+                completion_bonus=100_000,
+                expired_at=timezone.now() - timedelta(hours=1),
+                funding_term=None,
+                escrowed_amount=0,
+            )
 
-        # Assert: Treasury should be reduced by 50% of completion bonus
-        final_balance = await get_treasury_fund_balance()
-        expected_penalty = 50_000  # 50% of 100,000
-        self.assertEqual(initial_balance - expected_penalty, final_balance)
+            # Execute
+            await process_treasury_expiration_penalty(job)
+
+            # Assert: Treasury should be reduced by 50% of completion bonus
+            final_balance = await get_treasury_fund_balance()
+            expected_penalty = 50_000  # 50% of 100,000
+            self.assertEqual(initial_balance - expected_penalty, final_balance)
+        finally:
+            config.TREASURY_EXPIRATION_PENALTY_ENABLED = original
 
     async def test_completion_bonus_zeroed_after_penalty(self):
         """completion_bonus should be zeroed to prevent double processing."""
-        job = await sync_to_async(DeliveryJobFactory)(
-            completion_bonus=100_000,
-            expired_at=timezone.now() - timedelta(hours=1),
-            funding_term=None,
-        )
+        from amc import config
 
-        await process_treasury_expiration_penalty(job)
+        original = config.TREASURY_EXPIRATION_PENALTY_ENABLED
+        config.TREASURY_EXPIRATION_PENALTY_ENABLED = True
+        try:
+            job = await sync_to_async(DeliveryJobFactory)(
+                completion_bonus=100_000,
+                expired_at=timezone.now() - timedelta(hours=1),
+                funding_term=None,
+            )
 
-        await job.arefresh_from_db()
-        self.assertEqual(job.completion_bonus, 0)
+            await process_treasury_expiration_penalty(job)
+
+            await job.arefresh_from_db()
+            self.assertEqual(job.completion_bonus, 0)
+        finally:
+            config.TREASURY_EXPIRATION_PENALTY_ENABLED = original
 
     async def test_no_penalty_for_zero_bonus_job(self):
         """Jobs with 0 completion_bonus should not affect treasury."""
