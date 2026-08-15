@@ -21,10 +21,10 @@ from amc.webhook import process_event
 
 @patch("amc.webhook.get_rp_mode", new_callable=AsyncMock)
 @patch("amc.webhook.get_treasury_fund_balance", new_callable=AsyncMock)
-@patch("amc.handlers.cargo.should_trigger_wanted", return_value=True)  # always trigger wanted
 @patch("amc.handlers.cargo.accumulate_illicit_delivery", new_callable=AsyncMock, return_value=100_000)
 class IllicitCargoWantedTests(TestCase):
-    """All illicit cargo keys should trigger Wanted status and link Delivery."""
+    """All illicit cargo keys should link a criminal record and refresh Wanted status
+    (the random auto-wanted trigger is deprecated — see b27c97d)."""
 
     async def _setup_character(self):
         player = await sync_to_async(PlayerFactory)()
@@ -63,26 +63,35 @@ class IllicitCargoWantedTests(TestCase):
 
     @patch("amc.special_cargo.refresh_player_name", new_callable=AsyncMock)
     @patch("amc.special_cargo.record_treasury_expense", new_callable=AsyncMock)
-    async def test_ganja_creates_wanted(
-        self, mock_treasury, mock_refresh, mock_accumulate, mock_get_treasury, mock_get_rp_mode, mock_random
+    async def test_ganja_refreshes_existing_wanted(
+        self, mock_treasury, mock_refresh, mock_accumulate, mock_get_treasury, mock_get_rp_mode
     ):
         mock_get_rp_mode.return_value = False
         mock_get_treasury.return_value = 100_000
         player, character = await self._setup_character()
 
+        # A not-yet-wanted delivery does NOT auto-create wanted (deprecated trigger);
+        # assert there is no active Wanted after the delivery.
         event = self._cargo_event(character, "Ganja")
         await process_event(event, player, character)
 
         wanted = await Wanted.objects.filter(
             character=character, expired_at__isnull=True
         ).afirst()
-        self.assertIsNotNone(wanted)
-        self.assertEqual(wanted.wanted_remaining, Wanted.INITIAL_WANTED_LEVEL)
+        self.assertIsNone(wanted)
+
+        # Now seed a wanted — a subsequent illicit delivery refreshes (not duplicates) it.
+        created = await Wanted.objects.acreate(
+            character=character, wanted_remaining=Wanted.INITIAL_WANTED_LEVEL
+        )
+        await process_event(event, player, character)
+        await created.arefresh_from_db()
+        self.assertEqual(created.wanted_remaining, Wanted.INITIAL_WANTED_LEVEL)
 
     @patch("amc.special_cargo.refresh_player_name", new_callable=AsyncMock)
     @patch("amc.special_cargo.record_treasury_expense", new_callable=AsyncMock)
-    async def test_cocaine_creates_wanted(
-        self, mock_treasury, mock_refresh, mock_accumulate, mock_get_treasury, mock_get_rp_mode, mock_random
+    async def test_cocaine_does_not_auto_create_wanted(
+        self, mock_treasury, mock_refresh, mock_accumulate, mock_get_treasury, mock_get_rp_mode
     ):
         mock_get_rp_mode.return_value = False
         mock_get_treasury.return_value = 100_000
@@ -94,12 +103,12 @@ class IllicitCargoWantedTests(TestCase):
         wanted = await Wanted.objects.filter(
             character=character, expired_at__isnull=True
         ).afirst()
-        self.assertIsNotNone(wanted)
+        self.assertIsNone(wanted)
 
     @patch("amc.special_cargo.refresh_player_name", new_callable=AsyncMock)
     @patch("amc.special_cargo.record_treasury_expense", new_callable=AsyncMock)
-    async def test_coca_leaves_pallet_creates_wanted(
-        self, mock_treasury, mock_refresh, mock_accumulate, mock_get_treasury, mock_get_rp_mode, mock_random
+    async def test_coca_leaves_pallet_does_not_auto_create_wanted(
+        self, mock_treasury, mock_refresh, mock_accumulate, mock_get_treasury, mock_get_rp_mode
     ):
         mock_get_rp_mode.return_value = False
         mock_get_treasury.return_value = 100_000
@@ -111,12 +120,12 @@ class IllicitCargoWantedTests(TestCase):
         wanted = await Wanted.objects.filter(
             character=character, expired_at__isnull=True
         ).afirst()
-        self.assertIsNotNone(wanted)
+        self.assertIsNone(wanted)
 
     @patch("amc.special_cargo.refresh_player_name", new_callable=AsyncMock)
     @patch("amc.special_cargo.record_treasury_expense", new_callable=AsyncMock)
-    async def test_ganja_pallet_creates_wanted(
-        self, mock_treasury, mock_refresh, mock_accumulate, mock_get_treasury, mock_get_rp_mode, mock_random
+    async def test_ganja_pallet_does_not_auto_create_wanted(
+        self, mock_treasury, mock_refresh, mock_accumulate, mock_get_treasury, mock_get_rp_mode
     ):
         mock_get_rp_mode.return_value = False
         mock_get_treasury.return_value = 100_000
@@ -128,12 +137,12 @@ class IllicitCargoWantedTests(TestCase):
         wanted = await Wanted.objects.filter(
             character=character, expired_at__isnull=True
         ).afirst()
-        self.assertIsNotNone(wanted)
+        self.assertIsNone(wanted)
 
     @patch("amc.special_cargo.refresh_player_name", new_callable=AsyncMock)
     @patch("amc.special_cargo.record_treasury_expense", new_callable=AsyncMock)
-    async def test_money_pallet_creates_wanted(
-        self, mock_treasury, mock_refresh, mock_accumulate, mock_get_treasury, mock_get_rp_mode, mock_random
+    async def test_money_pallet_does_not_auto_create_wanted(
+        self, mock_treasury, mock_refresh, mock_accumulate, mock_get_treasury, mock_get_rp_mode
     ):
         mock_get_rp_mode.return_value = False
         mock_get_treasury.return_value = 100_000
@@ -145,7 +154,7 @@ class IllicitCargoWantedTests(TestCase):
         wanted = await Wanted.objects.filter(
             character=character, expired_at__isnull=True
         ).afirst()
-        self.assertIsNotNone(wanted)
+        self.assertIsNone(wanted)
 
     # ------------------------------------------------------------------
     # Wanted refresh (existing wanted gets timer reset)
@@ -154,7 +163,7 @@ class IllicitCargoWantedTests(TestCase):
     @patch("amc.special_cargo.refresh_player_name", new_callable=AsyncMock)
     @patch("amc.special_cargo.record_treasury_expense", new_callable=AsyncMock)
     async def test_contraband_refreshes_existing_wanted(
-        self, mock_treasury, mock_refresh, mock_accumulate, mock_get_treasury, mock_get_rp_mode, mock_random
+        self, mock_treasury, mock_refresh, mock_accumulate, mock_get_treasury, mock_get_rp_mode
     ):
         """If already wanted, a new contraband delivery resets the countdown."""
         mock_get_rp_mode.return_value = False
@@ -188,7 +197,7 @@ class IllicitCargoWantedTests(TestCase):
     @patch("amc.special_cargo.refresh_player_name", new_callable=AsyncMock)
     @patch("amc.special_cargo.record_treasury_expense", new_callable=AsyncMock)
     async def test_delivery_linked_to_criminal_record_for_ganja(
-        self, mock_treasury, mock_refresh, mock_accumulate, mock_get_treasury, mock_get_rp_mode, mock_random
+        self, mock_treasury, mock_refresh, mock_accumulate, mock_get_treasury, mock_get_rp_mode
     ):
         mock_get_rp_mode.return_value = False
         mock_get_treasury.return_value = 100_000
@@ -209,7 +218,7 @@ class IllicitCargoWantedTests(TestCase):
     @patch("amc.special_cargo.refresh_player_name", new_callable=AsyncMock)
     @patch("amc.special_cargo.record_treasury_expense", new_callable=AsyncMock)
     async def test_delivery_linked_to_criminal_record_for_money(
-        self, mock_treasury, mock_refresh, mock_accumulate, mock_get_treasury, mock_get_rp_mode, mock_random
+        self, mock_treasury, mock_refresh, mock_accumulate, mock_get_treasury, mock_get_rp_mode
     ):
         mock_get_rp_mode.return_value = False
         mock_get_treasury.return_value = 100_000
@@ -227,7 +236,7 @@ class IllicitCargoWantedTests(TestCase):
     @patch("amc.special_cargo.refresh_player_name", new_callable=AsyncMock)
     @patch("amc.special_cargo.record_treasury_expense", new_callable=AsyncMock)
     async def test_non_illicit_delivery_has_no_wanted(
-        self, mock_treasury, mock_refresh, mock_accumulate, mock_get_treasury, mock_get_rp_mode, mock_random
+        self, mock_treasury, mock_refresh, mock_accumulate, mock_get_treasury, mock_get_rp_mode
     ):
         """Non-illicit cargo should NOT create Wanted or link delivery."""
         mock_get_rp_mode.return_value = False
@@ -375,11 +384,10 @@ class ContrabandCriminalRecordTests(TestCase):
 
         mock_treasury.assert_not_called()
 
-    @patch("amc.handlers.cargo.should_trigger_wanted", return_value=True)
     @patch("amc.special_cargo.refresh_player_name", new_callable=AsyncMock)
     @patch("amc.special_cargo.record_treasury_expense", new_callable=AsyncMock)
     async def test_player_tag_refreshed_for_contraband(
-        self, mock_treasury, mock_refresh, mock_should_trigger, mock_get_treasury, mock_get_rp_mode
+        self, mock_treasury, mock_refresh, mock_get_treasury, mock_get_rp_mode
     ):
         """Player name tag is refreshed on contraband delivery.
 
@@ -400,12 +408,16 @@ class ContrabandCriminalRecordTests(TestCase):
 
 @patch("amc.webhook.get_rp_mode", new_callable=AsyncMock)
 @patch("amc.webhook.get_treasury_fund_balance", new_callable=AsyncMock)
-@patch("amc.handlers.cargo.should_trigger_wanted", return_value=True)
 @patch("amc.handlers.cargo.accumulate_illicit_delivery", new_callable=AsyncMock, return_value=100_000)
 class MakeSuspectTests(TestCase):
-    """When a Wanted is created/refreshed, make_suspect should be called on the mod server."""
+    """When a Wanted is refreshed via contraband, make_suspect should be called on the mod server.
 
-    async def _setup_character(self):
+    The random auto-wanted trigger is deprecated (b27c97d), so these tests seed an
+    existing Wanted record — an illicit delivery then refreshes it, exercising the
+    make_suspect call in create_or_refresh_wanted.
+    """
+
+    async def _setup_character(self, seed_wanted=False):
         player = await sync_to_async(PlayerFactory)()
         character = await sync_to_async(CharacterFactory)(player=player)
         await CharacterLocation.objects.acreate(
@@ -413,6 +425,11 @@ class MakeSuspectTests(TestCase):
         )
         await DeliveryPoint.objects.acreate(guid="s1", name="S1", coord=Point(0, 0, 0))
         await DeliveryPoint.objects.acreate(guid="d1", name="D1", coord=Point(100, 100, 0))
+        if seed_wanted:
+            await Wanted.objects.acreate(
+                character=character,
+                wanted_remaining=Wanted.INITIAL_WANTED_LEVEL,
+            )
         return player, character
 
     def _cargo_event(self, character, cargo_key="Ganja", payment=5_000):
@@ -437,14 +454,14 @@ class MakeSuspectTests(TestCase):
     @patch("amc.criminals.make_suspect", new_callable=AsyncMock)
     @patch("amc.criminals.refresh_player_name", new_callable=AsyncMock)
     @patch("amc.special_cargo.record_treasury_expense", new_callable=AsyncMock)
-    async def test_make_suspect_called_on_wanted_creation(
-        self, mock_treasury, mock_refresh, mock_make_suspect, mock_accumulate, mock_trigger, mock_get_treasury, mock_get_rp_mode
+    async def test_make_suspect_called_on_wanted_refresh(
+        self, mock_treasury, mock_refresh, mock_make_suspect, mock_accumulate, mock_get_treasury, mock_get_rp_mode
     ):
-        """When Wanted is created via illicit cargo, make_suspect is called on the mod server."""
+        """When Wanted is refreshed via contraband, make_suspect is called on the mod server."""
         mock_get_rp_mode.return_value = False
         mock_get_treasury.return_value = 100_000
         mock_http_client_mod = AsyncMock()
-        player, character = await self._setup_character()
+        player, character = await self._setup_character(seed_wanted=True)
 
         event = self._cargo_event(character)
         await process_event(event, player, character, http_client_mod=mock_http_client_mod)
@@ -455,12 +472,12 @@ class MakeSuspectTests(TestCase):
     @patch("amc.criminals.refresh_player_name", new_callable=AsyncMock)
     @patch("amc.special_cargo.record_treasury_expense", new_callable=AsyncMock)
     async def test_make_suspect_not_called_without_http_client_mod(
-        self, mock_treasury, mock_refresh, mock_make_suspect, mock_accumulate, mock_trigger, mock_get_treasury, mock_get_rp_mode
+        self, mock_treasury, mock_refresh, mock_make_suspect, mock_accumulate, mock_get_treasury, mock_get_rp_mode
     ):
         """When http_client_mod is None, make_suspect should not be called."""
         mock_get_rp_mode.return_value = False
         mock_get_treasury.return_value = 100_000
-        player, character = await self._setup_character()
+        player, character = await self._setup_character(seed_wanted=True)
 
         event = self._cargo_event(character)
         await process_event(event, player, character)
@@ -470,15 +487,15 @@ class MakeSuspectTests(TestCase):
     @patch("amc.criminals.make_suspect", new_callable=AsyncMock)
     @patch("amc.criminals.refresh_player_name", new_callable=AsyncMock)
     @patch("amc.special_cargo.record_treasury_expense", new_callable=AsyncMock)
-    async def test_make_suspect_failure_does_not_block_wanted_creation(
-        self, mock_treasury, mock_refresh, mock_make_suspect, mock_accumulate, mock_trigger, mock_get_treasury, mock_get_rp_mode
+    async def test_make_suspect_failure_does_not_block_wanted_refresh(
+        self, mock_treasury, mock_refresh, mock_make_suspect, mock_accumulate, mock_get_treasury, mock_get_rp_mode
     ):
-        """If make_suspect fails, the Wanted record should still be created."""
+        """If make_suspect fails, the Wanted record should still be refreshed."""
         mock_get_rp_mode.return_value = False
         mock_get_treasury.return_value = 100_000
         mock_make_suspect.side_effect = Exception("mod server unavailable")
         mock_http_client_mod = AsyncMock()
-        player, character = await self._setup_character()
+        player, character = await self._setup_character(seed_wanted=True)
 
         event = self._cargo_event(character)
         await process_event(event, player, character, http_client_mod=mock_http_client_mod)
@@ -486,7 +503,7 @@ class MakeSuspectTests(TestCase):
         wanted = await Wanted.objects.filter(
             character=character, expired_at__isnull=True
         ).afirst()
-        self.assertIsNotNone(wanted, "Wanted should still be created even if make_suspect fails")
+        self.assertIsNotNone(wanted, "Wanted should still be refreshed even if make_suspect fails")
 
 
 class IllicitCargoKeysRegistryTests(TestCase):
@@ -516,12 +533,11 @@ class IllicitCargoKeysRegistryTests(TestCase):
 
 @patch("amc.webhook.get_rp_mode", new_callable=AsyncMock)
 @patch("amc.webhook.get_treasury_fund_balance", new_callable=AsyncMock)
-@patch("amc.handlers.cargo.should_trigger_wanted", return_value=True)
 @patch("amc.handlers.cargo.accumulate_illicit_delivery", new_callable=AsyncMock, return_value=100_000)
 class WantedBountyTests(TestCase):
-    """Wanted.amount starts at 0 — bounty only grows from police proximity."""
+    """Wanted.amount stays at seed — bounty only grows from police proximity."""
 
-    async def _setup_character(self):
+    async def _setup_character(self, seed_bounty=0):
         player = await sync_to_async(PlayerFactory)()
         character = await sync_to_async(CharacterFactory)(player=player)
         await CharacterLocation.objects.acreate(
@@ -529,6 +545,12 @@ class WantedBountyTests(TestCase):
         )
         await DeliveryPoint.objects.acreate(guid="s1", name="S1", coord=Point(0, 0, 0))
         await DeliveryPoint.objects.acreate(guid="d1", name="D1", coord=Point(100, 100, 0))
+        if seed_bounty is not None:
+            await Wanted.objects.acreate(
+                character=character,
+                wanted_remaining=Wanted.INITIAL_WANTED_LEVEL,
+                amount=seed_bounty,
+            )
         return player, character
 
     def _cargo_event(self, character, cargo_key="Ganja", payment=5_000):
@@ -552,14 +574,16 @@ class WantedBountyTests(TestCase):
 
     @patch("amc.special_cargo.refresh_player_name", new_callable=AsyncMock)
     @patch("amc.special_cargo.record_treasury_expense", new_callable=AsyncMock)
-    async def test_delivery_creates_wanted_with_zero_bounty(
-        self, mock_treasury, mock_refresh, mock_accumulate, mock_trigger, mock_get_treasury, mock_get_rp_mode
+    async def test_refresh_keeps_zero_bounty(
+        self, mock_treasury, mock_refresh, mock_accumulate, mock_get_treasury, mock_get_rp_mode
     ):
-        """A delivery creates a Wanted record with amount=0 — bounty only grows from police chase."""
+        """An illicit delivery to an already-wanted player (bounty=0 seed) does not add to amount —
+        bounty only grows from police proximity."""
         mock_get_rp_mode.return_value = False
         mock_get_treasury.return_value = 100_000
-        player, character = await self._setup_character()
+        player, character = await self._setup_character(seed_bounty=0)
 
+        # Deliver something — the refresh should NOT add to amount
         event = self._cargo_event(character, payment=5_000)
         await process_event(event, player, character)
 
@@ -567,21 +591,18 @@ class WantedBountyTests(TestCase):
             character=character, expired_at__isnull=True
         ).afirst()
         self.assertIsNotNone(wanted)
-        self.assertEqual(
-            wanted.amount,
-            0,
-            "Wanted.amount must start at 0 — bounty only grows from police proximity",
-        )
+        self.assertEqual(wanted.amount, 0, "Delivery must not add to Wanted bounty")
 
     @patch("amc.special_cargo.refresh_player_name", new_callable=AsyncMock)
     @patch("amc.special_cargo.record_treasury_expense", new_callable=AsyncMock)
-    async def test_large_delivery_also_zero_bounty(
-        self, mock_treasury, mock_refresh, mock_accumulate, mock_trigger, mock_get_treasury, mock_get_rp_mode
+    async def test_large_delivery_also_keeps_zero_bounty(
+        self, mock_treasury, mock_refresh, mock_accumulate, mock_get_treasury, mock_get_rp_mode
     ):
-        """Even a large delivery produces amount=0 — bounty is tracked separately via police chase."""
+        """Even a large delivery to an already-wanted player produces amount=0 —
+        bounty is tracked separately via police chase."""
         mock_get_rp_mode.return_value = False
         mock_get_treasury.return_value = 100_000
-        player, character = await self._setup_character()
+        player, character = await self._setup_character(seed_bounty=0)
 
         event = self._cargo_event(character, payment=250_000)
         await process_event(event, player, character)
@@ -595,25 +616,20 @@ class WantedBountyTests(TestCase):
     @patch("amc.special_cargo.refresh_player_name", new_callable=AsyncMock)
     @patch("amc.special_cargo.record_treasury_expense", new_callable=AsyncMock)
     async def test_refresh_does_not_add_to_bounty(
-        self, mock_treasury, mock_refresh, mock_accumulate, mock_trigger, mock_get_treasury, mock_get_rp_mode
+        self, mock_treasury, mock_refresh, mock_accumulate, mock_get_treasury, mock_get_rp_mode
     ):
         """Refreshing an existing Wanted does not add to amount (amount=0 passed from cargo handler)."""
         mock_get_rp_mode.return_value = False
         mock_get_treasury.return_value = 100_000
-        player, character = await self._setup_character()
-
-        # Seed an existing wanted with a known bounty (from police chase)
-        existing_wanted = await Wanted.objects.acreate(
-            character=character,
-            wanted_remaining=Wanted.INITIAL_WANTED_LEVEL,
-            amount=30_000,
-        )
+        player, character = await self._setup_character(seed_bounty=30_000)
 
         # Deliver something — the refresh should NOT add to amount
         event = self._cargo_event(character, payment=1_000)
         await process_event(event, player, character)
 
-        await existing_wanted.arefresh_from_db()
+        existing_wanted = await Wanted.objects.filter(
+            character=character, expired_at__isnull=True
+        ).afirst()
         # 30k (from chase) + 0 (cargo handler passes amount=0) = 30k
         self.assertEqual(existing_wanted.amount, 30_000)
 
@@ -658,33 +674,6 @@ class DeliveryDebounceAccumulationTests(TestCase):
         for _ in range(10):
             total = await accumulate_illicit_delivery(guid, 10_000)
         self.assertEqual(total, 100_000)
-
-    async def test_cargo_handler_passes_accumulated_total_to_probability_roll(self):
-        """should_trigger_wanted receives the accumulated total, not just the delivery amount."""
-        import amc.handlers.cargo as cargo_module
-
-        # Simulate the cache already having 90k from a prior delivery (total = 100k)
-        delivery_amount = 10_000
-        expected_accumulated = 100_000
-
-        with (
-            patch.object(
-                cargo_module,
-                "accumulate_illicit_delivery",
-                new=AsyncMock(return_value=expected_accumulated),
-            ) as mock_accumulate,
-            patch.object(
-                cargo_module,
-                "should_trigger_wanted",
-                return_value=False,
-            ) as mock_trigger,
-        ):
-            # Call the function directly to verify the argument plumbing
-            accumulated = await mock_accumulate("any-guid", delivery_amount)
-            mock_trigger(accumulated)
-
-            mock_accumulate.assert_called_once_with("any-guid", delivery_amount)
-            mock_trigger.assert_called_once_with(expected_accumulated)
 
 
 class ShouldTriggerWantedAccumulatedTests(TestCase):

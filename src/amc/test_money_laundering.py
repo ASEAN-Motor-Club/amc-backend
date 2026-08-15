@@ -109,17 +109,13 @@ class MoneyLaunderingTests(TestCase):
         self.assertEqual(record.amount, 55_000)
         self.assertEqual(record.confiscatable_amount, 54_000)  # 50_000 + 80% of 5_000
 
-    @patch("amc.handlers.cargo.should_trigger_wanted", return_value=True)
-    async def test_money_delivery_server_announcement(
-        self,
-        mock_should_trigger,
-        mock_sc_announce,
-        mock_announce,
-        mock_get_treasury,
-        mock_get_rp_mode,
-        mock_check_floor,
+    async def test_money_delivery_no_new_wanted_no_laundering_announce(
+        self, mock_sc_announce, mock_announce, mock_get_treasury, mock_get_rp_mode, mock_check_floor
     ):
-        """Money delivery should populate the laundering cache when a new Wanted is created."""
+        """A money delivery to a NOT-already-wanted player does not create a Wanted
+        record (random wanted trigger is deprecated) and therefore does not populate
+        the laundering-announce cache."""
+        from amc.models import Wanted
         from django.core.cache import cache
 
         mock_get_rp_mode.return_value = False
@@ -131,18 +127,24 @@ class MoneyLaunderingTests(TestCase):
 
         await process_event(event, player, character, http_client=http_client)
 
-        # The cache key is only set when a new Wanted record is created
+        # No new Wanted is auto-created for a not-yet-wanted player.
+        self.assertEqual(
+            await Wanted.objects.filter(character=character, expired_at__isnull=True).acount(),
+            0,
+            "Fresh illicit delivery must not auto-create a Wanted record",
+        )
+        # And therefore the laundering-announce cache (set only on new-Wanted creation)
+        # is not populated.
         cache_key = f"money_laundered:{character.guid}"
         data = await cache.aget(cache_key)
-        self.assertIsNotNone(data, "Cache should be populated when new Wanted is created")
-        self.assertEqual(data["total"], 15_000)
-        self.assertEqual(data["name"], character.name)
+        self.assertIsNone(data, "Laundering cache must not be set without a new Wanted")
 
-    @patch("amc.handlers.cargo.should_trigger_wanted", return_value=True)
-    async def test_money_delivery_announces_only_on_new_wanted(
-        self, mock_should_trigger, mock_sc_announce, mock_announce, mock_get_treasury, mock_get_rp_mode, mock_check_floor
+    async def test_money_delivery_refresh_existing_wanted_does_not_announce(
+        self, mock_sc_announce, mock_announce, mock_get_treasury, mock_get_rp_mode, mock_check_floor
     ):
-        """Laundering cache is populated on first delivery (new Wanted) but not on refresh."""
+        """A money delivery to an ALREADY-wanted player refreshes the record but never
+        announces (announce is gated on newly_created, which is False on refresh)."""
+        from amc.models import Wanted
         from django.core.cache import cache
 
         mock_get_rp_mode.return_value = False
@@ -150,25 +152,26 @@ class MoneyLaunderingTests(TestCase):
 
         player, character = await _setup_character("deb")
         http_client = AsyncMock()
+
+        # Pre-existing active Wanted → delivery refreshes it (not creates).
+        await Wanted.objects.acreate(
+            character=character,
+            wanted_remaining=60,
+        )
+
+        event = _money_cargo_event(character.guid, player.unique_id, payment=20_000)
+        await process_event(event, player, character, http_client=http_client)
+
+        # Still exactly one active Wanted (refresh, no duplicate).
+        self.assertEqual(
+            await Wanted.objects.filter(character=character, expired_at__isnull=True).acount(),
+            1,
+            "Existing Wanted must be refreshed, not duplicated",
+        )
+        # Announce cache is only set on newly_created — never on a refresh.
         cache_key = f"money_laundered:{character.guid}"
-
-        # First delivery — creates new Wanted → cache should be set
-        event1 = _money_cargo_event(character.guid, player.unique_id, payment=10_000)
-        await process_event(event1, player, character, http_client=http_client)
-
-        data1 = await cache.aget(cache_key)
-        self.assertIsNotNone(data1, "Cache should be set on first delivery (new Wanted)")
-        self.assertEqual(data1["total"], 10_000)
-
-        # Clear cache to detect whether second delivery would set it again
-        await cache.adelete(cache_key)
-
-        # Second delivery — refreshes existing Wanted → cache should NOT be set again
-        event2 = _money_cargo_event(character.guid, player.unique_id, payment=20_000)
-        await process_event(event2, player, character, http_client=http_client)
-
-        data2 = await cache.aget(cache_key)
-        self.assertIsNone(data2, "Cache should NOT be set on subsequent delivery (Wanted refresh)")
+        data = await cache.aget(cache_key)
+        self.assertIsNone(data, "Laundering announce must not fire on a Wanted refresh")
 
     async def test_money_delivery_treasury_cost(
         self, mock_sc_announce, mock_announce, mock_get_treasury, mock_get_rp_mode, mock_check_floor
