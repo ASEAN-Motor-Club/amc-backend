@@ -10,6 +10,7 @@ check / CI, not in a plain venv without Postgres.
 """
 
 import pytest
+from asgiref.sync import sync_to_async
 from django.test import override_settings
 
 from amc.factories import CharacterFactory, PlayerFactory
@@ -144,8 +145,8 @@ def test_strip_reserved_tags_removes_bracket_prefix():
 @pytest.mark.asyncio
 async def test_name_moderation_log_row_persists():
     """A decision row records a player + verdict + action (Task 2)."""
-    player = await PlayerFactory.acreate()
-    character = await CharacterFactory.acreate(player=player)
+    player = await sync_to_async(PlayerFactory)()
+    character = await sync_to_async(CharacterFactory)(player=player)
     await NameModerationLog.objects.acreate(
         player=player,
         character=character,
@@ -183,8 +184,8 @@ class _FakeHttp:
 @pytest.mark.asyncio
 @override_settings(NAMER_ENABLED=False)
 async def test_run_name_moderation_disabled_does_nothing():
-    player = await PlayerFactory.acreate()
-    character = await CharacterFactory.acreate(player=player)
+    player = await sync_to_async(PlayerFactory)()
+    character = await sync_to_async(CharacterFactory)(player=player)
     character.name = "delvyn1gaa"
     character.custom_name = None
     await character.asave()
@@ -199,8 +200,8 @@ async def test_run_name_moderation_disabled_does_nothing():
 @pytest.mark.asyncio
 @override_settings(NAMER_ENABLED=True, NAMER_CANNED_FALLBACK_NAME="FriendlyPlayer")
 async def test_run_name_moderation_blocklist_auto_renames():
-    player = await PlayerFactory.acreate()
-    character = await CharacterFactory.acreate(player=player)
+    player = await sync_to_async(PlayerFactory)()
+    character = await sync_to_async(CharacterFactory)(player=player)
     character.name = "delvyn1gaa"
     character.custom_name = None
     await character.asave()
@@ -218,8 +219,8 @@ async def test_run_name_moderation_blocklist_auto_renames():
 @pytest.mark.asyncio
 @override_settings(NAMER_ENABLED=True, NAMER_AUTO_CONFIDENCE_THRESHOLD=0.9)
 async def test_run_name_moderation_llm_high_conf_renames(monkeypatch):
-    player = await PlayerFactory.acreate()
-    character = await CharacterFactory.acreate(player=player)
+    player = await sync_to_async(PlayerFactory)()
+    character = await sync_to_async(CharacterFactory)(player=player)
     character.name = "CoolName"  # not blocklisted -> Stage B
     character.custom_name = None
     await character.asave()
@@ -248,8 +249,8 @@ async def test_run_name_moderation_llm_high_conf_renames(monkeypatch):
 @pytest.mark.asyncio
 @override_settings(NAMER_ENABLED=True)
 async def test_run_name_moderation_low_conf_review(monkeypatch):
-    player = await PlayerFactory.acreate()
-    character = await CharacterFactory.acreate(player=player)
+    player = await sync_to_async(PlayerFactory)()
+    character = await sync_to_async(CharacterFactory)(player=player)
     character.name = "Ambiguous"
     character.custom_name = None
     await character.asave()
