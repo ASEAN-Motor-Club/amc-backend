@@ -13,8 +13,56 @@ import pytest
 
 from amc.factories import CharacterFactory, PlayerFactory
 from amc.models import NameModerationLog
+from amc.name_moderation import (
+    is_offensive_blocklist,
+    normalize_name,
+    strip_reserved_tags,
+)
 
 pytestmark = pytest.mark.django_db
+
+
+def test_blocklist_flags_known_slurs():
+    """Stage A catches canonical + leetspeak-obfuscated slurs (Task 3)."""
+    flagged = [
+        "delivyn1gaa",    # 1->i single-g "niga"
+        "n1gga",
+        "Niggerslayer",
+        "Localslave",     # slave
+        "xF4GGOTx",       # faggot with 4->a
+        "fagot",          # single-g f-slur
+        "N4ziScum",       # nazi
+    ]
+    for name in flagged:
+        assert is_offensive_blocklist(name)[0] is True, name
+
+
+def test_blocklist_ignores_clean_names():
+    """Stage A must never flag clean names (precision over recall)."""
+    clean = [
+        "HappyDriver",
+        "Motortown",   # internal 'tow' etc. must be safe
+        "Nigeria",     # country — single-g after 'i', must NOT match
+        "Nigel",       # name
+        "enigma",      # 'nig' inside a clean word
+        "ih8juice",    # no slur token -> falls to LLM, not blocklist
+        "truckin",
+        "JUICEn1g",    # truncated n, no double-g / trailing vowel -> precision gate
+        "Tofu",
+    ]
+    for name in clean:
+        assert is_offensive_blocklist(name)[0] is False, name
+
+
+def test_normalize_decodes_leetspeak():
+    assert normalize_name("delivyn1gaa") == "delivynigaa"
+    assert normalize_name("xF4GGOT x") == "xfaggotx"
+
+
+def test_strip_reserved_tags_removes_bracket_prefix():
+    assert strip_reserved_tags("[GOV] Boss") == "Boss"
+    assert strip_reserved_tags("[M] Racer") == "Racer"
+    assert strip_reserved_tags("NoTag") == "NoTag"
 
 
 @pytest.mark.asyncio
