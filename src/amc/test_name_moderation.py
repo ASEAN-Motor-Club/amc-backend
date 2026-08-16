@@ -222,7 +222,11 @@ async def test_run_name_moderation_blocklist_auto_renames():
 
 
 @pytest.mark.asyncio
-@override_settings(NAMER_ENABLED=True, NAMER_AUTO_CONFIDENCE_THRESHOLD=0.9)
+@override_settings(
+    NAMER_ENABLED=True,
+    NAMER_AUTO_CONFIDENCE_THRESHOLD=0.9,
+    NAMER_REVIEW_CHANNEL_ID="1366478091131551834",
+)
 async def test_run_name_moderation_llm_high_conf_renames(monkeypatch):
     player = await sync_to_async(PlayerFactory)()
     character = await sync_to_async(CharacterFactory)(player=player)
@@ -240,7 +244,13 @@ async def test_run_name_moderation_llm_high_conf_renames(monkeypatch):
             "llm",
         )
 
+    posted = []
+
+    def fake_enqueue(channel_id, content, timestamp):
+        posted.append((channel_id, content))
+
     monkeypatch.setattr("amc.name_policy.judge_name", fake_judge)
+    monkeypatch.setattr("amc.tasks.enqueue_discord_message", fake_enqueue)
     await run_name_moderation(character, player, _FakeHttp(), _FakeHttp())
 
     assert (await _reload_player(player)).forced_name == "MuchBetter"
@@ -249,6 +259,12 @@ async def test_run_name_moderation_llm_high_conf_renames(monkeypatch):
     assert row.verdict_source == "llm"
     assert row.action == "rename"
     assert row.reason == "contextual slur"
+    assert len(posted) == 1
+    channel, content = posted[0]
+    assert channel == "1366478091131551834"
+    assert "MuchBetter" in content
+    assert "contextual slur" in content
+    assert "CoolName" in content
 
 
 @pytest.mark.asyncio
