@@ -420,6 +420,46 @@ class ForcedNameLog(models.Model):
         ordering = ["-created_at"]
 
 
+class NameModerationLog(models.Model):
+    """Audit trail for every auto-moderation name decision.
+
+    Records one row per login-name moderation decision (blocklist, LLM, or
+    cache), regardless of whether an action was taken, so verdicts and the
+    auto-rename actions they caused are reviewable and tunable. Distinct from
+    ForcedNameLog (which records only the actual name locks).
+    """
+
+    class VerdictSource(models.TextChoices):
+        BLOCKLIST = "blocklist"
+        LLM = "llm"
+        CACHE = "cache"
+        ERROR = "error"
+
+    class Action(models.TextChoices):
+        RENAME = "rename"
+        NONE = "none"
+        MANUAL_REVIEW = "manual_review"
+
+    player = models.ForeignKey(
+        Player, on_delete=models.CASCADE, related_name="name_moderation_logs"
+    )
+    character = models.ForeignKey(
+        Character, on_delete=models.SET_NULL, null=True, blank=True, related_name="+"
+    )
+    base_name = models.CharField(max_length=64)
+    verdict_source = models.CharField(max_length=16, choices=VerdictSource.choices)
+    is_violation = models.BooleanField()
+    confidence = models.FloatField(default=0.0)
+    categories = ArrayField(models.CharField(max_length=32), default=list, blank=True)
+    action = models.CharField(max_length=16, choices=Action.choices, default=Action.NONE)
+    suggested_name = models.CharField(max_length=64, null=True, blank=True)
+    llm_model = models.CharField(max_length=64, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ["-created_at"]
+
+
 @final
 class CriminalRecord(models.Model):
     character = models.ForeignKey(
