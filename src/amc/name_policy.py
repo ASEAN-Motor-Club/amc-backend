@@ -115,6 +115,34 @@ async def _apply_rename(
         except Exception:
             logger.exception("in-game announce failed after auto-rename")
 
+    await _post_rename_to_discord(
+        base_name, clean_target, source=source,
+        confidence=confidence, categories=categories, reason=reason,
+    )
+
+
+async def _post_rename_to_discord(
+    base_name, clean_target, *, source, confidence, categories, reason,
+):
+    """Log a completed auto-rename to the review channel for auditing."""
+    channel_id = _cfg("NAMER_REVIEW_CHANNEL_ID", None)
+    if not channel_id:
+        return
+    try:
+        from amc.tasks import enqueue_discord_message
+
+        reason_txt = (reason or "").strip()
+        msg = (
+            f"Auto-renamed `{base_name}` → `{clean_target}` "
+            f"(source={source}, conf={confidence:.2f}, "
+            f"cats={categories or []})"
+        )
+        if reason_txt:
+            msg += f". Reason: {reason_txt}"
+        enqueue_discord_message(str(channel_id), msg, timezone.now())
+    except Exception:
+        logger.exception("Discord rename-log enqueue failed")
+
 
 async def _log_manual_review(character, player, base_name, verdict):
     await _record(
