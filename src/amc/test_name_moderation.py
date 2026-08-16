@@ -248,6 +248,7 @@ async def test_run_name_moderation_llm_high_conf_renames(monkeypatch):
     row = await NameModerationLog.objects.filter(player=player).aget()
     assert row.verdict_source == "llm"
     assert row.action == "rename"
+    assert row.reason == "contextual slur"
 
 
 @pytest.mark.asyncio
@@ -263,7 +264,8 @@ async def test_run_name_moderation_low_conf_review(monkeypatch):
         return (
             NameVerdict(
                 name=name, is_violation=True, confidence=0.5,
-                categories=["hate_slur"], recommended_action="manual_review",
+                categories=["hate_slur"], reason="borderline, human review",
+                recommended_action="manual_review",
             ),
             "llm",
         )
@@ -274,6 +276,7 @@ async def test_run_name_moderation_low_conf_review(monkeypatch):
     assert (await _reload_player(player)).forced_name is None  # no lock on sub-threshold
     row = await NameModerationLog.objects.filter(player=player).aget()
     assert row.action == "manual_review"
+    assert row.reason == "borderline, human review"
 
 
 def test_safe_suggested_rejects_offensive_and_junk():

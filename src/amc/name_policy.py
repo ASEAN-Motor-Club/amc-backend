@@ -56,7 +56,7 @@ def _safe_suggested_name(suggested: str | None) -> str | None:
 
 async def _record(
     character, player, base_name, *, source, is_violation, confidence,
-    action, categories=None, suggested_name=None,
+    action, categories=None, suggested_name=None, reason=None,
 ):
     await NameModerationLog.objects.acreate(
         player=player,
@@ -69,12 +69,13 @@ async def _record(
         action=action,
         suggested_name=suggested_name,
         llm_model=_cfg("NAMER_LLM_MODEL", "") if source == "llm" else "",
+        reason=reason or "",
     )
 
 
 async def _apply_rename(
     character, player, base_name, *, to, source, confidence,
-    categories, http_client, http_client_mod,
+    categories, http_client, http_client_mod, reason=None,
 ):
     """Account-level lock + live push + audit + optional announce."""
     from amc.forced_name import log_forced_name_change
@@ -92,7 +93,7 @@ async def _apply_rename(
     await _record(
         character, player, base_name, source=source, is_violation=True,
         confidence=confidence, action="rename", categories=categories,
-        suggested_name=clean_target,
+        suggested_name=clean_target, reason=reason,
     )
     logger.info("auto-rename %r -> %r (uid=%s, source=%s)",
                 old, clean_target, player.unique_id, source)
@@ -120,6 +121,7 @@ async def _log_manual_review(character, player, base_name, verdict):
         character, player, base_name, source="llm", is_violation=True,
         confidence=verdict.confidence, action="manual_review",
         categories=verdict.categories, suggested_name=verdict.suggested_name,
+        reason=verdict.reason,
     )
     channel_id = _cfg("NAMER_REVIEW_CHANNEL_ID", None)
     if channel_id:
@@ -163,7 +165,8 @@ async def run_name_moderation(
         verdict, source = await judge_name(base)
         if source == "error":
             await _record(character, player, base, source="error",
-                          is_violation=False, confidence=0.0, action="none")
+                          is_violation=False, confidence=0.0, action="none",
+                          reason="judge_error")
             return
 
         if (
@@ -178,6 +181,7 @@ async def run_name_moderation(
                 character, player, base, to=to, source=source,
                 confidence=verdict.confidence, categories=verdict.categories,
                 http_client=http_client, http_client_mod=http_client_mod,
+                reason=verdict.reason,
             )
             return
 
@@ -188,7 +192,7 @@ async def run_name_moderation(
         await _record(
             character, player, base, source=source, is_violation=False,
             confidence=verdict.confidence, action="none",
-            categories=verdict.categories,
+            categories=verdict.categories, reason=verdict.reason,
         )
     except Exception:
         logger.exception("run_name_moderation failed for uid=%s",
