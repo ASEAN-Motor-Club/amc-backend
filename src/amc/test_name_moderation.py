@@ -181,6 +181,11 @@ class _FakeHttp:
         raise RuntimeError("network off")
 
 
+async def _reload_player(player):
+    """Re-fetch a player by unique_id (async-safe reload)."""
+    return await Player.objects.aget(unique_id=player.unique_id)
+
+
 @pytest.mark.asyncio
 @override_settings(NAMER_ENABLED=False)
 async def test_run_name_moderation_disabled_does_nothing():
@@ -192,9 +197,10 @@ async def test_run_name_moderation_disabled_does_nothing():
 
     await run_name_moderation(character, player, _FakeHttp(), _FakeHttp())
 
-    assert await NameModerationLog.objects.acount() == 0
-    await player.arefresh()
-    assert player.forced_name is None
+    # Scoped to this player (other DB tests may have created rows; fixtures
+    # intentionally create different players per test).
+    assert await NameModerationLog.objects.filter(player=player).acount() == 0
+    assert (await _reload_player(player)).forced_name is None
 
 
 @pytest.mark.asyncio
@@ -208,10 +214,9 @@ async def test_run_name_moderation_blocklist_auto_renames():
 
     await run_name_moderation(character, player, _FakeHttp(), _FakeHttp())
 
-    await player.arefresh()
-    assert player.forced_name == "FriendlyPlayer"
+    assert (await _reload_player(player)).forced_name == "FriendlyPlayer"
     assert await ForcedNameLog.objects.filter(player=player).acount() == 1
-    row = await NameModerationLog.objects.aget(player=player)
+    row = await NameModerationLog.objects.filter(player=player).aget()
     assert row.verdict_source == "blocklist"
     assert row.action == "rename"
 
@@ -238,10 +243,9 @@ async def test_run_name_moderation_llm_high_conf_renames(monkeypatch):
     monkeypatch.setattr("amc.name_policy.judge_name", fake_judge)
     await run_name_moderation(character, player, _FakeHttp(), _FakeHttp())
 
-    await player.arefresh()
-    assert player.forced_name == "MuchBetter"
+    assert (await _reload_player(player)).forced_name == "MuchBetter"
     assert await ForcedNameLog.objects.filter(player=player).acount() == 1
-    row = await NameModerationLog.objects.aget(player=player)
+    row = await NameModerationLog.objects.filter(player=player).aget()
     assert row.verdict_source == "llm"
     assert row.action == "rename"
 
@@ -267,9 +271,8 @@ async def test_run_name_moderation_low_conf_review(monkeypatch):
     monkeypatch.setattr("amc.name_policy.judge_name", fake_judge)
     await run_name_moderation(character, player, _FakeHttp(), _FakeHttp())
 
-    await player.arefresh()
-    assert player.forced_name is None  # no lock on sub-threshold
-    row = await NameModerationLog.objects.aget(player=player)
+    assert (await _reload_player(player)).forced_name is None  # no lock on sub-threshold
+    row = await NameModerationLog.objects.filter(player=player).aget()
     assert row.action == "manual_review"
 
 
