@@ -12,6 +12,7 @@ check / CI, not in a plain venv without Postgres.
 import pytest
 
 from amc.factories import CharacterFactory, PlayerFactory
+from amc.llm_judge import _cache, judge_name
 from amc.models import NameModerationLog
 from amc.name_moderation import (
     is_offensive_blocklist,
@@ -21,6 +22,57 @@ from amc.name_moderation import (
 from amc.name_verdict import NameVerdict
 
 pytestmark = pytest.mark.django_db
+
+
+@pytest.fixture(autouse=True)
+def _clear_judge_cache():
+    _cache.clear()
+    yield
+    _cache.clear()
+
+
+@pytest.mark.asyncio
+async def test_judge_name_returns_llm_verdict(monkeypatch):
+    async def fake_call(name):
+        return NameVerdict(
+            name=name, is_violation=True, confidence=0.9,
+            recommended_action="rename", suggested_name="NiceName",
+        )
+
+    monkeypatch.setattr("amc.llm_judge._call_llm", fake_call)
+    verdict, src = await judge_name("CoolName")
+    assert src == "llm"
+    assert verdict.is_violation is True
+    assert verdict.suggested_name == "NiceName"
+
+
+@pytest.mark.asyncio
+async def test_judge_name_degrades_on_error(monkeypatch):
+    async def boom(name):
+        raise RuntimeError("api down")
+
+    monkeypatch.setattr("amc.llm_judge._call_llm", boom)
+    verdict, src = await judge_name("SomeName")
+    assert src == "error"
+    assert verdict.is_violation is False
+    assert verdict.recommended_action == "none"
+
+
+@pytest.mark.asyncio
+async def test_judge_name_serves_cache_hit(monkeypatch):
+    calls = []
+
+    async def fake_call(name):
+        calls.append(name)
+        return NameVerdict(name=name, is_violation=True, confidence=0.9,
+                           recommended_action="rename", suggested_name="Taco")
+
+    monkeypatch.setattr("amc.llm_judge._call_llm", fake_call)
+    _, src1 = await judge_name("Repeat")
+    _, src2 = await judge_name("repeat")  # same normalized key -> cache
+    assert src1 == "llm"
+    assert src2 == "cache"
+    assert len(calls) == 1
 
 
 def test_name_verdict_defaults_and_bounds():
