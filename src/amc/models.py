@@ -454,6 +454,7 @@ class NameModerationLog(models.Model):
     action = models.CharField(max_length=16, choices=Action.choices, default=Action.NONE)
     suggested_name = models.CharField(max_length=64, null=True, blank=True)
     llm_model = models.CharField(max_length=64, blank=True)
+    reason = models.CharField(max_length=1000, blank=True)
     created_at = models.DateTimeField(auto_now_add=True)
 
     class Meta:
