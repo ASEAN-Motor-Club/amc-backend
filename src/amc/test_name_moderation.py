@@ -10,15 +10,17 @@ check / CI, not in a plain venv without Postgres.
 """
 
 import pytest
+from django.test import override_settings
 
 from amc.factories import CharacterFactory, PlayerFactory
 from amc.llm_judge import _cache, judge_name
-from amc.models import NameModerationLog
+from amc.models import ForcedNameLog, NameModerationLog, Player
 from amc.name_moderation import (
     is_offensive_blocklist,
     normalize_name,
     strip_reserved_tags,
 )
+from amc.name_policy import _safe_suggested_name, run_name_moderation
 from amc.name_verdict import NameVerdict
 
 pytestmark = pytest.mark.django_db
@@ -160,3 +162,120 @@ async def test_name_moderation_log_row_persists():
     assert row.is_violation is True
     assert row.action == NameModerationLog.Action.RENAME
     assert row.suggested_name == "FriendlyDriver"
+
+
+# ---------------------------------------------------------------------------
+# Orchestrator (Task 6)
+# ---------------------------------------------------------------------------
+
+
+class _FakeHttp:
+    """Minimal aiohttp-like client whose calls fail — only DB writes matter."""
+
+    def __init__(self):
+        self.calls = []
+
+    async def post(self, url, **kwargs):
+        self.calls.append(("post", url))
+        raise RuntimeError("network off")
+
+
+@pytest.mark.asyncio
+@override_settings(NAMER_ENABLED=False)
+async def test_run_name_moderation_disabled_does_nothing():
+    player = await PlayerFactory.acreate()
+    character = await CharacterFactory.acreate(player=player)
+    character.name = "delvyn1gaa"
+    character.custom_name = None
+    await character.asave()
+
+    await run_name_moderation(character, player, _FakeHttp(), _FakeHttp())
+
+    assert await NameModerationLog.objects.acount() == 0
+    await player.arefresh()
+    assert player.forced_name is None
+
+
+@pytest.mark.asyncio
+@override_settings(NAMER_ENABLED=True, NAMER_CANNED_FALLBACK_NAME="FriendlyPlayer")
+async def test_run_name_moderation_blocklist_auto_renames():
+    player = await PlayerFactory.acreate()
+    character = await CharacterFactory.acreate(player=player)
+    character.name = "delvyn1gaa"
+    character.custom_name = None
+    await character.asave()
+
+    await run_name_moderation(character, player, _FakeHttp(), _FakeHttp())
+
+    await player.arefresh()
+    assert player.forced_name == "FriendlyPlayer"
+    assert await ForcedNameLog.objects.filter(player=player).acount() == 1
+    row = await NameModerationLog.objects.aget(player=player)
+    assert row.verdict_source == "blocklist"
+    assert row.action == "rename"
+
+
+@pytest.mark.asyncio
+@override_settings(NAMER_ENABLED=True, NAMER_AUTO_CONFIDENCE_THRESHOLD=0.9)
+async def test_run_name_moderation_llm_high_conf_renames(monkeypatch):
+    player = await PlayerFactory.acreate()
+    character = await CharacterFactory.acreate(player=player)
+    character.name = "CoolName"  # not blocklisted -> Stage B
+    character.custom_name = None
+    await character.asave()
+
+    async def fake_judge(name):
+        return (
+            NameVerdict(
+                name=name, is_violation=True, confidence=0.97,
+                categories=["hate_slur"], reason="contextual slur",
+                suggested_name="MuchBetter", recommended_action="rename",
+            ),
+            "llm",
+        )
+
+    monkeypatch.setattr("amc.name_policy.judge_name", fake_judge)
+    await run_name_moderation(character, player, _FakeHttp(), _FakeHttp())
+
+    await player.arefresh()
+    assert player.forced_name == "MuchBetter"
+    assert await ForcedNameLog.objects.filter(player=player).acount() == 1
+    row = await NameModerationLog.objects.aget(player=player)
+    assert row.verdict_source == "llm"
+    assert row.action == "rename"
+
+
+@pytest.mark.asyncio
+@override_settings(NAMER_ENABLED=True)
+async def test_run_name_moderation_low_conf_review(monkeypatch):
+    player = await PlayerFactory.acreate()
+    character = await CharacterFactory.acreate(player=player)
+    character.name = "Ambiguous"
+    character.custom_name = None
+    await character.asave()
+
+    async def fake_judge(name):
+        return (
+            NameVerdict(
+                name=name, is_violation=True, confidence=0.5,
+                categories=["hate_slur"], recommended_action="manual_review",
+            ),
+            "llm",
+        )
+
+    monkeypatch.setattr("amc.name_policy.judge_name", fake_judge)
+    await run_name_moderation(character, player, _FakeHttp(), _FakeHttp())
+
+    await player.arefresh()
+    assert player.forced_name is None  # no lock on sub-threshold
+    row = await NameModerationLog.objects.aget(player=player)
+    assert row.action == "manual_review"
+
+
+def test_safe_suggested_rejects_offensive_and_junk():
+    assert _safe_suggested_name("Cool Name") == "Cool Name"
+    assert _safe_suggested_name("n1gga") is None        # still offensive
+    assert _safe_suggested_name("[GOV] boss") is None   # reserved tag
+    assert _safe_suggested_name("") is None
+    assert _safe_suggested_name(None) is None
+    assert _safe_suggested_name("A" * 60) is None       # too long
