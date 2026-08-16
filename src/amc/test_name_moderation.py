@@ -18,8 +18,30 @@ from amc.name_moderation import (
     normalize_name,
     strip_reserved_tags,
 )
+from amc.name_verdict import NameVerdict
 
 pytestmark = pytest.mark.django_db
+
+
+def test_name_verdict_defaults_and_bounds():
+    """Pydantic verdict enforces types/enums and defaults action to none."""
+    v = NameVerdict(name="ok", is_violation=False)
+    assert v.recommended_action == "none"
+    assert v.categories == []
+    assert 0.0 <= v.confidence <= 1.0
+
+
+def test_name_verdict_rejects_bad_action():
+    with pytest.raises(ValueError):
+        NameVerdict.model_validate(
+            {"name": "x", "is_violation": True, "confidence": 1.0,
+             "recommended_action": "BOGUS"}
+        )
+
+
+def test_name_verdict_rejects_out_of_range_confidence():
+    with pytest.raises(ValueError):
+        NameVerdict(name="x", is_violation=False, confidence=99.0)
 
 
 def test_blocklist_flags_known_slurs():
