@@ -270,7 +270,11 @@ GAME_LOG_TIMEZONE = os.environ.get("GAME_LOG_TIMEZONE", "Asia/Bangkok")
 # into the worker's env (same secret name peripheral uses).
 OPENAI_API_KEY_OPENROUTER = os.environ.get("OPENAI_API_KEY_OPENROUTER", "")
 NAMER_ENABLED = os.environ.get("NAMER_ENABLED", "0").lower() in ("1", "true", "yes")
-NAMER_LLM_MODEL = os.environ.get("NAMER_LLM_MODEL", "qwen/qwen3.6-flash")
+# Model for the structured-output name-moderation judge. Verified 2026-08 on
+# OpenRouter via `beta.chat.completions.parse`: openai/* and claude models all
+# emit clean structured JSON; qwen/* reasoning models burn the token budget on
+# reasoning and return no parseable JSON, so do NOT use them here.
+NAMER_LLM_MODEL = os.environ.get("NAMER_LLM_MODEL", "openai/gpt-4o-mini")
 # Confidence threshold above which a high-confidence LLM rename auto-applies.
 NAMER_AUTO_CONFIDENCE_THRESHOLD = float(
     os.environ.get("NAMER_AUTO_CONFIDENCE_THRESHOLD", "0.9")
