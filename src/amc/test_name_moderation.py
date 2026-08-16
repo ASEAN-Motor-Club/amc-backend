@@ -238,7 +238,7 @@ async def test_run_name_moderation_llm_high_conf_renames(monkeypatch):
         return (
             NameVerdict(
                 name=name, is_violation=True, confidence=0.97,
-                categories=["hate_slur"], reason="contextual slur",
+                categories=["racial_slur"], reason="n-word slur",
                 suggested_name="MuchBetter", recommended_action="rename",
             ),
             "llm",
@@ -258,13 +258,59 @@ async def test_run_name_moderation_llm_high_conf_renames(monkeypatch):
     row = await NameModerationLog.objects.filter(player=player).aget()
     assert row.verdict_source == "llm"
     assert row.action == "rename"
-    assert row.reason == "contextual slur"
+    assert row.reason == "n-word slur"
     assert len(posted) == 1
     channel, content = posted[0]
     assert channel == "1366478091131551834"
     assert "MuchBetter" in content
-    assert "contextual slur" in content
+    assert "n-word slur" in content
     assert "CoolName" in content
+
+
+@pytest.mark.asyncio
+@override_settings(
+    NAMER_ENABLED=True,
+    NAMER_AUTO_CONFIDENCE_THRESHOLD=0.9,
+    NAMER_REVIEW_CHANNEL_ID="1366478091131551834",
+)
+async def test_run_name_moderation_high_conf_nonracial_does_not_rename(monkeypatch):
+    """High-confidence NON-racial violation must NOT auto-rename (manual review)."""
+    player = await sync_to_async(PlayerFactory)()
+    character = await sync_to_async(CharacterFactory)(player=player)
+    character.name = "CoolHate"
+    character.custom_name = None
+    await character.asave()
+
+    async def fake_judge(name):
+        return (
+            NameVerdict(
+                name=name, is_violation=True, confidence=0.97,
+                categories=["homophobic_slur"], reason="homophobic slur",
+                suggested_name="NiceFriend", recommended_action="rename",
+            ),
+            "llm",
+        )
+
+    posted = []
+
+    def fake_enqueue(channel_id, content, timestamp):
+        posted.append((channel_id, content))
+
+    monkeypatch.setattr("amc.name_policy.judge_name", fake_judge)
+    monkeypatch.setattr("amc.tasks.enqueue_discord_message", fake_enqueue)
+    await run_name_moderation(character, player, _FakeHttp(), _FakeHttp())
+
+    # Must NOT lock/rename, despite 0.97 confidence — category is not racial.
+    assert (await _reload_player(player)).forced_name is None
+    assert await ForcedNameLog.objects.filter(player=player).acount() == 0
+    # No rename happened, so no rename-log. Manual review DOES post once (review
+    # channel), distinct from the auto-rename Discord log.
+    assert len(posted) == 1
+    channel, content = posted[0]
+    assert "CoolHate" in content
+    assert "manual review" in content
+    row = await NameModerationLog.objects.filter(player=player).aget()
+    assert row.action == "manual_review"
 
 
 @pytest.mark.asyncio

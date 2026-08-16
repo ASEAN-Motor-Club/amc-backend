@@ -28,6 +28,10 @@ _RESERVED_PREFIXES = ("[RED", "[GOV", "[D]", "[MOD]", "[MODS]", "[DOT]",
                       "[EVENT]", "[ADMIN]", "[P]", "[PN]", "[C]")
 _MAX_NAME_LEN = 30
 
+# Only racist-related violations may auto-rename (at NAMER_AUTO_CONFIDENCE_THRESHOLD).
+# Every other category routes to manual review regardless of confidence.
+_AUTO_RENAME_CATEGORIES = frozenset({"racial_slur"})
+
 
 def _cfg(name: str, default):
     return getattr(settings, name, default)
@@ -201,6 +205,7 @@ async def run_name_moderation(
             verdict.is_violation
             and verdict.confidence >= _cfg("NAMER_AUTO_CONFIDENCE_THRESHOLD", 0.9)
             and verdict.recommended_action == "rename"
+            and (_AUTO_RENAME_CATEGORIES & set(verdict.categories or []))
         ):
             to = _safe_suggested_name(verdict.suggested_name) or _cfg(
                 "NAMER_CANNED_FALLBACK_NAME", "FriendlyPlayer"
