@@ -303,7 +303,12 @@ async def test_run_name_moderation_high_conf_nonracial_does_not_rename(monkeypat
     # Must NOT lock/rename, despite 0.97 confidence — category is not racial.
     assert (await _reload_player(player)).forced_name is None
     assert await ForcedNameLog.objects.filter(player=player).acount() == 0
-    assert len(posted) == 0  # no rename -> no Discord rename-log
+    # No rename happened, so no rename-log. Manual review DOES post once (review
+    # channel), distinct from the auto-rename Discord log.
+    assert len(posted) == 1
+    channel, content = posted[0]
+    assert "CoolHate" in content
+    assert "manual review" in content
     row = await NameModerationLog.objects.filter(player=player).aget()
     assert row.action == "manual_review"
 
