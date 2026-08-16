@@ -27,6 +27,7 @@ dependencies = [
     "psutil>=6.1.1",
     "pyjwt>=2.9.0",
     "protobuf>=7.34.1",
+    "openai==1.96.1",
 ]
 [project.scripts]
 amc-manage = "manage:main"

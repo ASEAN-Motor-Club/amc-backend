@@ -265,6 +265,27 @@ EVENT_MOD_MANAGEMENT_API_URL = os.environ.get(
 # Staging (amc-peripheral): UTC
 GAME_LOG_TIMEZONE = os.environ.get("GAME_LOG_TIMEZONE", "Asia/Bangkok")
 
+# --- Login-name auto-moderation (OpenRouter LLM) ---
+# Mirrors amc-peripheral's OpenRouter setup. The API key is injected via ragenix
+# into the worker's env (same secret name peripheral uses).
+OPENAI_API_KEY_OPENROUTER = os.environ.get("OPENAI_API_KEY_OPENROUTER", "")
+NAMER_ENABLED = os.environ.get("NAMER_ENABLED", "0").lower() in ("1", "true", "yes")
+NAMER_LLM_MODEL = os.environ.get("NAMER_LLM_MODEL", "qwen/qwen3.6-flash")
+# Confidence threshold above which a high-confidence LLM rename auto-applies.
+NAMER_AUTO_CONFIDENCE_THRESHOLD = float(
+    os.environ.get("NAMER_AUTO_CONFIDENCE_THRESHOLD", "0.9")
+)
+# Discord channel (id) for sub-threshold LLM verdicts needing manual review.
+NAMER_REVIEW_CHANNEL_ID = os.environ.get(
+    "NAMER_REVIEW_CHANNEL_ID", "1366478091131551834"
+)
+# Replacement used when no LLM suggestion is safe (or for blocklist hits).
+NAMER_CANNED_FALLBACK_NAME = os.environ.get("NAMER_CANNED_FALLBACK_NAME", "FriendlyPlayer")
+# TTL (seconds) for verdicts cached in the LLM judge.
+NAMER_VERDICT_CACHE_TTL = int(os.environ.get("NAMER_VERDICT_CACHE_TTL", "3600"))
+# Broadcast a neutral in-game announcement after an auto-rename.
+NAMER_ANNOUNCE = os.environ.get("NAMER_ANNOUNCE", "1").lower() in ("1", "true", "yes")
+
 CHAT_VIA_WEBHOOK = os.environ.get("CHAT_VIA_WEBHOOK", "0").lower() in (
     "1",
     "true",

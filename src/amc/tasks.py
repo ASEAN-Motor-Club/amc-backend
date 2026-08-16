@@ -1006,6 +1006,15 @@ async def process_log_event(
                 await process_login_event(character.id, timestamp)
                 asyncio.create_task(send_player_messages(http_client_mod, player))
                 await refresh_player_name(character, http_client_mod)
+                # Non-blocking auto-moderation of the display name (blocklist +
+                # LLM) — login is never gated on it; failures degrade to no-op.
+                from amc.name_policy import run_name_moderation
+
+                asyncio.create_task(
+                    run_name_moderation(
+                        character, player, http_client, http_client_mod
+                    )
+                )
 
             if is_current_event:
                 # Welcome announcement in global chat (doesn't need GUID)
