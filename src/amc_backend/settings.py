@@ -274,7 +274,7 @@ NAMER_ENABLED = os.environ.get("NAMER_ENABLED", "0").lower() in ("1", "true", "y
 # OpenRouter via `beta.chat.completions.parse`: openai/* and claude models all
 # emit clean structured JSON; qwen/* reasoning models burn the token budget on
 # reasoning and return no parseable JSON, so do NOT use them here.
-NAMER_LLM_MODEL = os.environ.get("NAMER_LLM_MODEL", "openai/gpt-4o-mini")
+NAMER_LLM_MODEL = os.environ.get("NAMER_LLM_MODEL", "openai/gpt-5.6-luna")
 # Confidence threshold above which a high-confidence LLM rename auto-applies.
 NAMER_AUTO_CONFIDENCE_THRESHOLD = float(
     os.environ.get("NAMER_AUTO_CONFIDENCE_THRESHOLD", "0.9")
