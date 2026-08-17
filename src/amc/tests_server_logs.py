@@ -389,40 +389,6 @@ class ProcessLogEventTestCase(TestCase):
             ).aexists()
         )
 
-    async def test_login_welcome_uses_forced_name(self):
-        """'Welcome back' must greet with the forced/renamed name, not the raw one."""
-        from unittest.mock import patch
-        from amc import tasks as tasks_module
-
-        # Force a rename on the player (the LLM/admin forced_name lock).
-        self.player.forced_name = "RenamedDriver"
-        await self.player.asave(update_fields=["forced_name"])
-        # Make it a "Welcome back" case (> 1h since last seen -> still within 7d).
-        self.character.last_online = timezone.now() - timedelta(hours=5)
-        await self.character.asave(update_fields=["last_online"])
-
-        event = PlayerLoginLogEvent(
-            timestamp=self.server_log.timestamp,
-            player_id=self.player.unique_id,
-            player_name=self.character.name,
-        )
-        announced = []
-
-        async def fake_announce(message, client, delay=0, **kwargs):
-            announced.append(message)
-
-        with patch.object(tasks_module, "announce", new=fake_announce):
-            ctx = {
-                "http_client": None,
-                "http_client_mod": None,
-                "startup_time": timezone.now() - timedelta(hours=1),
-            }
-            await process_log_event(event, ctx=ctx)
-
-        self.assertTrue(announced, "a welcome/announce should fire")
-        self.assertIn("RenamedDriver", announced[0])
-        self.assertNotIn(self.character.name, announced[0])
-
     async def test_player_login_out_of_order_1(self):
         await PlayerStatusLog.objects.acreate(
             character=self.character,

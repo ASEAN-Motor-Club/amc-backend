@@ -4,7 +4,7 @@ from unittest.mock import AsyncMock, patch
 from django.test import SimpleTestCase, TestCase
 from django.utils import timezone
 
-from amc.models import Character
+from amc.models import Character, Player
 from amc.tasks import (
     _resolve_guid,
     _resolve_guid_for_login,
@@ -12,6 +12,88 @@ from amc.tasks import (
     aget_or_create_character,
     get_welcome_message,
 )
+
+
+class LoginWelcomeUsesForcedNameTests(TestCase):
+    """The 'Welcome back' greeting must use the forced/renamed name, not the raw one."""
+
+    async def test_welcome_back_uses_forced_name(self):
+        from unittest.mock import patch
+
+        import amc.tasks as tasks_module
+        from amc.server_logs import PlayerLoginLogEvent
+
+        player = await Player.objects.acreate(unique_id=555001)
+        character_name = "RawChosenName"
+        character = await Character.objects.acreate(
+            name=character_name, player=player, guid="welcome_guid"
+        )
+        # Force a rename (the LLM/admin forced_name lock).
+        await Player.objects.filter(unique_id=player.unique_id).aupdate(
+            forced_name="RenamedDriver"
+        )
+        # > 1h since last seen (and < 7d) → triggers "Welcome back".
+        await Character.objects.filter(id=character.id).aupdate(
+            last_online=timezone.now() - timedelta(hours=5)
+        )
+
+        event = PlayerLoginLogEvent(
+            timestamp=timezone.now(),
+            player_id=player.unique_id,
+            player_name=character_name,
+        )
+        announced = []
+
+        async def fake_announce(message, client, delay=0, **kwargs):
+            announced.append(message)
+
+        with patch.object(tasks_module, "announce", new=fake_announce):
+            await tasks_module.process_log_event(
+                event,
+                ctx={
+                    "http_client": None,
+                    "http_client_mod": None,
+                    "startup_time": timezone.now() - timedelta(hours=1),
+                },
+            )
+
+        self.assertTrue(announced, "a 'Welcome back' announce should fire")
+        self.assertIn("RenamedDriver", announced[0])
+        self.assertNotIn(character_name, announced[0])
+
+    async def test_no_forced_name_uses_chosen_name(self):
+        """Without a forced name, the welcome keeps the player's chosen name."""
+        from unittest.mock import patch
+
+        import amc.tasks as tasks_module
+        from amc.server_logs import PlayerLoginLogEvent
+
+        player = await Player.objects.acreate(unique_id=555002)
+        await Character.objects.acreate(
+            name="PlainJoe", player=player, guid="welcome_guid2"
+        )
+        event = PlayerLoginLogEvent(
+            timestamp=timezone.now(),
+            player_id=player.unique_id,
+            player_name="PlainJoe",
+        )
+        announced = []
+
+        async def fake_announce(message, client, delay=0, **kwargs):
+            announced.append(message)
+
+        with patch.object(tasks_module, "announce", new=fake_announce):
+            await tasks_module.process_log_event(
+                event,
+                ctx={
+                    "http_client": None,
+                    "http_client_mod": None,
+                    "startup_time": timezone.now() - timedelta(hours=1),
+                },
+            )
+
+        self.assertTrue(announced, "a 'Welcome back' announce should fire")
+        self.assertIn("PlainJoe", announced[0])
 
 
 class GetWelcomeMessageTests(SimpleTestCase):
