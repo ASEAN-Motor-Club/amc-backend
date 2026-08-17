@@ -17,18 +17,34 @@ pytestmark = pytest.mark.django_db
 
 
 class _FakeHttp:
-    """Minimal aiohttp-like client — only records writes, then raises."""
+    """Minimal aiohttp-like client — records writes as async-context entries."""
 
     def __init__(self):
         self.calls = []
 
     async def post(self, url, **kwargs):
         self.calls.append(("post", url))
-        raise RuntimeError("network off")
+        return _FakeResponse()
 
-    async def put(self, url, **kwargs):
+    def put(self, url, **kwargs):
+        # aiohttp's put() returns an async context manager (not a coroutine).
         self.calls.append(("put", url))
-        raise RuntimeError("network off")
+        return _FakeResponse()
+
+
+class _FakeResponse:
+    """Async context manager standing in for aiohttp's response object."""
+
+    status = 200
+
+    async def __aenter__(self):
+        return self
+
+    async def __aexit__(self, *exc):
+        return False
+
+    async def text(self):
+        return ""
 
 
 async def _make_review_log(player=None, character=None, base_name="BadName"):
