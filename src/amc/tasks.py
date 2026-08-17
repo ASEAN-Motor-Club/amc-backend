@@ -1041,10 +1041,17 @@ async def process_log_event(
                 )
 
             if is_current_event:
-                # Welcome announcement in global chat (doesn't need GUID)
+                # Welcome announcement in global chat (doesn't need GUID).
+                # Greet with the effective display base name — an admin/LLM
+                # forced_name overrides the player's chosen name across all
+                # characters, so 'Welcome back' must reflect the renamed name,
+                # not the raw chosen one. `refresh_player_name` (run above)
+                # already resolved forced_name into the account; read it here.
+                # Deterministic — no LLM gating on login.
                 try:
+                    welcome_name = player.forced_name or character.name
                     welcome_message, _is_new = get_welcome_message(
-                        character.name,
+                        welcome_name,
                         is_new=is_new_player,
                         last_online=character.last_online,
                     )
