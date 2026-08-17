@@ -1,5 +1,5 @@
 import asyncio
-from datetime import timedelta
+from datetime import datetime, timedelta
 from decimal import Decimal
 from typing import Optional
 from django.db.models import F
@@ -17,6 +17,7 @@ from amc.mod_server import (
     transfer_money,
     get_vehicle_cargos,
     set_world_vehicle_decal,
+    get_muted_players,
     mute_player,
     unmute_player,
 )
@@ -569,6 +570,32 @@ async def cmd_cargo(ctx: CommandContext, target_player_name: Optional[str] = Non
     await ctx.reply("\n".join(lines))
 
 
+def _format_mute_status(mute_until) -> str:
+    """Human-readable 'Mute Until' status for a mod mute response value.
+
+    ``True`` (or the string ``"permanent"``) means permanent. A positive
+    number is an absolute UTC epoch second; we render it as a local wall-clock
+    time plus a live remaining countdown.
+    """
+    if mute_until is True or mute_until == "permanent":
+        return _("permanently")
+    if isinstance(mute_until, (int, float)) and mute_until > 0:
+        until = timezone.localtime(
+            datetime.fromtimestamp(int(mute_until), tz=timezone.utc)
+        )
+        when = until.strftime("%Y-%m-%d %H:%M")
+        remain = int(mute_until) - int(timezone.now().timestamp())
+        if remain > 0:
+            m, s = divmod(remain, 60)
+            h, m = divmod(m, 60)
+            remaining = f"{h}h {m}m" if h else f"{m}m {s}s"
+            return _("until {when} ({remaining} left)").format(
+                when=when, remaining=remaining
+            )
+        return _("until {when}").format(when=when)
+    return _("permanently")
+
+
 @registry.register(
     "/mute",
     description=gettext_lazy("Mute a player (Admin)"),
@@ -612,19 +639,19 @@ async def cmd_mute(ctx: CommandContext, target_player_name: str, duration: Optio
         return
 
     try:
-        await mute_player(ctx.http_client_mod, target_unique_id, mute_for=mute_for)
+        mute_result = await mute_player(
+            ctx.http_client_mod, target_unique_id, mute_for=mute_for
+        )
     except Exception as e:
         await ctx.reply(_("Failed to mute player: {error}").format(error=str(e)))
         return
 
-    if mute_for is True:
-        duration_text = _("permanently")
-    else:
-        duration_text = _("for {seconds}s").format(seconds=mute_for)
+    mute_until = mute_result.get("MuteUntil") if isinstance(mute_result, dict) else None
+    status_text = _format_mute_status(mute_until)
 
     await ctx.reply(
-        _("<Title>Player Muted</>\n\n{name} has been muted {duration}.").format(
-            name=display_name, duration=duration_text
+        _("<Title>Player Muted</>\n\n{name} has been muted {status}.").format(
+            name=display_name, status=status_text
         )
     )
 
@@ -672,6 +699,41 @@ async def cmd_unmute(ctx: CommandContext, target_player_name: str):
     await ctx.reply(
         _("<Title>Player Unmuted</>\n\n{name} has been unmuted.").format(name=display_name)
     )
+
+
+@registry.register(
+    "/mute_list",
+    description=gettext_lazy("List muted players with mute-until countdown (Admin)"),
+    category="Admin",
+)
+async def cmd_mute_list(ctx: CommandContext):
+    if not ctx.player_info or not ctx.player_info.get("bIsAdmin"):
+        await ctx.reply(_("Admin-only"))
+        return
+
+    muted = await get_muted_players(ctx.http_client_mod)
+    if not muted:
+        await ctx.reply(_("No players are currently muted."))
+        return
+
+    players = await get_players_mod(ctx.http_client_mod) or []
+    name_by_id = {
+        str(p.get("UniqueID")): p.get("PlayerName", _("Unknown"))
+        for p in players
+        if p.get("UniqueID")
+    }
+
+    lines = [_("<Title>Muted Players</>")]
+    for entry in muted:
+        uid = str(entry.get("UniqueID", ""))
+        name = name_by_id.get(uid, uid)
+        status = _format_mute_status(entry.get("MuteUntil"))
+        kind = _("hard") if entry.get("Hard") else _("soft")
+        lines.append(
+            _("{name}: {status} ({kind})").format(name=name, status=status, kind=kind)
+        )
+
+    await ctx.reply("\n".join(lines))
 
 
 @registry.register(
