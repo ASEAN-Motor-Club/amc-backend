@@ -1,9 +1,9 @@
 """Tests for login-time offensive-name auto-moderation.
 
-Covers: NameModerationLog audit model (Task 2), Stage A deterministic
-blocklist (Task 3), Pydantic structured verdicts (Task 4), the OpenRouter LLM
-judge (Step 5), the orchestrator + login hook + auto-rename + announcement
-(Step 6), and the safe-suggestion guard.
+Covers: NameModerationLog audit model, Pydantic structured verdicts, the
+OpenRouter LLM judge, the orchestrator + login hook + auto-rename +
+announcement, and the safe-suggestion guard. (The deterministic regex
+blocklist was removed — the game already enforces offensive names.)
 
 These require PostgreSQL (ArrayField) so they run under the flake's pytest
 check / CI, not in a plain venv without Postgres.
@@ -16,11 +16,7 @@ from django.test import override_settings
 from amc.factories import CharacterFactory, PlayerFactory
 from amc.llm_judge import _cache, judge_name
 from amc.models import ForcedNameLog, NameModerationLog, Player
-from amc.name_moderation import (
-    is_offensive_blocklist,
-    normalize_name,
-    strip_reserved_tags,
-)
+from amc.name_moderation import strip_reserved_tags
 from amc.name_policy import _safe_suggested_name, run_name_moderation
 from amc.name_verdict import NameVerdict
 
@@ -99,43 +95,6 @@ def test_name_verdict_rejects_out_of_range_confidence():
         NameVerdict(name="x", is_violation=False, confidence=99.0)
 
 
-def test_blocklist_flags_known_slurs():
-    """Stage A catches canonical + leetspeak-obfuscated slurs (Task 3)."""
-    flagged = [
-        "delivyn1gaa",    # 1->i single-g "niga"
-        "n1gga",
-        "Niggerslayer",
-        "Localslave",     # slave
-        "xF4GGOTx",       # faggot with 4->a
-        "fagot",          # single-g f-slur
-        "N4ziScum",       # nazi
-    ]
-    for name in flagged:
-        assert is_offensive_blocklist(name)[0] is True, name
-
-
-def test_blocklist_ignores_clean_names():
-    """Stage A must never flag clean names (precision over recall)."""
-    clean = [
-        "HappyDriver",
-        "Motortown",   # internal 'tow' etc. must be safe
-        "Nigeria",     # country — single-g after 'i', must NOT match
-        "Nigel",       # name
-        "enigma",      # 'nig' inside a clean word
-        "ih8juice",    # no slur token -> falls to LLM, not blocklist
-        "truckin",
-        "JUICEn1g",    # truncated n, no double-g / trailing vowel -> precision gate
-        "Tofu",
-    ]
-    for name in clean:
-        assert is_offensive_blocklist(name)[0] is False, name
-
-
-def test_normalize_decodes_leetspeak():
-    assert normalize_name("delivyn1gaa") == "delivynigaa"
-    assert normalize_name("xF4GGOT x") == "xfaggotx"
-
-
 def test_strip_reserved_tags_removes_bracket_prefix():
     assert strip_reserved_tags("[GOV] Boss") == "Boss"
     assert strip_reserved_tags("[M] Racer") == "Racer"
@@ -204,24 +163,6 @@ async def test_run_name_moderation_disabled_does_nothing():
 
 
 @pytest.mark.asyncio
-@override_settings(NAMER_ENABLED=True, NAMER_CANNED_FALLBACK_NAME="FriendlyPlayer")
-async def test_run_name_moderation_blocklist_auto_renames():
-    player = await sync_to_async(PlayerFactory)()
-    character = await sync_to_async(CharacterFactory)(player=player)
-    character.name = "delvyn1gaa"
-    character.custom_name = None
-    await character.asave()
-
-    await run_name_moderation(character, player, _FakeHttp(), _FakeHttp())
-
-    assert (await _reload_player(player)).forced_name == "FriendlyPlayer"
-    assert await ForcedNameLog.objects.filter(player=player).acount() == 1
-    row = await NameModerationLog.objects.filter(player=player).aget()
-    assert row.verdict_source == "blocklist"
-    assert row.action == "rename"
-
-
-@pytest.mark.asyncio
 @override_settings(
     NAMER_ENABLED=True,
     NAMER_AUTO_CONFIDENCE_THRESHOLD=0.9,
@@ -230,7 +171,7 @@ async def test_run_name_moderation_blocklist_auto_renames():
 async def test_run_name_moderation_llm_high_conf_renames(monkeypatch):
     player = await sync_to_async(PlayerFactory)()
     character = await sync_to_async(CharacterFactory)(player=player)
-    character.name = "CoolName"  # not blocklisted -> Stage B
+    character.name = "CoolName"  # clean name -> LLM judge
     character.custom_name = None
     await character.asave()
 
@@ -341,10 +282,11 @@ async def test_run_name_moderation_low_conf_review(monkeypatch):
     assert row.reason == "borderline, human review"
 
 
-def test_safe_suggested_rejects_offensive_and_junk():
+def test_safe_suggested_rejects_junk_only():
+    """Guard now only enforces reservation, chars, and length (blocklist removed)."""
     assert _safe_suggested_name("Cool Name") == "Cool Name"
-    assert _safe_suggested_name("n1gga") is None        # still offensive
     assert _safe_suggested_name("[GOV] boss") is None   # reserved tag
+    assert _safe_suggested_name("has/invalid") is None  # char check
     assert _safe_suggested_name("") is None
     assert _safe_suggested_name(None) is None
     assert _safe_suggested_name("A" * 60) is None       # too long

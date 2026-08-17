@@ -2,8 +2,9 @@
 
 Wire-in: on `PlayerLoginLogEvent`, the worker schedules
 `run_name_moderation(character, player, http_client, http_client_mod)` as a
-non-blocking task. This ties together Stage A (deterministic blocklist) and
-Stage B (OpenRouter LLM judge), performs the account-level `forced_name` lock,
+non-blocking task. This ties together the OpenRouter LLM judge (which replaces
+the old deterministic regex blocklist — removed because the game already enforces
+offensive names at the source), performs the account-level `forced_name` lock,
 applies it live, records audit rows, and (per settings) announces neutrally and
 posts manual-review items to Discord.
 
@@ -20,7 +21,7 @@ from django.utils import timezone
 
 from amc.llm_judge import judge_name
 from amc.models import NameModerationLog
-from amc.name_moderation import is_offensive_blocklist, strip_reserved_tags
+from amc.name_moderation import strip_reserved_tags
 
 logger = logging.getLogger(__name__)
 
@@ -51,8 +52,6 @@ def _safe_suggested_name(suggested: str | None) -> str | None:
         return None
     if _is_reserved_display(s):
         return None
-    if is_offensive_blocklist(s)[0]:
-        return None  # never let the LLM propose another offensive name
     if not all(c.isalnum() or c in " _-." for c in s):
         return None
     return s
@@ -180,17 +179,6 @@ async def run_name_moderation(
         display = character.custom_name or character.name
         base = strip_reserved_tags(display).strip()
         if not base or _is_reserved_display(display):
-            return
-
-        # Stage A — deterministic blocklist (certain violation, no LLM).
-        blocked, cats = is_offensive_blocklist(base)
-        if blocked:
-            await _apply_rename(
-                character, player, base,
-                to=_cfg("NAMER_CANNED_FALLBACK_NAME", "FriendlyPlayer"),
-                source="blocklist", confidence=1.0, categories=cats,
-                http_client=http_client, http_client_mod=http_client_mod,
-            )
             return
 
         # Stage B — LLM structured verdict (cache-guarded).

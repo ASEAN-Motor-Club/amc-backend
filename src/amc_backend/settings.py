@@ -283,7 +283,7 @@ NAMER_AUTO_CONFIDENCE_THRESHOLD = float(
 NAMER_REVIEW_CHANNEL_ID = os.environ.get(
     "NAMER_REVIEW_CHANNEL_ID", "1366478091131551834"
 )
-# Replacement used when no LLM suggestion is safe (or for blocklist hits).
+# Replacement used when no LLM suggestion passes the safety guard.
 NAMER_CANNED_FALLBACK_NAME = os.environ.get("NAMER_CANNED_FALLBACK_NAME", "FriendlyPlayer")
 # TTL (seconds) for verdicts cached in the LLM judge.
 NAMER_VERDICT_CACHE_TTL = int(os.environ.get("NAMER_VERDICT_CACHE_TTL", "3600"))
