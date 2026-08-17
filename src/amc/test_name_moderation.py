@@ -15,7 +15,7 @@ from django.test import override_settings
 
 from amc.factories import CharacterFactory, PlayerFactory
 from amc.llm_judge import _cache, judge_name
-from amc.models import ForcedNameLog, NameModerationLog, Player
+from amc.models import ForcedNameLog, NameModerationLog, NameWhitelist, Player
 from amc.name_moderation import strip_reserved_tags
 from amc.name_policy import _safe_suggested_name, run_name_moderation
 from amc.name_verdict import NameVerdict
@@ -234,11 +234,11 @@ async def test_run_name_moderation_high_conf_nonracial_does_not_rename(monkeypat
 
     posted = []
 
-    def fake_enqueue(channel_id, content, timestamp):
-        posted.append((channel_id, content))
+    def fake_enqueue_review(channel_id, log_id, content, timestamp):
+        posted.append((channel_id, log_id, content))
 
     monkeypatch.setattr("amc.name_policy.judge_name", fake_judge)
-    monkeypatch.setattr("amc.tasks.enqueue_discord_message", fake_enqueue)
+    monkeypatch.setattr("amc.tasks.enqueue_discord_review", fake_enqueue_review)
     await run_name_moderation(character, player, _FakeHttp(), _FakeHttp())
 
     # Must NOT lock/rename, despite 0.97 confidence — category is not racial.
@@ -247,7 +247,9 @@ async def test_run_name_moderation_high_conf_nonracial_does_not_rename(monkeypat
     # No rename happened, so no rename-log. Manual review DOES post once (review
     # channel), distinct from the auto-rename Discord log.
     assert len(posted) == 1
-    channel, content = posted[0]
+    channel, log_id, content = posted[0]
+    assert channel == "1366478091131551834"
+    assert log_id is not None
     assert "CoolHate" in content
     assert "manual review" in content
     row = await NameModerationLog.objects.filter(player=player).aget()
@@ -280,6 +282,80 @@ async def test_run_name_moderation_low_conf_review(monkeypatch):
     row = await NameModerationLog.objects.filter(player=player).aget()
     assert row.action == "manual_review"
     assert row.reason == "borderline, human review"
+
+
+@pytest.mark.asyncio
+@override_settings(NAMER_ENABLED=True)
+async def test_run_name_moderation_whitelisted_name_skips_llm(monkeypatch):
+    """A per-player whitelisted name must skip the LLM without posting a review."""
+    player = await sync_to_async(PlayerFactory)()
+    character = await sync_to_async(CharacterFactory)(player=player)
+    character.name = "MyNick"
+    character.custom_name = None
+    await character.asave()
+    # Pre-whitelist this name for this player.
+    await NameWhitelist.objects.acreate(player=player, name="mynick", reason="approved")
+
+    called = []
+    async def fake_judge(name):
+        called.append(name)
+        return (
+            NameVerdict(name=name, is_violation=True, confidence=1.0,
+                        categories=["racial_slur"], suggested_name="Bad"),
+            "llm",
+        )
+
+    posted = []
+    def fake_enqueue_review(channel_id, log_id, content, timestamp):
+        posted.append(content)
+
+    monkeypatch.setattr("amc.name_policy.judge_name", fake_judge)
+    monkeypatch.setattr("amc.tasks.enqueue_discord_review", fake_enqueue_review)
+    await run_name_moderation(character, player, _FakeHttp(), _FakeHttp())
+
+    assert called == []  # LLM never hit
+    assert len(posted) == 0  # no review posted
+    assert (await _reload_player(player)).forced_name is None  # no rename
+    row = await NameModerationLog.objects.filter(player=player).aget()
+    assert row.verdict_source == "whitelist"
+    assert row.action == "none"
+    assert row.reason == "admin_whitelisted"
+
+
+@pytest.mark.asyncio
+@override_settings(NAMER_ENABLED=True)
+async def test_run_name_moderation_whitelist_is_per_player(monkeypatch):
+    """Whitelisting for one player does NOT skip the LLM for another with the same name."""
+    p1 = await sync_to_async(PlayerFactory)()
+    p2 = await sync_to_async(PlayerFactory)()
+    c1 = await sync_to_async(CharacterFactory)(player=p1)
+    c2 = await sync_to_async(CharacterFactory)(player=p2)
+    c1.name = c2.name = "Shared"
+    c1.custom_name = c2.custom_name = None
+    await c1.asave()
+    await c2.asave()
+    await NameWhitelist.objects.acreate(player=p1, name="shared", reason="approved")
+
+    called = []
+    async def fake_judge(name):
+        called.append(name)
+        return (
+            NameVerdict(name=name, is_violation=True, confidence=0.5,
+                        categories=["hate_slur"], reason="borderline",
+                        recommended_action="manual_review"),
+            "llm",
+        )
+
+    monkeypatch.setattr("amc.name_policy.judge_name", fake_judge)
+    # p1 is whitelisted -> no LLM; p2 is not -> LLM called.
+    await run_name_moderation(c1, p1, _FakeHttp(), _FakeHttp())
+    await run_name_moderation(c2, p2, _FakeHttp(), _FakeHttp())
+
+    assert called == ["Shared"]  # only p2 hit the LLM
+    r1 = await NameModerationLog.objects.filter(player=p1).aget()
+    r2 = await NameModerationLog.objects.filter(player=p2).aget()
+    assert r1.verdict_source == "whitelist"
+    assert r2.verdict_source == "llm"
 
 
 def test_safe_suggested_rejects_junk_only():

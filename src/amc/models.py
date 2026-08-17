@@ -434,11 +434,13 @@ class NameModerationLog(models.Model):
         LLM = "llm"
         CACHE = "cache"
         ERROR = "error"
+        WHITELIST = "whitelist"
 
     class Action(models.TextChoices):
         RENAME = "rename"
         NONE = "none"
         MANUAL_REVIEW = "manual_review"
+        WHITELIST = "whitelist"
 
     player = models.ForeignKey(
         Player, on_delete=models.CASCADE, related_name="name_moderation_logs"
@@ -458,6 +460,30 @@ class NameModerationLog(models.Model):
     created_at = models.DateTimeField(auto_now_add=True)
 
     class Meta:
+        ordering = ["-created_at"]
+
+
+class NameWhitelist(models.Model):
+    """A per-player approved display name so the LLM judge skips it forever.
+
+    ``name`` is stored lowercased. Uniqueness is scoped per ``player`` so one
+    account approving a name does not bless it for the whole server.
+    """
+
+    player = models.ForeignKey(
+        Player, on_delete=models.CASCADE, related_name="name_whitelists"
+    )
+    name = models.CharField(max_length=64)
+    added_by = models.PositiveBigIntegerField(null=True, blank=True)  # discord id
+    reason = models.CharField(max_length=1000, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        constraints = [
+            models.UniqueConstraint(
+                fields=["player", "name"], name="unique_name_whitelist_per_player"
+            )
+        ]
         ordering = ["-created_at"]
 
 
