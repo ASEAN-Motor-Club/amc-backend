@@ -121,6 +121,30 @@ def enqueue_discord_message(channel_id: str, content: str, timestamp):
     _process_discord_queue()
 
 
+def enqueue_discord_review(channel_id: str, log_id: int, content: str, timestamp):
+    """Enqueue a manual-review message WITH Rename/Whitelist buttons.
+
+    The message is sent on the bot's event loop (run_coroutine_threadsafe) with a
+    `NameReviewView` so button interactions dispatch back into the bot. The bot
+    holds a reference to each view keyed by log id so callbacks stay alive.
+    """
+    if not _discord_client_ref or not _discord_client_ref.loop:
+        logger.warning("discord_review: bot not ready, dropping review for log %s", log_id)
+        return
+
+    async def _send():
+        try:
+            from amc_cogs.name_review import send_review_message
+
+            await send_review_message(
+                _discord_client_ref, channel_id, log_id, content
+            )
+        except Exception:
+            logger.exception("Discord review send failed for log %s", log_id)
+
+    asyncio.run_coroutine_threadsafe(_send(), _discord_client_ref.loop)
+
+
 async def _show_police_popup(http_client_mod, character_guid, player_id):
     """Show police rules popup with a wanted list of online characters with active criminal records."""
     try:

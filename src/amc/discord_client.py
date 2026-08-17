@@ -21,12 +21,16 @@ from amc_cogs.crime_stats import CrimeStatsCog
 from amc_cogs.faction_stats import FactionStatsCog
 from amc_cogs.housing import HousingCog
 from amc_cogs.beammp_status import BeamMPStatusCog
+from amc_cogs.name_review import NameReviewCog
 
 
 class AMCDiscordBot(commands.Bot):
     def __init__(self, *args, **kwargs):
         kwargs.setdefault("command_prefix", "/")
         super().__init__(*args, **kwargs)
+        # Live manual-review views keyed by NameModerationLog id (kept alive for
+        # button callbacks).
+        self._review_views: dict[int, discord.ui.View] = {}
 
     async def setup_hook(self):
         self.http_client_game = aiohttp.ClientSession(
@@ -61,6 +65,7 @@ class AMCDiscordBot(commands.Bot):
         await self.add_cog(FactionStatsCog(self), guild=guild)
         await self.add_cog(HousingCog(self), guild=guild)
         await self.add_cog(BeamMPStatusCog(self), guild=guild)
+        await self.add_cog(NameReviewCog(self), guild=guild)
         await self.tree.sync(guild=guild)
 
 
