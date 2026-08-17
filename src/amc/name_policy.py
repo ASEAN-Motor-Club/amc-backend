@@ -198,7 +198,7 @@ async def apply_review_rename(
     shared `_apply_name_lock`, flips the audit action to `rename`, and returns the
     applied name.
     """
-    log = await NameModerationLog.objects.aget(pk=log_id)
+    log = await NameModerationLog.objects.select_related("character").aget(pk=log_id)
     player = await Player.objects.aget(unique_id=log.player_id)
     character = log.character
     target = log.suggested_name or _cfg("NAMER_CANNED_FALLBACK_NAME",
