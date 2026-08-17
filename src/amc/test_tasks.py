@@ -25,7 +25,7 @@ class LoginWelcomeUsesForcedNameTests(TestCase):
 
         player = await Player.objects.acreate(unique_id=555001)
         character_name = "RawChosenName"
-        character = await Character.objects.acreate(
+        await Character.objects.acreate(
             name=character_name, player=player, guid="welcome_guid"
         )
         # Force a rename (the LLM/admin forced_name lock).
@@ -33,7 +33,7 @@ class LoginWelcomeUsesForcedNameTests(TestCase):
             forced_name="RenamedDriver"
         )
         # > 1h since last seen (and < 7d) → triggers "Welcome back".
-        await Character.objects.filter(id=character.id).aupdate(
+        await Character.objects.filter(player=player).aupdate(
             last_online=timezone.now() - timedelta(hours=5)
         )
 
@@ -42,12 +42,15 @@ class LoginWelcomeUsesForcedNameTests(TestCase):
             player_id=player.unique_id,
             player_name=character_name,
         )
-        announced = []
+        greeted_with = []
 
-        async def fake_announce(message, client, delay=0, **kwargs):
-            announced.append(message)
+        def fake_get_welcome_message(name, is_new, last_online=None):
+            greeted_with.append(name)
+            return f"Welcome back {name}!", False
 
-        with patch.object(tasks_module, "announce", new=fake_announce):
+        # Patch get_welcome_message (called synchronously in the login path) to
+        # capture which name is used for the "Welcome back" greet.
+        with patch.object(tasks_module, "get_welcome_message", new=fake_get_welcome_message):
             await tasks_module.process_log_event(
                 event,
                 ctx={
@@ -57,9 +60,8 @@ class LoginWelcomeUsesForcedNameTests(TestCase):
                 },
             )
 
-        self.assertTrue(announced, "a 'Welcome back' announce should fire")
-        self.assertIn("RenamedDriver", announced[0])
-        self.assertNotIn(character_name, announced[0])
+        self.assertTrue(greeted_with, "a 'Welcome back' greet must fire")
+        self.assertEqual(greeted_with[0], "RenamedDriver")
 
     async def test_no_forced_name_uses_chosen_name(self):
         """Without a forced name, the welcome keeps the player's chosen name."""
@@ -77,12 +79,13 @@ class LoginWelcomeUsesForcedNameTests(TestCase):
             player_id=player.unique_id,
             player_name="PlainJoe",
         )
-        announced = []
+        greeted_with = []
 
-        async def fake_announce(message, client, delay=0, **kwargs):
-            announced.append(message)
+        def fake_get_welcome_message(name, is_new, last_online=None):
+            greeted_with.append(name)
+            return f"Welcome back {name}!", False
 
-        with patch.object(tasks_module, "announce", new=fake_announce):
+        with patch.object(tasks_module, "get_welcome_message", new=fake_get_welcome_message):
             await tasks_module.process_log_event(
                 event,
                 ctx={
@@ -92,8 +95,8 @@ class LoginWelcomeUsesForcedNameTests(TestCase):
                 },
             )
 
-        self.assertTrue(announced, "a 'Welcome back' announce should fire")
-        self.assertIn("PlainJoe", announced[0])
+        self.assertTrue(greeted_with, "a 'Welcome back' greet must fire")
+        self.assertEqual(greeted_with[0], "PlainJoe")
 
 
 class GetWelcomeMessageTests(SimpleTestCase):
