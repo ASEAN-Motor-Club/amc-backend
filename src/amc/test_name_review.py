@@ -17,13 +17,17 @@ pytestmark = pytest.mark.django_db
 
 
 class _FakeHttp:
-    """Minimal aiohttp-like client — only DB writes matter here."""
+    """Minimal aiohttp-like client — only records writes, then raises."""
 
     def __init__(self):
         self.calls = []
 
     async def post(self, url, **kwargs):
         self.calls.append(("post", url))
+        raise RuntimeError("network off")
+
+    async def put(self, url, **kwargs):
+        self.calls.append(("put", url))
         raise RuntimeError("network off")
 
 
