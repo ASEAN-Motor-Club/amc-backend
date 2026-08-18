@@ -7,7 +7,7 @@ from django.db import migrations, models
 class Migration(migrations.Migration):
 
     dependencies = [
-        ("amc", "0229_namewhitelist"),
+        ("amc", "0231_alter_namemoderationlog_action_and_more"),
     ]
 
     operations = [
