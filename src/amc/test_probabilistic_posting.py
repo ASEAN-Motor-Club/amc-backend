@@ -329,3 +329,44 @@ class ProbabilisticPostingMultipleSlotsTestCase(TestCase):
             expired_at__gte=timezone.now(),
         ).acount()
         self.assertEqual(job_count, 0)
+
+    @patch(_PATCHES["sc_conflicts"], new_callable=AsyncMock, return_value=set())
+    @patch(_PATCHES["escrow"], new_callable=AsyncMock, return_value=True)
+    @patch(_PATCHES["treasury"], new_callable=AsyncMock, return_value=Decimal("50000000"))
+    @patch(_PATCHES["announce"], new_callable=AsyncMock)
+    @patch(_PATCHES["get_players"], new_callable=AsyncMock, return_value=[])
+    async def test_min_active_jobs_floor_at_low_player_count(
+        self, mock_players, mock_announce, mock_treasury, mock_escrow, mock_conflicts
+    ):
+        """With 0 players and a depressed adaptive multiplier, the board would
+        otherwise collapse to ~1 job; the min_active_jobs floor keeps 3 up."""
+        from amc import jobs as jobs_module
+
+        # Tune so the log2 curve + adaptive mult naturally yields ~1 at 0 players.
+        JobPostingConfig.objects.update_or_create(
+            pk=1,
+            defaults={
+                "min_base_jobs": 1,
+                "min_active_jobs": 3,
+                "max_posts_per_tick": 10,
+                "max_multiplier": 2.0,
+                "treasury_equilibrium": 50_000_000,
+                "treasury_sensitivity": 1.5,
+            },
+        )
+
+        with patch.object(
+            jobs_module, "calculate_adaptive_multiplier", return_value=0.5
+        ):
+            # treasury_mult=1.0 -> posting_chance 1.0 -> every open slot posts
+            with patch.object(
+                jobs_module, "calculate_treasury_multiplier", return_value=1.0
+            ):
+                ctx = {"http_client": AsyncMock()}
+                await monitor_jobs(ctx)
+
+        job_count = await DeliveryJob.objects.filter(
+            fulfilled_at__isnull=True,
+            expired_at__gte=timezone.now(),
+        ).acount()
+        self.assertEqual(job_count, 3)

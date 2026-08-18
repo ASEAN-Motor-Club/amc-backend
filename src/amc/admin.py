@@ -1179,6 +1179,7 @@ class JobPostingConfigAdmin(admin.ModelAdmin):
         "max_multiplier",
         "players_per_job",
         "min_base_jobs",
+        "min_active_jobs",
         "posting_rate_multiplier",
     ]
 

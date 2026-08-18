@@ -187,7 +187,9 @@ async def monitor_jobs(ctx):
     # Base formula: log2 curve — generous at low player counts, flattens at high
     # e.g. 0→1, 6→4, 10→4, 20→5, 30→6
     base_max_jobs = config.min_base_jobs + round(math.log2(1 + num_players))
-    max_active_jobs = max(1, int(base_max_jobs * adaptive_mult))
+    max_active_jobs = max(
+        config.min_active_jobs, int(base_max_jobs * adaptive_mult)
+    )
 
     slots_to_fill = max_active_jobs - num_active_jobs
     if slots_to_fill <= 0:
