@@ -343,7 +343,9 @@ class ProbabilisticPostingMultipleSlotsTestCase(TestCase):
         from amc import jobs as jobs_module
 
         # Tune so the log2 curve + adaptive mult naturally yields ~1 at 0 players.
-        JobPostingConfig.objects.update_or_create(
+        # Use the async variant: this test body runs in async context, and a
+        # sync update_or_create would raise SynchronousOnlyOperation.
+        await JobPostingConfig.objects.aupdate_or_create(
             pk=1,
             defaults={
                 "min_base_jobs": 1,
