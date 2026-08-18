@@ -3038,6 +3038,13 @@ class JobPostingConfig(models.Model):
         default=1,
         help_text="Base offset for log2 job count curve (added to log2(1 + players))",
     )
+    min_active_jobs = models.PositiveIntegerField(
+        default=3,
+        help_text=(
+            "Floor on the target number of active jobs. Even with very few "
+            "players, the board keeps at least this many jobs to choose from."
+        ),
+    )
     # Global posting probability multiplier
     posting_rate_multiplier = models.FloatField(
         default=1.0,

@@ -81,6 +81,7 @@ class JobConfigSchema(Schema):
     max_multiplier: float
     players_per_job: int
     min_base_jobs: int
+    min_active_jobs: int
     posting_rate_multiplier: float
     treasury_equilibrium: int
     treasury_sensitivity: float
@@ -94,6 +95,7 @@ class JobConfigUpdateRequest(Schema):
     max_multiplier: float | None = None
     players_per_job: int | None = None
     min_base_jobs: int | None = None
+    min_active_jobs: int | None = None
     posting_rate_multiplier: float | None = None
     treasury_equilibrium: int | None = None
     treasury_sensitivity: float | None = None
@@ -332,6 +334,7 @@ async def get_job_config(request: HttpRequest):
         "max_multiplier": config.max_multiplier,
         "players_per_job": config.players_per_job,
         "min_base_jobs": config.min_base_jobs,
+        "min_active_jobs": config.min_active_jobs,
         "posting_rate_multiplier": config.posting_rate_multiplier,
         "treasury_equilibrium": config.treasury_equilibrium,
         "treasury_sensitivity": config.treasury_sensitivity,
@@ -355,6 +358,7 @@ async def update_job_config(
         "max_multiplier",
         "players_per_job",
         "min_base_jobs",
+        "min_active_jobs",
         "posting_rate_multiplier",
         "treasury_equilibrium",
         "treasury_sensitivity",
@@ -373,6 +377,7 @@ async def update_job_config(
         "max_multiplier": config.max_multiplier,
         "players_per_job": config.players_per_job,
         "min_base_jobs": config.min_base_jobs,
+        "min_active_jobs": config.min_active_jobs,
         "posting_rate_multiplier": config.posting_rate_multiplier,
         "treasury_equilibrium": config.treasury_equilibrium,
         "treasury_sensitivity": config.treasury_sensitivity,
