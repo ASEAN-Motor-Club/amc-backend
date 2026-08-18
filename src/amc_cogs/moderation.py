@@ -270,6 +270,89 @@ class ModerationCog(commands.Cog):
             ephemeral=True,
         )
 
+    @admin.command(
+        name="force_rp",
+        description="Force a player into RP mode for N hours (can't toggle off) (Admin)",
+    )
+    @app_commands.checks.has_any_role(settings.DISCORD_ADMIN_ROLE_ID)
+    @app_commands.describe(
+        player="Player name (online or stored in DB)",
+        hours="How long to lock them into RP mode (hours). Cleared with /admin clear_forced_rp",
+    )
+    async def discord_force_rp(
+        self, ctx: discord.Interaction, player: str, hours: float
+    ):
+        from amc.commands.admin import _resolve_player_for_force_rename
+        from amc.forced_rp import apply_forced_rp
+
+        if hours <= 0:
+            await ctx.response.send_message(
+                "Duration must be positive.", ephemeral=True
+            )
+            return
+
+        target_player, _character = await _resolve_player_for_force_rename(
+            self.bot.http_client_mod, player
+        )
+        if target_player is None:
+            await ctx.response.send_message(
+                f"Player '{player}' not found.", ephemeral=True
+            )
+            return
+
+        duration = await apply_forced_rp(
+            target_player,
+            hours=hours,
+            http_client_mod=self.bot.http_client_mod,
+            actor_discord_id=ctx.user.id,
+        )
+        until = target_player.forced_rp_until
+        hours_int = int(duration.total_seconds() / 3600)
+
+        await ctx.response.send_message(
+            f"✅ **{player}** is now locked into RP mode for **{hours_int}h** "
+            f"(until {until:%Y-%m-%d %H:%M} UTC). "
+            "They cannot disable it with /rp_mode until then.",
+            ephemeral=True,
+        )
+
+    @admin.command(
+        name="clear_forced_rp",
+        description="Release an admin-imposed RP-mode lock early (Admin)",
+    )
+    @app_commands.checks.has_any_role(settings.DISCORD_ADMIN_ROLE_ID)
+    @app_commands.describe(player="Player name (online or stored in DB)")
+    async def discord_clear_forced_rp(
+        self, ctx: discord.Interaction, player: str
+    ):
+        from amc.commands.admin import _resolve_player_for_force_rename
+        from amc.forced_rp import clear_forced_rp
+
+        target_player, _character = await _resolve_player_for_force_rename(
+            self.bot.http_client_mod, player
+        )
+        if target_player is None:
+            await ctx.response.send_message(
+                f"Player '{player}' not found.", ephemeral=True
+            )
+            return
+
+        cleared = await clear_forced_rp(
+            target_player,
+            http_client_mod=self.bot.http_client_mod,
+            actor_discord_id=ctx.user.id,
+        )
+        if not cleared:
+            await ctx.response.send_message(
+                f"**{player}** does not have a forced RP-mode lock.", ephemeral=True
+            )
+            return
+
+        await ctx.response.send_message(
+            f"✅ RP-mode lock removed — **{player}** can now toggle RP mode off normally.",
+            ephemeral=True,
+        )
+
     @admin_teleport.command(name="add", description="Create a new teleport point")
     @app_commands.checks.has_any_role(settings.DISCORD_ADMIN_ROLE_ID)
     async def add_teleport_point(self, ctx, name: str):
