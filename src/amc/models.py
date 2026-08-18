@@ -89,6 +89,17 @@ class Player(models.Model):
             "across all their characters. Cleared by /clear_forced_name."
         ),
     )
+    # Persistent mute. None = not muted; a future datetime = muted until then
+    # (temp); PERMANENT_MUTE_UNTIL sentinel = permanent. The mod only keeps
+    # mutes in session RAM, so the backend re-applies this on player login.
+    muted_until = models.DateTimeField(
+        null=True,
+        blank=True,
+        help_text=(
+            "Absolute time the player's mute expires, or the permanent sentinel "
+            "(year 9999) for a permanent mute. Re-applied to the mod on login."
+        ),
+    )
     social_score = models.IntegerField(default=0)
     language = models.CharField(
         max_length=10,

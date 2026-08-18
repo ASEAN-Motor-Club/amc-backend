@@ -1025,6 +1025,14 @@ async def process_log_event(
                 "startup_time"
             )
 
+            # Re-apply a persisted mute (account-level, survives restarts).
+            # Fire-and-forget: login is never gated on the mute; the mod keeps
+            # mutes in session RAM, so this restores them after every restart.
+            if player is not None:
+                from amc.mute import reapply_mute_on_login
+
+                asyncio.create_task(reapply_mute_on_login(player, http_client_mod))
+
             # --- Immediate actions (no GUID needed) ---
             if character:
                 await process_login_event(character.id, timestamp)
