@@ -1016,3 +1016,109 @@ async def cmd_clear_forced_name(ctx: CommandContext, target_player_name: str):
     await ctx.announce(
         f"{ctx.character.name} removed the forced name on {target_player_name}."
     )
+
+
+@registry.register(
+    "/force_rp",
+    description=gettext_lazy(
+        "Force a player into RP mode for N hours (can't toggle off) (Admin)"
+    ),
+    category="Admin",
+)
+async def cmd_force_rp(ctx: CommandContext, target_player_name: str, hours: str):
+    if not ctx.player_info or not ctx.player_info.get("bIsAdmin"):
+        await ctx.reply(_("Admin-only"))
+        return
+
+    try:
+        hours_val = float(hours)
+    except (TypeError, ValueError):
+        await ctx.reply(
+            _("Invalid duration. Usage: /force_rp <player> <hours> (e.g. /force_rp bob 2)")
+        )
+        return
+    if hours_val <= 0:
+        await ctx.reply(_("Duration must be positive."))
+        return
+
+    target_player, _character = await _resolve_player_for_force_rename(
+        ctx.http_client_mod, target_player_name
+    )
+    if target_player is None:
+        await ctx.reply(
+            _("Player '{name}' not found.").format(name=target_player_name)
+        )
+        return
+
+    from amc.forced_rp import apply_forced_rp
+
+    duration = await apply_forced_rp(
+        target_player,
+        hours=hours_val,
+        http_client_mod=ctx.http_client_mod,
+        actor_character=ctx.character,
+        actor_player=ctx.player,
+    )
+    until = target_player.forced_rp_until
+
+    await ctx.reply(
+        _(
+            "<Title>Force RP Mode</>\n\n{name} is now locked into RP mode for "
+            "<Bold>{hours}h</> (until {until}). They cannot disable it with /rp_mode until then."
+        ).format(
+            name=target_player_name,
+            hours=int(duration.total_seconds() / 3600),
+            until=timezone.localtime(until).strftime("%Y-%m-%d %H:%M"),
+        )
+    )
+    await ctx.announce(
+        f"{ctx.character.name} forced RP mode on {target_player_name} for {int(duration.total_seconds() / 3600)}h."
+    )
+
+
+@registry.register(
+    "/clear_forced_rp",
+    description=gettext_lazy(
+        "Release an admin-imposed RP-mode lock early (Admin)"
+    ),
+    category="Admin",
+)
+async def cmd_clear_forced_rp(ctx: CommandContext, target_player_name: str):
+    if not ctx.player_info or not ctx.player_info.get("bIsAdmin"):
+        await ctx.reply(_("Admin-only"))
+        return
+
+    target_player, _character = await _resolve_player_for_force_rename(
+        ctx.http_client_mod, target_player_name
+    )
+    if target_player is None:
+        await ctx.reply(
+            _("Player '{name}' not found.").format(name=target_player_name)
+        )
+        return
+
+    from amc.forced_rp import clear_forced_rp
+
+    cleared = await clear_forced_rp(
+        target_player,
+        http_client_mod=ctx.http_client_mod,
+        actor_character=ctx.character,
+        actor_player=ctx.player,
+    )
+    if not cleared:
+        await ctx.reply(
+            _("{name} does not have a forced RP-mode lock.").format(
+                name=target_player_name
+            )
+        )
+        return
+
+    await ctx.reply(
+        _(
+            "<Title>RP Mode Lock Removed</>\n\n{name} can now toggle RP mode "
+            "off normally again."
+        ).format(name=target_player_name)
+    )
+    await ctx.announce(
+        f"{ctx.character.name} removed the forced RP-mode lock on {target_player_name}."
+    )

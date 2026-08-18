@@ -28,6 +28,21 @@ from django.utils.translation import gettext as _, gettext_lazy
 async def cmd_rp_mode(ctx: CommandContext, verification_code: str = ""):
     if ctx.character.rp_mode:
         # --- Disabling RP mode ---
+        # A forced RP-mode lock overrides everything: the player cannot toggle
+        # off until the lock expires, even past the minimum-duration gate.
+        from amc.forced_rp import is_forced_rp
+
+        forced_until = is_forced_rp(ctx.player)
+        if forced_until is not None:
+            await ctx.reply(
+                _(
+                    "<Title>RP Mode Locked</>\n"
+                    "An administrator has forced you to remain in RP mode until "
+                    "<Highlight>{until}</>. You cannot disable RP mode until then."
+                ).format(until=timezone.localtime(forced_until).strftime("%Y-%m-%d %H:%M"))
+            )
+            return
+
         session = await RPSession.aget_active(ctx.character)
         if session:
             elapsed = timezone.now() - session.created_at

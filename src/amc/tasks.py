@@ -1029,6 +1029,12 @@ async def process_log_event(
             if character:
                 await process_login_event(character.id, timestamp)
                 asyncio.create_task(send_player_messages(http_client_mod, player))
+                # A forced-RP lock (account-level) must re-apply on login so a
+                # locked player can't escape by relogging; run before the name
+                # refresh so the [R] tag reflects the lock immediately.
+                from amc.forced_rp import enforce_forced_rp_on_login
+
+                await enforce_forced_rp_on_login(character, player)
                 await refresh_player_name(character, http_client_mod)
                 # Non-blocking auto-moderation of the display name (LLM judge)
                 # — login is never gated on it; failures degrade to no-op.

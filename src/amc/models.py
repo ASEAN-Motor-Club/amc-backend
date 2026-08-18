@@ -89,6 +89,17 @@ class Player(models.Model):
             "across all their characters. Cleared by /clear_forced_name."
         ),
     )
+    # Admin-imposed RP-mode lock. While `now < forced_rp_until`, the player is
+    # forced into RP mode across all their characters — they cannot toggle it
+    # off with /rp_mode until the timestamp passes (self-expiring; no cron).
+    forced_rp_until = models.DateTimeField(
+        null=True,
+        blank=True,
+        help_text=(
+            "While in the future, the player is locked into RP mode and cannot "
+            "toggle it off until this time. NULL = not forced."
+        ),
+    )
     social_score = models.IntegerField(default=0)
     language = models.CharField(
         max_length=10,
@@ -405,6 +416,39 @@ class ForcedNameLog(models.Model):
     action = models.CharField(max_length=10, choices=Action.choices)
     old_name = models.CharField(max_length=200, null=True, blank=True)
     new_name = models.CharField(max_length=200, null=True, blank=True)
+    # In-game actor (admin's character / player account).
+    actor_character = models.ForeignKey(
+        Character, on_delete=models.SET_NULL, null=True, blank=True, related_name="+"
+    )
+    actor_player = models.ForeignKey(
+        Player, on_delete=models.SET_NULL, null=True, blank=True, related_name="+"
+    )
+    # Discord actor (slash-command user id).
+    actor_discord_id = models.PositiveBigIntegerField(null=True, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ["-created_at"]
+
+
+class ForcedRPLog(models.Model):
+    """Audit trail for admin force-RP locks and their removal.
+
+    Records who set/cleared a player's forced RP-mode lock, the before/after
+    expiry timestamps, and when. One row per set/clear action, signed by either
+    an in-game character+player or a Discord user.
+    """
+
+    class Action(models.TextChoices):
+        SET = "set"
+        CLEAR = "clear"
+
+    player = models.ForeignKey(
+        Player, on_delete=models.CASCADE, related_name="forced_rp_logs"
+    )
+    action = models.CharField(max_length=10, choices=Action.choices)
+    old_until = models.DateTimeField(null=True, blank=True)
+    new_until = models.DateTimeField(null=True, blank=True)
     # In-game actor (admin's character / player account).
     actor_character = models.ForeignKey(
         Character, on_delete=models.SET_NULL, null=True, blank=True, related_name="+"
