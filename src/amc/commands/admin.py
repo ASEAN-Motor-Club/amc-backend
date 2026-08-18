@@ -1,4 +1,5 @@
 import asyncio
+import logging
 from datetime import timedelta
 from decimal import Decimal
 from typing import Optional
@@ -38,7 +39,10 @@ from django.utils.translation import gettext as _, gettext_lazy
 from amc.utils import fuzzy_find_player
 from amc.player_tags import strip_all_tags, refresh_player_name
 from amc.forced_name import log_forced_name_change
+from amc.mute import persist_mute, clear_persistent_mute
 from amc_finance.services import player_donation
+
+logger = logging.getLogger(__name__)
 
 
 @registry.register(
@@ -617,6 +621,19 @@ async def cmd_mute(ctx: CommandContext, target_player_name: str, duration: Optio
         await ctx.reply(_("Failed to mute player: {error}").format(error=str(e)))
         return
 
+    # Persist the mute so it survives a server restart (re-applied on login).
+    try:
+        player_row, _created_flag = await Player.objects.aget_or_create(
+            unique_id=target_unique_id
+        )
+        await persist_mute(player_row, mute_for)
+    except Exception as e:  # noqa: BLE001 - mute already applied live
+        logger.warning(
+            "Mute applied live but failed to persist for %s: %s",
+            target_unique_id,
+            e,
+        )
+
     if mute_for is True:
         duration_text = _("permanently")
     else:
@@ -668,6 +685,19 @@ async def cmd_unmute(ctx: CommandContext, target_player_name: str):
     except Exception as e:
         await ctx.reply(_("Failed to unmute player: {error}").format(error=str(e)))
         return
+
+    # Clear the persisted mute so it stays unmuted across restarts.
+    try:
+        player_row, _created_flag = await Player.objects.aget_or_create(
+            unique_id=target_unique_id
+        )
+        await clear_persistent_mute(player_row)
+    except Exception as e:  # noqa: BLE001 - unmute already applied live
+        logger.warning(
+            "Unmute applied live but failed to clear persistence for %s: %s",
+            target_unique_id,
+            e,
+        )
 
     await ctx.reply(
         _("<Title>Player Unmuted</>\n\n{name} has been unmuted.").format(name=display_name)
