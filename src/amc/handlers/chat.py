@@ -37,6 +37,20 @@ async def handle_server_send_chat(event, player, character, ctx):
     if is_normal_chat:
         return 0, 0, 0, 0
 
+    # Muted players must NOT be able to drive the bot (or run any command)
+    # through chat. The mod redirects their messages here (Company/Proximity)
+    # so others don't see them, but without this guard a muted player can still
+    # type `/bot ...` and have Annie act on it — an invisible mute bypass.
+    from amc.mute import is_muted
+
+    if is_muted(player):
+        logger.info(
+            "Suppressing chat command from muted player %s: %.80r",
+            unique_id or "?",
+            message,
+        )
+        return 0, 0, 0, 0
+
     try:
         await PlayerChatLog.objects.acreate(
             timestamp=timezone.now(),

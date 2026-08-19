@@ -10,6 +10,7 @@ from amc.mute import (
     persist_mute,
     clear_persistent_mute,
     reapply_mute_on_login,
+    is_muted,
 )
 
 
@@ -217,3 +218,102 @@ async def test_cmd_unmute_clears_persistence():
 
     await target.arefresh_from_db()
     assert target.muted_until is None
+
+
+# --- is_muted helper ---
+
+
+def test_is_muted_false_when_never_muted():
+    player = MagicMock()
+    player.muted_until = None
+    assert is_muted(player) is False
+
+
+def test_is_muted_false_when_player_none():
+    assert is_muted(None) is False
+
+
+def test_is_muted_true_when_permanent():
+    player = MagicMock()
+    player.muted_until = PERMANENT_MUTE_UNTIL
+    assert is_muted(player) is True
+
+
+def test_is_muted_true_when_future_temp():
+    player = MagicMock()
+    player.muted_until = timezone.now() + timedelta(hours=1)
+    assert is_muted(player) is True
+
+
+def test_is_muted_false_when_expired():
+    player = MagicMock()
+    player.muted_until = timezone.now() - timedelta(minutes=5)
+    assert is_muted(player) is False
+
+
+# --- Muted players must not drive the bot via redirected chat ---
+
+
+@patch("amc.handlers.chat.PlayerChatLog.objects")
+@patch("amc.handlers.chat.registry")
+@pytest.mark.asyncio
+@pytest.mark.django_db
+async def test_muted_player_bot_command_suppressed(mock_registry, mock_chatlog):
+    """A muted player's /bot command must NOT reach Annie."""
+    from amc.factories import PlayerFactory, CharacterFactory
+    from amc.handlers.chat import handle_server_send_chat
+
+    player = await sync_to_async(PlayerFactory)(muted_until=PERMANENT_MUTE_UNTIL)
+    character = await sync_to_async(CharacterFactory)(
+        player=player, name="MutedGuy", guid="guid-muted-bot"
+    )
+
+    event = {
+        "data": {
+            "Message": "/bot announce something",
+            "Category": 2,  # non-normal (mod redirects muted chat here)
+            "CharacterGuid": str(character.guid),
+            "UniqueID": str(player.unique_id),
+        }
+    }
+    ctx = MagicMock()
+
+    result = await handle_server_send_chat(event, player, character, ctx)
+
+    # Command must be suppressed: nothing forwarded to Annie, nothing executed.
+    mock_registry.execute.assert_not_awaited()
+    assert mock_chatlog.acreate.called is False
+    assert result == (0, 0, 0, 0)
+
+
+@patch("amc.handlers.chat.PlayerChatLog.objects")
+@patch("amc.handlers.chat.registry")
+@pytest.mark.asyncio
+@pytest.mark.django_db
+async def test_unmuted_player_command_not_suppressed(mock_registry, mock_chatlog):
+    """An unmuted player's /bot command still flows through normally."""
+    from amc.factories import PlayerFactory, CharacterFactory
+    from amc.handlers.chat import handle_server_send_chat
+
+    player = await sync_to_async(PlayerFactory)()  # not muted
+    character = await sync_to_async(CharacterFactory)(
+        player=player, name="NormalGuy", guid="guid-normal-bot"
+    )
+
+    event = {
+        "data": {
+            "Message": "/bot hello",
+            "Category": 2,
+            "CharacterGuid": str(character.guid),
+            "UniqueID": str(player.unique_id),
+        }
+    }
+    ctx = MagicMock()
+    mock_chatlog.acreate = AsyncMock()
+
+    await handle_server_send_chat(event, player, character, ctx)
+
+    # Not muted → command is executed and forwarded.
+    mock_registry.execute.assert_awaited()
+    assert mock_chatlog.acreate.called is True
+
