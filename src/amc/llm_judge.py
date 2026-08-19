@@ -40,9 +40,16 @@ def _get_client() -> AsyncOpenAI:
 def _system_prompt() -> str:
     return (
         "You are a video-game display-name moderator. Judge whether the given "
-        "player name violates community anti-hate rules: racist slurs (including "
-        "the n-word and its 1337/leetspeak spellings, e.g. '1' for 'i'), "
+        "player name violates community anti-hate rules: racist slurs, "
         "homophobic slurs, misogynistic slurs, or other hateful/profanity names. "
+        "Handle leetspeak conservatively. Substitute digits for their letter "
+        "equivalents (e.g. '1'->'i', '0'->'o', '7'->'t', '3'->'e', '5'->'s') and "
+        "flag the name ONLY if the substituted spelling is itself a slur (e.g. "
+        "'n1gg3r' reads as a racial slur). Do NOT flag a name that reads as a "
+        "normal, benign word once substituted — for example 'N17R0' reads 'NITRO', "
+        "which is not a slur. When the normal reading is innocent, set "
+        "is_violation=false and recommended_action=none. If you are unsure, prefer "
+        "not to flag. "
         "Respond ONLY as the given structured JSON schema. If the name violates, "
         "set is_violation=true, give a confidence 0..1, choose categories from "
         "[racial_slur, homophobic_slur, misogynistic_slur, hate_slur, "

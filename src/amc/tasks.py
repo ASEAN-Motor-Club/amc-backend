@@ -145,6 +145,32 @@ def enqueue_discord_review(channel_id: str, log_id: int, content: str, timestamp
     asyncio.run_coroutine_threadsafe(_send(), _discord_client_ref.loop)
 
 
+def enqueue_discord_rename_audit(channel_id: str, log_id: int, content: str, timestamp):
+    """Enqueue an auto-rename audit message WITH an Undo & Whitelist button.
+
+    Analogous to `enqueue_discord_review` but for a COMPLETED auto-rename, so an
+    admin can revert a false-positive rename (e.g. N17R0 -> NITRO) straight from
+    the audit message. Sent with a `NameAutoRenameView` on the bot's event loop.
+    """
+    if not _discord_client_ref or not _discord_client_ref.loop:
+        logger.warning(
+            "discord_rename_audit: bot not ready, dropping audit for log %s", log_id
+        )
+        return
+
+    async def _send():
+        try:
+            from amc_cogs.name_review import send_rename_audit_message
+
+            await send_rename_audit_message(
+                _discord_client_ref, channel_id, log_id, content
+            )
+        except Exception:
+            logger.exception("Discord rename-audit send failed for log %s", log_id)
+
+    asyncio.run_coroutine_threadsafe(_send(), _discord_client_ref.loop)
+
+
 async def _show_police_popup(http_client_mod, character_guid, player_id):
     """Show police rules popup with a wanted list of online characters with active criminal records."""
     try:
