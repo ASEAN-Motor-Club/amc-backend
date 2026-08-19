@@ -381,7 +381,7 @@ def test_safe_suggested_rejects_junk_only():
 @pytest.mark.asyncio
 @override_settings(NAMER_ENABLED=True)
 async def test_apply_auto_rename_undo_restores_and_whitelists():
-    """Undo flips forced_name back to the ORIGINAL base_name and whitelists it."""
+    """Undo CLEARS the forced lock (true undo) and whitelists the original name."""
     player = await sync_to_async(PlayerFactory)(forced_name="NITRO")
     character = await sync_to_async(CharacterFactory)(player=player, name="N17R0")
     character.custom_name = "NITRO"
@@ -392,24 +392,28 @@ async def test_apply_auto_rename_undo_restores_and_whitelists():
         categories=["racial_slur"], action=NameModerationLog.Action.RENAME,
         suggested_name="NITRO", reason="false positive",
     )
-    # _FakeHttp makes announce/refresh fail harmlessly (both wrapped in try/except).
+    # _FakeHttp makes the in-game refresh fail harmlessly (wrapped in try/except).
     restored = await apply_auto_rename_undo(
         log.pk, actor_discord_id=12345,
         http_client=_FakeHttp(), http_client_mod=_FakeHttp(),
     )
     assert restored == "N17R0"
-    assert (await _reload_player(player)).forced_name == "N17R0"  # exact restore
+    # Lock cleared -> player regains naming authority (their natural name shows).
+    assert (await _reload_player(player)).forced_name is None
     row = await NameModerationLog.objects.aget(pk=log.pk)
     assert row.action == NameModerationLog.Action.UNDONE
+    assert row.suggested_name == "N17R0"
     # Original name is now per-player whitelisted (skip LLM on next login).
     assert await NameWhitelist.objects.filter(
         player=player, name="n17r0"
     ).aexists()
-    # The restore itself is audited in ForcedNameLog (the factory-set rename
-    # did NOT create a log row, so exactly one "set" row exists from the undo).
-    assert await ForcedNameLog.objects.filter(
-        player=player, action="set"
-    ).acount() == 1
+    # The clearing itself is audited (action='clear', old=NITRO, new=None).
+    clear_log = await ForcedNameLog.objects.filter(
+        player=player, action="clear"
+    ).aget()
+    assert clear_log.old_name == "NITRO"
+    assert clear_log.new_name is None
+    assert clear_log.actor_discord_id == 12345
 
 
 @pytest.mark.asyncio
