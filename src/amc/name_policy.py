@@ -78,17 +78,12 @@ async def _record(
 
 async def _apply_name_lock(
     player, character, target, http_client, http_client_mod, *,
-    actor_discord_id=None, do_announce: bool = True, sanitize: bool = True,
+    actor_discord_id=None,
 ) -> str:
     """Set forced_name + audit + live refresh + optional announce.
 
-    Shared by the login auto-rename path, the manual-review Rename button, and
-    the auto-rename Undo button so all produce identical name-lock behaviour.
-
-    do_announce=False suppresses the "changed to follow community rules" in-game
-    announcement (the Undo path restores an innocent name — the default message
-    would read backwards). sanitize=False writes `target` verbatim so the Undo
-    path can restore the EXACT original name without fallback.
+    Shared by the login auto-rename path and the manual-review Rename button so
+    both produce identical name-lock behaviour.
     """
     from amc.forced_name import log_forced_name_change
     from amc.player_tags import refresh_player_name
@@ -97,11 +92,8 @@ async def _apply_name_lock(
         old = character.custom_name or character.name
     else:
         old = player.forced_name or ""
-    if sanitize:
-        clean_target = _safe_suggested_name(target) or _cfg("NAMER_CANNED_FALLBACK_NAME",
-                                                            "FriendlyPlayer")
-    else:
-        clean_target = target.strip()
+    clean_target = _safe_suggested_name(target) or _cfg("NAMER_CANNED_FALLBACK_NAME",
+                                                        "FriendlyPlayer")
     await player.__class__.objects.filter(
         unique_id=player.unique_id
     ).aupdate(forced_name=clean_target)
@@ -118,7 +110,7 @@ async def _apply_name_lock(
         except Exception:
             logger.exception("refresh_player_name failed after renaming %r", old)
 
-    if do_announce and _cfg("NAMER_ANNOUNCE", True):
+    if _cfg("NAMER_ANNOUNCE", True):
         try:
             from amc.game_server import announce
 
@@ -131,6 +123,35 @@ async def _apply_name_lock(
             logger.exception("in-game announce failed after name lock")
 
     return clean_target
+
+
+async def _apply_name_unlock(
+    player, character, http_client_mod, *, actor_discord_id=None,
+) -> None:
+    """Clear an account-level forced-name lock + audit + live refresh.
+
+    Mirrors `cmd_clear_forced_name` (restore the player their own name again)
+    so the auto-rename Undo button returns a false-positive victim to full
+    naming authority instead of permanently locking them to the original name.
+    """
+    from amc.forced_name import log_forced_name_change
+    from amc.player_tags import refresh_player_name
+
+    old = player.forced_name
+    await player.__class__.objects.filter(
+        unique_id=player.unique_id
+    ).aupdate(forced_name=None)
+    await log_forced_name_change(
+        player, action="clear", old_name=old, new_name=None,
+        actor_discord_id=actor_discord_id,
+    )
+    logger.info("clear name lock %r (uid=%s, actor_discord=%s)",
+                old, player.unique_id, actor_discord_id)
+    if character is not None:
+        try:
+            await refresh_player_name(character, http_client_mod)
+        except Exception:
+            logger.exception("refresh_player_name failed after clearing lock %r", old)
 
 
 async def _apply_rename(
@@ -268,11 +289,13 @@ async def apply_auto_rename_undo(
     if not base:
         raise ValueError(f"log {log_id} has no base_name to restore")
     player = await Player.objects.aget(unique_id=log.player_id)
-    # Restore the EXACT original name; suppress the generic "changed to follow
-    # community rules" announce (the message would read backwards for an undo).
-    new_name = await _apply_name_lock(
-        player, log.character, base, http_client, http_client_mod,
-        actor_discord_id=actor_discord_id, do_announce=False, sanitize=False,
+    # Restore the player's own name by CLEARING the forced lock (mirrors
+    # cmd_clear_forced_name) so they regain full naming authority — not by
+    # re-locking them to the original name for good. Whitelisting below keeps
+    # the LLM judge from re-flagging the innocent name on their next login.
+    await _apply_name_unlock(
+        player, log.character, http_client_mod,
+        actor_discord_id=actor_discord_id,
     )
     await NameWhitelist.objects.aget_or_create(
         player_id=log.player_id,
@@ -281,9 +304,9 @@ async def apply_auto_rename_undo(
                   "reason": "undone auto-rename (admin approved)"},
     )
     log.action = NameModerationLog.Action.UNDONE
-    log.suggested_name = new_name
+    log.suggested_name = base
     await log.asave(update_fields=["action", "suggested_name"])
-    return new_name
+    return base
 
 
 async def _is_whitelisted(player, base: str) -> bool:
