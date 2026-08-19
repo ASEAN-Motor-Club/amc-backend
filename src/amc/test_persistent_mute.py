@@ -317,3 +317,72 @@ async def test_unmuted_player_command_not_suppressed(mock_registry, mock_chatlog
     mock_registry.execute.assert_awaited()
     assert mock_chatlog.acreate.called is True
 
+
+@patch("amc.handlers.chat.PlayerChatLog.objects")
+@patch("amc.handlers.chat.registry")
+@pytest.mark.asyncio
+@pytest.mark.django_db
+async def test_muted_player_regular_command_not_suppressed(mock_registry, mock_chatlog):
+    """A muted player's ordinary command (song request) still executes.
+
+    The mute hides visible chat but does NOT revoke command access — only the
+    AI-bot channels (/bot and @annie) are suppressed. Commands like song
+    requests must keep flowing for muted players.
+    """
+    from amc.factories import PlayerFactory, CharacterFactory
+    from amc.handlers.chat import handle_server_send_chat
+
+    player = await sync_to_async(PlayerFactory)(muted_until=PERMANENT_MUTE_UNTIL)
+    character = await sync_to_async(CharacterFactory)(
+        player=player, name="MutedGuy", guid="guid-muted-song"
+    )
+
+    event = {
+        "data": {
+            "Message": "/song_request 2000s House Mix",
+            "Category": 2,
+            "CharacterGuid": str(character.guid),
+            "UniqueID": str(player.unique_id),
+        }
+    }
+    ctx = MagicMock()
+    mock_chatlog.acreate = AsyncMock()
+
+    await handle_server_send_chat(event, player, character, ctx)
+
+    # Not an AI-bot channel → command runs, chat is logged (for the record).
+    mock_registry.execute.assert_awaited()
+    assert mock_chatlog.acreate.called is True
+
+
+@patch("amc.handlers.chat.PlayerChatLog.objects")
+@patch("amc.handlers.chat.registry")
+@pytest.mark.asyncio
+@pytest.mark.django_db
+async def test_muted_player_annie_mention_suppressed(mock_registry, mock_chatlog):
+    """A muted player must not reach Annie via an @annie mention."""
+    from amc.factories import PlayerFactory, CharacterFactory
+    from amc.handlers.chat import handle_server_send_chat
+
+    player = await sync_to_async(PlayerFactory)(muted_until=PERMANENT_MUTE_UNTIL)
+    character = await sync_to_async(CharacterFactory)(
+        player=player, name="MutedGuy", guid="guid-muted-annie"
+    )
+
+    event = {
+        "data": {
+            "Message": "@annie what time is it",
+            "Category": 2,
+            "CharacterGuid": str(character.guid),
+            "UniqueID": str(player.unique_id),
+        }
+    }
+    ctx = MagicMock()
+
+    result = await handle_server_send_chat(event, player, character, ctx)
+
+    # @annie is an AI-bot channel → suppressed entirely (not executed, not logged).
+    mock_registry.execute.assert_not_awaited()
+    assert mock_chatlog.acreate.called is False
+    assert result == (0, 0, 0, 0)
+

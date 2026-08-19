@@ -37,15 +37,19 @@ async def handle_server_send_chat(event, player, character, ctx):
     if is_normal_chat:
         return 0, 0, 0, 0
 
-    # Muted players must NOT be able to drive the bot (or run any command)
-    # through chat. The mod redirects their messages here (Company/Proximity)
-    # so others don't see them, but without this guard a muted player can still
-    # type `/bot ...` and have Annie act on it — an invisible mute bypass.
+    is_bot_command = message.startswith("/bot ")
+
+    # Muted players keep ordinary chat commands (song requests, news, tags,
+    # etc.) — the mod already suppresses their visible chat by redirecting it to
+    # a non-normal category. What a mute must NOT do is let the player drive the
+    # AI bot invisibly: block both AI-bot channels (`/bot` and `@annie`) which
+    # would otherwise still reach Annie from a muted player's hidden message.
     from amc.mute import is_muted
 
-    if is_muted(player):
+    bot_channels = is_bot_command or "@annie" in message.lower()
+    if is_muted(player) and bot_channels:
         logger.info(
-            "Suppressing chat command from muted player %s: %.80r",
+            "Suppressing AI-bot channel from muted player %s: %.80r",
             unique_id or "?",
             message,
         )
@@ -89,7 +93,6 @@ async def handle_server_send_chat(event, player, character, ctx):
     player_id = str(player.unique_id) if player else None
     discord_id = player.discord_user_id if player else None
 
-    is_bot_command = message.startswith("/bot ")
     asyncio.create_task(
         emit_bot_event(
             {
