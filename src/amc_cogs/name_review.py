@@ -137,6 +137,60 @@ class NameReviewView(discord.ui.View):
         self._drop_from_store()
 
 
+def _undo_custom_id(log_id: int) -> str:
+    return f"namer_undo_{log_id}"
+
+
+class NameAutoRenameView(NameReviewView):
+    """View for a COMPLETED auto-rename audit — an Undo & Whitelist button.
+
+    Reuses NameReviewView's admin gate / disable / store-drop helpers but
+    exposes a single "Undo & Whitelist" button instead of Rename/Whitelist.
+    It lets an admin revert a false-positive auto-rename (e.g. N17R0 -> NITRO)
+    straight from the audit message, restoring the original name AND whitelisting
+    it for that player so the LLM judge skips it on future logins.
+    """
+
+    def __init__(self, bot: "AMCDiscordBot", log_id: int, *, timeout=None):
+        # Base adds the manual-review Rename/Whitelist buttons — clear them.
+        super().__init__(bot, log_id, timeout=timeout)
+        self.clear_items()
+
+        undo = discord.ui.Button(
+            label="Undo & Whitelist",
+            style=discord.ButtonStyle.success,
+            emoji="↩️",
+            custom_id=_undo_custom_id(log_id),
+        )
+        undo.callback = self.undo_callback
+        self.add_item(undo)
+
+    async def undo_callback(self, interaction: discord.Interaction):
+        await interaction.response.defer(ephemeral=True)
+        if not await self._is_admin(interaction):
+            await interaction.followup.send("Admins only.", ephemeral=True)
+            return
+        try:
+            from amc.name_policy import apply_auto_rename_undo
+
+            new_name = await apply_auto_rename_undo(
+                self.log_id,
+                actor_discord_id=interaction.user.id,
+                http_client=self.bot.http_client_game,
+                http_client_mod=self.bot.http_client_mod,
+            )
+            await self._disable_buttons(interaction)
+            self._drop_from_store()
+            await interaction.followup.send(
+                f"Restored **{new_name}** and whitelisted it.", ephemeral=True
+            )
+        except Exception as e:
+            logger.exception("NameAutoRename undo failed for log %s", self.log_id)
+            await interaction.followup.send(
+                f"Undo failed: {e}", ephemeral=True
+            )
+
+
 async def send_review_message(bot, channel_id, log_id, content) -> None:
     """Send a manual-review message with action buttons on the bot's loop.
 
@@ -150,6 +204,24 @@ async def send_review_message(bot, channel_id, log_id, content) -> None:
         logger.warning("review channel %s not found for log %s", channel_id, log_id)
         return
     view = NameReviewView(bot, log_id)
+    await channel.send(content, view=view)
+    bot._review_views[log_id] = view
+
+
+async def send_rename_audit_message(bot, channel_id, log_id, content) -> None:
+    """Send an auto-rename audit message WITH an Undo & Whitelist button.
+
+    Same store/retrieval mechanics as `send_review_message`, but the view is a
+    `NameAutoRenameView` (a single "Undo & Whitelist" button). Keyed by `log_id`
+    in `bot._review_views` like the manual-review views.
+    """
+    if not bot.is_ready():
+        await bot.wait_until_ready()
+    channel = bot.get_channel(int(channel_id))
+    if channel is None:
+        logger.warning("rename-audit channel %s not found for log %s", channel_id, log_id)
+        return
+    view = NameAutoRenameView(bot, log_id)
     await channel.send(content, view=view)
     bot._review_views[log_id] = view
 

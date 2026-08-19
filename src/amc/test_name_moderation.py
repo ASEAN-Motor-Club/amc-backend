@@ -17,7 +17,11 @@ from amc.factories import CharacterFactory, PlayerFactory
 from amc.llm_judge import _cache, judge_name
 from amc.models import ForcedNameLog, NameModerationLog, NameWhitelist, Player
 from amc.name_moderation import strip_reserved_tags
-from amc.name_policy import _safe_suggested_name, run_name_moderation
+from amc.name_policy import (
+    _safe_suggested_name,
+    apply_auto_rename_undo,
+    run_name_moderation,
+)
 from amc.name_verdict import NameVerdict
 
 pytestmark = pytest.mark.django_db
@@ -187,11 +191,11 @@ async def test_run_name_moderation_llm_high_conf_renames(monkeypatch):
 
     posted = []
 
-    def fake_enqueue(channel_id, content, timestamp):
-        posted.append((channel_id, content))
+    def fake_enqueue(channel_id, log_id, content, timestamp):
+        posted.append((channel_id, log_id, content))
 
     monkeypatch.setattr("amc.name_policy.judge_name", fake_judge)
-    monkeypatch.setattr("amc.tasks.enqueue_discord_message", fake_enqueue)
+    monkeypatch.setattr("amc.tasks.enqueue_discord_rename_audit", fake_enqueue)
     await run_name_moderation(character, player, _FakeHttp(), _FakeHttp())
 
     assert (await _reload_player(player)).forced_name == "MuchBetter"
@@ -201,8 +205,9 @@ async def test_run_name_moderation_llm_high_conf_renames(monkeypatch):
     assert row.action == "rename"
     assert row.reason == "n-word slur"
     assert len(posted) == 1
-    channel, content = posted[0]
+    channel, log_id, content = posted[0]
     assert channel == "1366478091131551834"
+    assert log_id == row.pk  # audit post carries the log id for the Undo button
     assert "MuchBetter" in content
     assert "n-word slur" in content
     assert "CoolName" in content
@@ -366,3 +371,66 @@ def test_safe_suggested_rejects_junk_only():
     assert _safe_suggested_name("") is None
     assert _safe_suggested_name(None) is None
     assert _safe_suggested_name("A" * 60) is None       # too long
+
+
+# ---------------------------------------------------------------------------
+# Auto-rename undo (Undo & Whitelist review button)
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+@override_settings(NAMER_ENABLED=True)
+async def test_apply_auto_rename_undo_restores_and_whitelists():
+    """Undo flips forced_name back to the ORIGINAL base_name and whitelists it."""
+    player = await sync_to_async(PlayerFactory)(forced_name="NITRO")
+    character = await sync_to_async(CharacterFactory)(player=player, name="N17R0")
+    character.custom_name = "NITRO"
+    await character.asave()
+    log = await NameModerationLog.objects.acreate(
+        player=player, character=character, base_name="N17R0",
+        verdict_source="llm", is_violation=True, confidence=0.96,
+        categories=["racial_slur"], action=NameModerationLog.Action.RENAME,
+        suggested_name="NITRO", reason="false positive",
+    )
+    # _FakeHttp makes announce/refresh fail harmlessly (both wrapped in try/except).
+    restored = await apply_auto_rename_undo(
+        log.pk, actor_discord_id=12345,
+        http_client=_FakeHttp(), http_client_mod=_FakeHttp(),
+    )
+    assert restored == "N17R0"
+    assert (await _reload_player(player)).forced_name == "N17R0"  # exact restore
+    row = await NameModerationLog.objects.aget(pk=log.pk)
+    assert row.action == NameModerationLog.Action.UNDONE
+    # Original name is now per-player whitelisted (skip LLM on next login).
+    assert await NameWhitelist.objects.filter(
+        player=player, name="n17r0"
+    ).aexists()
+    # The restore itself is audited in ForcedNameLog (the factory-set rename
+    # did NOT create a log row, so exactly one "set" row exists from the undo).
+    assert await ForcedNameLog.objects.filter(
+        player=player, action="set"
+    ).acount() == 1
+
+
+@pytest.mark.asyncio
+@override_settings(NAMER_ENABLED=True)
+async def test_apply_auto_rename_undo_rejects_non_rename_log():
+    """Undo is only valid on an actual auto-rename (action='rename')."""
+    player = await sync_to_async(PlayerFactory)()
+    character = await sync_to_async(CharacterFactory)(player=player, name="CoolHate")
+    log = await NameModerationLog.objects.acreate(
+        player=player, character=character, base_name="CoolHate",
+        verdict_source="llm", is_violation=True, confidence=0.9,
+        categories=["homophobic_slur"],
+        action=NameModerationLog.Action.MANUAL_REVIEW,
+        suggested_name="Nice",
+    )
+    with pytest.raises(ValueError):
+        await apply_auto_rename_undo(
+            log.pk, actor_discord_id=99,
+            http_client=_FakeHttp(), http_client_mod=_FakeHttp(),
+        )
+    # Nothing changed: still manual_review, no whitelist, no forced name.
+    row = await NameModerationLog.objects.aget(pk=log.pk)
+    assert row.action == NameModerationLog.Action.MANUAL_REVIEW
+    assert await NameWhitelist.objects.filter(player=player, name="coolhate").acount() == 0

@@ -452,6 +452,7 @@ class NameModerationLog(models.Model):
         NONE = "none"
         MANUAL_REVIEW = "manual_review"
         WHITELIST = "whitelist"
+        UNDONE = "undone"
 
     player = models.ForeignKey(
         Player, on_delete=models.CASCADE, related_name="name_moderation_logs"
