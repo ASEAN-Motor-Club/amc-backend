@@ -55,6 +55,21 @@ async def clear_persistent_mute(player):
     await player.asave(update_fields=["muted_until"])
 
 
+def is_muted(player) -> bool:
+    """Return True if a player is currently muted (persisted mute active).
+
+    None → not muted. ``PERMANENT_MUTE_UNTIL`` (year >= 9999) → muted forever.
+    Any other future datetime → muted until then. Expired temporary mutes
+    count as NOT muted (they'll be cleared by ``reapply_mute_on_login``).
+    """
+    until = player.muted_until if player else None
+    if until is None:
+        return False
+    if until.year >= 9999:
+        return True
+    return until > timezone.now()
+
+
 async def reapply_mute_on_login(player, http_client_mod):
     """Ensure a player with a persisted mute is muted in the live mod session.
 
