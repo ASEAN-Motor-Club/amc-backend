@@ -848,6 +848,133 @@ async def process_logout_event(character_id, timestamp):
 
 
 
+_restart_spawn_tasks: set[asyncio.Task] = set()
+
+
+async def _spawn_with_retry(make_coro, label, attempts=3, base_delay=2):
+    """Await ``make_coro()`` with bounded exponential backoff.
+
+    ``make_coro`` must produce a fresh coroutine on each call (a plain lambda
+    works) so each attempt gets its own. When all attempts fail, log loudly
+    and return ``None`` instead of raising — one broken item must not abort
+    the remaining spawns in a restart batch.
+    """
+    for attempt in range(1, attempts + 1):
+        try:
+            return await make_coro()
+        except Exception:  # noqa: BLE001
+            if attempt == attempts:
+                logger.exception("Failed to %s after %d attempts", label, attempts)
+                return None
+            wait = base_delay * 2 ** (attempt - 1)
+            logger.warning(
+                "%s failed (attempt %d/%d), retrying in %ss",
+                label,
+                attempt,
+                attempts,
+                wait,
+            )
+            await asyncio.sleep(wait)
+
+
+def _track_restart_spawn(coro, seconds):
+    """Create a delayed restart-spawn task with a retained reference.
+
+    Bare ``asyncio.create_task`` results can be garbage-collected mid-flight
+    when nothing references them; retaining refs until completion avoids that.
+    """
+    task = asyncio.create_task(delay(coro, seconds))
+    _restart_spawn_tasks.add(task)
+    task.add_done_callback(_restart_spawn_tasks.discard)
+    return task
+
+
+async def spawn_restarting_dealerships(http_client_mod):
+    async for vd in VehicleDealership.objects.filter(spawn_on_restart=True):
+        await _spawn_with_retry(
+            lambda vd=vd: vd.spawn(http_client_mod),
+            f"dealership {vd.vehicle_key}",
+        )
+
+
+async def spawn_display_vehicles(http_client_mod):
+    async for v in CharacterVehicle.objects.select_related("character").filter(
+        spawn_on_restart=True
+    ):
+        extra_data = {}
+        if v.character:
+            extra_data = {
+                "companyGuid": "1" * 32,
+                "companyName": f"{v.character.name}'s Display",
+                "drivable": v.rental,
+            }
+        tags = [f"display-{v.id}"]
+        if v.character:
+            tags.append(v.character.name)
+        await _spawn_with_retry(
+            lambda v=v, extra_data=extra_data, tags=tags: spawn_registered_vehicle(
+                http_client_mod,
+                v,
+                tag="display_vehicles",
+                extra_data=extra_data,
+                tags=tags,
+            ),
+            f"display vehicle {v.id}",
+        )
+        await asyncio.sleep(0.5)
+
+
+async def spawn_world_vehicle_decals(http_client_mod):
+    async for v in CharacterVehicle.objects.filter(is_world_vehicle=True):
+        await _spawn_with_retry(
+            lambda v=v: set_world_vehicle_decal(
+                http_client_mod,
+                f"{v.config['VehicleName']}_C",
+                customization=v.config["Customization"],
+                decal=v.config["Decal"],
+                parts=[{**p, "partKey": p["Key"]} for p in v.config["Parts"]],
+            ),
+            f"world vehicle {v.id}",
+        )
+
+
+async def spawn_restarting_garages(http_client_mod):
+    async for g in Garage.objects.filter(spawn_on_restart=True):
+        if not g.config:
+            continue
+        location = g.config.get("Location")
+        rotation = g.config.get("Rotation")
+        if not location:
+            continue
+
+        resp = await _spawn_with_retry(
+            lambda g=g, location=location, rotation=rotation: spawn_garage(
+                http_client_mod, location, rotation
+            ),
+            f"garage {g.id}",
+        )
+        if resp is None:
+            # Spawn exhausted its retries; skip the tag update rather than
+            # crashing on resp.get().
+            continue
+        tag = resp.get("tag")
+        g.tag = tag
+        await g.asave(update_fields=["tag"])
+
+
+async def spawn_world_assets(http_client_mod):
+    async for wt in WorldText.objects.filter():
+        await _spawn_with_retry(
+            lambda wt=wt: spawn_assets(http_client_mod, wt.generate_asset_data()),
+            f"world text {wt.id}",
+        )
+    async for wt in WorldObject.objects.filter():
+        await _spawn_with_retry(
+            lambda wt=wt: spawn_assets(http_client_mod, [wt.generate_asset_data()]),
+            f"world object {wt.id}",
+        )
+
+
 async def process_log_event(
     event: LogEvent, http_client=None, http_client_mod=None, ctx={}, hostname=""
 ):
@@ -1278,68 +1405,14 @@ async def process_log_event(
             )
             logger.info("Closed stale police sessions on server start")
 
-            async def spawn_dealerships():
-                async for vd in VehicleDealership.objects.filter(spawn_on_restart=True):
-                    await vd.spawn(http_client_mod)
-
-            async def spawn_player_vehicles():
-                async for v in CharacterVehicle.objects.select_related(
-                    "character"
-                ).filter(spawn_on_restart=True):
-                    extra_data = {}
-                    if v.character:
-                        extra_data = {
-                            "companyGuid": "1" * 32,
-                            "companyName": f"{v.character.name}'s Display",
-                            "drivable": v.rental,
-                        }
-                    tags = [f"display-{v.id}"]
-                    if v.character:
-                        tags.append(v.character.name)
-                    await spawn_registered_vehicle(
-                        http_client_mod,
-                        v,
-                        tag="display_vehicles",
-                        extra_data=extra_data,
-                        tags=tags,
-                    )
-                    await asyncio.sleep(0.5)
-
-            async def spawn_world_vehicles():
-                async for v in CharacterVehicle.objects.filter(is_world_vehicle=True):
-                    await set_world_vehicle_decal(
-                        http_client_mod,
-                        f"{v.config['VehicleName']}_C",
-                        customization=v.config["Customization"],
-                        decal=v.config["Decal"],
-                        parts=[{**p, "partKey": p["Key"]} for p in v.config["Parts"]],
-                    )
-
-            async def spawn_garages():
-                async for g in Garage.objects.filter(spawn_on_restart=True):
-                    if not g.config:
-                        continue
-                    location = g.config.get("Location")
-                    rotation = g.config.get("Rotation")
-                    if not location:
-                        continue
-
-                    resp = await spawn_garage(http_client_mod, location, rotation)
-                    tag = resp.get("tag")
-                    g.tag = tag
-                    await g.asave(update_fields=["tag"])
-
-            async def _spawn_assets():
-                async for wt in WorldText.objects.filter():
-                    await spawn_assets(http_client_mod, wt.generate_asset_data())
-                async for wt in WorldObject.objects.filter():
-                    await spawn_assets(http_client_mod, [wt.generate_asset_data()])
-
-            asyncio.create_task(delay(spawn_dealerships(), 15))
-            asyncio.create_task(delay(_spawn_assets(), 20))
-            asyncio.create_task(delay(spawn_garages(), 25))
-            asyncio.create_task(delay(spawn_world_vehicles(), 30))
-            asyncio.create_task(delay(spawn_player_vehicles(), 35))
+            # Staggered mod-API write batches. Each item retries transient
+            # failures with backoff; a permanently failing item is logged and
+            # skipped instead of aborting the rest of its batch.
+            _track_restart_spawn(spawn_restarting_dealerships(http_client_mod), 15)
+            _track_restart_spawn(spawn_world_assets(http_client_mod), 20)
+            _track_restart_spawn(spawn_restarting_garages(http_client_mod), 25)
+            _track_restart_spawn(spawn_world_vehicle_decals(http_client_mod), 30)
+            _track_restart_spawn(spawn_display_vehicles(http_client_mod), 35)
 
         case UnknownLogEntry():
             logger.warning("Unknown log entry: %s", event)

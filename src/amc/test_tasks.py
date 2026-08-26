@@ -9,8 +9,11 @@ from amc.tasks import (
     _resolve_guid,
     _resolve_guid_for_login,
     _resolve_guid_from_game_server,
+    _spawn_with_retry,
     aget_or_create_character,
     get_welcome_message,
+    spawn_restarting_dealerships,
+    spawn_restarting_garages,
 )
 
 
@@ -545,3 +548,187 @@ class ResolveGuidFromGameServerForceRefreshTests(SimpleTestCase):
 
         self.assertEqual(result, VALID_GUID)
         mock_get.assert_called_once_with(mock_http, force_refresh=False)
+
+
+def _patch_sleep():
+    """Replace asyncio.sleep inside amc.tasks with a no-op that records waits."""
+    recorded: list[float] = []
+
+    async def fake_sleep(seconds, *args, **kwargs):
+        recorded.append(seconds)
+
+    return patch("asyncio.sleep", new=fake_sleep), recorded
+
+
+class SpawnRetryHelperTests(TestCase):
+    async def test_returns_immediately_on_success(self):
+        attempts = []
+
+        async def make_coro():
+            attempts.append(1)
+            return "ok"
+
+        result = await _spawn_with_retry(make_coro, "thing")
+
+        self.assertEqual(result, "ok")
+        self.assertEqual(len(attempts), 1)
+
+    async def test_retries_with_backoff_then_succeeds(self):
+        calls = []
+        patcher, waits = _patch_sleep()
+
+        async def make_coro():
+            calls.append(1)
+            if len(calls) < 3:
+                raise ConnectionError("boom")
+            return "recovered"
+
+        with patcher:
+            result = await _spawn_with_retry(make_coro, "thing", base_delay=2)
+
+        self.assertEqual(result, "recovered")
+        self.assertEqual(len(calls), 3)
+        # Exponential backoff between attempts.
+        self.assertEqual(waits, [2, 4])
+
+    async def test_exhausted_attempts_return_none_instead_of_raising(self):
+        calls = []
+        patcher, _waits = _patch_sleep()
+
+        async def make_coro():
+            calls.append(1)
+            raise RuntimeError("Session is closed")
+
+        with patcher:
+            result = await _spawn_with_retry(make_coro, "thing", attempts=3)
+
+        self.assertIsNone(result)
+        self.assertEqual(len(calls), 3)
+
+    async def test_make_coro_called_fresh_per_attempt(self):
+        coros_seen = []
+
+        def make_coro():
+            async def attempt():
+                raise ValueError("always fails")
+
+            coros_seen.append(attempt)
+            return attempt()
+
+        p, _waits = _patch_sleep()
+        with p:
+            result = await _spawn_with_retry(make_coro, "thing", attempts=2)
+
+        self.assertIsNone(result)
+        # Each retry awaited a distinct coroutine object (cannot re-await one).
+        self.assertEqual(len(coros_seen), 2)
+        self.assertIsNot(coros_seen[0], coros_seen[1])
+
+
+class DealershipRestartSpawnTests(TestCase):
+    async def test_one_dead_dealership_does_not_abort_the_batch(self):
+        from django.contrib.gis.geos import Point
+
+        from amc.models import VehicleDealership
+
+        dead_key = "Elisa_Police"
+        ok_key = "Police_01"
+        spawn_calls = []
+
+        async def flaky_spawn(self, http_client_mod):
+            spawn_calls.append(self.vehicle_key)
+            if self.vehicle_key == dead_key:
+                raise RuntimeError("Session is closed")
+
+        patcher, _waits = _patch_sleep()
+        with patcher, patch(
+            "amc.models.VehicleDealership.spawn", new=flaky_spawn
+        ):
+            first = await VehicleDealership.objects.acreate(
+                vehicle_key=dead_key,
+                location=Point(1.0, 2.0, 3.0),
+                yaw=270,
+                spawn_on_restart=True,
+            )
+            second = await VehicleDealership.objects.acreate(
+                vehicle_key=ok_key,
+                location=Point(4.0, 5.0, 6.0),
+                yaw=90,
+                spawn_on_restart=True,
+            )
+
+            await spawn_restarting_dealerships(http_client_mod=object())
+
+        self.assertIn(first.vehicle_key, spawn_calls)
+        self.assertIn(second.vehicle_key, spawn_calls)
+        # The broken dealership consumed all its attempts; the healthy one
+        # was still attempted exactly once afterwards.
+        self.assertEqual(spawn_calls.count(dead_key), 3)
+        self.assertEqual(spawn_calls.count(ok_key), 1)
+
+    async def test_dealership_without_restart_flag_is_skipped(self):
+        from django.contrib.gis.geos import Point
+
+        from amc.models import VehicleDealership
+
+        async def any_spawn(self, http_client_mod):  # pragma: no cover
+            raise AssertionError("must not be called")
+
+        patcher, _waits = _patch_sleep()
+        with patcher, patch(
+            "amc.models.VehicleDealership.spawn", new=any_spawn
+        ):
+            await VehicleDealership.objects.acreate(
+                vehicle_key="Elisa2_Police",
+                location=Point(318628.0, 1335942.0, -20000.0),
+                yaw=270,
+                spawn_on_restart=False,
+            )
+            await spawn_restarting_dealerships(http_client_mod=object())
+
+
+class GarageRestartSpawnTests(TestCase):
+    async def test_garage_tag_saved_after_transient_failures(self):
+        from amc.models import Garage
+
+        garage_spawn = AsyncMock(
+            side_effect=[
+                ConnectionError("mod not ready"),
+                ConnectionError("mod not ready"),
+                {"tag": "GarageTag123"},
+            ]
+        )
+
+        patcher, _waits = _patch_sleep()
+        with patcher, patch("amc.tasks.spawn_garage", new=garage_spawn):
+            garage = await Garage.objects.acreate(
+                hostname="test-host",
+                config={"Location": {"X": 1}, "Rotation": {"Yaw": 0}},
+                spawn_on_restart=True,
+            )
+            await spawn_restarting_garages(http_client_mod=object())
+
+        refreshed = await Garage.objects.aget(id=garage.id)
+        self.assertEqual(refreshed.tag, "GarageTag123")
+        self.assertEqual(garage_spawn.await_count, 3)
+
+    async def test_garage_permanent_failure_does_not_crash_batch_or_save_tag(self):
+        from amc.models import Garage
+
+        garage_spawn = AsyncMock(side_effect=RuntimeError("Session is closed"))
+
+        patcher, _waits = _patch_sleep()
+        with patcher, patch("amc.tasks.spawn_garage", new=garage_spawn):
+            garage = await Garage.objects.acreate(
+                hostname="test-host",
+                config={"Location": {"X": 1}, "Rotation": {"Yaw": 0}},
+                spawn_on_restart=True,
+            )
+            # Must complete without raising despite the permanently failing
+            # garage — this is the exact crash shape from the Aug 26 incident
+            # where one closed session aborted the remaining restart spawns.
+            await spawn_restarting_garages(http_client_mod=object())
+
+        refreshed = await Garage.objects.aget(id=garage.id)
+        self.assertIsNone(refreshed.tag)
+        self.assertEqual(garage_spawn.await_count, 3)
