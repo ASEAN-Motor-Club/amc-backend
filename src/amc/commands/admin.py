@@ -634,6 +634,23 @@ async def cmd_mute(ctx: CommandContext, target_player_name: str, duration: Optio
             e,
         )
 
+    # Reflect the mute in the display-name tag immediately (no-op if the
+    # character can't be resolved, e.g. stale mod roster entry).
+    try:
+        from amc.models import Character
+
+        target_character = await Character.objects.filter(
+            guid=target.get("CharacterGuid")
+        ).afirst()
+        if target_character is not None:
+            await refresh_player_name(target_character, ctx.http_client_mod)
+    except Exception as e:  # noqa: BLE001 - the tag is cosmetic, never fail the mute
+        logger.warning(
+            "Mute applied but failed to refresh name tag for %s: %s",
+            target_unique_id,
+            e,
+        )
+
     if mute_for is True:
         duration_text = _("permanently")
     else:
@@ -695,6 +712,23 @@ async def cmd_unmute(ctx: CommandContext, target_player_name: str):
     except Exception as e:  # noqa: BLE001 - unmute already applied live
         logger.warning(
             "Unmute applied live but failed to clear persistence for %s: %s",
+            target_unique_id,
+            e,
+        )
+
+    # Drop the mute tag from the display name immediately (no-op if the
+    # character can't be resolved).
+    try:
+        from amc.models import Character
+
+        target_character = await Character.objects.filter(
+            guid=target.get("CharacterGuid")
+        ).afirst()
+        if target_character is not None:
+            await refresh_player_name(target_character, ctx.http_client_mod)
+    except Exception as e:  # noqa: BLE001 - the tag is cosmetic, never fail the unmute
+        logger.warning(
+            "Unmute applied but failed to refresh name tag for %s: %s",
             target_unique_id,
             e,
         )
