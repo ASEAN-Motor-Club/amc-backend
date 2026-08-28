@@ -383,6 +383,7 @@ class RenameGovTagProtectionTests(TestCase):
         ctx = MagicMock(spec=CommandContext)
         ctx.reply = AsyncMock()
         ctx.character = character
+        ctx.player = player
         ctx.http_client_mod = MagicMock()
 
         await cmd_rename(ctx, "[GOV1] GovPlayer")

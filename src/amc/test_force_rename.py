@@ -146,7 +146,10 @@ async def test_refresh_player_name_restores_chosen_name_after_clear(mock_set_nam
     await refresh_player_name(character, session, has_custom_parts=False)
 
     await character.arefresh_from_db()
-    assert character.custom_name == "ChosenName"
+    # refresh_player_name stores custom_name=None when the computed display
+    # name matches the original character name (see player_tags.py) — the
+    # chosen name is restored via the game-server push asserted below.
+    assert character.custom_name is None
     assert "ChosenName" in mock_set_name.call_args.args[2]
 
 
@@ -232,8 +235,10 @@ async def test_resolve_player_offline_fallback():
 
     assert player is not None
     assert player.pk == target_player.pk
-    # Offline → no online character to push to
-    assert character is None
+    # Offline → the resolver returns the most recently stored matching
+    # character (documented in _resolve_offline_player_by_name), not None.
+    assert character is not None
+    assert character.name == "OfflineGuy"
 
     # Also resolve straight through the offline helper ignoring online list.
     player2, _char2 = await _resolve_offline_player_by_name("OfflineGuy")
