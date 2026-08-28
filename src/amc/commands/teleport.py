@@ -362,11 +362,15 @@ async def cmd_tp_name(ctx: CommandContext, name: str = ""):
 
             if location:
                 # The map waypoint's Z is unreliable — players clip through
-                # the ground when it's used as-is.  Correct it to the actual
-                # terrain height from the heightmap; fall back to the
-                # game-provided Z only where the heightmap has no data.
+                # the ground when it's used as-is.  Correct it to at least
+                # the terrain height from the heightmap, but never *below*
+                # the game-provided Z: the heightmap is bare terrain and
+                # doesn't include buildings, piers, etc. that the
+                # destination may sit on top of.
                 terrain_z = terrain_z_cm(location["X"], location["Y"])
-                base_z = terrain_z if terrain_z is not None else location["Z"]
+                base_z = location["Z"]
+                if terrain_z is not None:
+                    base_z = max(base_z, terrain_z)
                 # Fix Z offset based on vehicle
                 if player_info.get("VehicleKey") == "None":
                     location["Z"] = base_z + 100
