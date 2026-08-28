@@ -404,10 +404,9 @@ async def test_offline_forced_name_applies_on_reconnect():
 @pytest.mark.django_db
 async def test_cmd_force_rename_sets_lock_and_applies():
     from amc.factories import CharacterFactory, PlayerFactory
-    from amc.models import Character
 
     target_player = await sync_to_async(PlayerFactory)()
-    target_character = await sync_to_async(CharacterFactory)(
+    _target_character = await sync_to_async(CharacterFactory)(
         player=target_player, name="OffensiveName", guid="guid-target-1"
     )
 
@@ -447,7 +446,7 @@ async def test_cmd_force_rename_non_admin_denied():
     from amc.factories import CharacterFactory, PlayerFactory
 
     target_player = await sync_to_async(PlayerFactory)()
-    target_character = await sync_to_async(CharacterFactory)(
+    _target_character = await sync_to_async(CharacterFactory)(
         player=target_player, name="OffensiveName", guid="guid-target-2"
     )
     admin_player = await sync_to_async(PlayerFactory)()
@@ -468,7 +467,7 @@ async def test_cmd_clear_forced_name_releases_lock():
     from amc.factories import CharacterFactory, PlayerFactory
 
     target_player = await sync_to_async(PlayerFactory)(forced_name="LockedName")
-    target_character = await sync_to_async(CharacterFactory)(
+    _target_character = await sync_to_async(CharacterFactory)(
         player=target_player, name="Original", guid="guid-target-3"
     )
     admin_player = await sync_to_async(PlayerFactory)()

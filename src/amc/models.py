@@ -1955,6 +1955,27 @@ class ServerTeleportLog(models.Model):
 
 
 @final
+class ServerVehicleDespawnLog(models.Model):
+    timestamp = models.DateTimeField()
+    player = models.ForeignKey(
+        Player, on_delete=models.SET_NULL, null=True, related_name="vehicle_despawn_logs"
+    )
+    character = models.ForeignKey(
+        Character, on_delete=models.SET_NULL, null=True, related_name="vehicle_despawn_logs"
+    )
+    hook = models.CharField(max_length=50)
+    vehicle_game_id = models.BigIntegerField(null=True, blank=True)
+    vehicle_name = models.CharField(max_length=100, null=True, blank=True)
+    data = models.JSONField(null=True, blank=True)
+
+    class Meta:
+        indexes = [
+            models.Index(fields=["character", "-timestamp"]),
+            models.Index(fields=["vehicle_game_id"]),
+        ]
+
+
+@final
 class TeleportPoint(models.Model):
     name = models.CharField(max_length=20)
     character = models.ForeignKey(
