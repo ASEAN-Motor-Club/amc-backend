@@ -851,6 +851,7 @@ class CargoAdmin(admin.ModelAdmin):
 class DeliveryJobTemplateAdmin(admin.ModelAdmin):
     list_display = [
         "name",
+        "enabled",
         "default_quantity",
         "completion_bonus",
         "rp_mode",
@@ -860,6 +861,7 @@ class DeliveryJobTemplateAdmin(admin.ModelAdmin):
         "lifetime_expirations",
     ]
     readonly_fields = ["success_score", "lifetime_completions", "lifetime_expirations"]
+    list_filter = ["enabled", "rp_mode"]
     search_fields = ["name", "description"]
     filter_horizontal = ["cargos", "source_points", "destination_points"]
 
