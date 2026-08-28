@@ -4,6 +4,7 @@ import math
 from datetime import timedelta
 from django.utils import timezone
 from amc.command_framework import registry, CommandContext
+from amc.heightmap import terrain_z_cm
 from amc.models import TeleportPoint, RescueRequest, PoliceSession, Wanted
 from amc.mod_server import (
     get_player,
@@ -360,11 +361,21 @@ async def cmd_tp_name(ctx: CommandContext, name: str = ""):
                     return
 
             if location:
+                # The map waypoint's Z is unreliable — players clip through
+                # the ground when it's used as-is.  Correct it to at least
+                # the terrain height from the heightmap, but never *below*
+                # the game-provided Z: the heightmap is bare terrain and
+                # doesn't include buildings, piers, etc. that the
+                # destination may sit on top of.
+                terrain_z = terrain_z_cm(location["X"], location["Y"])
+                base_z = location["Z"]
+                if terrain_z is not None:
+                    base_z = max(base_z, terrain_z)
                 # Fix Z offset based on vehicle
                 if player_info.get("VehicleKey") == "None":
-                    location["Z"] += 100
+                    location["Z"] = base_z + 100
                 else:
-                    location["Z"] += 5
+                    location["Z"] = base_z + 5
 
     if not location:
         asyncio.create_task(

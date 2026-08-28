@@ -118,3 +118,74 @@ class TeleportAdminCustomDestinationTestCase(TestCase):
             mock_tp.assert_called_once()
             call_args = mock_tp.call_args
             self.assertEqual(call_args[0][2], {"X": 500, "Y": 600, "Z": 705})  # Z+5
+
+
+class TeleportWaypointHeightmapTestCase(TestCase):
+    """Waypoint Z must be max(game Z, terrain Z).
+
+    The heightmap is bare terrain — it does not include buildings, piers,
+    etc. When the game-provided destination Z is already above the
+    heightmap (destination sits on a structure), it must be kept.
+    """
+
+    def setUp(self):
+        self.ctx = MagicMock(spec=CommandContext)
+        self.ctx.reply = AsyncMock()
+        self.ctx.announce = AsyncMock()
+
+        self.ctx.http_client_mod = MagicMock()
+        self.ctx.http_client_mod.post = AsyncMock()
+        self.ctx.http_client_mod.get = AsyncMock()
+
+        self.player = Player.objects.create(unique_id="76561198000000002")
+        self.character = Character.objects.create(
+            name="WaypointChar", player=self.player, guid="guid-789"
+        )
+
+        self.ctx.character = self.character
+        self.ctx.player = self.player
+        self.ctx.player_info = {
+            "bIsAdmin": True,
+            "CustomDestinationAbsoluteLocation": {"X": -500000, "Y": 400000, "Z": 300},
+        }
+
+    async def _run_tp(self, terrain_z):
+        with (
+            patch(
+                "amc.commands.teleport.get_player_last_vehicle",
+                new=AsyncMock(return_value={"vehicle": None}),
+            ),
+            patch(
+                "amc.commands.teleport.terrain_z_cm",
+                return_value=terrain_z,
+            ) as mock_terrain,
+            patch("amc.commands.teleport.teleport_player", new=AsyncMock()) as mock_tp,
+        ):
+            await cmd_tp_name(self.ctx, "")
+            mock_terrain.assert_called_once_with(-500000, 400000)
+            mock_tp.assert_called_once()
+            return mock_tp.call_args[0][2]
+
+    async def test_waypoint_z_raised_to_terrain_when_below(self):
+        # Game Z below terrain (bogus waypoint Z) -> terrain wins.
+        # VehicleKey missing -> else branch, Z + 5.
+        location = await self._run_tp(terrain_z=-20000)
+        self.assertEqual(location["Z"], -20000 + 5)
+
+    async def test_waypoint_z_kept_when_already_above_terrain(self):
+        # Game Z above terrain (clicked on a building/pier) -> keep game Z.
+        location = await self._run_tp(terrain_z=-21900)
+        self.assertEqual(location["Z"], 300 + 5)
+
+    async def test_waypoint_z_on_foot_offset(self):
+        # On-foot branch (VehicleKey == "None") uses +100; terrain still
+        # lifts the bogus game Z.
+        self.ctx.player_info = {
+            "bIsAdmin": True,
+            "VehicleKey": "None",
+            "CustomDestinationAbsoluteLocation": {
+                "X": -500000, "Y": 400000, "Z": 300
+            },
+        }
+        location = await self._run_tp(terrain_z=-20000)
+        self.assertEqual(location["Z"], -20000 + 100)

@@ -242,6 +242,9 @@ GDAL_LIBRARY_PATH = os.environ.get("GDAL_LIBRARY_PATH")
 
 GAME_SERVER_API_URL = os.environ.get("GAME_SERVER_API_URL", "http://127.0.0.1:8080")
 MOD_SERVER_API_URL = os.environ.get("MOD_SERVER_API_URL", "http://127.0.0.1:5001")
+
+# Full-resolution Jeju_World terrain heightmap (JHM1 compressed, see amc.heightmap)
+HEIGHTMAP_PATH = os.environ.get("HEIGHTMAP_PATH", "/var/lib/amc-backend/jeju_heights_11000.jhm")
 WEBHOOK_SERVER_API_URL = os.environ.get(
     "WEBHOOK_SERVER_API_URL", "http://127.0.0.1:5000"
 )
