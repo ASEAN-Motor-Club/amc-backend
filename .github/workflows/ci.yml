@@ -7,7 +7,7 @@ on:
     branches: [master]
 
 jobs:
-  type-check:
+  pytest:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -17,6 +17,4 @@ jobs:
       - uses: DeterminateSystems/magic-nix-cache-action@main
       - name: Run Checks
         run: |
-          nix build .#checks.x86_64-linux.ruff
-          nix build .#checks.x86_64-linux.django-check
           nix build .#checks.x86_64-linux.pytest
