@@ -11,6 +11,7 @@ from amc.heightmap import (
     QUAD_CM,
     WIDTH,
     Heightmap,
+    write_jhm,
 )
 
 # 3x3 synthetic map. Node (row, col) sits at world
@@ -95,3 +96,103 @@ def test_wrong_size_rejected(tmp_path):
 
 def test_real_dimensions_constant():
     assert (WIDTH, HEIGHT) == (11_000, 11_000)
+
+
+# --- JHM1 compressed format -----------------------------------------------
+
+
+@pytest.fixture
+def raw_path(tmp_path):
+    path = tmp_path / "raw.bin"
+    with open(path, "wb") as f:
+        for row in RAWS:
+            for raw in row:
+                f.write(struct.pack("<H", raw))
+    return path
+
+
+def _write_raw(tmp_path, grid, name="raw.bin"):
+    path = tmp_path / name
+    with open(path, "wb") as f:
+        for row in grid:
+            for raw in row:
+                f.write(struct.pack("<H", raw))
+    return path
+
+
+def test_jhm_matches_raw_sampler(tmp_path, raw_path):
+    jhm_path = tmp_path / "compressed.jhm"
+    write_jhm(raw_path, jhm_path, width=3, height=3, block=2)
+
+    raw_hm = Heightmap(raw_path, width=3, height=3)
+    jhm_hm = Heightmap(jhm_path)  # dims come from the JHM1 header
+
+    assert (jhm_hm.width, jhm_hm.height) == (3, 3)
+    # Sample densely across every quad; bilinear output must be identical.
+    for i in range(21):
+        for j in range(21):
+            x = ORIGIN_X_CM + j * (2 * QUAD_CM) / 20
+            y = ORIGIN_Y_CM + i * (2 * QUAD_CM) / 20
+            assert jhm_hm.z_cm(x, y) == pytest.approx(raw_hm.z_cm(x, y))
+
+
+def test_jhm_edge_block_padding(tmp_path):
+    # 3x3 grid with block=2: node (2,2) lives in a zero-padded edge block
+    # and must still be sampled exactly.
+    grid = [[100, 200, 300], [150, 250, 350], [175, 275, 375]]
+    raw_path = _write_raw(tmp_path, grid)
+    jhm_path = tmp_path / "compressed.jhm"
+    write_jhm(raw_path, jhm_path, width=3, height=3, block=2)
+
+    jhm_hm = Heightmap(jhm_path)
+    x, y = ORIGIN_X_CM + 2 * QUAD_CM, ORIGIN_Y_CM + 2 * QUAD_CM
+    expected = Heightmap.raw_to_z_cm(375)
+    assert jhm_hm.z_cm(x, y) == pytest.approx(expected)
+
+
+def test_jhm_non_divisor_block(tmp_path):
+    # 20x20 grid, block=7 (not a divisor): exercises partial blocks on
+    # both axes plus wrapped deltas on random-looking terrain.
+    rng = __import__("random").Random(7)
+    grid = [[rng.randrange(0, 44_021) for _ in range(20)] for _ in range(20)]
+    raw_path = _write_raw(tmp_path, grid)
+    jhm_path = tmp_path / "compressed.jhm"
+    write_jhm(raw_path, jhm_path, width=20, height=20, block=7)
+
+    raw_hm = Heightmap(raw_path, width=20, height=20)
+    jhm_hm = Heightmap(jhm_path)
+    for i in range(41):
+        for j in range(41):
+            x = ORIGIN_X_CM + j * (19 * QUAD_CM) / 40
+            y = ORIGIN_Y_CM + i * (19 * QUAD_CM) / 40
+            assert jhm_hm.z_cm(x, y) == pytest.approx(raw_hm.z_cm(x, y))
+
+
+def test_jhm_delta_codec_roundtrip(tmp_path, raw_path):
+    # Byte-exact grid round-trip through the JHM1 codec helpers.
+    from amc.heightmap import _JHM_MAGIC, _JHM_HEADER
+
+    jhm_path = tmp_path / "compressed.jhm"
+    write_jhm(raw_path, jhm_path, width=3, height=3, block=2)
+
+    blob = jhm_path.read_bytes()
+    magic, w, h, block, count, index_offset = _JHM_HEADER.unpack_from(blob)
+    assert magic == _JHM_MAGIC and (w, h, block, count) == (3, 3, 2, 4)
+
+    import lzma
+    from itertools import accumulate
+
+    # Compare per block: each decoded block is a row-major block×block tile
+    # of the grid padded to a multiple of the block size with zeros.
+    nb = 2  # ceil(3 / block)
+    for i in range(count):
+        br, bc = divmod(i, nb)
+        off, ln = struct.unpack_from("<QI", blob, index_offset + i * 12)
+        deltas = struct.unpack(f"<{block * block}H", lzma.decompress(blob[off:off + ln]))
+        got = [v & 0xFFFF for v in accumulate(deltas)]
+        expected = [
+            RAWS[r][c] if r < 3 and c < 3 else 0
+            for r in range(br * block, br * block + block)
+            for c in range(bc * block, bc * block + block)
+        ]
+        assert got == expected
