@@ -55,6 +55,19 @@ async def clear_persistent_mute(player):
     await player.asave(update_fields=["muted_until"])
 
 
+def is_muted_value(until) -> bool:
+    """Mute-state check on a raw ``muted_until`` datetime (None allowed).
+
+    Shared by ``is_muted`` and the display-name tag builder, which reads the
+    column via ``values_list`` and has no Player instance to pass.
+    """
+    if until is None:
+        return False
+    if until.year >= 9999:
+        return True
+    return until > timezone.now()
+
+
 def is_muted(player) -> bool:
     """Return True if a player is currently muted (persisted mute active).
 
@@ -62,12 +75,7 @@ def is_muted(player) -> bool:
     Any other future datetime → muted until then. Expired temporary mutes
     count as NOT muted (they'll be cleared by ``reapply_mute_on_login``).
     """
-    until = player.muted_until if player else None
-    if until is None:
-        return False
-    if until.year >= 9999:
-        return True
-    return until > timezone.now()
+    return is_muted_value(player.muted_until if player else None)
 
 
 async def reapply_mute_on_login(player, http_client_mod):

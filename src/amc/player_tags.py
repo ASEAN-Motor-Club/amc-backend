@@ -9,9 +9,9 @@ PUSHED_NAME_TTL = 3600  # 1 hour
 
 # Regexes for stripping tags — covers both new compact and legacy formats
 TAG_PATTERNS = [
-    # New compact format: must start with C/M/G/P/R or *, optionally followed by more letters/digits/stars
-    # e.g. [C], [M], [R], [G3], [CM], [MG3], [CMG12], [*****], [C***], [MP], [MPG3], [MC1***G3], [RMG3]
-    re.compile(r"\[(?=[CMGPR*])[CMGPR\d*]+\]\s*"),
+    # New compact format: must start with X/C/M/G/P/R or *, optionally followed by more letters/digits/stars
+    # e.g. [X], [C], [M], [R], [G3], [CM], [MG3], [CMG12], [*****], [C***], [MP], [MPG3], [MC1***G3], [RMG3], [XM]
+    re.compile(r"\[(?=[XCMGPR*])[XCMGPR\d*]+\]\s*"),
     # Legacy formats with W-prefix or Unicode stars (for players who logged in before star refactor)
     re.compile(r"\[(?=[CMGPW\u2605])[CMGPW\d\u2605]+\]\s*"),
     # Legacy compact format with Unicode subscript digits (e.g. [G₃], [MG₂₃])
@@ -42,7 +42,7 @@ def name_has_mod_tag(name: str) -> bool:
     """Return True if the name currently carries a mod-parts tag."""
     return bool(
         re.search(r"\[MODS?\]", name, re.IGNORECASE)
-        or re.search(r"\[[CGPW0-9₀-₉]*M[CGPW0-9₀-₉]*\]", name)
+        or re.search(r"\[[XRCGPW0-9₀-₉*]*M[XCGPW0-9₀-₉*]*\]", name)
     )
 
 
@@ -56,10 +56,12 @@ def build_display_name(
     wanted_stars: int = 0,
     rp_mode: bool = False,
     guild_abbreviation: str | None = None,
+    muted: bool = False,
 ) -> str:
     """Build the definitive display name with a single compact tag.
 
-    Tag format: [RMP1*****C1G3] BaseName[ABV]  (order: R, M, P, stars, C, G; guild suffix at end)
+    Tag format: [XRMP1*****C1G3] BaseName[ABV]  (order: X, R, M, P, stars, C, G; guild suffix at end)
+      X = Muted (persisted mute active — cannot chat)
       R = RP mode toggled on OR wanted (forced onto all wanted players)
       M = Modded vehicle parts
       P1 = Police level (active session)
@@ -77,9 +79,13 @@ def build_display_name(
         wanted_stars: Wanted level (0–5, 0 = not wanted)
         rp_mode: Whether the character is currently in RP mode
         guild_abbreviation: Active guild abbreviation (e.g. "GOP"), or None
+        muted: Whether the player is currently muted
     """
     clean_name = strip_all_tags(base_name)
     tag = ""
+
+    if muted:
+        tag += "X"
 
     if rp_mode or wanted_stars > 0:
         tag += "R"
@@ -198,18 +204,26 @@ async def refresh_player_name(
     # query, which raises Django's SynchronousOnlyOperation in the async arq
     # worker context and silently aborts name enforcement.
     forced_name = None
+    muted_until = None
     if character.player_id:
         try:
             from amc.models import Player
 
-            forced_name = await (
+            row = await (
                 Player.objects.filter(unique_id=character.player_id)
-                .values_list("forced_name", flat=True)
+                .values_list("forced_name", "muted_until")
                 .afirst()
             )
+            if row is not None:
+                forced_name, muted_until = row
         except Exception:
             forced_name = None
     base_name = (forced_name or character.name).strip() or character.name
+
+    # Mute tag: X while a persisted mute is active (permanent or unexpired temp).
+    from amc.mute import is_muted_value
+
+    muted = is_muted_value(muted_until)
 
     # Reconstruct name
     new_name = build_display_name(
@@ -221,6 +235,7 @@ async def refresh_player_name(
         wanted_stars=wanted_stars,
         rp_mode=character.rp_mode,
         guild_abbreviation=guild_abbreviation,
+        muted=muted,
     )
 
     # Save to DB if changed

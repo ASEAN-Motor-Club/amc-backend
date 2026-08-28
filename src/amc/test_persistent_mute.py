@@ -12,6 +12,7 @@ from amc.mute import (
     clear_persistent_mute,
     reapply_mute_on_login,
     is_muted,
+    is_muted_value,
 )
 
 
@@ -176,6 +177,9 @@ async def test_cmd_mute_persists_permanent():
             ],
         ),
         patch("amc.commands.admin.mute_player", new_callable=AsyncMock),
+        patch(
+            "amc.commands.admin.refresh_player_name", new_callable=AsyncMock
+        ) as mock_refresh,
     ):
         ctx = await _make_ctx(admin, admin_char, is_admin=True)
         await cmd_mute(ctx, "Troublemaker")  # no duration → permanent
@@ -183,6 +187,8 @@ async def test_cmd_mute_persists_permanent():
     await target.arefresh_from_db()
     assert target.muted_until is not None
     assert target.muted_until.year >= 9999
+    # The mute is reflected in the display name immediately.
+    mock_refresh.assert_awaited_once()
 
 
 @pytest.mark.asyncio
@@ -213,12 +219,79 @@ async def test_cmd_unmute_clears_persistence():
             ],
         ),
         patch("amc.commands.admin.unmute_player", new_callable=AsyncMock),
+        patch(
+            "amc.commands.admin.refresh_player_name", new_callable=AsyncMock
+        ) as mock_refresh,
     ):
         ctx = await _make_ctx(admin, admin_char, is_admin=True)
         await cmd_unmute(ctx, "MutedGuy")
 
     await target.arefresh_from_db()
     assert target.muted_until is None
+    # The mute tag is dropped from the display name immediately.
+    mock_refresh.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+@pytest.mark.django_db
+async def test_cmd_mute_applies_x_tag_to_display_name():
+    """End-to-end: /mute pushes the [X] tag onto the online character's name."""
+    from amc.commands.admin import cmd_mute
+    from amc.factories import CharacterFactory, PlayerFactory
+
+    admin = await sync_to_async(PlayerFactory)()
+    admin_char = await sync_to_async(CharacterFactory)(
+        player=admin, name="Admin", guid="guid-admin-mute-tag"
+    )
+    target = await sync_to_async(PlayerFactory)()
+    character = await sync_to_async(CharacterFactory)(
+        player=target, name="Troublemaker", guid="guid-target-mute-tag"
+    )
+
+    with (
+        patch(
+            "amc.commands.admin.get_players_mod",
+            new_callable=AsyncMock,
+            return_value=[
+                {
+                    "PlayerName": "Troublemaker",
+                    "CharacterGuid": "guid-target-mute-tag",
+                    "UniqueID": target.unique_id,
+                }
+            ],
+        ),
+        patch("amc.commands.admin.mute_player", new_callable=AsyncMock),
+        patch("amc.player_tags.set_character_name", new_callable=AsyncMock),
+    ):
+        ctx = await _make_ctx(admin, admin_char, is_admin=True)
+        await cmd_mute(ctx, "Troublemaker")
+
+    await character.arefresh_from_db()
+    assert character.custom_name == "[X] Troublemaker"
+
+
+# --- is_muted_value (raw muted_until check) ---
+
+
+def test_is_muted_value_none():
+    assert is_muted_value(None) is False
+
+
+def test_is_muted_value_permanent():
+    assert is_muted_value(PERMANENT_MUTE_UNTIL) is True
+
+
+def test_is_muted_value_future_and_past():
+    assert is_muted_value(timezone.now() + timedelta(hours=1)) is True
+    assert is_muted_value(timezone.now() - timedelta(hours=1)) is False
+
+
+def test_is_muted_value_matches_is_muted():
+    player = MagicMock()
+    player.muted_until = PERMANENT_MUTE_UNTIL
+    assert is_muted_value(player.muted_until) == is_muted(player)
+    player.muted_until = None
+    assert is_muted_value(player.muted_until) == is_muted(player)
 
 
 # --- is_muted helper ---

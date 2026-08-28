@@ -3,6 +3,7 @@ from unittest.mock import patch, AsyncMock, MagicMock
 from amc.player_tags import (
     strip_all_tags,
     build_display_name,
+    name_has_mod_tag,
     refresh_player_name,
 )
 
@@ -289,6 +290,31 @@ def test_build_display_name_rp_mode_default_false():
     )
 
 
+# --- mute (X) tag ---
+
+
+def test_build_display_name_muted_only():
+    assert build_display_name("PlayerOne", muted=True) == "[X] PlayerOne"
+
+
+def test_build_display_name_mute_goes_first():
+    """X is the first letter in the compact tag."""
+    assert (
+        build_display_name(
+            "PlayerOne", muted=True, has_custom_parts=True, wanted_stars=2
+        )
+        == "[XRM**] PlayerOne"
+    )
+
+
+def test_build_display_name_muted_with_gov():
+    assert build_display_name("PlayerOne", muted=True, gov_level=3) == "[XG3] PlayerOne"
+
+
+def test_build_display_name_not_muted_no_tag():
+    assert build_display_name("PlayerOne", muted=False) == "PlayerOne"
+
+
 # --- guild suffix ---
 
 
@@ -403,6 +429,19 @@ def test_strip_guild_suffix_does_not_strip_permanent_tag():
     assert strip_all_tags("[DOT] PlayerOne") == "[DOT] PlayerOne"
 
 
+def test_strip_mute_tag():
+    assert strip_all_tags("[X] PlayerOne") == "PlayerOne"
+    assert strip_all_tags("[XM] PlayerOne") == "PlayerOne"
+    assert strip_all_tags("[XR**] PlayerOne") == "PlayerOne"
+
+
+def test_name_has_mod_tag_with_mute_composite():
+    """A muted+modded composite tag [XM] must still count as modded."""
+    assert name_has_mod_tag("[XM] PlayerOne") is True
+    assert name_has_mod_tag("[X] PlayerOne") is False
+    assert name_has_mod_tag("[XRM**] PlayerOne") is True
+
+
 # --- refresh_player_name integration tests ---
 
 
@@ -453,6 +492,95 @@ async def test_refresh_player_name_preserves_mod_state_legacy(mock_set_name):
 
     await character.arefresh_from_db()
     assert character.custom_name == "[M] TestPlayer"
+
+
+@pytest.mark.asyncio
+@pytest.mark.django_db
+@patch("amc.player_tags.set_character_name", new_callable=AsyncMock)
+async def test_refresh_player_name_adds_mute_tag(mock_set_name):
+    """A permanently muted player's display name carries the X tag."""
+    from asgiref.sync import sync_to_async
+
+    from amc.factories import CharacterFactory, PlayerFactory
+    from amc.mute import PERMANENT_MUTE_UNTIL
+
+    player = await sync_to_async(PlayerFactory)(muted_until=PERMANENT_MUTE_UNTIL)
+    character = await sync_to_async(CharacterFactory)(
+        player=player,
+        name="TestPlayer",
+        guid="test-guid-mute",
+    )
+
+    session = MagicMock()
+    await refresh_player_name(character, session)
+
+    await character.arefresh_from_db()
+    assert character.custom_name == "[X] TestPlayer"
+    from amc.player_tags import set_character_name
+
+    set_character_name.assert_awaited_once_with(
+        session, "test-guid-mute", "[X] TestPlayer"
+    )
+
+
+@pytest.mark.asyncio
+@pytest.mark.django_db
+@patch("amc.player_tags.set_character_name", new_callable=AsyncMock)
+async def test_refresh_player_name_no_mute_tag_when_expired(mock_set_name):
+    """An expired temporary mute must not produce the X tag."""
+    from datetime import timedelta
+
+    from asgiref.sync import sync_to_async
+    from django.utils import timezone
+
+    from amc.factories import CharacterFactory, PlayerFactory
+
+    player = await sync_to_async(PlayerFactory)(
+        muted_until=timezone.now() - timedelta(minutes=5)
+    )
+    character = await sync_to_async(CharacterFactory)(
+        player=player,
+        name="TestPlayer",
+        guid="test-guid-mute-expired",
+    )
+
+    session = MagicMock()
+    await refresh_player_name(character, session)
+
+    from amc.player_tags import set_character_name
+
+    set_character_name.assert_awaited_once_with(
+        session, "test-guid-mute-expired", "TestPlayer"
+    )
+
+
+@pytest.mark.asyncio
+@pytest.mark.django_db
+@patch("amc.player_tags.set_character_name", new_callable=AsyncMock)
+async def test_refresh_player_name_mute_tag_survives_rename(mock_set_name):
+    """A muted player who was also force-renamed keeps the X tag on the locked name."""
+    from asgiref.sync import sync_to_async
+
+    from amc.factories import CharacterFactory, PlayerFactory
+    from amc.mute import PERMANENT_MUTE_UNTIL
+
+    player = await sync_to_async(PlayerFactory)(
+        muted_until=PERMANENT_MUTE_UNTIL, forced_name="FriendlyFellow"
+    )
+    character = await sync_to_async(CharacterFactory)(
+        player=player,
+        name="TestPlayer",
+        guid="test-guid-mute-renamed",
+    )
+
+    session = MagicMock()
+    await refresh_player_name(character, session)
+
+    from amc.player_tags import set_character_name
+
+    set_character_name.assert_awaited_once_with(
+        session, "test-guid-mute-renamed", "[X] FriendlyFellow"
+    )
 
 
 @pytest.mark.asyncio
