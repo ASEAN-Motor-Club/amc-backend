@@ -8,6 +8,7 @@ from django.conf import settings
 from amc.models import Player
 from amc.mod_server import send_message_as_player
 from amc.game_server import announce, get_players
+from amc.utils import strip_emojis
 
 FIFO_PATH = os.environ.get("NECESSE_FIFO_PATH")
 
@@ -24,25 +25,32 @@ class ChatCog(commands.Cog):
     @commands.Cog.listener()
     async def on_message(self, message):
         if not message.author.bot and message.channel.id == self.game_chat_channel_id:
-            try:
-                player = await Player.objects.aget(discord_user_id=message.author.id)
-                online_players = await get_players(self.bot.http_client_game)
-                online_players_by_id = {
-                    str(uid): data["name"] for uid, data in online_players
-                }
-                if str(player.unique_id) in online_players_by_id:
-                    await send_message_as_player(
-                        self.bot.http_client_mod, message.content, str(player.unique_id)
+            content = strip_emojis(message.content)
+            if content:
+                try:
+                    player = await Player.objects.aget(
+                        discord_user_id=message.author.id
                     )
-                    return
-            except Player.DoesNotExist:
-                pass
+                    online_players = await get_players(self.bot.http_client_game)
+                    online_players_by_id = {
+                        str(uid): data["name"] for uid, data in online_players
+                    }
+                    if str(player.unique_id) in online_players_by_id:
+                        await send_message_as_player(
+                            self.bot.http_client_mod, content, str(player.unique_id)
+                        )
+                        return
+                except Player.DoesNotExist:
+                    pass
 
-            await announce(
-                f"{message.author.display_name}: {message.content}",
-                self.bot.http_client_game,
-                color="FFFFFF",
-            )
+                display_name = strip_emojis(message.author.display_name)
+                if not display_name:
+                    display_name = message.author.name
+                await announce(
+                    f"{display_name}: {content}",
+                    self.bot.http_client_game,
+                    color="FFFFFF",
+                )
 
         if (
             not message.author.bot

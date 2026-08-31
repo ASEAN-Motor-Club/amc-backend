@@ -80,6 +80,7 @@ dependencies = [
     { name = "django-ninja" },
     { name = "django-ninja-extra" },
     { name = "django-oauth-toolkit" },
+    { name = "emoji" },
     { name = "factory-boy" },
     { name = "gunicorn" },
     { name = "matplotlib" },
@@ -121,6 +122,7 @@ requires-dist = [
     { name = "django-ninja", specifier = ">=1.4.3" },
     { name = "django-ninja-extra", specifier = ">=0.30.1" },
     { name = "django-oauth-toolkit", specifier = ">=3.0.1" },
+    { name = "emoji", specifier = ">=2.14.1" },
     { name = "factory-boy", specifier = ">=3.3.3" },
     { name = "gunicorn", specifier = ">=23.0.0" },
     { name = "matplotlib", specifier = ">=3.10.6" },
@@ -520,6 +522,15 @@ dependencies = [
 sdist = { url = "https://files.pythonhosted.org/packages/7c/4f/d04bb7cd18acc6c4a626eb624f443c33c4e9c1727d2261dd7af47c1daea4/dpytest-0.7.0.tar.gz", hash = "sha256:9f16d58347591756a8d662a44c2307864698c8a5656408a584d0bb5d69c83bbb", size = 85233, upload-time = "2023-06-19T15:42:57.002Z" }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/c7/b3/172293411e30a0c255e4c86914e71ce3338844c43f90d36eb8c7d13967bf/dpytest-0.7.0-py3-none-any.whl", hash = "sha256:b9febeb860e6bc05bac3d433882becdba1b965ff4db1667e2d629acbc868b0d2", size = 30344, upload-time = "2023-06-19T15:42:55.391Z" },
+]
+
+[[package]]
+name = "emoji"
+version = "2.15.0"
+source = { registry = "https://pypi.org/simple" }
+sdist = { url = "https://files.pythonhosted.org/packages/a2/78/0d2db9382c92a163d7095fc08efff7800880f830a152cfced40161e7638d/emoji-2.15.0.tar.gz", hash = "sha256:eae4ab7d86456a70a00a985125a03263a5eac54cd55e51d7e184b1ed3b6757e4", size = 615483, upload-time = "2025-09-21T12:13:02.755Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/e1/5e/4b5aaaabddfacfe36ba7768817bd1f71a7a810a43705e531f3ae4c690767/emoji-2.15.0-py3-none-any.whl", hash = "sha256:205296793d66a89d88af4688fa57fd6496732eb48917a87175a023c8138995eb", size = 608433, upload-time = "2025-09-21T12:13:01.197Z" },
 ]
 
 [[package]]

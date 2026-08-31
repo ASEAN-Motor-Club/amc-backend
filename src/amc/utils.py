@@ -1,14 +1,34 @@
 import asyncio
 import math
+import re
 from functools import wraps
 from datetime import datetime, timedelta
 from zoneinfo import ZoneInfo
 import difflib
 from typing import List, Tuple, Optional
 import discord
+import emoji
 from django.utils import timezone
 from django.core.signing import Signer
 from django.conf import settings
+
+_DISCORD_CUSTOM_EMOJI_RE = re.compile(r"<a?:([A-Za-z0-9_]+):\d+>")
+
+
+def strip_emojis(text: str) -> str:
+    """Remove emojis for game chat delivery (Discord → Motor Town relay).
+
+    - Custom Discord emoji markup (``<:name:id>`` / ``<a:name:id>``) becomes
+      ``:name:`` (pure ASCII, meaning preserved).
+    - Unicode emoji are removed, including ZWJ sequences, flags, keycaps and
+      skin tones (handled by the ``emoji`` package's Unicode data).
+    - Non-emoji Unicode (Thai, Vietnamese, CJK, …) is PRESERVED.
+    - Runs of multiple spaces left behind by removal collapse to one, and the
+      result is trimmed.
+    """
+    text = _DISCORD_CUSTOM_EMOJI_RE.sub(r":\1:", text)
+    text = emoji.replace_emoji(text, replace="")
+    return re.sub(r" {2,}", " ", text).strip()
 
 
 def skip_if_running(func):
