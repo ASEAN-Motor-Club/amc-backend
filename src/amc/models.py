@@ -289,6 +289,16 @@ class Character(models.Model):
     truck_level = models.PositiveIntegerField(null=True, blank=True)
     wrecker_level = models.PositiveIntegerField(null=True, blank=True)
     racer_level = models.PositiveIntegerField(null=True, blank=True)
+    exclusive_progression = models.BooleanField(
+        null=True,
+        blank=True,
+        help_text=(
+            "True = every level gain observed in play on this server (armed when "
+            "a character's entire level table is all-1); False = the client "
+            "showed levels above what observed play left behind, i.e. the "
+            "player leveled outside; null = not tracked."
+        ),
+    )
     saving_rate = models.DecimalField(
         max_digits=3,
         decimal_places=2,

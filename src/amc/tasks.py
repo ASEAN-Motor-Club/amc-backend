@@ -96,6 +96,30 @@ _discord_queue: deque[tuple[str, str, float]] = (
 )  # (channel_id, content, timestamp)
 _discord_client_ref: "AMCDiscordBot | None" = None  # Store reference to Discord client
 
+# Exclusive-progression tracking (Character.exclusive_progression).
+# Keyed by player unique_id → set of level field_names already seen since the
+# player's most recent Player Login line. The first occurrence of each level
+# type after a login is the client's login snapshot (the game logs all 7 level
+# types right after every login), so those events carry the login-time levels
+# and are compared against the stored values; every later event for that type
+# in the same session is an in-session change and only updates the table.
+# Entries are reset on every login and removed once all 7 types are seen.
+# Worker-local on purpose: losing it after a restart only skips one check
+# (fail-open), the next login re-arms the state.
+_login_level_types_seen: dict[int, set[str]] = {}
+
+_LEVEL_FIELD_BY_TYPE = {
+    "CL_Driver": "driver_level",
+    "CL_Bus": "bus_level",
+    "CL_Taxi": "taxi_level",
+    "CL_Police": "police_level",
+    "CL_Truck": "truck_level",
+    "CL_Wrecker": "wrecker_level",
+    "CL_Racer": "racer_level",
+}
+
+_ALL_LEVEL_FIELDS = tuple(_LEVEL_FIELD_BY_TYPE.values())
+
 
 def _process_discord_queue():
     """Process Discord messages in FIFO order. Called from the arq event loop."""
@@ -1139,6 +1163,12 @@ async def process_log_event(
                 )
 
         case PlayerLoginLogEvent(timestamp, player_name, player_id):
+            # Exclusive-progression: a fresh login means the following burst of
+            # PlayerLevelChanged lines (the game logs all 7 level types right
+            # after every login) carries the client's login-time levels —
+            # reset the per-type "seen" tracker so those events are checked
+            # against the stored levels (see the level-changed case below).
+            _login_level_types_seen[player_id] = set()
             # For login events, resolve GUID with retries *before* creating the
             # character.  Login log lines arrive before the game server has fully
             # loaded the player, so the single-attempt lookup in
@@ -1377,26 +1407,98 @@ async def process_log_event(
         case PlayerLevelChangedLogEvent(
             timestamp, player_name, player_id, level_type, level_value
         ):
-            match level_type:
-                case "CL_Driver":
-                    field_name = "driver_level"
-                case "CL_Bus":
-                    field_name = "bus_level"
-                case "CL_Taxi":
-                    field_name = "taxi_level"
-                case "CL_Police":
-                    field_name = "police_level"
-                case "CL_Truck":
-                    field_name = "truck_level"
-                case "CL_Wrecker":
-                    field_name = "wrecker_level"
-                case "CL_Racer":
-                    field_name = "racer_level"
-                case _:
-                    raise ValueError("Unknown level type")
-            await Character.objects.filter(
+            field_name = _LEVEL_FIELD_BY_TYPE.get(level_type)
+            if field_name is None:
+                raise ValueError("Unknown level type")
+
+            character = await Character.objects.filter(
                 name=player_name, player__unique_id=player_id
-            ).aupdate(**{field_name: level_value})
+            ).afirst()
+            if character is None:
+                # Tagged display names ("[R] Name", "[*] Name") never match the
+                # stored name — fall back to the player's most recently active
+                # character so every level event still lands on a row.
+                character = (
+                    await Character.objects.with_last_login()
+                    .filter(player__unique_id=player_id)
+                    .order_by("-last_login")
+                    .afirst()
+                )
+            if character is None:
+                (
+                    character,
+                    _player,
+                    _character_created,
+                    _player_info,
+                ) = await aget_or_create_character(
+                    player_name, player_id, http_client_mod, http_client
+                )
+            if character is None:
+                logger.warning(
+                    f"Skipping level event for {player_name} — character could not be resolved"
+                )
+                return
+
+            # First occurrence of a level type after a login = the login
+            # snapshot; later events in the same session are in-session gains.
+            seen_types = _login_level_types_seen.get(player_id)
+            at_login = seen_types is not None and field_name not in seen_types
+            if seen_types is not None:
+                seen_types.add(field_name)
+                if len(seen_types) >= len(_ALL_LEVEL_FIELDS):
+                    _login_level_types_seen.pop(player_id, None)
+
+            stored_level = getattr(character, field_name)
+            if (
+                at_login
+                and character.exclusive_progression is True
+                and stored_level is not None
+                and level_value > stored_level
+            ):
+                # Login snapshot above what this player's own observed sessions
+                # left behind — client-side progression means those levels were
+                # earned outside this server.
+                logger.warning(
+                    f"Exclusive progression broken for {character.name} "
+                    f"(unique_id={player_id}): {field_name} {stored_level} → "
+                    f"{level_value} at login"
+                )
+                await Character.objects.filter(pk=character.pk).aupdate(
+                    exclusive_progression=False
+                )
+            elif (
+                at_login
+                and stored_level is not None
+                and level_value < stored_level
+            ):
+                # Client save rolled back (restore/tamper) — not "leveled
+                # outside", so the flag survives; recorded for the record.
+                logger.warning(
+                    f"Level regression at login for {character.name} "
+                    f"(unique_id={player_id}): {field_name} {stored_level} → "
+                    f"{level_value}"
+                )
+
+            # Every level event keeps the stored level current.
+            await Character.objects.filter(pk=character.pk).aupdate(
+                **{field_name: level_value}
+            )
+
+            # Arm: a character whose entire level table is exactly all-1 is a
+            # fresh account — every level it ever gains is observable here.
+            if at_login and character.exclusive_progression is None:
+                is_fresh_account = await Character.objects.filter(
+                    pk=character.pk,
+                    **{field: 1 for field in _ALL_LEVEL_FIELDS},
+                ).aexists()
+                if is_fresh_account:
+                    logger.info(
+                        f"Armed exclusive progression for new character "
+                        f"{character.name} (unique_id={player_id})"
+                    )
+                    await Character.objects.filter(pk=character.pk).aupdate(
+                        exclusive_progression=True
+                    )
 
         case ServerStartedLogEvent(timestamp, _version):
             # Close any stale police sessions from before the restart
