@@ -119,11 +119,11 @@ async def test_teleports_up_then_spawns_pad_at_z_minus_100():
         str(player.unique_id),
         {"X": -286981.0, "Y": 188839.0, "Z": -21512.0},  # -21812 + 300
     )
-    # pad at playerZ - 100
+    # pad at playerZ - 90
     m_sd.assert_awaited_once_with(
         ctx.http_client_mod,
         "Kart_01",  # "Kart" label -> VehicleKey value
-        {"X": -286981.0, "Y": 188839.0, "Z": -21912.0},  # -21812 - 100
+        {"X": -286981.0, "Y": 188839.0, "Z": -21902.0},  # -21812 - 90
         0.0,
     )
 
@@ -153,7 +153,7 @@ async def test_creates_persistent_dealership_row():
     assert row.vehicle_key == "Kart_01"
     assert row.location.x == pytest.approx(-286981.0)
     assert row.location.y == pytest.approx(188839.0)
-    assert row.location.z == pytest.approx(-21912.0)
+    assert row.location.z == pytest.approx(-21902.0)
     assert row.yaw == 0.0
     assert row.spawn_on_restart is True
 

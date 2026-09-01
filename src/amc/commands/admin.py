@@ -156,8 +156,10 @@ async def cmd_spawn_dealership(ctx: CommandContext, vehicle_label: Optional[str]
     #    the teleported player back down and a delay lets them re-enter the
     #    block radius (freeman 2026-09-01). The mod's _write_limiter serializes
     #    the two calls.
-    # 3) Dealer plot Z = playerZ - 100 (verified ground rule 2026-09-01).
-    pad_z = z - 100
+    # 3) Dealer plot Z = playerZ - 90 (freeman 2026-09-01: the game reports a
+    #    player's position 100 above ground, but the pad origin sits best at
+    #    -90; calibrated against working dealer pads).
+    pad_z = z - 90
     await spawn_dealership(
         ctx.http_client_mod,
         vehicle_key,
