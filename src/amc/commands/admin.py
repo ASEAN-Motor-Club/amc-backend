@@ -12,6 +12,7 @@ from amc.mod_server import (
     get_player,
     spawn_assets,
     spawn_vehicle,
+    spawn_dealership,
     force_exit_vehicle,
     get_players as get_players_mod,
     teleport_player,
@@ -33,7 +34,8 @@ from amc.models import (
     Garage,
     TeleportPoint,
 )
-from amc.enums import VehicleKey
+from amc.enums import VehicleKey, VehicleKeyByLabel
+from django.contrib.gis.geos import Point
 from django.utils import timezone
 from django.utils.translation import gettext as _, gettext_lazy
 from amc.utils import fuzzy_find_player
@@ -106,6 +108,78 @@ async def cmd_spawn_dealerships(ctx: CommandContext):
     if ctx.player_info and ctx.player_info.get("bIsAdmin"):
         async for vd in VehicleDealership.objects.filter(spawn_on_restart=True):
             await vd.spawn(ctx.http_client_mod)
+
+
+@registry.register(
+    "/spawn_dealership",
+    description=gettext_lazy("Spawn a vehicle dealership at your position (Admin)"),
+    category="Admin",
+)
+async def cmd_spawn_dealership(ctx: CommandContext, vehicle_label: Optional[str] = None):
+    if not ctx.player_info or not ctx.player_info.get("bIsAdmin"):
+        await ctx.reply(_("Admin-only"))
+        return
+
+    if vehicle_label is None:
+        await ctx.reply(
+            _("<Title>Spawn Dealership</>\n\n") + "\n".join(VehicleKey.labels)
+        )
+        return
+
+    vehicle_key = VehicleKeyByLabel.get(vehicle_label)
+    if vehicle_key is None:
+        await ctx.reply(
+            _("<Title>Unknown vehicle</>\n\nUse /spawn to list vehicle labels.")
+        )
+        return
+
+    loc = ctx.player_info.get("Location")
+    if not loc:
+        await ctx.reply(_("<Title>No location</>\n\nCould not read your position."))
+        return
+
+    x, y, z = loc["X"], loc["Y"], loc["Z"]
+
+    # 1) Teleport the admin straight up first. Verified live 2026-09-01: a
+    #    player standing near the pad origin blocks the dealership spawn.
+    try:
+        await teleport_player(
+            ctx.http_client_mod,
+            str(ctx.player.unique_id),
+            {"X": x, "Y": y, "Z": z + 300},
+        )
+    except Exception:
+        await ctx.reply(_("<Title>Teleport failed</>\n\nDealership not placed."))
+        return
+
+    # 2) Spawn IMMEDIATELY after the teleport — NO sleep here: gravity pulls
+    #    the teleported player back down and a delay lets them re-enter the
+    #    block radius (freeman 2026-09-01). The mod's _write_limiter serializes
+    #    the two calls.
+    # 3) Dealer plot Z = playerZ - 90 (freeman 2026-09-01: the game reports a
+    #    player's position 100 above ground, but the pad origin sits best at
+    #    -90; calibrated against working dealer pads).
+    pad_z = z - 90
+    await spawn_dealership(
+        ctx.http_client_mod,
+        vehicle_key,
+        {"X": x, "Y": y, "Z": pad_z},
+        0.0,
+    )
+
+    # 4) Persist so the plot respawns on server restart.
+    dealership = await VehicleDealership.objects.acreate(
+        vehicle_key=vehicle_key,
+        location=Point(x, y, pad_z),
+        yaw=0.0,
+        spawn_on_restart=True,
+        notes=f"/spawn_dealership by {ctx.character.name}",
+    )
+    await ctx.reply(
+        _(
+            "<Title>Dealership placed</>\n\n{vehicle} dealer at X={x:.0f} Y={y:.0f} (row {id}). Respawns on restart."
+        ).format(vehicle=vehicle_label, x=x, y=y, id=dealership.id)
+    )
 
 
 @registry.register(
