@@ -1,0 +1,49 @@
+{
+  "schema": "powercalc-provenance/1",
+  "model_version": "1.0.0",
+  "data_version": "2026.09.2",
+  "generated": "2026-09-02",
+  "validation": {
+    "method": "in-game dyno comparison (Yuuka, 2026-09-01)",
+    "case": "FordSmalBlock302_V8_5L_240HP + Intake 201 + Turbocharger_Stage1",
+    "in_game": {
+      "peak_torque_nm": 412.3,
+      "peak_torque_rpm": 4364,
+      "peak_power_hp": 293.0,
+      "peak_power_rpm": 6212
+    },
+    "model": {
+      "peak_torque_nm": 413.0,
+      "peak_torque_rpm": 4355,
+      "peak_power_hp": 293.2,
+      "peak_power_rpm": 6216
+    },
+    "residual": "value <0.2%, rpm <10"
+  },
+  "sources": {
+    "more_tuning": {
+      "mod": "qxZap_MoreTuning_P",
+      "workshop_file": "catbox x30czt.pak (2026-09-02)",
+      "sha256": "0c36be4d6cea1bc66063b5626b804b62de896c724458ba75b39b14babc05fbcd",
+      "bytes": 66499888,
+      "pak_version": "V8B",
+      "files": 1644
+    },
+    "vanilla_0_7_19": {
+      "game_version": "0.7.19",
+      "pak_ref": "mt-map-extract-ref/resource/MotorTown-Windows.pak",
+      "sha256": "39b0aa1b739e635800808bf7c06b781ca0ab089ff9e0fb8a8864030be84b02ca",
+      "bytes": 1508101360,
+      "gamedata": "gamedata.db 0.7.19 (vehicle_default_engine, vanilla engines)"
+    }
+  },
+  "engine_categories": "heuristic from part-row name patterns (bike/truck/pickup/car) + raw MassKg/VehicleTypes/TruckClasses from the Engines DataTable; categories are advisory, mass and tags are authoritative",
+  "notes": [
+    "MaxTorque unit is g*cm with g=10 -> N*m via x1e-4 (validated; 9.80665e-5 gives +2% error)",
+    "intake ramp unclamped at min(r,1.0); turbo spool E_sat=TurbineWeight/160 calibrated on Stage1",
+    "flat-profile turbos (BaseTorqueMultiplier==TorqueMultiplier) bypass the spool model entirely",
+    "EV peak power = MotorMaxPower/10 watts (game unit quirk)",
+    "intake/turbo ISEM field appears display-only; effect comes from Slope/BaseRPMRatio"
+  ],
+  "regen_pipeline": "mt-pak-extract worktree (skill: motortown-pak-mod-build) -> UAssetTool parse -> bake per references/engine-power-torque-model.md"
+}
