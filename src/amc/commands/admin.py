@@ -146,7 +146,7 @@ async def cmd_spawn_dealership(ctx: CommandContext, vehicle_label: Optional[str]
         await teleport_player(
             ctx.http_client_mod,
             str(ctx.player.unique_id),
-            {"X": x, "Y": y, "Z": z + 300},
+            {"X": x, "Y": y, "Z": z + 1000},
         )
     except Exception:
         await ctx.reply(_("<Title>Teleport failed</>\n\nDealership not placed."))
