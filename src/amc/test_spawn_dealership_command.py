@@ -113,11 +113,11 @@ async def test_teleports_up_then_spawns_pad_at_z_minus_100():
     # after — no sleep, gravity brings the player back down (freeman rule)
     assert order == ["tp", "sd"]
 
-    # teleport UP: z + 300, same X/Y, steam unique_id as player_id
+    # teleport UP: z + 1000, same X/Y, steam unique_id as player_id
     m_tp.assert_awaited_once_with(
         ctx.http_client_mod,
         str(player.unique_id),
-        {"X": -286981.0, "Y": 188839.0, "Z": -21512.0},  # -21812 + 300
+        {"X": -286981.0, "Y": 188839.0, "Z": -20812.0},  # -21812 + 1000
     )
     # pad at playerZ - 90
     m_sd.assert_awaited_once_with(
