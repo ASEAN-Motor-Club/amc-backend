@@ -58,8 +58,12 @@ def test_curve_block_renders():
     )
     block = _curve_block(res)
     assert block.startswith("```")
-    assert "T" in block and "P" in block
+    braille = sum(1 for ch in block if 0x2800 <= ord(ch) < 0x2900)
+    assert braille > 50  # actual dot characters, not placeholders
+    assert "torque" in block.lower() and "power" in block.lower()
     assert "rpm" in block
+    assert len(block) < 1024  # discord embed field limit
+    assert block.count("\n") == 25  # 24 content lines + fence
 
 
 def test_recommend_embed_empty_and_filled():

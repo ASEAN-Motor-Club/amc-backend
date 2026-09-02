@@ -82,27 +82,74 @@ def _setup_embed(result) -> discord.Embed:
     return emb
 
 
-def _curve_block(result, width: int = 48, height: int = 10) -> str:
-    """Compact torque (T) / power (P) overlay as a code block."""
+_BRAILLE_BASE = 0x2800
+# dot bit for (row 0..3, col 0..1) within a braille cell:
+#   1 4        0x01 0x08
+#   2 5   ->   0x02 0x10
+#   3 6        0x04 0x20
+#   7 8        0x40 0x80
+_BRAILLE_DOTS = ((0x01, 0x08), (0x02, 0x10), (0x04, 0x20), (0x40, 0x80))
+
+
+def _resample(pts, idx: int, n: int) -> list[float]:
+    """Linear-interpolate column idx of (rpm, ...) points to n uniform samples."""
+    xmin, xmax = pts[0][0], pts[-1][0]
+    span = xmax - xmin or 1.0
+    out, j = [], 0
+    for i in range(n):
+        x = xmin + span * i / (n - 1)
+        while j < len(pts) - 2 and pts[j + 1][0] < x:
+            j += 1
+        r0, v0 = pts[j][0], pts[j][idx]
+        r1, v1 = pts[j + 1][0], pts[j + 1][idx]
+        t = (x - r0) / (r1 - r0) if r1 > r0 else 0.0
+        out.append(v0 + (v1 - v0) * t)
+    return out
+
+
+def _braille_rows(values: list[float], width: int, height: int) -> list[str]:
+    """Render one series (one value per x-column) as braille dot rows.
+
+    Each character cell holds 2x4 dots, so width chars = 2*width x-samples
+    and height rows = 4*height y-levels. Values are normalized to their
+    own max (0 = bottom row). Vertical connectors fill gaps where adjacent
+    columns jump more than one dot row.
+    """
+    vrows = 4 * height
+    vmax = max(values) or 1.0
+    ys = [round(v / vmax * (vrows - 1)) for v in values]
+    grid = [[0] * width for _ in range(height)]
+    prev = None
+    for c, y in enumerate(ys):
+        col, dcol = c // 2, c % 2
+        grid[height - 1 - y // 4][col] |= _BRAILLE_DOTS[y % 4][dcol]
+        if prev is not None and abs(y - prev) > 1:
+            for yy in range(min(prev, y) + 1, max(prev, y)):
+                grid[height - 1 - yy // 4][col] |= _BRAILLE_DOTS[yy % 4][dcol]
+        prev = y
+    return ["".join(chr(_BRAILLE_BASE + b) if b else " " for b in row) for row in grid]
+
+
+def _curve_block(result, width: int = 36, height: int = 10) -> str:
+    """Torque + power as stacked braille plots in a code block.
+
+    Each series gets its own full-height y-scale (4x the vertical
+    resolution of the old T/P letter grid). Budget: 2 plots x (10 rows
+    of 36 chars) + captions/axis < 1024-char embed field limit.
+    """
     pts = result.curve_points
-    if not pts:
+    if len(pts) < 2:
         return ""
-    maxt = max(p[1] for p in pts) or 1.0
-    maxk = max(p[2] for p in pts) or 1.0
-    grid = [[" "] * width for _ in range(height)]
-    for rpm, tq, kw in pts:
-        col = min(width - 1, int(rpm / result.max_rpm / 1.25 * width))
-        rt = int(tq / maxt * (height - 1) + 0.5)
-        rk = int(kw / maxk * (height - 1) + 0.5)
-        row_t = height - 1 - rt
-        row_k = height - 1 - rk
-        if 0 <= row_t < height:
-            grid[row_t][col] = "T" if grid[row_t][col] == " " else "X"
-        if 0 <= row_k < height:
-            grid[row_k][col] = "P" if grid[row_k][col] == " " else "X"
-    rows = ["".join(r) for r in grid]
-    rows.append(f"{'':<{width // 2}}rpm →   (T=torque P=power)")
-    return "```\n" + "\n".join(rows) + "\n```"
+    xmax = pts[-1][0]
+    lines = []
+    for title, idx in (
+        (f"torque Nm · peak {result.peak_torque_nm:.0f} @ {result.peak_torque_rpm:.0f}", 1),
+        (f"power hp · peak {result.peak_power_hp:.0f} @ {result.peak_power_rpm:.0f}", 2),
+    ):
+        lines.append(title)
+        lines.extend(_braille_rows(_resample(pts, idx, 2 * width), width, height))
+        lines.append(f"0 → {xmax:,.0f} rpm")
+    return "```\n" + "\n".join(lines) + "\n```"
 
 
 def _recommend_embed(target_hp: float, hits) -> discord.Embed:
