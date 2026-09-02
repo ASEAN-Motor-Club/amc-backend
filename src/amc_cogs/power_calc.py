@@ -254,7 +254,7 @@ class PowerCalcCog(commands.Cog):
         max_mass: app_commands.Range[int, 0, 5000] | None = None,
         limit: app_commands.Range[int, 1, 15] = 10,
     ):
-        await interaction.response.defer(ephemeral=True)
+        await interaction.response.defer()
         hits = await asyncio.to_thread(
             search,
             float(target_hp),
@@ -265,7 +265,7 @@ class PowerCalcCog(commands.Cog):
             limit=limit,
         )
         await interaction.followup.send(
-            embed=_recommend_embed(float(target_hp), hits), ephemeral=True
+            embed=_recommend_embed(float(target_hp), hits),
         )
 
     @power.command(name="parts", description="List intake and turbocharger part values")
