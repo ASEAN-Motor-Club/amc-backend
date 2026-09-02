@@ -286,7 +286,7 @@ class PowerCalcCog(commands.Cog):
             color=_COLOR_INFO,
         )
         emb.set_footer(text=f"data {data_version()}")
-        await interaction.response.send_message(emb, ephemeral=True)
+        await interaction.response.send_message(embed=emb, ephemeral=True)
 
     @power.command(name="version", description="Calculator model/data versions")
     async def power_version(self, interaction: discord.Interaction):

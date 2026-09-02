@@ -5,7 +5,7 @@ callbacks are exercised through the embed helpers; autocomplete and the
 cog registration are smoke-tested.
 """
 
-from unittest.mock import MagicMock
+from unittest.mock import AsyncMock, MagicMock
 
 import discord
 import pytest
@@ -99,3 +99,24 @@ def test_turbo_autocomplete_labels_eco():
     choices = asyncio.run(_turbo_autocomplete(MagicMock(), "Eco"))
     assert choices
     assert all("(reduced hp)" in c.name for c in choices)
+
+
+def test_parts_command_sends_embed_as_kwarg(cog):
+    """Regression: the embed must go as send_message(embed=...), never
+    positionally. A positional Embed lands in the `content` slot and
+    discord.py stringifies it (str(Embed) is the object repr), so the
+    user gets a garbage ephemeral message with no embed — the bug that
+    shipped in the original /power parts (#68)."""
+    import asyncio
+
+    interaction = MagicMock()
+    interaction.response.send_message = AsyncMock()
+    asyncio.run(PowerCalcCog.power_parts.callback(cog, interaction))
+
+    interaction.response.send_message.assert_called_once()
+    kwargs = interaction.response.send_message.await_args.kwargs
+    emb = kwargs.get("embed")
+    assert isinstance(emb, discord.Embed)
+    assert kwargs.get("ephemeral") is True
+    assert emb.description and "Intakes" in emb.description
+    assert "Turbos" in emb.description
