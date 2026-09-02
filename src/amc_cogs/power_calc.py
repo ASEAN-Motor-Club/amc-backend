@@ -14,6 +14,8 @@ event loop with the game-chat relay and must never block it.
 from __future__ import annotations
 
 import asyncio
+import io
+import os
 
 import discord
 from discord import app_commands
@@ -29,6 +31,7 @@ from powercalc import (
     provenance,
     search,
 )
+from powercalc.model import KW_TO_HP
 
 _BRANCH_CHOICES = [
     app_commands.Choice(name="any induction", value="all"),
@@ -82,74 +85,62 @@ def _setup_embed(result) -> discord.Embed:
     return emb
 
 
-_BRAILLE_BASE = 0x2800
-# dot bit for (row 0..3, col 0..1) within a braille cell:
-#   1 4        0x01 0x08
-#   2 5   ->   0x02 0x10
-#   3 6        0x04 0x20
-#   7 8        0x40 0x80
-_BRAILLE_DOTS = ((0x01, 0x08), (0x02, 0x10), (0x04, 0x20), (0x40, 0x80))
+def _curve_png(result) -> io.BytesIO:
+    """Render torque/power vs rpm as a compact PNG chart for Discord.
 
-
-def _resample(pts, idx: int, n: int) -> list[float]:
-    """Linear-interpolate column idx of (rpm, ...) points to n uniform samples."""
-    xmin, xmax = pts[0][0], pts[-1][0]
-    span = xmax - xmin or 1.0
-    out, j = [], 0
-    for i in range(n):
-        x = xmin + span * i / (n - 1)
-        while j < len(pts) - 2 and pts[j + 1][0] < x:
-            j += 1
-        r0, v0 = pts[j][0], pts[j][idx]
-        r1, v1 = pts[j + 1][0], pts[j + 1][idx]
-        t = (x - r0) / (r1 - r0) if r1 > r0 else 0.0
-        out.append(v0 + (v1 - v0) * t)
-    return out
-
-
-def _braille_rows(values: list[float], width: int, height: int) -> list[str]:
-    """Render one series (one value per x-column) as braille dot rows.
-
-    Each character cell holds 2x4 dots, so width chars = 2*width x-samples
-    and height rows = 4*height y-levels. Values are normalized to their
-    own max (0 = bottom row). Vertical connectors fill gaps where adjacent
-    columns jump more than one dot row.
+    matplotlib is already a project dependency (imported elsewhere in the
+    worker), so this adds no new package. Two stacked axes share the rpm
+    scale; each series is annotated with its peak. Styled for Discord's
+    dark surface with an explicit panel color so it stays readable on
+    light theme too. Runs via asyncio.to_thread (Agg, no display).
     """
-    vrows = 4 * height
-    vmax = max(values) or 1.0
-    ys = [round(v / vmax * (vrows - 1)) for v in values]
-    grid = [[0] * width for _ in range(height)]
-    prev = None
-    for c, y in enumerate(ys):
-        col, dcol = c // 2, c % 2
-        grid[height - 1 - y // 4][col] |= _BRAILLE_DOTS[y % 4][dcol]
-        if prev is not None and abs(y - prev) > 1:
-            for yy in range(min(prev, y) + 1, max(prev, y)):
-                grid[height - 1 - yy // 4][col] |= _BRAILLE_DOTS[yy % 4][dcol]
-        prev = y
-    return ["".join(chr(_BRAILLE_BASE + b) if b else " " for b in row) for row in grid]
+    # Best effort: a stable config dir avoids the per-process font-cache
+    # rebuild matplotlib otherwise does when HOME is not writable. Only
+    # effective if matplotlib has not been imported yet this process.
+    os.environ.setdefault("MPLCONFIGDIR", "/tmp/mpl-amc-cache")
+    import matplotlib
 
+    matplotlib.use("Agg")
+    import matplotlib.pyplot as plt
 
-def _curve_block(result, width: int = 36, height: int = 10) -> str:
-    """Torque + power as stacked braille plots in a code block.
-
-    Each series gets its own full-height y-scale (4x the vertical
-    resolution of the old T/P letter grid). Budget: 2 plots x (10 rows
-    of 36 chars) + captions/axis < 1024-char embed field limit.
-    """
     pts = result.curve_points
-    if len(pts) < 2:
-        return ""
-    xmax = pts[-1][0]
-    lines = []
-    for title, idx in (
-        (f"torque Nm · peak {result.peak_torque_nm:.0f} @ {result.peak_torque_rpm:.0f}", 1),
-        (f"power hp · peak {result.peak_power_hp:.0f} @ {result.peak_power_rpm:.0f}", 2),
+    rpm = [p[0] for p in pts]
+    panel, text, gridc = "#2b2d31", "#dbdee1", "#4b4d54"
+    fig, (ax_t, ax_p) = plt.subplots(
+        2, 1, figsize=(5.2, 3.6), dpi=100, sharex=True
+    )
+    fig.patch.set_facecolor(panel)
+    for ax, series, color, unit, peak_v, peak_r in (
+        (ax_t, [p[1] for p in pts], "#5865f2", "Nm",
+         result.peak_torque_nm, result.peak_torque_rpm),
+        (ax_p, [p[2] * KW_TO_HP for p in pts], "#f0b232", "hp",
+         result.peak_power_hp, result.peak_power_rpm),
     ):
-        lines.append(title)
-        lines.extend(_braille_rows(_resample(pts, idx, 2 * width), width, height))
-        lines.append(f"0 → {xmax:,.0f} rpm")
-    return "```\n" + "\n".join(lines) + "\n```"
+        ax.set_facecolor(panel)
+        ax.plot(rpm, series, color=color, lw=1.6)
+        ax.scatter([peak_r], [peak_v], color=color, s=12, zorder=3)
+        ax.annotate(
+            f"{peak_v:.0f} {unit} @ {peak_r:,.0f}",
+            (peak_r, peak_v),
+            xytext=(4, 2),
+            textcoords="offset points",
+            color=color,
+            fontsize=7,
+        )
+        ax.set_ylabel(unit, color=text, fontsize=8)
+        ax.tick_params(colors=text, labelsize=7)
+        ax.grid(True, color=gridc, lw=0.4, alpha=0.6)
+        for spine in ax.spines.values():
+            spine.set_color(gridc)
+    ax_p.set_xlabel("rpm", color=text, fontsize=8)
+    ax_p.set_xlim(0, pts[-1][0])
+    fig.suptitle(result.engine_part, color=text, fontsize=9)
+    fig.tight_layout()
+    buf = io.BytesIO()
+    fig.savefig(buf, format="png", facecolor=panel)
+    plt.close(fig)
+    buf.seek(0)
+    return buf
 
 
 def _recommend_embed(target_hp: float, hits) -> discord.Embed:
@@ -249,7 +240,7 @@ class PowerCalcCog(commands.Cog):
         engine="Engine part id",
         intake="Intake part (omit for stock intake)",
         turbo="Turbocharger part (omit for naturally aspirated)",
-        show_curve="Attach a compact torque/power curve",
+        show_curve="Attach a torque/power chart image",
     )
     @app_commands.autocomplete(
         engine=_engine_autocomplete,
@@ -277,11 +268,15 @@ class PowerCalcCog(commands.Cog):
             )
             return
         emb = _setup_embed(result)
+        file = None
         if show_curve and not result.is_ev:
-            block = _curve_block(result)
-            if block:
-                emb.add_field(name="Curve", value=block, inline=False)
-        await interaction.response.send_message(embed=emb)
+            buf = await asyncio.to_thread(_curve_png, result)
+            file = discord.File(buf, filename="curve.png")
+            emb.set_image(url="attachment://curve.png")
+        if file is not None:
+            await interaction.response.send_message(embed=emb, file=file)
+        else:
+            await interaction.response.send_message(embed=emb)
 
     @power.command(name="recommend", description="Recommend builds near a target hp")
     @app_commands.describe(
