@@ -122,6 +122,49 @@ def _distance_3d(a, b):
     return math.sqrt((a[0] - b[0]) ** 2 + (a[1] - b[1]) ** 2 + (a[2] - b[2]) ** 2)
 
 
+CM_PER_KM = 100_000
+
+
+async def _fetch_custom_destination(ctx: CommandContext, player_info: dict) -> dict:
+    """Ensure player_info carries CustomDestinationAbsoluteLocation.
+
+    The native game API doesn't expose the map-picked destination marker —
+    fall back to the mod server's player info (which does) and merge.
+    """
+    if player_info.get("CustomDestinationAbsoluteLocation"):
+        return player_info
+    if ctx.http_client_mod and ctx.player:
+        try:
+            mod_player_info = await get_player(
+                ctx.http_client_mod, str(ctx.player.unique_id)
+            )
+            if mod_player_info and mod_player_info.get(
+                "CustomDestinationAbsoluteLocation"
+            ):
+                return {**player_info, **mod_player_info}
+        except Exception:
+            pass
+    return player_info
+
+
+def _correct_marker_z(location: dict, is_on_foot: bool) -> dict:
+    """Heightmap-fallback Z correction for a map-picked marker.
+
+    The map waypoint's Z is unreliable — players clip through the ground
+    when it's used as-is.  Correct it to at least the terrain height from
+    the heightmap, but never *below* the game-provided Z: the heightmap is
+    bare terrain and doesn't include buildings, piers, etc. that the
+    destination may sit on top of.
+    """
+    terrain_z = terrain_z_cm(location["X"], location["Y"])
+    base_z = location["Z"]
+    if terrain_z is not None:
+        base_z = max(base_z, terrain_z)
+    # Fix Z offset based on vehicle
+    location["Z"] = base_z + (100 if is_on_foot else 5)
+    return location
+
+
 @registry.register(
     ["/teleport vehicle", "/tp vehicle"],
     description=gettext_lazy(
@@ -311,22 +354,7 @@ async def cmd_tp_name(ctx: CommandContext, name: str = ""):
 
             # Admins typing bare /tp need CustomDestinationAbsoluteLocation,
             # which the native game API doesn't expose — fetch from mod server.
-            if (
-                not name
-                and not player_info.get("CustomDestinationAbsoluteLocation")
-                and ctx.http_client_mod
-                and ctx.player
-            ):
-                try:
-                    mod_player_info = await get_player(
-                        ctx.http_client_mod, str(ctx.player.unique_id)
-                    )
-                    if mod_player_info and mod_player_info.get(
-                        "CustomDestinationAbsoluteLocation"
-                    ):
-                        player_info = {**player_info, **mod_player_info}
-                except Exception:
-                    pass
+            player_info = await _fetch_custom_destination(ctx, player_info)
 
             # Teleport to Custom Waypoint
             no_vehicles = (
@@ -361,21 +389,9 @@ async def cmd_tp_name(ctx: CommandContext, name: str = ""):
                     return
 
             if location:
-                # The map waypoint's Z is unreliable — players clip through
-                # the ground when it's used as-is.  Correct it to at least
-                # the terrain height from the heightmap, but never *below*
-                # the game-provided Z: the heightmap is bare terrain and
-                # doesn't include buildings, piers, etc. that the
-                # destination may sit on top of.
-                terrain_z = terrain_z_cm(location["X"], location["Y"])
-                base_z = location["Z"]
-                if terrain_z is not None:
-                    base_z = max(base_z, terrain_z)
-                # Fix Z offset based on vehicle
-                if player_info.get("VehicleKey") == "None":
-                    location["Z"] = base_z + 100
-                else:
-                    location["Z"] = base_z + 5
+                location = _correct_marker_z(
+                    location, player_info.get("VehicleKey") == "None"
+                )
 
     if not location:
         asyncio.create_task(
