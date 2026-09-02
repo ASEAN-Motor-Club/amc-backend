@@ -169,6 +169,12 @@ class TeleportWaypointHeightmapTestCase(TestCase):
     async def test_waypoint_z_raised_to_terrain_when_below(self):
         # Game Z below terrain (bogus waypoint Z) -> terrain wins.
         # VehicleKey missing -> else branch, Z + 5.
+        self.ctx.player_info = {
+            "bIsAdmin": True,
+            "CustomDestinationAbsoluteLocation": {
+                "X": -500000, "Y": 400000, "Z": -50000
+            },
+        }
         location = await self._run_tp(terrain_z=-20000)
         self.assertEqual(location["Z"], -20000 + 5)
 
@@ -184,7 +190,7 @@ class TeleportWaypointHeightmapTestCase(TestCase):
             "bIsAdmin": True,
             "VehicleKey": "None",
             "CustomDestinationAbsoluteLocation": {
-                "X": -500000, "Y": 400000, "Z": 300
+                "X": -500000, "Y": 400000, "Z": -50000
             },
         }
         location = await self._run_tp(terrain_z=-20000)
