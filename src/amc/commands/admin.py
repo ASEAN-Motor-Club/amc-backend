@@ -133,6 +133,20 @@ async def cmd_spawn_dealership(ctx: CommandContext, vehicle_label: Optional[str]
         )
         return
 
+    # 0) Read the admin's facing (pawn Yaw) from the mod endpoint so the pad
+    #    faces the same way the admin is looking (freeman 2026-09-02). The
+    #    chat-context player_info (native API) carries Location but no
+    #    Rotation, so this needs a fresh mod fetch. Falls back to 0.0 (the
+    #    previous behaviour) if the fetch fails or has no Rotation.
+    try:
+        player_data = await get_player(
+            ctx.http_client_mod, str(ctx.player.unique_id), force_refresh=True
+        )
+    except Exception:
+        player_data = None
+    rot = player_data.get("Rotation", {}) if player_data else {}
+    yaw = rot.get("Yaw", 0.0)
+
     loc = ctx.player_info.get("Location")
     if not loc:
         await ctx.reply(_("<Title>No location</>\n\nCould not read your position."))
@@ -164,14 +178,14 @@ async def cmd_spawn_dealership(ctx: CommandContext, vehicle_label: Optional[str]
         ctx.http_client_mod,
         vehicle_key,
         {"X": x, "Y": y, "Z": pad_z},
-        0.0,
+        yaw,
     )
 
     # 4) Persist so the plot respawns on server restart.
     dealership = await VehicleDealership.objects.acreate(
         vehicle_key=vehicle_key,
         location=Point(x, y, pad_z),
-        yaw=0.0,
+        yaw=yaw,
         spawn_on_restart=True,
         notes=f"/spawn_dealership by {ctx.character.name}",
     )

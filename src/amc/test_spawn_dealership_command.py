@@ -103,7 +103,12 @@ async def test_teleports_up_then_spawns_pad_at_z_minus_100():
         "amc.commands.admin.teleport_player", new_callable=AsyncMock
     ) as m_tp, patch(
         "amc.commands.admin.spawn_dealership", new_callable=AsyncMock
-    ) as m_sd, patch("amc.mod_server.show_popup", new_callable=AsyncMock):
+    ) as m_sd, patch(
+        "amc.commands.admin.get_player", new_callable=AsyncMock
+    ) as m_gp, patch(
+        "amc.mod_server.show_popup", new_callable=AsyncMock
+    ):
+        m_gp.return_value = None  # no pawn data -> yaw falls back to 0.0
         order = []
         m_tp.side_effect = lambda *a, **k: order.append("tp")
         m_sd.side_effect = lambda *a, **k: order.append("sd")
@@ -138,7 +143,12 @@ async def test_creates_persistent_dealership_row():
         "amc.commands.admin.teleport_player", new_callable=AsyncMock
     ), patch(
         "amc.commands.admin.spawn_dealership", new_callable=AsyncMock
-    ), patch("amc.mod_server.show_popup", new_callable=AsyncMock):
+    ), patch(
+        "amc.commands.admin.get_player", new_callable=AsyncMock
+    ) as m_gp, patch(
+        "amc.mod_server.show_popup", new_callable=AsyncMock
+    ):
+        m_gp.return_value = None  # no pawn data -> yaw falls back to 0.0
         await cmd_spawn_dealership(ctx, "Kart")
 
     rows = [
@@ -160,6 +170,97 @@ async def test_creates_persistent_dealership_row():
 
 @pytest.mark.asyncio
 @pytest.mark.django_db
+async def test_uses_admin_pawn_yaw_for_spawn_and_row():
+    player, character = await _make_pair()
+    ctx = make_ctx(player, character, {"bIsAdmin": True, "Location": dict(PLAYER_LOC)})
+
+    with patch(
+        "amc.commands.admin.teleport_player", new_callable=AsyncMock
+    ), patch(
+        "amc.commands.admin.spawn_dealership", new_callable=AsyncMock
+    ) as m_sd, patch(
+        "amc.commands.admin.get_player", new_callable=AsyncMock
+    ) as m_gp, patch(
+        "amc.mod_server.show_popup", new_callable=AsyncMock
+    ):
+        m_gp.return_value = {"Rotation": {"Roll": 0.0, "Pitch": 0.0, "Yaw": 170.0}}
+        await cmd_spawn_dealership(ctx, "Kart")
+
+    # the pad spawns (and persists) facing the admin's pawn yaw
+    m_sd.assert_awaited_once_with(
+        ctx.http_client_mod,
+        "Kart_01",
+        {"X": -286981.0, "Y": 188839.0, "Z": -21902.0},
+        170.0,
+    )
+    row = await VehicleDealership.objects.filter(
+        notes=f"/spawn_dealership by {character.name}"
+    ).afirst()
+    assert row is not None
+    assert row.yaw == pytest.approx(170.0)
+
+
+@pytest.mark.asyncio
+@pytest.mark.django_db
+async def test_missing_rotation_falls_back_to_yaw_zero():
+    player, character = await _make_pair()
+    ctx = make_ctx(player, character, {"bIsAdmin": True, "Location": dict(PLAYER_LOC)})
+
+    with patch(
+        "amc.commands.admin.teleport_player", new_callable=AsyncMock
+    ), patch(
+        "amc.commands.admin.spawn_dealership", new_callable=AsyncMock
+    ) as m_sd, patch(
+        "amc.commands.admin.get_player", new_callable=AsyncMock
+    ) as m_gp, patch(
+        "amc.mod_server.show_popup", new_callable=AsyncMock
+    ):
+        # pawn payload without a Rotation key (older mod builds)
+        m_gp.return_value = {"PlayerName": "admin"}
+        await cmd_spawn_dealership(ctx, "Kart")
+
+    m_sd.assert_awaited_once_with(
+        ctx.http_client_mod,
+        "Kart_01",
+        {"X": -286981.0, "Y": 188839.0, "Z": -21902.0},
+        0.0,
+    )
+
+
+@pytest.mark.asyncio
+@pytest.mark.django_db
+async def test_get_player_failure_falls_back_to_yaw_zero():
+    player, character = await _make_pair()
+    ctx = make_ctx(player, character, {"bIsAdmin": True, "Location": dict(PLAYER_LOC)})
+
+    with patch(
+        "amc.commands.admin.teleport_player", new_callable=AsyncMock
+    ), patch(
+        "amc.commands.admin.spawn_dealership", new_callable=AsyncMock
+    ) as m_sd, patch(
+        "amc.commands.admin.get_player", new_callable=AsyncMock
+    ) as m_gp, patch(
+        "amc.mod_server.show_popup", new_callable=AsyncMock
+    ):
+        m_gp.side_effect = Exception("mod endpoint down")
+        await cmd_spawn_dealership(ctx, "Kart")
+
+    # a failed yaw fetch must not abort the placement (old behaviour kept)
+    m_sd.assert_awaited_once_with(
+        ctx.http_client_mod,
+        "Kart_01",
+        {"X": -286981.0, "Y": 188839.0, "Z": -21902.0},
+        0.0,
+    )
+    row = await VehicleDealership.objects.filter(
+        notes=f"/spawn_dealership by {character.name}"
+    ).afirst()
+    assert row is not None
+    assert row.yaw == 0.0
+
+
+@pytest.mark.asyncio
+@pytest.mark.django_db
 async def test_teleport_failure_aborts_before_spawn():
     player, character = await _make_pair()
     ctx = make_ctx(player, character, {"bIsAdmin": True, "Location": dict(PLAYER_LOC)})
@@ -168,7 +269,12 @@ async def test_teleport_failure_aborts_before_spawn():
         "amc.commands.admin.teleport_player", new_callable=AsyncMock
     ) as m_tp, patch(
         "amc.commands.admin.spawn_dealership", new_callable=AsyncMock
-    ) as m_sd, patch("amc.mod_server.show_popup", new_callable=AsyncMock):
+    ) as m_sd, patch(
+        "amc.commands.admin.get_player", new_callable=AsyncMock
+    ) as m_gp, patch(
+        "amc.mod_server.show_popup", new_callable=AsyncMock
+    ):
+        m_gp.return_value = None
         m_tp.side_effect = Exception("boom")
         await cmd_spawn_dealership(ctx, "Kart")
 
