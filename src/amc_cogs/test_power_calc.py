@@ -12,7 +12,7 @@ import pytest
 
 from amc_cogs.power_calc import (
     PowerCalcCog,
-    _curve_block,
+    _curve_png,
     _filter_choices,
     _recommend_embed,
     _setup_embed,
@@ -52,14 +52,14 @@ def test_setup_embed_ev():
     assert "412" in emb.description
 
 
-def test_curve_block_renders():
+def test_curve_png_renders():
     res = compute_setup(
         "SmallBlock_240HP", "201", "Turbocharger_Stage1", keep_points=True
     )
-    block = _curve_block(res)
-    assert block.startswith("```")
-    assert "T" in block and "P" in block
-    assert "rpm" in block
+    buf = _curve_png(res)
+    data = buf.getvalue()
+    assert data[:8] == b"\x89PNG\r\n\x1a\n"  # real PNG magic
+    assert 5_000 < len(data) < 500_000  # lightweight attachment
 
 
 def test_recommend_embed_empty_and_filled():

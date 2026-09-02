@@ -14,6 +14,8 @@ event loop with the game-chat relay and must never block it.
 from __future__ import annotations
 
 import asyncio
+import io
+import os
 
 import discord
 from discord import app_commands
@@ -29,6 +31,7 @@ from powercalc import (
     provenance,
     search,
 )
+from powercalc.model import KW_TO_HP
 
 _BRANCH_CHOICES = [
     app_commands.Choice(name="any induction", value="all"),
@@ -82,27 +85,62 @@ def _setup_embed(result) -> discord.Embed:
     return emb
 
 
-def _curve_block(result, width: int = 48, height: int = 10) -> str:
-    """Compact torque (T) / power (P) overlay as a code block."""
+def _curve_png(result) -> io.BytesIO:
+    """Render torque/power vs rpm as a compact PNG chart for Discord.
+
+    matplotlib is already a project dependency (imported elsewhere in the
+    worker), so this adds no new package. Two stacked axes share the rpm
+    scale; each series is annotated with its peak. Styled for Discord's
+    dark surface with an explicit panel color so it stays readable on
+    light theme too. Runs via asyncio.to_thread (Agg, no display).
+    """
+    # Best effort: a stable config dir avoids the per-process font-cache
+    # rebuild matplotlib otherwise does when HOME is not writable. Only
+    # effective if matplotlib has not been imported yet this process.
+    os.environ.setdefault("MPLCONFIGDIR", "/tmp/mpl-amc-cache")
+    import matplotlib
+
+    matplotlib.use("Agg")
+    import matplotlib.pyplot as plt
+
     pts = result.curve_points
-    if not pts:
-        return ""
-    maxt = max(p[1] for p in pts) or 1.0
-    maxk = max(p[2] for p in pts) or 1.0
-    grid = [[" "] * width for _ in range(height)]
-    for rpm, tq, kw in pts:
-        col = min(width - 1, int(rpm / result.max_rpm / 1.25 * width))
-        rt = int(tq / maxt * (height - 1) + 0.5)
-        rk = int(kw / maxk * (height - 1) + 0.5)
-        row_t = height - 1 - rt
-        row_k = height - 1 - rk
-        if 0 <= row_t < height:
-            grid[row_t][col] = "T" if grid[row_t][col] == " " else "X"
-        if 0 <= row_k < height:
-            grid[row_k][col] = "P" if grid[row_k][col] == " " else "X"
-    rows = ["".join(r) for r in grid]
-    rows.append(f"{'':<{width // 2}}rpm →   (T=torque P=power)")
-    return "```\n" + "\n".join(rows) + "\n```"
+    rpm = [p[0] for p in pts]
+    panel, text, gridc = "#2b2d31", "#dbdee1", "#4b4d54"
+    fig, (ax_t, ax_p) = plt.subplots(
+        2, 1, figsize=(5.2, 3.6), dpi=100, sharex=True
+    )
+    fig.patch.set_facecolor(panel)
+    for ax, series, color, unit, peak_v, peak_r in (
+        (ax_t, [p[1] for p in pts], "#5865f2", "Nm",
+         result.peak_torque_nm, result.peak_torque_rpm),
+        (ax_p, [p[2] * KW_TO_HP for p in pts], "#f0b232", "hp",
+         result.peak_power_hp, result.peak_power_rpm),
+    ):
+        ax.set_facecolor(panel)
+        ax.plot(rpm, series, color=color, lw=1.6)
+        ax.scatter([peak_r], [peak_v], color=color, s=12, zorder=3)
+        ax.annotate(
+            f"{peak_v:.0f} {unit} @ {peak_r:,.0f}",
+            (peak_r, peak_v),
+            xytext=(4, 2),
+            textcoords="offset points",
+            color=color,
+            fontsize=7,
+        )
+        ax.set_ylabel(unit, color=text, fontsize=8)
+        ax.tick_params(colors=text, labelsize=7)
+        ax.grid(True, color=gridc, lw=0.4, alpha=0.6)
+        for spine in ax.spines.values():
+            spine.set_color(gridc)
+    ax_p.set_xlabel("rpm", color=text, fontsize=8)
+    ax_p.set_xlim(0, pts[-1][0])
+    fig.suptitle(result.engine_part, color=text, fontsize=9)
+    fig.tight_layout()
+    buf = io.BytesIO()
+    fig.savefig(buf, format="png", facecolor=panel)
+    plt.close(fig)
+    buf.seek(0)
+    return buf
 
 
 def _recommend_embed(target_hp: float, hits) -> discord.Embed:
@@ -202,7 +240,7 @@ class PowerCalcCog(commands.Cog):
         engine="Engine part id",
         intake="Intake part (omit for stock intake)",
         turbo="Turbocharger part (omit for naturally aspirated)",
-        show_curve="Attach a compact torque/power curve",
+        show_curve="Attach a torque/power chart image",
     )
     @app_commands.autocomplete(
         engine=_engine_autocomplete,
@@ -230,11 +268,15 @@ class PowerCalcCog(commands.Cog):
             )
             return
         emb = _setup_embed(result)
+        file = None
         if show_curve and not result.is_ev:
-            block = _curve_block(result)
-            if block:
-                emb.add_field(name="Curve", value=block, inline=False)
-        await interaction.response.send_message(embed=emb)
+            buf = await asyncio.to_thread(_curve_png, result)
+            file = discord.File(buf, filename="curve.png")
+            emb.set_image(url="attachment://curve.png")
+        if file is not None:
+            await interaction.response.send_message(embed=emb, file=file)
+        else:
+            await interaction.response.send_message(embed=emb)
 
     @power.command(name="recommend", description="Recommend builds near a target hp")
     @app_commands.describe(
