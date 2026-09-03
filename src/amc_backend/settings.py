@@ -358,6 +358,10 @@ DISCORD_COP_ROLE_ID = int(os.environ.get("DISCORD_COP_ROLE_ID", "148664476540233
 DISCORD_CRIMINAL_ROLE_ID = int(
     os.environ.get("DISCORD_CRIMINAL_ROLE_ID", "1486645424910635029")
 )
+# "Active" Discord role: synced daily by amc.active_role — linked players with a
+# game login in the last 30 days hold it, everyone else holding it loses it.
+# 0 = disabled (cron no-ops until the role exists and the ID is configured).
+DISCORD_ACTIVE_ROLE_ID = int(os.environ.get("DISCORD_ACTIVE_ROLE_ID", "0"))
 DISCORD_COP_CHANNEL_ID = int(os.environ.get("DISCORD_COP_CHANNEL_ID", 0))
 DISCORD_CRIMINAL_CHANNEL_ID = int(os.environ.get("DISCORD_CRIMINAL_CHANNEL_ID", 0))
 FACTION_SWITCH_COOLDOWN_HOURS = int(os.environ.get("FACTION_SWITCH_COOLDOWN_HOURS", 24))
