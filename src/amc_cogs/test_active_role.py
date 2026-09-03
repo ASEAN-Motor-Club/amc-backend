@@ -13,9 +13,7 @@ from amc_cogs.active_role import ActiveRoleCog
 
 def _interaction(*, admin: bool, guild: bool = True):
     interaction = MagicMock()
-    interaction.response = SimpleNamespace(
-        send_message=AsyncMock(), defer=AsyncMock()
-    )
+    interaction.response = SimpleNamespace(send_message=AsyncMock(), defer=AsyncMock())
     interaction.followup = MagicMock()
     interaction.followup.send = AsyncMock()
     if guild:
@@ -52,7 +50,9 @@ def test_active_sync_reports_summary_followup():
     cog = ActiveRoleCog(MagicMock())
     interaction = _interaction(admin=True)
     summary = {"skipped": False, "added": 3, "removed": 1, "missing": 0}
-    with patch("amc_cogs.active_role.sync_active_role", new=AsyncMock(return_value=summary)):
+    with patch(
+        "amc_cogs.active_role.sync_active_role", new=AsyncMock(return_value=summary)
+    ):
         asyncio.run(ActiveRoleCog.active_sync.callback(cog, interaction))
     interaction.response.defer.assert_awaited_once_with(ephemeral=True)
     interaction.followup.send.assert_awaited_once()
@@ -65,7 +65,9 @@ def test_active_sync_reports_skipped_configuration():
     cog = ActiveRoleCog(MagicMock())
     interaction = _interaction(admin=True)
     summary = {"skipped": True, "added": 0, "removed": 0, "missing": 0}
-    with patch("amc_cogs.active_role.sync_active_role", new=AsyncMock(return_value=summary)):
+    with patch(
+        "amc_cogs.active_role.sync_active_role", new=AsyncMock(return_value=summary)
+    ):
         asyncio.run(ActiveRoleCog.active_sync.callback(cog, interaction))
     text = interaction.followup.send.await_args.args[0]
     assert "skipped" in text

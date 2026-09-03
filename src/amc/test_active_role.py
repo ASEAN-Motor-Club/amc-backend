@@ -107,9 +107,7 @@ def _bot(role_members, guild_members):
     role.members = role_members
     guild = MagicMock()
     guild.get_role.return_value = role
-    guild.get_member = lambda uid: next(
-        (m for m in guild_members if m.id == uid), None
-    )
+    guild.get_member = lambda uid: next((m for m in guild_members if m.id == uid), None)
     # Unknown members (e.g. rows leaked between tests) raise NotFound like a
     # real guild where the user never joined.
     import discord
@@ -131,15 +129,13 @@ async def test_sync_adds_and_removes(settings):
 
     active_p = await Player.objects.acreate(unique_id=21, discord_user_id=21)
     active_c = await Character.objects.acreate(player=active_p, name="c21")
-    await PlayerStatusLog.objects.acreate(
-        character=active_c, timespan=(now, None)
-    )
+    await PlayerStatusLog.objects.acreate(character=active_c, timespan=(now, None))
     # linked but no recent login → must lose the role
     await Player.objects.acreate(unique_id=22, discord_user_id=22)
 
     stale_member = _member(22)  # currently holds the role, inactive
     active_member = _member(21)  # active, no role yet
-    bot, guild, _role = _bot(
+    bot, _guild, _role = _bot(
         role_members=[stale_member],
         guild_members=[active_member, stale_member],
     )
@@ -160,7 +156,7 @@ async def test_sync_skips_when_role_id_unset(settings):
     from amc.active_role import sync_active_role
 
     settings.DISCORD_ACTIVE_ROLE_ID = 0
-    bot, guild, _role = _bot(role_members=[], guild_members=[])
+    bot, _guild, _role = _bot(role_members=[], guild_members=[])
     summary = await sync_active_role(bot)
     assert summary == {"skipped": True, "added": 0, "removed": 0, "missing": 0}
     bot.get_guild.assert_not_called()
