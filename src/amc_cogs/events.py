@@ -1,5 +1,6 @@
 import asyncio
 import re
+
 from django.db.models import StdDev, F, Window
 from django.db.models.functions import RowNumber
 from discord import app_commands
@@ -167,6 +168,24 @@ async def send_results_message(channel, scheduled_event, championship, participa
         embed.set_footer(text=f"Part of {championship.name}")
 
     await channel.send(embed=embed)
+
+
+def _select_event(events, selector):
+    """Pick an event from a /events listing.
+
+    No selector + exactly one event -> that event. Otherwise match by GUID
+    prefix or name substring. Returns None when the choice is ambiguous
+    (caller should list the events) or nothing matched.
+    """
+    if not selector:
+        return events[0] if len(events) == 1 else None
+    lowered = selector.lower()
+    for event in events:
+        if event["EventGuid"].lower().startswith(lowered) or (
+            lowered in event.get("EventName", "").lower()
+        ):
+            return event
+    return None
 
 
 class EventsCog(commands.Cog):
@@ -459,39 +478,69 @@ class EventsCog(commands.Cog):
 
     @app_commands.command(
         name="join_player_to_event",
-        description="Joins a player into an event (Event Server)",
+        description="Joins a player into an event (Main Server)",
     )
     @app_commands.checks.has_any_role(settings.DISCORD_EVENT_ADMIN_ROLE_ID)
     @app_commands.autocomplete(player_id=player_autocomplete)
-    async def join_player_to_event(self, ctx, player_id: str):
-        events = await get_events(self.bot.event_http_client_mod)
+    async def join_player_to_event(
+        self, ctx, player_id: str, event: str | None = None
+    ):
+        events = await get_events(self.bot.http_client_mod)
         if not events:
             await ctx.response.send_message("No active events")
             return
 
-        event = events[0]
+        selected = _select_event(events, event)
+        if selected is None:
+            listing = "\n".join(
+                f"- **{e['EventName']}** (`{e['EventGuid'][:8]}`)"
+                for e in events[:10]
+            )
+            await ctx.response.send_message(
+                "Multiple active events — specify one by name or GUID prefix:\n"
+                f"{listing}"
+            )
+            return
+
         await join_player_to_event(
-            self.bot.event_http_client_mod, event["EventGuid"], player_id
+            self.bot.http_client_mod, selected["EventGuid"], player_id
         )
-        await ctx.response.send_message(f"Player {player_id} joined")
+        await ctx.response.send_message(
+            f"Player {player_id} joined **{selected['EventName']}**"
+        )
 
     @app_commands.command(
         name="kick_player_from_event",
-        description="Kicks a player from an event (Event Server)",
+        description="Kicks a player from an event (Main Server)",
     )
     @app_commands.checks.has_any_role(settings.DISCORD_EVENT_ADMIN_ROLE_ID)
     @app_commands.autocomplete(player_id=player_autocomplete)
-    async def kick_player_from_event(self, ctx, player_id: str):
-        events = await get_events(self.bot.event_http_client_mod)
+    async def kick_player_from_event(
+        self, ctx, player_id: str, event: str | None = None
+    ):
+        events = await get_events(self.bot.http_client_mod)
         if not events:
             await ctx.response.send_message("No active events")
             return
 
-        event = events[0]
+        selected = _select_event(events, event)
+        if selected is None:
+            listing = "\n".join(
+                f"- **{e['EventName']}** (`{e['EventGuid'][:8]}`)"
+                for e in events[:10]
+            )
+            await ctx.response.send_message(
+                "Multiple active events — specify one by name or GUID prefix:\n"
+                f"{listing}"
+            )
+            return
+
         await kick_player_from_event(
-            self.bot.event_http_client_mod, event["EventGuid"], player_id
+            self.bot.http_client_mod, selected["EventGuid"], player_id
         )
-        await ctx.response.send_message(f"Player {player_id} kicked")
+        await ctx.response.send_message(
+            f"Player {player_id} kicked from **{selected['EventName']}**"
+        )
 
     @app_commands.command(
         name="post_scheduled_event_embed", description="Creates a scheduled event embed"
