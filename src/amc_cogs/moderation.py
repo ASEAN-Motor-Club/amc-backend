@@ -127,10 +127,12 @@ class ModerationCog(commands.Cog):
     def __init__(self, bot: "AMCDiscordBot"):
         self.bot = bot
         self.logger = logging.getLogger(__name__)
-        self.player_autocomplete = create_player_autocomplete(self.bot.http_client_game)
+        self.player_autocomplete_factory = create_player_autocomplete(
+            self.bot.http_client_game
+        )
 
     async def player_autocomplete(self, interaction, current):
-        return await self.player_autocomplete(interaction, current)
+        return await self.player_autocomplete_factory(interaction, current)
 
     @admin.command(name="announce", description="Sends an announcement")
     @app_commands.checks.has_any_role(settings.DISCORD_ADMIN_ROLE_ID)
