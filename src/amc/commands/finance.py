@@ -23,6 +23,28 @@ from decimal import Decimal
 from django.utils.translation import gettext as _, gettext_lazy
 
 
+async def _parse_amount(ctx: CommandContext, amount: str) -> int | None:
+    """Parse a player-supplied money amount.
+
+    Rejects non-numeric and non-positive values with a friendly popup
+    (negative amounts used to slip through into the ledger/mod calls).
+    Returns the parsed positive int, or None if the input was rejected.
+    """
+    try:
+        value = int(amount.replace(",", "").strip())
+    except (TypeError, ValueError):
+        await ctx.reply(
+            _("<Warning>Invalid amount:</> {amount}\nPlease enter a positive number, e.g. /donate 1,000").format(
+                amount=amount
+            )
+        )
+        return None
+    if value <= 0:
+        await ctx.reply(_("Amount must be greater than 0."))
+        return None
+    return value
+
+
 @registry.register(
     "/bank",
     description=gettext_lazy("Access your bank account"),
@@ -131,7 +153,9 @@ How ASEAN Loans Works
     category="Finance",
 )
 async def cmd_donate(ctx: CommandContext, amount: str, verification_code: str = ""):
-    amount_int = int(amount.replace(",", ""))
+    amount_int = await _parse_amount(ctx, amount)
+    if amount_int is None:
+        return
     code_expected, verified = with_verification_code(
         (amount_int, ctx.character.id), verification_code
     )
@@ -174,7 +198,9 @@ async def cmd_donate(ctx: CommandContext, amount: str, verification_code: str = 
     category="Finance",
 )
 async def cmd_withdraw(ctx: CommandContext, amount: str, verification_code: str = ""):
-    amount_int = int(amount.replace(",", ""))
+    amount_int = await _parse_amount(ctx, amount)
+    if amount_int is None:
+        return
     code_gen, verified = with_verification_code(
         (amount_int, ctx.character.guid), verification_code
     )
@@ -204,10 +230,19 @@ async def cmd_loan(ctx: CommandContext, amount: str, verification_code: str = ""
         await ctx.announce(_("You must have done at least one delivery"))
         return
 
-    amount_int = int(amount.replace(",", ""))
+    amount_int = await _parse_amount(ctx, amount)
+    if amount_int is None:
+        return
     loan_balance = await get_player_loan_balance(ctx.character)
     max_loan, _ignored = await get_character_max_loan(ctx.character)
     amount_int = int(min(Decimal(amount_int), max_loan - loan_balance))
+    if amount_int <= 0:
+        await ctx.reply(
+            _("You cannot take a loan of {amount}: you have reached your maximum loan.").format(
+                amount=amount
+            )
+        )
+        return
 
     code_expected, verified = with_verification_code(
         (amount_int, ctx.character.id), verification_code
@@ -353,7 +388,9 @@ async def cmd_toggle_ubi(ctx: CommandContext):
     category="Finance",
 )
 async def cmd_burn(ctx: CommandContext, amount: str, verification_code: str = ""):
-    amount_int = int(amount.replace(",", ""))
+    amount_int = await _parse_amount(ctx, amount)
+    if amount_int is None:
+        return
     code_expected, verified = with_verification_code(
         (amount_int, ctx.character.id), verification_code
     )
@@ -394,7 +431,6 @@ Sorry, the verification code did not match, please try again:
         return
     else:
         try:
-            amount_int = max(0, amount_int)
             await transfer_money(
                 ctx.http_client_mod, int(-amount_int), "Burn", str(ctx.player.unique_id)
             )
