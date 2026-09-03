@@ -171,8 +171,8 @@ def _correct_marker_z(location: dict, is_on_foot: bool) -> dict:
     return location
 
 
-TELEPORT_COST_PER_KM_ON_FOOT = 15_000
-TELEPORT_COST_PER_KM_IN_VEHICLE = 30_000
+TELEPORT_COST_PER_KM_ON_FOOT = 7_500
+TELEPORT_COST_PER_KM_IN_VEHICLE = 15_000
 
 
 def _marker_teleport_cost(

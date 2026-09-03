@@ -69,25 +69,25 @@ class MarkerTeleportCostTestCase(SimpleTestCase):
         cost, km = _marker_teleport_cost(
             {"X": 0, "Y": 0, "Z": 0}, {"X": 100_000, "Y": 0, "Z": 0}, True
         )
-        self.assertEqual((cost, round(km, 6)), (15_000, 1.0))
+        self.assertEqual((cost, round(km, 6)), (7_500, 1.0))
 
     def test_one_km_in_vehicle_costs_double(self):
         cost, _km = _marker_teleport_cost(
             {"X": 0, "Y": 0, "Z": 0}, {"X": 100_000, "Y": 0, "Z": 0}, False
         )
-        self.assertEqual(cost, 30_000)
+        self.assertEqual(cost, 15_000)
 
     def test_prorates_exactly_without_minimum(self):
         cost, _km = _marker_teleport_cost(
             {"X": 0, "Y": 0, "Z": 0}, {"X": 20_000, "Y": 0, "Z": 0}, True
         )
-        self.assertEqual(cost, 3_000)
+        self.assertEqual(cost, 1_500)
 
     def test_short_hops_still_cost_something(self):
         cost, _km = _marker_teleport_cost(
             {"X": 0, "Y": 0, "Z": 0}, {"X": 1_000, "Y": 0, "Z": 0}, False
         )
-        self.assertEqual(cost, 300)
+        self.assertEqual(cost, 150)
 
     def test_zero_distance_costs_zero(self):
         cost, km = _marker_teleport_cost(
@@ -163,7 +163,7 @@ class Tp2MarkerCommandTestCase(TestCase):
             await cmd_tp2marker(ctx, "")
         ctx.reply.assert_awaited_once()
         msg = ctx.reply.await_args[0][0]
-        self.assertIn("15,000", msg)
+        self.assertIn("7,500", msg)
         self.assertIn("on foot", msg)
         self.assertIn("5,000,000", msg)
         self.assertIn("/tp2marker ", msg)
@@ -178,11 +178,11 @@ class Tp2MarkerCommandTestCase(TestCase):
             ),
         )
         code = generate_verification_code(
-            (15_000, 500_000, -200_000, character.id)
+            (7_500, 500_000, -200_000, character.id)
         )
         with command_patches() as (mock_tp, mock_fee, mock_refund, _terrain):
             await cmd_tp2marker(ctx, code)
-        mock_fee.assert_awaited_once_with(15_000, character, character.player)
+        mock_fee.assert_awaited_once_with(7_500, character, character.player)
         mock_tp.assert_awaited_once()
         tp_args, tp_kwargs = mock_tp.await_args
         location = tp_args[2]
@@ -207,11 +207,11 @@ class Tp2MarkerCommandTestCase(TestCase):
             ),
         )
         code = generate_verification_code(
-            (30_000, 500_000, -200_000, character.id)
+            (15_000, 500_000, -200_000, character.id)
         )
         with command_patches() as (mock_tp, mock_fee, _refund, _terrain):
             await cmd_tp2marker(ctx, code)
-        mock_fee.assert_awaited_once_with(30_000, character, character.player)
+        mock_fee.assert_awaited_once_with(15_000, character, character.player)
         self.assertIs(mock_tp.await_args.kwargs["remove_cargo"], True)
         location = mock_tp.await_args.args[2]
         self.assertEqual(location["Z"], 10_005)  # terrain + 5 (vehicle)
@@ -240,7 +240,7 @@ class Tp2MarkerCommandTestCase(TestCase):
             ),
         )
         code = generate_verification_code(
-            (15_000, 500_000, -200_000, character.id)
+            (7_500, 500_000, -200_000, character.id)
         )
         with command_patches() as (mock_tp, mock_fee, mock_refund, _terrain):
             mock_fee.side_effect = ValueError("Unable to withdraw more than balance")
@@ -259,12 +259,12 @@ class Tp2MarkerCommandTestCase(TestCase):
             ),
         )
         code = generate_verification_code(
-            (15_000, 500_000, -200_000, character.id)
+            (7_500, 500_000, -200_000, character.id)
         )
         with command_patches() as (mock_tp, _fee, mock_refund, _terrain):
             mock_tp.side_effect = Exception("mod server 400")
             await cmd_tp2marker(ctx, code)
-        mock_refund.assert_awaited_once_with(15_000, character, character.player)
+        mock_refund.assert_awaited_once_with(7_500, character, character.player)
         ctx.reply.assert_awaited_once()
         self.assertIn("refunded", ctx.reply.await_args[0][0])
         ctx.announce.assert_not_called()
@@ -328,7 +328,7 @@ class Tp2MarkerCommandTestCase(TestCase):
             await cmd_tp2marker(ctx, "")
         mock_get_player.assert_awaited_once()
         # Quote shows the marker-based cost
-        self.assertIn("15,000", ctx.reply.await_args[0][0])
+        self.assertIn("7,500", ctx.reply.await_args[0][0])
 
 
 class TeleportFeeLedgerTestCase(TestCase):
