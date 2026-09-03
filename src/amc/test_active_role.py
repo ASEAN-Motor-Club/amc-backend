@@ -22,52 +22,79 @@ from amc.models import Character, Player, PlayerStatusLog
 # ---------------------------------------------------------------------------
 
 
+# NOTE: async-ORM writes (acreate) run on a threadpool connection OUTSIDE
+# pytest-django's per-test transaction, so rows written here PERSIST past the
+# test (they are not rolled back) and would pollute downstream test files
+# (hit 2026-09-03: leaked active-looking players broke test_elections and
+# test_leaderboard_cog). Every DB test therefore deletes its own players in a
+# try/finally — Player deletion cascades to characters and status logs.
+# ---------------------------------------------------------------------------
+
+
+async def _cleanup_players(*unique_ids: int) -> None:
+    await Player.objects.filter(unique_id__in=list(unique_ids)).adelete()
+
+
 @pytest.mark.asyncio
 @pytest.mark.django_db
 async def test_get_active_discord_ids_linked_recent_and_multichar():
-    now = timezone.now()
+    try:
+        now = timezone.now()
 
-    linked_active = await Player.objects.acreate(unique_id=1, discord_user_id=1001)
-    linked_stale = await Player.objects.acreate(unique_id=2, discord_user_id=1002)
-    unlinked_active = await Player.objects.acreate(unique_id=3)  # no discord_user_id
-    await Player.objects.acreate(unique_id=4, discord_user_id=1004)  # never logged in
+        linked_active = await Player.objects.acreate(unique_id=1, discord_user_id=1001)
+        linked_stale = await Player.objects.acreate(unique_id=2, discord_user_id=1002)
+        unlinked_active = await Player.objects.acreate(
+            unique_id=3
+        )  # no discord_user_id
+        await Player.objects.acreate(
+            unique_id=4, discord_user_id=1004
+        )  # never logged in
 
-    for player, age in ((linked_active, 1), (linked_stale, 45), (unlinked_active, 1)):
-        character = await Character.objects.acreate(
-            player=player, name=f"c{player.unique_id}"
-        )
+        for player, age in (
+            (linked_active, 1),
+            (linked_stale, 45),
+            (unlinked_active, 1),
+        ):
+            character = await Character.objects.acreate(
+                player=player, name=f"c{player.unique_id}"
+            )
+            await PlayerStatusLog.objects.acreate(
+                character=character, timespan=(now - timedelta(days=age), None)
+            )
+        # multi-character player: newest character login counts (stale + fresh)
+        alt = await Character.objects.acreate(player=linked_stale, name="c2-alt")
         await PlayerStatusLog.objects.acreate(
-            character=character, timespan=(now - timedelta(days=age), None)
+            character=alt, timespan=(now - timedelta(days=2), None)
         )
-    # multi-character player: newest character login counts (stale char + fresh one)
-    alt = await Character.objects.acreate(player=linked_stale, name="c2-alt")
-    await PlayerStatusLog.objects.acreate(
-        character=alt, timespan=(now - timedelta(days=2), None)
-    )
 
-    result = await get_active_discord_ids(window_days=30)
-    assert {1001, 1002} <= result  # fresh login; rescued by newest-char login
-    assert 1004 not in result  # linked but never logged in
+        result = await get_active_discord_ids(window_days=30)
+        assert {1001, 1002} <= result  # fresh login; rescued by newest-char login
+        assert 1004 not in result  # linked but never logged in
+    finally:
+        await _cleanup_players(1, 2, 3, 4)
 
 
 @pytest.mark.asyncio
 @pytest.mark.django_db
 async def test_get_active_discord_ids_window_boundary():
     """A login just past the cutoff is out; just inside the cutoff is in."""
-    now = timezone.now()
-    player = await Player.objects.acreate(unique_id=10, discord_user_id=1010)
-    character = await Character.objects.acreate(player=player, name="c10")
-    await PlayerStatusLog.objects.acreate(
-        character=character,
-        timespan=(now - timedelta(days=30, seconds=1), None),
-    )
-    result = await get_active_discord_ids(window_days=30)
-    assert 1010 not in result
+    try:
+        now = timezone.now()
+        player = await Player.objects.acreate(unique_id=10, discord_user_id=1010)
+        character = await Character.objects.acreate(player=player, name="c10")
+        await PlayerStatusLog.objects.acreate(
+            character=character,
+            timespan=(now - timedelta(days=30, seconds=1), None),
+        )
+        result = await get_active_discord_ids(window_days=30)
+        assert 1010 not in result
 
-    await PlayerStatusLog.objects.acreate(
-        character=character, timespan=(now - timedelta(days=29, hours=23), None)
-    )
-    assert 1010 in await get_active_discord_ids(window_days=30)
+        await PlayerStatusLog.objects.acreate(
+            character=character, timespan=(now - timedelta(days=29, hours=23), None)
+        )
+        assert 1010 in await get_active_discord_ids(window_days=30)
+    finally:
+        await _cleanup_players(10)
 
 
 # ---------------------------------------------------------------------------
@@ -149,6 +176,7 @@ async def test_sync_adds_and_removes(settings):
     assert summary["skipped"] is False
     assert summary["added"] >= 1
     assert summary["removed"] >= 1
+    await _cleanup_players(21, 22)
 
 
 @pytest.mark.asyncio
@@ -195,6 +223,7 @@ async def test_sync_counts_missing_member_without_raising(settings):
     summary = await sync_active_role(bot)
     assert summary["skipped"] is False
     assert summary["missing"] >= 1  # own player (31) is not in the guild
+    await _cleanup_players(31)
 
 
 @pytest.mark.asyncio
