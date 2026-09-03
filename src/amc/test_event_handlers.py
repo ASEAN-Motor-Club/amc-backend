@@ -1,5 +1,6 @@
 """Tests for the SSE event handler module (amc.handlers.events)."""
 
+import asyncio
 import time
 from datetime import timedelta
 from unittest.mock import AsyncMock, patch
@@ -13,6 +14,7 @@ from amc.handlers import dispatch
 from amc.handlers.events import (
     _upsert_game_event,
     _upsert_game_event_character,
+    handle_change_event_state,
 )
 from amc.models import (
     GameEvent,
@@ -591,3 +593,65 @@ class ScheduledEventAssociationTests(TestCase):
         await game_event.arefresh_from_db()
 
         self.assertIsNone(game_event.scheduled_event_id)
+
+
+# ---------------------------------------------------------------------------
+# Tests: finish results popup (2→3 transition)
+# ---------------------------------------------------------------------------
+
+
+class FinishResultsPopupTests(TestCase):
+    @patch("amc.handlers.events.delay", new=lambda coro, seconds: coro)
+    async def test_finish_schedules_results_popup(self):
+        await sync_to_async(CharacterFactory)(
+            player__unique_id=int(PLAYER_ID), guid=CHAR_GUID
+        )
+
+        event_data = _make_event_data(state=2)
+        game_event, _ = await _upsert_game_event(event_data)
+        await _upsert_game_event_character(game_event, event_data["Players"][0])
+
+        event_data["State"] = 3
+        event = {
+            "hook": "ServerChangeEventState",
+            "timestamp": int(time.time()),
+            "data": {
+                "CharacterGuid": CHAR_GUID,
+                "Event": event_data,
+            },
+        }
+        ctx = _make_ctx(http_client_mod=AsyncMock())
+
+        with patch(
+            "amc.handlers.events.show_results_popup", new=AsyncMock()
+        ) as mock_popup:
+            await handle_change_event_state(event, None, None, ctx)
+            await asyncio.sleep(0.05)  # flush the task scheduled by the handler
+
+        mock_popup.assert_awaited_once()
+        args = mock_popup.await_args.args
+        self.assertEqual(args[0], ctx.http_client_mod)
+        self.assertEqual(len(args[1]), 1)  # the one participant
+
+    @patch("amc.handlers.events.delay", new=lambda coro, seconds: coro)
+    async def test_no_popup_without_finish_transition(self):
+        await _upsert_game_event(_make_event_data(state=1))
+
+        event_data = _make_event_data(state=2)  # 1→2, not a finish
+        event = {
+            "hook": "ServerChangeEventState",
+            "timestamp": int(time.time()),
+            "data": {
+                "CharacterGuid": CHAR_GUID,
+                "Event": event_data,
+            },
+        }
+        ctx = _make_ctx(http_client_mod=AsyncMock())
+
+        with patch(
+            "amc.handlers.events.show_results_popup", new=AsyncMock()
+        ) as mock_popup:
+            await handle_change_event_state(event, None, None, ctx)
+            await asyncio.sleep(0.05)
+
+        mock_popup.assert_not_awaited()
