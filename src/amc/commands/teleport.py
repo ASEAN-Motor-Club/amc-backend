@@ -15,6 +15,12 @@ from amc.mod_server import (
 )
 from amc.game_server import get_players
 from amc.police import is_police_vehicle
+from amc.utils import with_verification_code
+from amc_finance.loans import get_player_bank_balance
+from amc_finance.services import (
+    refund_player_teleport_fee,
+    register_player_teleport_fee,
+)
 from django.conf import settings
 from django.db.models import Q
 from django.utils.translation import gettext as _, gettext_lazy
@@ -120,6 +126,68 @@ async def _check_police_tp_near_wanted(ctx: CommandContext, location: dict) -> b
 
 def _distance_3d(a, b):
     return math.sqrt((a[0] - b[0]) ** 2 + (a[1] - b[1]) ** 2 + (a[2] - b[2]) ** 2)
+
+
+CM_PER_KM = 100_000
+
+
+async def _fetch_custom_destination(ctx: CommandContext, player_info: dict) -> dict:
+    """Ensure player_info carries CustomDestinationAbsoluteLocation.
+
+    The native game API doesn't expose the map-picked destination marker —
+    fall back to the mod server's player info (which does) and merge.
+    """
+    if player_info.get("CustomDestinationAbsoluteLocation"):
+        return player_info
+    if ctx.http_client_mod and ctx.player:
+        try:
+            mod_player_info = await get_player(
+                ctx.http_client_mod, str(ctx.player.unique_id)
+            )
+            if mod_player_info and mod_player_info.get(
+                "CustomDestinationAbsoluteLocation"
+            ):
+                return {**player_info, **mod_player_info}
+        except Exception:
+            pass
+    return player_info
+
+
+def _correct_marker_z(location: dict, is_on_foot: bool) -> dict:
+    """Heightmap-fallback Z correction for a map-picked marker.
+
+    The map waypoint's Z is unreliable — players clip through the ground
+    when it's used as-is.  Correct it to at least the terrain height from
+    the heightmap, but never *below* the game-provided Z: the heightmap is
+    bare terrain and doesn't include buildings, piers, etc. that the
+    destination may sit on top of.
+    """
+    terrain_z = terrain_z_cm(location["X"], location["Y"])
+    base_z = location["Z"]
+    if terrain_z is not None:
+        base_z = max(base_z, terrain_z)
+    # Fix Z offset based on vehicle
+    location["Z"] = base_z + (100 if is_on_foot else 5)
+    return location
+
+
+TELEPORT_COST_PER_KM_ON_FOOT = 7_500
+TELEPORT_COST_PER_KM_IN_VEHICLE = 15_000
+
+
+def _marker_teleport_cost(
+    player_loc: dict, marker_loc: dict, is_on_foot: bool
+) -> tuple[int, float]:
+    """(cost, km) for a marker teleport. 2D horizontal distance, exact prorate."""
+    dx = marker_loc["X"] - player_loc["X"]
+    dy = marker_loc["Y"] - player_loc["Y"]
+    km = math.sqrt(dx * dx + dy * dy) / CM_PER_KM
+    rate = (
+        TELEPORT_COST_PER_KM_ON_FOOT
+        if is_on_foot
+        else TELEPORT_COST_PER_KM_IN_VEHICLE
+    )
+    return int(round(km * rate)), km
 
 
 @registry.register(
@@ -311,22 +379,7 @@ async def cmd_tp_name(ctx: CommandContext, name: str = ""):
 
             # Admins typing bare /tp need CustomDestinationAbsoluteLocation,
             # which the native game API doesn't expose — fetch from mod server.
-            if (
-                not name
-                and not player_info.get("CustomDestinationAbsoluteLocation")
-                and ctx.http_client_mod
-                and ctx.player
-            ):
-                try:
-                    mod_player_info = await get_player(
-                        ctx.http_client_mod, str(ctx.player.unique_id)
-                    )
-                    if mod_player_info and mod_player_info.get(
-                        "CustomDestinationAbsoluteLocation"
-                    ):
-                        player_info = {**player_info, **mod_player_info}
-                except Exception:
-                    pass
+            player_info = await _fetch_custom_destination(ctx, player_info)
 
             # Teleport to Custom Waypoint
             no_vehicles = (
@@ -361,21 +414,9 @@ async def cmd_tp_name(ctx: CommandContext, name: str = ""):
                     return
 
             if location:
-                # The map waypoint's Z is unreliable — players clip through
-                # the ground when it's used as-is.  Correct it to at least
-                # the terrain height from the heightmap, but never *below*
-                # the game-provided Z: the heightmap is bare terrain and
-                # doesn't include buildings, piers, etc. that the
-                # destination may sit on top of.
-                terrain_z = terrain_z_cm(location["X"], location["Y"])
-                base_z = location["Z"]
-                if terrain_z is not None:
-                    base_z = max(base_z, terrain_z)
-                # Fix Z offset based on vehicle
-                if player_info.get("VehicleKey") == "None":
-                    location["Z"] = base_z + 100
-                else:
-                    location["Z"] = base_z + 5
+                location = _correct_marker_z(
+                    location, player_info.get("VehicleKey") == "None"
+                )
 
     if not location:
         asyncio.create_task(
@@ -400,4 +441,104 @@ async def cmd_tp_name(ctx: CommandContext, name: str = ""):
         no_vehicles=no_vehicles,
         reset_trailers=not player_info.get("bIsAdmin"),
         reset_carried_vehicles=not player_info.get("bIsAdmin"),
+    )
+
+
+@registry.register(
+    ["/tp2marker"],
+    description=gettext_lazy(
+        "Teleport to your map destination marker (paid per km, from bank)"
+    ),
+    category="Teleportation",
+    featured=True,
+)
+async def cmd_tp2marker(ctx: CommandContext, verification_code: str = ""):
+    player_info = dict(ctx.player_info or {})
+
+    if not player_info.get("Location"):
+        await ctx.reply(_("Could not determine your position — try again."))
+        return
+
+    if ctx.character.rp_mode:
+        await ctx.reply(_("Teleporting is disabled while in RP mode."))
+        return
+
+    is_on_duty = await PoliceSession.objects.filter(
+        character=ctx.character, ended_at__isnull=True
+    ).aexists()
+    if is_on_duty:
+        await ctx.reply(
+            _("Custom destination teleport is restricted while on police duty.")
+        )
+        return
+
+    is_on_foot = player_info.get("VehicleKey") == "None"
+
+    player_info = await _fetch_custom_destination(ctx, player_info)
+    marker = player_info.get("CustomDestinationAbsoluteLocation")
+    if not marker:
+        await ctx.reply(
+            _(
+                "<Title>Teleport to Marker</>\n"
+                "No destination marker set. Place a marker on the map first "
+                "(set destination), then use <Highlight>/tp2marker</>."
+            )
+        )
+        return
+
+    cost, km = _marker_teleport_cost(player_info["Location"], marker, is_on_foot)
+
+    code_expected, verified = with_verification_code(
+        (cost, int(round(marker["X"])), int(round(marker["Y"])), ctx.character.id),
+        verification_code,
+    )
+
+    if not verified:
+        balance = int(await get_player_bank_balance(ctx.character))
+        await ctx.reply(
+            _(
+                "<Title>Teleport to Marker</>\n"
+                "Distance: <Highlight>{km:.1f} km</> ({mode})\n"
+                "Cost: <Money>{cost:,}</> from your bank "
+                "(balance: <Money>{balance:,}</>)\n"
+                "<Warning>Cargo and trailers will be reset!</>\n"
+                "To confirm, type: <Highlight>/tp2marker {code}</>"
+            ).format(
+                km=km,
+                mode="on foot" if is_on_foot else "in vehicle",
+                cost=cost,
+                balance=balance,
+                code=code_expected.upper(),
+            )
+        )
+        return
+
+    try:
+        if cost > 0:
+            await register_player_teleport_fee(cost, ctx.character, ctx.player)
+    except ValueError:
+        await ctx.reply(
+            _("Insufficient bank balance — {cost:,} required.").format(cost=cost)
+        )
+        return
+
+    location = _correct_marker_z(dict(marker), is_on_foot)
+    try:
+        await teleport_player(
+            ctx.http_client_mod,
+            str(ctx.player.unique_id),
+            location,
+            no_vehicles=False,
+            remove_cargo=True,
+            reset_carried_vehicles=True,
+        )
+    except Exception:
+        if cost > 0:
+            await refund_player_teleport_fee(cost, ctx.character, ctx.player)
+        await ctx.reply(_("Teleport failed — your fee has been refunded."))
+        return
+
+    await ctx.announce(
+        f"{ctx.character.name} teleported {km:.1f} km to their map marker "
+        f"({'on foot' if is_on_foot else 'by vehicle'}) for {cost:,}"
     )

@@ -174,6 +174,7 @@ async def teleport_player(
     no_vehicles=False,
     reset_trailers=None,
     reset_carried_vehicles=None,
+    remove_cargo=None,
     force=False,
 ):
     await _write_limiter.acquire()
@@ -188,6 +189,8 @@ async def teleport_player(
         data["bResetTrailers"] = reset_trailers
     if reset_carried_vehicles is not None:
         data["bResetCarriedVehicles"] = reset_carried_vehicles
+    if remove_cargo is not None:
+        data["bRemoveCargo"] = remove_cargo
     if rotation:
         data["Rotation"] = rotation
     async with session.post(f"/players/{player_id}/teleport", json=data) as resp:
