@@ -529,7 +529,7 @@ async def cmd_tp2marker(ctx: CommandContext, verification_code: str = ""):
             str(ctx.player.unique_id),
             location,
             no_vehicles=False,
-            reset_trailers=True,
+            remove_cargo=True,
             reset_carried_vehicles=True,
         )
     except Exception:

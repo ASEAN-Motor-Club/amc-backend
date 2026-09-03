@@ -189,8 +189,9 @@ class Tp2MarkerCommandTestCase(TestCase):
         # terrain (10,000) > game Z (3,000); on foot -> +100
         self.assertEqual(location["Z"], 10_100)
         self.assertIs(tp_kwargs["no_vehicles"], False)
-        self.assertIs(tp_kwargs["reset_trailers"], True)
+        self.assertIs(tp_kwargs["remove_cargo"], True)
         self.assertIs(tp_kwargs["reset_carried_vehicles"], True)
+        self.assertNotIn("reset_trailers", tp_kwargs)
         mock_refund.assert_not_called()
         ctx.announce.assert_awaited_once()
         self.assertIn("1.0 km", ctx.announce.await_args[0][0])
@@ -211,6 +212,7 @@ class Tp2MarkerCommandTestCase(TestCase):
         with command_patches() as (mock_tp, mock_fee, _refund, _terrain):
             await cmd_tp2marker(ctx, code)
         mock_fee.assert_awaited_once_with(30_000, character, character.player)
+        self.assertIs(mock_tp.await_args.kwargs["remove_cargo"], True)
         location = mock_tp.await_args.args[2]
         self.assertEqual(location["Z"], 10_005)  # terrain + 5 (vehicle)
         self.assertIn("by vehicle", ctx.announce.await_args[0][0])
