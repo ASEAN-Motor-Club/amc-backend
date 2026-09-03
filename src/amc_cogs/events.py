@@ -461,7 +461,7 @@ class EventsCog(commands.Cog):
         name="join_player_to_event",
         description="Joins a player into an event (Event Server)",
     )
-    @app_commands.checks.has_any_role(1395460420189421713)
+    @app_commands.checks.has_any_role(settings.DISCORD_EVENT_ADMIN_ROLE_ID)
     @app_commands.autocomplete(player_id=player_autocomplete)
     async def join_player_to_event(self, ctx, player_id: str):
         events = await get_events(self.bot.event_http_client_mod)
@@ -479,7 +479,7 @@ class EventsCog(commands.Cog):
         name="kick_player_from_event",
         description="Kicks a player from an event (Event Server)",
     )
-    @app_commands.checks.has_any_role(1395460420189421713)
+    @app_commands.checks.has_any_role(settings.DISCORD_EVENT_ADMIN_ROLE_ID)
     @app_commands.autocomplete(player_id=player_autocomplete)
     async def kick_player_from_event(self, ctx, player_id: str):
         events = await get_events(self.bot.event_http_client_mod)
