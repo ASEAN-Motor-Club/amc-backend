@@ -174,7 +174,7 @@ class EventsCog(commands.Cog):
         self.bot = bot
         self.teams_channel_id = teams_channel_id
         self.last_embed_message = None
-        self.player_autocomplete = create_player_autocomplete(
+        self.player_autocomplete_factory = create_player_autocomplete(
             self.bot.event_http_client_game
         )
 
@@ -455,7 +455,7 @@ class EventsCog(commands.Cog):
         await interaction.response.send_message(f"Penalty: {penalty}")
 
     async def player_autocomplete(self, interaction, current):
-        return await self.player_autocomplete(interaction, current)
+        return await self.player_autocomplete_factory(interaction, current)
 
     @app_commands.command(
         name="join_player_to_event",
