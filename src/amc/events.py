@@ -102,12 +102,15 @@ async def process_event(event):
         guid=event["OwnerCharacterId"]["CharacterGuid"],
     ).afirst()
 
-    scheduled_event = await ScheduledEvent.objects.filter(
-        race_setup=race_setup,
-        start_time__lte=timezone.now(),
-        end_time__gte=timezone.now(),
-        time_trial=True,  # only auto-associate time trials
-    ).afirst()
+    scheduled_event = await (
+        ScheduledEvent.objects.filter(
+            race_setup=race_setup,
+            start_time__lte=timezone.now(),
+            end_time__gte=timezone.now(),
+        )
+        .order_by("start_time")  # deterministic pick if several match
+        .afirst()
+    )
 
     try:
         game_event = await (

@@ -108,12 +108,15 @@ async def _upsert_game_event(event_data: dict):
     # --- ScheduledEvent association ---
     scheduled_event = None
     if race_setup:
-        scheduled_event = await ScheduledEvent.objects.filter(
-            race_setup=race_setup,
-            start_time__lte=timezone.now(),
-            end_time__gte=timezone.now(),
-            time_trial=True,
-        ).afirst()
+        scheduled_event = await (
+            ScheduledEvent.objects.filter(
+                race_setup=race_setup,
+                start_time__lte=timezone.now(),
+                end_time__gte=timezone.now(),
+            )
+            .order_by("start_time")  # deterministic pick if several match
+            .afirst()
+        )
 
     # --- GameEvent upsert ---
     transition = None

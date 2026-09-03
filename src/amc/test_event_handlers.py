@@ -1,10 +1,12 @@
 """Tests for the SSE event handler module (amc.handlers.events)."""
 
 import time
+from datetime import timedelta
 from unittest.mock import AsyncMock, patch
 
 from asgiref.sync import sync_to_async
 from django.test import TestCase
+from django.utils import timezone
 
 from amc.factories import PlayerFactory, CharacterFactory
 from amc.handlers import dispatch
@@ -17,6 +19,7 @@ from amc.models import (
     GameEventCharacter,
     LapSectionTime,
     RaceSetup,
+    ScheduledEvent,
 )
 from amc.webhook_context import EventContext
 
@@ -535,3 +538,56 @@ class EventLifecycleTests(TestCase):
 
         await ge.arefresh_from_db()
         self.assertEqual(ge.state, 3)
+
+
+# ---------------------------------------------------------------------------
+# Tests: scheduled-event association (time-trial and non-time-trial)
+# ---------------------------------------------------------------------------
+
+
+class ScheduledEventAssociationTests(TestCase):
+    async def _make_scheduled_event(
+        self, time_trial: bool, started_minutes_ago: int, ends_in_minutes: int
+    ) -> ScheduledEvent:
+        race_setup, _ = await RaceSetup.objects.aget_or_create(
+            hash=RaceSetup.calculate_hash(RACE_SETUP_RAW),
+            defaults={"config": RACE_SETUP_RAW, "name": "Test Route"},
+        )
+        now = timezone.now()
+        return await ScheduledEvent.objects.acreate(
+            name="Scheduled Race",
+            start_time=now - timedelta(minutes=started_minutes_ago),
+            end_time=now + timedelta(minutes=ends_in_minutes),
+            time_trial=time_trial,
+            race_setup=race_setup,
+        )
+
+    async def test_associates_nontt_scheduled_event(self):
+        scheduled_event = await self._make_scheduled_event(
+            time_trial=False, started_minutes_ago=30, ends_in_minutes=30
+        )
+        event_data = _make_event_data(state=1)
+        game_event, _ = await _upsert_game_event(event_data)
+        await game_event.arefresh_from_db()
+
+        self.assertEqual(game_event.scheduled_event_id, scheduled_event.id)
+
+    async def test_associates_tt_scheduled_event_unchanged(self):
+        scheduled_event = await self._make_scheduled_event(
+            time_trial=True, started_minutes_ago=30, ends_in_minutes=30
+        )
+        event_data = _make_event_data(state=1)
+        game_event, _ = await _upsert_game_event(event_data)
+        await game_event.arefresh_from_db()
+
+        self.assertEqual(game_event.scheduled_event_id, scheduled_event.id)
+
+    async def test_no_association_after_window(self):
+        await self._make_scheduled_event(
+            time_trial=False, started_minutes_ago=120, ends_in_minutes=-60
+        )
+        event_data = _make_event_data(state=1)
+        game_event, _ = await _upsert_game_event(event_data)
+        await game_event.arefresh_from_db()
+
+        self.assertIsNone(game_event.scheduled_event_id)
