@@ -87,3 +87,126 @@ def test_compute_role_changes_empty_sides():
     assert compute_role_changes(set(), {5}) == ([], [5])
     assert compute_role_changes({5}, set()) == ([5], [])
     assert compute_role_changes(set(), set()) == ([], [])
+
+
+# ---------------------------------------------------------------------------
+# sync_active_role — mocked-bot integration
+# ---------------------------------------------------------------------------
+
+
+def _member(uid: int) -> MagicMock:
+    m = MagicMock()
+    m.id = uid
+    m.add_roles = AsyncMock()
+    m.remove_roles = AsyncMock()
+    return m
+
+
+def _bot(role_members, guild_members):
+    role = MagicMock()
+    role.members = role_members
+    guild = MagicMock()
+    guild.get_role.return_value = role
+    guild.get_member = lambda uid: next(
+        (m for m in guild_members if m.id == uid), None
+    )
+    # Unknown members (e.g. rows leaked between tests) raise NotFound like a
+    # real guild where the user never joined.
+    import discord
+
+    guild.fetch_member = AsyncMock(side_effect=discord.NotFound(MagicMock(), "x"))
+    bot = MagicMock()
+    bot.get_guild.return_value = guild
+    return bot, guild, role
+
+
+@pytest.mark.asyncio
+@pytest.mark.django_db
+async def test_sync_adds_and_removes(settings):
+    from amc.active_role import sync_active_role
+
+    settings.DISCORD_ACTIVE_ROLE_ID = 555
+    settings.DISCORD_GUILD_ID = 42
+    now = timezone.now()
+
+    active_p = await Player.objects.acreate(unique_id=21, discord_user_id=21)
+    active_c = await Character.objects.acreate(player=active_p, name="c21")
+    await PlayerStatusLog.objects.acreate(
+        character=active_c, timespan=(now, None)
+    )
+    # linked but no recent login → must lose the role
+    await Player.objects.acreate(unique_id=22, discord_user_id=22)
+
+    stale_member = _member(22)  # currently holds the role, inactive
+    active_member = _member(21)  # active, no role yet
+    bot, guild, _role = _bot(
+        role_members=[stale_member],
+        guild_members=[active_member, stale_member],
+    )
+
+    summary = await sync_active_role(bot)
+
+    active_member.add_roles.assert_awaited_once()
+    stale_member.remove_roles.assert_awaited_once()
+    # exact added/removed counts are not asserted: rows leaked between tests
+    # (async-ORM writes bypass the per-test transaction) may add to the diff.
+    assert summary["skipped"] is False
+    assert summary["added"] >= 1
+    assert summary["removed"] >= 1
+
+
+@pytest.mark.asyncio
+async def test_sync_skips_when_role_id_unset(settings):
+    from amc.active_role import sync_active_role
+
+    settings.DISCORD_ACTIVE_ROLE_ID = 0
+    bot, guild, _role = _bot(role_members=[], guild_members=[])
+    summary = await sync_active_role(bot)
+    assert summary == {"skipped": True, "added": 0, "removed": 0, "missing": 0}
+    bot.get_guild.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_sync_skips_when_role_not_found(settings):
+    from amc.active_role import sync_active_role
+
+    settings.DISCORD_ACTIVE_ROLE_ID = 555
+    settings.DISCORD_GUILD_ID = 42
+    bot, guild, _role = _bot(role_members=[], guild_members=[])
+    guild.get_role.return_value = None
+    summary = await sync_active_role(bot)
+    assert summary["skipped"] is True
+
+
+@pytest.mark.asyncio
+@pytest.mark.django_db
+async def test_sync_counts_missing_member_without_raising(settings):
+    import discord
+
+    from amc.active_role import sync_active_role
+
+    settings.DISCORD_ACTIVE_ROLE_ID = 555
+    settings.DISCORD_GUILD_ID = 42
+    now = timezone.now()
+    player = await Player.objects.acreate(unique_id=31, discord_user_id=31)
+    character = await Character.objects.acreate(player=player, name="c31")
+    await PlayerStatusLog.objects.acreate(character=character, timespan=(now, None))
+
+    bot, guild, _role = _bot(role_members=[], guild_members=[])
+    guild.get_member = lambda uid: None
+    guild.fetch_member = AsyncMock(side_effect=discord.NotFound(MagicMock(), "x"))
+
+    summary = await sync_active_role(bot)
+    assert summary["skipped"] is False
+    assert summary["missing"] >= 1  # own player (31) is not in the guild
+
+
+@pytest.mark.asyncio
+async def test_cron_wrapper_skips_when_client_not_ready():
+    from types import SimpleNamespace
+
+    from amc import active_role
+
+    ctx = {"discord_client": SimpleNamespace(is_ready=lambda: False)}
+    # must return cleanly, never raise, never touch discord
+    assert await active_role.active_role_cron(ctx) is None
