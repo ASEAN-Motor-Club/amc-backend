@@ -100,6 +100,8 @@ async def register_player_deposit(
 async def register_player_withdrawal(
     amount, character, player, description="Player Withdrawal"
 ):
+    if amount <= 0:
+        raise ValueError("Withdrawal amount must be positive")
     account, _ = await Account.objects.aget_or_create(
         account_type=Account.AccountType.LIABILITY,
         book=Account.Book.BANK,
@@ -205,6 +207,12 @@ async def refund_player_teleport_fee(
 
 
 async def player_donation(amount, character, description="Player Donation"):
+    if amount <= 0:
+        # Non-positive "donations" must never book a journal or touch
+        # total_donations (a negative amount used to decrement it). Zero is a
+        # legitimate call from the gov-employee pipeline (subsidy-only
+        # contributions), so treat non-positive amounts as a no-op.
+        return
     treasury_fund, _ = await Account.objects.aget_or_create(
         account_type=Account.AccountType.ASSET,
         book=Account.Book.GOVERNMENT,
