@@ -22,7 +22,7 @@ from django.conf import settings
 from django.db.models import Exists, OuterRef, Prefetch
 from django.utils import timezone
 
-from amc.events import create_event_embed
+from amc.events import create_event_embed, show_results_popup
 from amc.handlers import register
 from amc.mod_server import transfer_exp
 from amc.models import (
@@ -287,6 +287,29 @@ async def _reward_event_exp(game_event_id: int, http_client_mod):
             )
 
 
+async def _show_finish_results(game_event_id: int, http_client_mod):
+    """Push the final results popup to every participant on event finish.
+
+    Restores the legacy monitor_events behaviour (2→3 transition) that was
+    dropped in the SSE migration. Popup content is built by
+    amc.events.print_results (rank / net time / DNF-ENGINE-VEHICLE flags).
+    """
+    participants = [
+        p
+        async for p in GameEventCharacter.objects.select_related(
+            "character", "character__player"
+        ).filter(game_event_id=game_event_id)
+    ]
+    if not participants:
+        return
+    try:
+        await show_results_popup(http_client_mod, participants)
+    except Exception:
+        logger.exception(
+            "Failed to show finish results popup for event %s", game_event_id
+        )
+
+
 async def _update_discord_event_embed(game_event_id: int, discord_client):
     if discord_client is None:
         logger.debug("_update_discord_event_embed: discord_client is None, skipping")
@@ -385,6 +408,9 @@ async def handle_change_event_state(event, player, character, ctx):
         await _upsert_game_event_character(game_event, player_info)
 
     if transition and transition[1] == 3:
+        asyncio.create_task(
+            delay(_show_finish_results(game_event.pk, ctx.http_client_mod), 5)
+        )
         asyncio.create_task(
             delay(_reward_event_exp(game_event.pk, ctx.http_client_mod), 10)
         )
