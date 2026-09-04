@@ -243,6 +243,17 @@ GDAL_LIBRARY_PATH = os.environ.get("GDAL_LIBRARY_PATH")
 GAME_SERVER_API_URL = os.environ.get("GAME_SERVER_API_URL", "http://127.0.0.1:8080")
 MOD_SERVER_API_URL = os.environ.get("MOD_SERVER_API_URL", "http://127.0.0.1:5001")
 
+# Pinned banner pushed to Motor Town after every server start. The banner is
+# runtime-only game state (GameState.Net_ServerConfig.PinnedAnnounce) — the
+# game clears it on boot, so the backend re-sets it when the ServerStarted log
+# event arrives (see amc.tasks.spawn_pinned_announcement). Empty string
+# disables the push.
+PINNED_ANNOUNCEMENT = os.environ.get(
+    "MOTOR_TOWN_PINNED_ANNOUNCEMENT",
+    "<Small>www.aseanmotorclub.com</> | Welcome to <Money>AMC</>! "
+    "| <Event>/help</> for <Focus>Cmds</>.",
+)
+
 # Full-resolution Jeju_World terrain heightmap (JHM1 compressed, see amc.heightmap)
 HEIGHTMAP_PATH = os.environ.get("HEIGHTMAP_PATH", "/var/lib/amc-backend/jeju_heights_11000.jhm")
 WEBHOOK_SERVER_API_URL = os.environ.get(
