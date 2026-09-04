@@ -97,9 +97,13 @@ async def _upsert_game_event(event_data: dict):
         )
 
     # --- Owner ---
+    # NOTE: owner-less events (backend-posted auto TTs) carry
+    # OwnerCharacterId.UniqueNetId == "" — an empty string would crash the
+    # BigInteger lookup below (ValueError: invalid literal for int()).  Skip
+    # the lookup so the event is still created with owner=None/auto_created.
     owner = None
     owner_data = event_data.get("OwnerCharacterId", {})
-    if owner_data:
+    if owner_data and owner_data.get("UniqueNetId"):
         owner = await Character.objects.filter(
             player__unique_id=owner_data.get("UniqueNetId"),
             guid=owner_data.get("CharacterGuid"),
@@ -435,7 +439,17 @@ async def handle_passed_race_section(event, player, character, ctx):
     if not event_guid:
         return 0, 0, 0, 0
 
-    game_event = await GameEvent.objects.filter(guid=event_guid).afirst()
+    # The game keeps ONE event guid across re-runs (it resets the event to
+    # state 1 between runs), so multiple GameEvent rows exist per guid — one
+    # per run.  Always resolve to the LATEST row (the current run), matching
+    # _upsert_game_event's .alatest("start_time"); an unordered .afirst()
+    # returns the oldest row and lands section times on a stale run.
+    game_event = (
+        await GameEvent.objects.filter(guid=event_guid)
+        .select_related("race_setup")
+        .order_by("-start_time")
+        .afirst()
+    )
     if not game_event:
         logger.warning("ServerPassedRaceSection: GameEvent %s not found", event_guid)
         return 0, 0, 0, 0
@@ -454,6 +468,11 @@ async def handle_passed_race_section(event, player, character, ctx):
             "ServerPassedRaceSection: GameEventCharacter not found for event %s, character %s",
             event_guid, character_guid,
         )
+        return 0, 0, 0, 0
+
+    # Do not update finished players — their final times are already stored
+    # and later section events are stragglers from the delayed SSE bursts.
+    if game_event_char.finished:
         return 0, 0, 0, 0
 
     # Update section index and total time
@@ -494,6 +513,23 @@ async def handle_passed_race_section(event, player, character, ctx):
                 first_section_total_time_seconds=0
             )
 
+    # Natural-finish detection.  A natural finish is a server-internal event
+    # transition — the game never sends the client→server ChangeEventState
+    # RPC for it, so state 3 never reaches the backend and the run's row
+    # stays In Progress forever (no finished flag, results popup, or EXP).
+    # Mark the participant finished when they cross the last section of a
+    # single-lap route (NumLaps<=1).  Multi-lap routes cannot be detected
+    # this way — the section stream carries no reliable lap count — so those
+    # keep depending on the abort/DQ ChangeEventState(3) snapshots.
+    race_setup = game_event.race_setup
+    if (
+        race_setup is not None
+        and race_setup.num_laps <= 1
+        and section_index == race_setup.num_sections - 1
+    ):
+        game_event_char.finished = True
+        await game_event_char.asave(update_fields=["finished"])
+
     # Update Discord embed to reflect section progress (throttled)
     asyncio.create_task(
         _throttled_update_embed(game_event.pk, ctx.discord_client)
@@ -515,7 +551,13 @@ async def handle_join_event(event, player, character, ctx):
     if not event_guid:
         return 0, 0, 0, 0
 
-    game_event = await GameEvent.objects.filter(guid=event_guid).afirst()
+    # Resolve to the LATEST row for this guid — one GameEvent row per run
+    # (see handle_passed_race_section).
+    game_event = (
+        await GameEvent.objects.filter(guid=event_guid)
+        .order_by("-start_time")
+        .afirst()
+    )
     if game_event is None:
         return 0, 0, 0, 0
 
@@ -533,7 +575,11 @@ async def handle_leave_event(event, player, character, ctx):
     if not event_guid:
         return 0, 0, 0, 0
 
-    game_event = await GameEvent.objects.filter(guid=event_guid).afirst()
+    game_event = (
+        await GameEvent.objects.filter(guid=event_guid)
+        .order_by("-start_time")
+        .afirst()
+    )
     if game_event is None:
         return 0, 0, 0, 0
 
