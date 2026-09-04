@@ -68,7 +68,12 @@ async def sync_active_role(bot) -> dict:
         logger.info("Active role sync: DISCORD_ACTIVE_ROLE_ID not set — skipped")
         return empty
 
-    guild = bot.get_guild(settings.DISCORD_GUILD_ID)
+    # discord.py's guild store is int-keyed (state.py:302) — a str from
+    # os.environ would look up None forever. Cast defensively here rather
+    # than in settings.py: casting the setting globally would activate the
+    # other latent get_guild(settings.DISCORD_GUILD_ID) call sites
+    # (tasks.py faction role sync) as a side effect.
+    guild = bot.get_guild(int(settings.DISCORD_GUILD_ID or 0))
     if guild is None:
         logger.warning(
             "Active role sync: guild %s not found", settings.DISCORD_GUILD_ID
