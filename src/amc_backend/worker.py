@@ -38,6 +38,7 @@ from amc_finance.services import (  # noqa: E402
     transfer_nirc,
 )
 from amc_finance.loans import evaluate_credit_scores  # noqa: E402
+from amc.active_role import active_role_cron  # noqa: E402
 
 REDIS_SETTINGS = RedisSettings(**settings.REDIS_SETTINGS)
 
@@ -246,6 +247,11 @@ class WorkerSettings:
         cron(evaluate_credit_scores, hour=0, minute=15, second=0),
         # pyrefly: ignore [bad-argument-type]
         cron(transfer_nirc, hour=0, minute=5, second=0),  # daily NIRC drip
+        # Daily Active role sync — 01:37 UTC (08:37 ICT), just after the
+        # 08:30+07 daily game-server restart. No-ops unless
+        # DISCORD_ACTIVE_ROLE_ID is configured.
+        # pyrefly: ignore [bad-argument-type]
+        cron(active_role_cron, hour=1, minute=37, second=0),
         # cron(monitor_events_main, second=None),
         # cron(monitor_events_event, second=None),  # Replaced by SSE event handlers
         # pyrefly: ignore [bad-argument-type]
