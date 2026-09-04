@@ -154,29 +154,31 @@ async def test_sync_adds_and_removes(settings):
     settings.DISCORD_GUILD_ID = 42
     now = timezone.now()
 
-    active_p = await Player.objects.acreate(unique_id=21, discord_user_id=21)
-    active_c = await Character.objects.acreate(player=active_p, name="c21")
-    await PlayerStatusLog.objects.acreate(character=active_c, timespan=(now, None))
-    # linked but no recent login → must lose the role
-    await Player.objects.acreate(unique_id=22, discord_user_id=22)
+    try:
+        active_p = await Player.objects.acreate(unique_id=21, discord_user_id=21)
+        active_c = await Character.objects.acreate(player=active_p, name="c21")
+        await PlayerStatusLog.objects.acreate(character=active_c, timespan=(now, None))
+        # linked but no recent login → must lose the role
+        await Player.objects.acreate(unique_id=22, discord_user_id=22)
 
-    stale_member = _member(22)  # currently holds the role, inactive
-    active_member = _member(21)  # active, no role yet
-    bot, _guild, _role = _bot(
-        role_members=[stale_member],
-        guild_members=[active_member, stale_member],
-    )
+        stale_member = _member(22)  # currently holds the role, inactive
+        active_member = _member(21)  # active, no role yet
+        bot, _guild, _role = _bot(
+            role_members=[stale_member],
+            guild_members=[active_member, stale_member],
+        )
 
-    summary = await sync_active_role(bot)
+        summary = await sync_active_role(bot)
 
-    active_member.add_roles.assert_awaited_once()
-    stale_member.remove_roles.assert_awaited_once()
-    # exact added/removed counts are not asserted: rows leaked between tests
-    # (async-ORM writes bypass the per-test transaction) may add to the diff.
-    assert summary["skipped"] is False
-    assert summary["added"] >= 1
-    assert summary["removed"] >= 1
-    await _cleanup_players(21, 22)
+        active_member.add_roles.assert_awaited_once()
+        stale_member.remove_roles.assert_awaited_once()
+        # exact added/removed counts are not asserted: rows leaked between tests
+        # (async-ORM writes bypass the per-test transaction) may add to the diff.
+        assert summary["skipped"] is False
+        assert summary["added"] >= 1
+        assert summary["removed"] >= 1
+    finally:
+        await _cleanup_players(21, 22)
 
 
 @pytest.mark.asyncio
@@ -203,6 +205,25 @@ async def test_sync_skips_when_role_not_found(settings):
 
 
 @pytest.mark.asyncio
+async def test_sync_casts_guild_id_to_int(settings):
+    """discord.py's guild store is int-keyed (state.py:302) — the raw str
+    from os.environ must be cast before get_guild, else the lookup returns
+    None forever (found in the 2026-09-04 review). Set the PRODUCTION shape
+    (str) and pin the int reaching the bot."""
+    from amc.active_role import sync_active_role
+
+    settings.DISCORD_ACTIVE_ROLE_ID = 555
+    settings.DISCORD_GUILD_ID = "1535855262739603526"  # str, as env vars arrive
+    bot, guild, _role = _bot(role_members=[], guild_members=[])
+    guild.get_role.return_value = None  # early-return: no DB touch needed
+
+    summary = await sync_active_role(bot)
+
+    bot.get_guild.assert_called_once_with(1535855262739603526)
+    assert summary["skipped"] is True
+
+
+@pytest.mark.asyncio
 @pytest.mark.django_db
 async def test_sync_counts_missing_member_without_raising(settings):
     import discord
@@ -212,18 +233,20 @@ async def test_sync_counts_missing_member_without_raising(settings):
     settings.DISCORD_ACTIVE_ROLE_ID = 555
     settings.DISCORD_GUILD_ID = 42
     now = timezone.now()
-    player = await Player.objects.acreate(unique_id=31, discord_user_id=31)
-    character = await Character.objects.acreate(player=player, name="c31")
-    await PlayerStatusLog.objects.acreate(character=character, timespan=(now, None))
+    try:
+        player = await Player.objects.acreate(unique_id=31, discord_user_id=31)
+        character = await Character.objects.acreate(player=player, name="c31")
+        await PlayerStatusLog.objects.acreate(character=character, timespan=(now, None))
 
-    bot, guild, _role = _bot(role_members=[], guild_members=[])
-    guild.get_member = lambda uid: None
-    guild.fetch_member = AsyncMock(side_effect=discord.NotFound(MagicMock(), "x"))
+        bot, guild, _role = _bot(role_members=[], guild_members=[])
+        guild.get_member = lambda uid: None
+        guild.fetch_member = AsyncMock(side_effect=discord.NotFound(MagicMock(), "x"))
 
-    summary = await sync_active_role(bot)
-    assert summary["skipped"] is False
-    assert summary["missing"] >= 1  # own player (31) is not in the guild
-    await _cleanup_players(31)
+        summary = await sync_active_role(bot)
+        assert summary["skipped"] is False
+        assert summary["missing"] >= 1  # own player (31) is not in the guild
+    finally:
+        await _cleanup_players(31)
 
 
 @pytest.mark.asyncio
