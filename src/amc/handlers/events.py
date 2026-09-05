@@ -456,14 +456,36 @@ async def handle_passed_race_section(event, player, character, ctx):
         )
         return 0, 0, 0, 0
 
+    laptime_seconds = data.get("LaptimeSeconds", 0)
+    # A section-0 crossing AFTER the first one (the start line, recorded in
+    # first_section_total_time_seconds) completes a lap, and LaptimeSeconds is
+    # then the just-completed lap's time (verified live 2026-09-05: S0 splits
+    # 19.88/16.83 matched TotalTime deltas exactly). The SSE stream never
+    # carries the cumulative LapTimes/BestLapTime snapshot mid-race — that was
+    # the polling-era data source — so laps are reconstructed here.
+    completed_lap = (
+        section_index == 0
+        and game_event_char.first_section_total_time_seconds is not None
+        and 0 < laptime_seconds < 10_000_000
+    )
+
     # Update section index and total time
     game_event_char.section_index = section_index
     game_event_char.last_section_total_time_seconds = total_time_seconds
-    if game_event_char.laps == 0:
+    if completed_lap:
+        game_event_char.lap_times = list(game_event_char.lap_times or []) + [
+            laptime_seconds
+        ]
+        best = game_event_char.best_lap_time or 0
+        if best <= 0 or laptime_seconds < best:
+            game_event_char.best_lap_time = laptime_seconds
+        game_event_char.laps += 1
+    elif game_event_char.laps == 0:
         game_event_char.laps = 1
-    await game_event_char.asave(
-        update_fields=["section_index", "last_section_total_time_seconds", "laps"]
-    )
+    update_fields = ["section_index", "last_section_total_time_seconds", "laps"]
+    if completed_lap:
+        update_fields += ["lap_times", "best_lap_time"]
+    await game_event_char.asave(update_fields=update_fields)
 
     # Record lap section time
     if section_index >= 0 and game_event_char.laps >= 1:
