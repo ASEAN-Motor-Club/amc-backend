@@ -143,6 +143,13 @@ async def _upsert_game_event(event_data: dict):
             game_event.scheduled_event = scheduled_event
         await game_event.asave()
     except GameEvent.DoesNotExist:
+        # The game resets the event to state 1 for a new run without ever
+        # announcing the previous run's finish (no hookable event at
+        # completion — freeman 2026-09-05): assume any prior run row still
+        # marked In Progress was Finished before creating the new run's row.
+        await GameEvent.objects.filter(
+            guid=event_guid, state__lt=3
+        ).aupdate(state=3)
         try:
             existing_event = await (
                 GameEvent.objects.filter(
