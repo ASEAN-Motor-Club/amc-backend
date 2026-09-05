@@ -273,6 +273,24 @@ def format_time(total_seconds: float) -> str:
 
 
 def print_results(participants):
+    def format_lap(seconds):
+        if seconds is None or seconds <= 0:
+            return "-"
+        return format_time(seconds)
+
+    def best_lap(participant):
+        return format_lap(participant.best_lap_time)
+
+    def last_lap(participant):
+        laps = participant.lap_times or []
+        return format_lap(laps[-1]) if laps else "-"
+
+    # Lap columns only appear when at least one participant recorded a lap
+    # (multi-lap events). Sprint / time-trial popups keep the legacy layout.
+    show_laps = any(
+        (p.best_lap_time or 0) > 0 or p.lap_times for p in participants
+    )
+
     def print_result(participant, rank):
         flags = []
         if not participant.finished:
@@ -283,7 +301,11 @@ def print_results(participants):
             flags.append("VEHICLE")
 
         flags = ", ".join(flags)
-        return f"#{str(rank).zfill(2)}: <Bold>{participant.character.name.ljust(16)}</> {format_time(participant.net_time).ljust(14)} <Warning>{flags}</>"
+        line = f"#{str(rank).zfill(2)}: <Bold>{participant.character.name.ljust(16)}</> {format_time(participant.net_time).ljust(14)}"
+        if show_laps:
+            line += f" BL {best_lap(participant).ljust(9)} LL {last_lap(participant).ljust(9)}"
+        line += f" <Warning>{flags}</>"
+        return line
 
     lines = [
         print_result(participant, rank)
