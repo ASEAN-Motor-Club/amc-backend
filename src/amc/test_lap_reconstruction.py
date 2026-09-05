@@ -152,13 +152,12 @@ class LapReconstructionTests(TestCase):
         self.assertEqual(gec.lap_times, [])
         self.assertEqual(gec.laps, 1)
 
-    async def test_circuit_lap_completion_un_finishes_premature_last_section(
-        self, *mocks
-    ):
-        """NumLaps==0 circuit: the natural-finish rule fires prematurely at
-        the last section (S1 here, num_sections-1), but a genuine S0
-        lap-completion after it proves the route is a circuit — un-finish
-        and keep reconstructing laps (live quali evidence 19.88/16.83)."""
+    async def test_zero_lap_finished_participant_keeps_lapping(self, *mocks):
+        """NumLaps==0 routes finish at the LAST waypoint (first pass through
+        num_sections-1).  On a loop-style route the player keeps lapping
+        afterwards: finished stays True (no flip-flop), lap reconstruction
+        continues, and the finish snapshot (section index / last total) is
+        frozen at the finish crossing (freeman 2026-09-05 geometry)."""
         player, character = await self._setup()
 
         # Start line.
@@ -169,7 +168,7 @@ class LapReconstructionTests(TestCase):
             character,
             _make_ctx(),
         )
-        # Last section of a NumLaps=0 route -> premature natural finish.
+        # Last section of a NumLaps=0 route -> natural finish (Rule A).
         await dispatch(
             "ServerPassedRaceSection",
             _section(1, 29.55, 6.1),
@@ -180,7 +179,8 @@ class LapReconstructionTests(TestCase):
         gec = await self._gec()
         self.assertTrue(gec.finished)
 
-        # A real S0 lap completion arrives -> circuit detected, un-finish.
+        # Lapping continues: lap completions are still reconstructed but
+        # the participant is NOT un-finished.
         await dispatch(
             "ServerPassedRaceSection",
             _section(0, 43.32, 19.88),
@@ -189,11 +189,10 @@ class LapReconstructionTests(TestCase):
             _make_ctx(),
         )
         gec = await self._gec()
-        self.assertFalse(gec.finished)
+        self.assertTrue(gec.finished)
         self.assertEqual(gec.lap_times, [19.88])
         self.assertEqual(gec.laps, 2)
 
-        # Lapping continues.
         await dispatch(
             "ServerPassedRaceSection",
             _section(0, 60.15, 16.83),
@@ -205,3 +204,7 @@ class LapReconstructionTests(TestCase):
         self.assertEqual(gec.lap_times, [19.88, 16.83])
         self.assertEqual(gec.best_lap_time, 16.83)
         self.assertEqual(gec.laps, 3)
+        # Finish snapshot frozen at the finish crossing (29.55), not the
+        # later lap totals — net time stays the first-loop time.
+        self.assertEqual(gec.section_index, 1)
+        self.assertEqual(gec.last_section_total_time_seconds, 29.55)

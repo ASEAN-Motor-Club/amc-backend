@@ -869,6 +869,39 @@ class RunRowResolutionTests(TestCase):
         await gec.arefresh_from_db()
         self.assertFalse(gec.finished)
 
+    async def test_one_lap_finishes_on_s0_not_last_waypoint(self):
+        """NumLaps>=1 routes finish at the FIRST waypoint (freeman
+        2026-09-05): crossing the last waypoint must not finish a 1-lap
+        run; the S0 crossing that completes the lap does."""
+        event_data = _make_event_data(state=2)
+        event_data["EventGuid"] = self.RUN_GUID
+        event_data["RaceSetup"] = {**RACE_SETUP_RAW, "NumLaps": 1}
+        game_event, _ = await _upsert_game_event(event_data)
+        await _upsert_game_event_character(game_event, event_data["Players"][0])
+        ctx = _make_ctx()
+
+        # Start line.
+        await handle_passed_race_section(
+            self._section_event(0, 60.0), None, None, ctx
+        )
+        # Last waypoint of a NumLaps=1 route — NOT the finish checkpoint.
+        await handle_passed_race_section(
+            self._section_event(1, 142.5), None, None, ctx
+        )
+        gec = await GameEventCharacter.objects.filter(game_event=game_event).afirst()
+        await gec.arefresh_from_db()
+        self.assertFalse(gec.finished)
+
+        # S0 crossing completes lap 1 -> the finish checkpoint -> finished.
+        await handle_passed_race_section(
+            self._section_event(0, 300.0), None, None, ctx
+        )
+        gec = await GameEventCharacter.objects.filter(game_event=game_event).afirst()
+        await gec.arefresh_from_db()
+        self.assertTrue(gec.finished)
+        self.assertEqual(gec.laps, 2)  # start marker + 1 completed lap
+        self.assertEqual(gec.lap_times, [300.0])
+
     async def test_finished_participant_ignores_late_sections(self):
         """Delayed SSE bursts re-deliver sections after the finish — a
         finished participant must not be updated again."""

@@ -490,32 +490,36 @@ async def handle_passed_race_section(event, player, character, ctx):
         and 0 < laptime_seconds <= total_time_seconds
     )
 
-    # Do not update finished players — their final times are already stored
-    # and later section events are stragglers from the delayed SSE bursts.
-    # EXCEPTION (NumLaps==0 routes): the natural-finish rule below fires on
-    # the last section of a 0-lap run, which is correct for point-to-point
-    # sprints but premature for circuit-style TTs where the player keeps
-    # lapping (live evidence 2026-09-05: quali laps 19.88/16.83 continued
-    # after the S1 crossing that had already finished the run).  A genuine
-    # lap-completion S0 crossing after that proves the route is a circuit:
-    # un-finish and keep reconstructing.  The flag may thus flip once per
-    # run; NumLaps>=1 finished runs never un-finish.
-    un_finished = False
+    # Finished-participant guard.  The game's own auto-finish —
+    # ChangeEventState(3), which fires only when ALL players complete the
+    # track (freeman 2026-09-05) — never reaches SSE for solo/partial
+    # lobbies, so completion is inferred per participant:
+    #   - NumLaps==0 routes: the finish checkpoint is the LAST waypoint —
+    #     the first pass through num_sections-1 finishes the run (Rule A).
+    #   - NumLaps>=1 routes: the finish checkpoint is the FIRST waypoint —
+    #     the S0 crossing that completes lap N (Rule B below).
+    # Later section events for a finished participant are stragglers from
+    # delayed SSE bursts.  EXCEPTION: a finished NumLaps==0 participant on
+    # a loop-style route (practice/quali TTs) keeps lapping — keep
+    # reconstructing their laps while the finish snapshot (section index /
+    # last total / net time) stays frozen.  finished is never un-set (the
+    # un-finish flip-flop experiment was removed 2026-09-05).
+    finished_0lap = False
     if game_event_char.finished:
         num_laps_now = (
             game_event.race_setup.num_laps
             if game_event.race_setup is not None
-            else 0
+            else None
         )
-        if completed_lap and num_laps_now == 0:
-            game_event_char.finished = False
-            un_finished = True
+        if num_laps_now == 0:
+            finished_0lap = True
         else:
             return 0, 0, 0, 0
 
-    # Update section index and total time
-    game_event_char.section_index = section_index
-    game_event_char.last_section_total_time_seconds = total_time_seconds
+    # Update section index and total time (frozen for finished 0-lap runs)
+    if not finished_0lap:
+        game_event_char.section_index = section_index
+        game_event_char.last_section_total_time_seconds = total_time_seconds
     just_finished = False
     if completed_lap:
         game_event_char.lap_times = list(game_event_char.lap_times or []) + [
@@ -526,43 +530,50 @@ async def handle_passed_race_section(event, player, character, ctx):
             game_event_char.best_lap_time = laptime_seconds
         game_event_char.laps += 1
 
-        # Multi-lap natural-finish detection.  Natural completion is a
-        # server-internal transition — the game never emits
+        # Rule B — N-lap natural-finish detection (NumLaps>=1).  Natural
+        # completion is a server-internal transition — the game never emits
         # ChangeEventState(3) for it (verified live 2026-09-05: a 2-lap
         # kart event recorded both laps in LapTimes {11.32, 9.54} yet the
-        # run stayed finished=False forever, since the single-lap rule
-        # only fires on the last section of NumLaps<=1 routes).  A
-        # multi-lap run finishes on the section-0 crossing that completes
-        # the final lap — exactly the crossing reconstructed above.
-        # NOTE: ``laps`` is 1 + completed-lap count (the initial 1 is the
-        # in-progress marker set on the first section crossing), so the
-        # final-lap condition is laps - 1 >= num_laps, not laps >= num_laps.
-        num_laps = None
-        if game_event.race_setup_id:
-            race_setup = await RaceSetup.objects.filter(
-                pk=game_event.race_setup_id
-            ).afirst()
-            num_laps = race_setup.num_laps if race_setup else None
+        # run stayed finished=False forever).  In NumLaps>=1 routes the
+        # finish checkpoint is the FIRST waypoint (freeman 2026-09-05), so
+        # a 1-lap or N-lap run finishes on the section-0 crossing that
+        # completes the final lap — exactly the crossing reconstructed
+        # above.  NOTE: ``laps`` is 1 + completed-lap count (the initial 1
+        # is the in-progress marker set on the first section crossing), so
+        # the final-lap condition is laps - 1 >= num_laps, not
+        # laps >= num_laps.
+        num_laps = (
+            game_event.race_setup.num_laps
+            if game_event.race_setup is not None
+            else None
+        )
         if (
             num_laps is not None
-            and num_laps >= 2
+            and num_laps >= 1
             and game_event_char.laps - 1 >= num_laps
         ):
             game_event_char.finished = True
             just_finished = True
     elif game_event_char.laps == 0:
         game_event_char.laps = 1
-    update_fields = ["section_index", "last_section_total_time_seconds", "laps"]
+    update_fields = ["laps"]
+    if not finished_0lap:
+        update_fields += ["section_index", "last_section_total_time_seconds"]
     if completed_lap:
         update_fields += ["lap_times", "best_lap_time"]
         if just_finished:
             update_fields.append("finished")
-    if un_finished:
-        update_fields.append("finished")
     await game_event_char.asave(update_fields=update_fields)
 
-    # Record lap section time
-    if section_index >= 0 and game_event_char.laps >= 1:
+    # Record lap section time.  For finished 0-lap runs only lap-completion
+    # (S0) crossings get rows — their lap index is advanced so they cannot
+    # collide with the finish snapshot's rows, while straggler
+    # re-deliveries (completed_lap=False) cannot overwrite them.
+    if (
+        section_index >= 0
+        and game_event_char.laps >= 1
+        and (not finished_0lap or completed_lap)
+    ):
         lap = game_event_char.laps - 1
         await LapSectionTime.objects.aupdate_or_create(
             game_event_character=game_event_char,
@@ -580,7 +591,11 @@ async def handle_passed_race_section(event, player, character, ctx):
     # because the SSE handler never receives lap count updates; the ``laps``
     # field in the DB would stay at 1 throughout the race, causing every
     # subsequent section-0 crossing to overwrite the value.
-    if section_index == 0 and game_event_char.first_section_total_time_seconds is None:
+    if (
+        not finished_0lap
+        and section_index == 0
+        and game_event_char.first_section_total_time_seconds is None
+    ):
         if total_time_seconds < 10_000_000:
             await GameEventCharacter.objects.filter(pk=game_event_char.pk).aupdate(
                 first_section_total_time_seconds=total_time_seconds
@@ -590,18 +605,19 @@ async def handle_passed_race_section(event, player, character, ctx):
                 first_section_total_time_seconds=0
             )
 
-    # Natural-finish detection.  A natural finish is a server-internal event
-    # transition — the game never sends the client→server ChangeEventState
-    # RPC for it, so state 3 never reaches the backend and the run's row
-    # stays In Progress forever (no finished flag, results popup, or EXP).
-    # Mark the participant finished when they cross the last section of a
-    # single-lap route (NumLaps<=1).  Multi-lap routes cannot be detected
-    # this way — the section stream carries no reliable lap count — so those
-    # keep depending on the abort/DQ ChangeEventState(3) snapshots.
+    # Rule A — 0-lap natural finish.  The game's own auto-finish
+    # (ChangeEventState(3)) fires only when ALL players complete the track
+    # and never reaches the backend for solo/partial lobbies, so the run's
+    # row would stay In Progress forever (no finished flag, results popup,
+    # or EXP).  For NumLaps==0 routes the finish checkpoint is the LAST
+    # waypoint (freeman 2026-09-05): the first pass through
+    # num_sections-1 completes the track.  NumLaps>=1 routes finish at the
+    # first waypoint instead (Rule B above).
     race_setup = game_event.race_setup
     if (
-        race_setup is not None
-        and race_setup.num_laps <= 1
+        not finished_0lap
+        and race_setup is not None
+        and race_setup.num_laps == 0
         and section_index == race_setup.num_sections - 1
     ):
         game_event_char.finished = True
