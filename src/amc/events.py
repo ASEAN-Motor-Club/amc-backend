@@ -102,12 +102,15 @@ async def process_event(event):
         guid=event["OwnerCharacterId"]["CharacterGuid"],
     ).afirst()
 
-    scheduled_event = await ScheduledEvent.objects.filter(
-        race_setup=race_setup,
-        start_time__lte=timezone.now(),
-        end_time__gte=timezone.now(),
-        time_trial=True,  # only auto-associate time trials
-    ).afirst()
+    scheduled_event = await (
+        ScheduledEvent.objects.filter(
+            race_setup=race_setup,
+            start_time__lte=timezone.now(),
+            end_time__gte=timezone.now(),
+        )
+        .order_by("start_time")  # deterministic pick if several match
+        .afirst()
+    )
 
     try:
         game_event = await (
@@ -251,6 +254,10 @@ def format_time(total_seconds: float) -> str:
   Returns:
     A string representing the time in MM:SS.sss format.
   """
+    if total_seconds is None:
+        # Participants without any section crossing have a NULL net time —
+        # render a dash instead of crashing the popup build.
+        return "-"
     if not isinstance(total_seconds, (int, float)):
         raise TypeError("Input must be a number (int or float).")
     if total_seconds < 0:
@@ -269,7 +276,92 @@ def format_time(total_seconds: float) -> str:
     return f"{formatted_minutes}:{formatted_seconds}"
 
 
+def format_lap(seconds):
+    """Lap time for display; '-' when no lap was recorded."""
+    if seconds is None or seconds <= 0:
+        return "-"
+    return format_time(seconds)
+
+
+def participant_lap_segment(participant):
+    """' BL <best> LL <last>' suffix for Discord participant lines.
+
+    Empty string when the participant recorded no laps, so sprint and
+    time-trial lines stay byte-identical to the legacy format.
+    """
+    laps = participant.lap_times or []
+    best = format_lap(participant.best_lap_time)
+    last = format_lap(laps[-1]) if laps else "-"
+    if best == "-" and last == "-":
+        return ""
+    return f" BL {best} LL {last}"
+
+
+def _lap_breakdown_lines(participants):
+    """Per-lap performance breakdown rendered under the results table.
+
+    One row per recorded lap per participant: lap number, lap time, delta
+    to the participant's own best lap ("BEST" on the fastest), and the
+    position that lap achieved among all participants' same-index laps
+    (so a driver can see which lap lost them the race).  The section is
+    omitted entirely when nobody recorded a lap, so sprint / time-trial
+    popups stay byte-identical to the legacy layout.
+
+    Display-side sentinel filter: boot-age values can leak into
+    ``lap_times`` via the game's own start snapshots (live evidence
+    2026-09-05: 6329.98 as a first entry) and are never real laps — a
+    single lap above 600s is not renderable on any current route.
+    """
+    def display_laps(participant):
+        return [t for t in (participant.lap_times or []) if 0 < t <= 600]
+
+    blocks = []  # (participant, laps) for everyone with at least one lap
+    per_lap_laps = []  # per_lap_laps[i] = lap-i times across participants
+    for participant in participants:
+        laps = display_laps(participant)
+        if not laps:
+            continue
+        blocks.append((participant, laps))
+        for i, t in enumerate(laps):
+            if len(per_lap_laps) <= i:
+                per_lap_laps.append([])
+            per_lap_laps[i].append(t)
+
+    if not blocks:
+        return []
+
+    def lap_position(i, t):
+        if len(per_lap_laps[i]) <= 1:
+            return ""
+        faster = sum(1 for other in per_lap_laps[i] if other < t)
+        return f"P{faster + 1}"
+
+    lines = ["", "<Title>Lap breakdown</>"]
+    for participant, laps in blocks:
+        best = min(laps)
+        lines.append(f"<Bold>{participant.character.name.ljust(16)}</>")
+        for i, t in enumerate(laps):
+            marker = "BEST" if t == best else f"+{t - best:.3f}"
+            position = lap_position(i, t)
+            suffix = f"  {position}" if position else ""
+            lines.append(f"  L{i + 1}  {t:>9.3f}s  {marker:>9}{suffix}")
+    return lines
+
+
 def print_results(participants):
+    def best_lap(participant):
+        return format_lap(participant.best_lap_time)
+
+    def last_lap(participant):
+        laps = participant.lap_times or []
+        return format_lap(laps[-1]) if laps else "-"
+
+    # Lap columns only appear when at least one participant recorded a lap
+    # (multi-lap events). Sprint / time-trial popups keep the legacy layout.
+    show_laps = any(
+        (p.best_lap_time or 0) > 0 or p.lap_times for p in participants
+    )
+
     def print_result(participant, rank):
         flags = []
         if not participant.finished:
@@ -280,12 +372,17 @@ def print_results(participants):
             flags.append("VEHICLE")
 
         flags = ", ".join(flags)
-        return f"#{str(rank).zfill(2)}: <Bold>{participant.character.name.ljust(16)}</> {format_time(participant.net_time).ljust(14)} <Warning>{flags}</>"
+        line = f"#{str(rank).zfill(2)}: <Bold>{participant.character.name.ljust(16)}</> {format_time(participant.net_time).ljust(14)}"
+        if show_laps:
+            line += f" BL {best_lap(participant).ljust(9)} LL {last_lap(participant).ljust(9)}"
+        line += f" <Warning>{flags}</>"
+        return line
 
     lines = [
         print_result(participant, rank)
         for rank, participant in enumerate(participants, start=1)
     ]
+    lines += _lap_breakdown_lines(participants)
     return "\n".join(lines)
 
 
@@ -428,6 +525,7 @@ def create_event_embed(game_event):
                     progress_str = f"{progress_percentage:.1f}%"
 
             participant_line = f"{rank}. {participant.character.name} ({progress_str})"
+            participant_line += participant_lap_segment(participant)
 
             if participant.wrong_vehicle:
                 participant_line += " [Wrong Vehicle]"

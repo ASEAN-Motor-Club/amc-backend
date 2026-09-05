@@ -59,6 +59,7 @@ from amc.mod_server import (
     spawn_garage,
     despawn_player_vehicle,
     force_exit_vehicle,
+    set_pinned_announcement,
 )
 from amc.mailbox import send_player_messages
 from amc.utils import (
@@ -992,11 +993,31 @@ async def spawn_world_assets(http_client_mod):
             lambda wt=wt: spawn_assets(http_client_mod, wt.generate_asset_data()),
             f"world text {wt.id}",
         )
-    async for wt in WorldObject.objects.filter():
+    async for wo in WorldObject.objects.filter():
         await _spawn_with_retry(
-            lambda wt=wt: spawn_assets(http_client_mod, [wt.generate_asset_data()]),
-            f"world object {wt.id}",
+            lambda wo=wo: spawn_assets(http_client_mod, [wo.generate_asset_data()]),
+            f"world object {wo.id}",
         )
+
+
+async def spawn_pinned_announcement(http_client_mod):
+    """Re-set the pinned banner after a server start.
+
+    The banner (GameState.Net_ServerConfig.PinnedAnnounce) is runtime-only —
+    the game clears it on every boot, so it must be re-applied each start.
+    Uses the mod's direct-write path (bogus playerId), so no online admin is
+    required. Retried longer than the default because the mod returns 400
+    until the game world has finished loading.
+    """
+    message = settings.PINNED_ANNOUNCEMENT
+    if not message:
+        return
+    await _spawn_with_retry(
+        lambda: set_pinned_announcement(http_client_mod, message),
+        "set pinned announcement",
+        attempts=5,
+        base_delay=5,
+    )
 
 
 async def process_log_event(
@@ -1513,6 +1534,7 @@ async def process_log_event(
             _track_restart_spawn(spawn_restarting_dealerships(http_client_mod), 15)
             _track_restart_spawn(spawn_world_assets(http_client_mod), 20)
             _track_restart_spawn(spawn_restarting_garages(http_client_mod), 25)
+            _track_restart_spawn(spawn_pinned_announcement(http_client_mod), 30)
             _track_restart_spawn(spawn_world_vehicle_decals(http_client_mod), 30)
             _track_restart_spawn(spawn_display_vehicles(http_client_mod), 35)
 

@@ -97,7 +97,11 @@ async def register_player_deposit(
     )
 
 
-async def register_player_withdrawal(amount, character, player):
+async def register_player_withdrawal(
+    amount, character, player, description="Player Withdrawal"
+):
+    if amount <= 0:
+        raise ValueError("Withdrawal amount must be positive")
     account, _ = await Account.objects.aget_or_create(
         account_type=Account.AccountType.LIABILITY,
         book=Account.Book.BANK,
@@ -120,7 +124,7 @@ async def register_player_withdrawal(amount, character, player):
 
     return await sync_to_async(create_journal_entry)(
         timezone.now(),
-        "Player Withdrawal",
+        description,
         character,
         [
             {
@@ -137,7 +141,78 @@ async def register_player_withdrawal(amount, character, player):
     )
 
 
+async def register_player_teleport_fee(
+    amount, character, player, description="Teleport Fee"
+):
+    """Charge a player's bank account; book the fee as treasury revenue.
+
+    Mirrors the /donate chain (bank withdrawal + treasury posting) but does
+    NOT touch character.total_donations.  Raises ValueError when the player's
+    bank balance is insufficient (nothing is posted).
+    """
+    await register_player_withdrawal(amount, character, player, description=description)
+
+    treasury_fund, _ = await Account.objects.aget_or_create(
+        account_type=Account.AccountType.ASSET,
+        book=Account.Book.GOVERNMENT,
+        character=None,
+        name="Treasury Fund",
+    )
+    treasury_revenue, _ = await Account.objects.aget_or_create(
+        account_type=Account.AccountType.REVENUE,
+        book=Account.Book.GOVERNMENT,
+        character=None,
+        name="Treasury Revenue",
+    )
+
+    return await sync_to_async(create_journal_entry, thread_sensitive=True)(
+        timezone.now(),
+        description,
+        character,
+        [
+            {"account": treasury_revenue, "debit": 0, "credit": amount},
+            {"account": treasury_fund, "debit": amount, "credit": 0},
+        ],
+    )
+
+
+async def refund_player_teleport_fee(
+    amount, character, player, description="Teleport Fee Refund"
+):
+    """Exact reverse of register_player_teleport_fee."""
+    await register_player_deposit(amount, character, player, description=description)
+
+    treasury_fund, _ = await Account.objects.aget_or_create(
+        account_type=Account.AccountType.ASSET,
+        book=Account.Book.GOVERNMENT,
+        character=None,
+        name="Treasury Fund",
+    )
+    treasury_revenue, _ = await Account.objects.aget_or_create(
+        account_type=Account.AccountType.REVENUE,
+        book=Account.Book.GOVERNMENT,
+        character=None,
+        name="Treasury Revenue",
+    )
+
+    return await sync_to_async(create_journal_entry, thread_sensitive=True)(
+        timezone.now(),
+        description,
+        character,
+        [
+            {"account": treasury_revenue, "debit": amount, "credit": 0},
+            {"account": treasury_fund, "debit": 0, "credit": amount},
+        ],
+    )
+
+
 async def player_donation(amount, character, description="Player Donation"):
+    if amount <= 0:
+        # Non-positive "donations" must never book a journal or touch
+        # total_donations (a negative amount used to decrement it). Zero is a
+        # legitimate call from the gov-employee pipeline (subsidy-only
+        # contributions), so treat non-positive amounts as a no-op.
+        return
     treasury_fund, _ = await Account.objects.aget_or_create(
         account_type=Account.AccountType.ASSET,
         book=Account.Book.GOVERNMENT,

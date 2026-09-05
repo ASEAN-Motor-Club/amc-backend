@@ -14,12 +14,25 @@ from django.utils import timezone
 from django.utils.translation import gettext_lazy
 
 
+STAGGERED_START_DEFAULT_DELAY = 20.0  # matches amc.events.staggered_start's own default
+
+
+async def resolve_stagger_delay(active_event, delay_arg) -> float:
+    """Manual argument > scheduled event's configured delay > 20s default."""
+    if delay_arg is not None:
+        return float(delay_arg)
+    scheduled_event = getattr(active_event, "scheduled_event", None)
+    if scheduled_event is not None and scheduled_event.staggered_start_delay > 0:
+        return float(scheduled_event.staggered_start_delay)
+    return STAGGERED_START_DEFAULT_DELAY
+
+
 @registry.register(
     "/staggered_start",
     description=gettext_lazy("Start event with staggered delay"),
     category="Events",
 )
-async def cmd_staggered_start(ctx: CommandContext, delay: int):
+async def cmd_staggered_start(ctx: CommandContext, delay: int | None = None):
     active_event = await (
         GameEvent.objects.filter(
             Exists(
@@ -28,7 +41,7 @@ async def cmd_staggered_start(ctx: CommandContext, delay: int):
                 )
             )
         )
-        .select_related("race_setup")
+        .select_related("race_setup", "scheduled_event")
         .alatest("last_updated")
     )
 
@@ -40,7 +53,7 @@ async def cmd_staggered_start(ctx: CommandContext, delay: int):
         ctx.http_client_mod,
         active_event,
         player_id=ctx.player.unique_id,
-        delay=float(delay),
+        delay=await resolve_stagger_delay(active_event, delay),
     )
 
 

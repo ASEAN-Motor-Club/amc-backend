@@ -146,6 +146,8 @@ def calc_loan_fee(amount, character, max_loan, credit_score=100):
 
 
 async def register_player_take_loan(amount, character):
+    if amount <= 0:
+        raise ValueError("Loan amount must be positive")
     max_loan, _ = await get_character_max_loan(character)
     fee = calc_loan_fee(
         amount, character, max_loan, credit_score=character.credit_score

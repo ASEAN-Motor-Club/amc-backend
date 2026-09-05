@@ -166,6 +166,27 @@ async def send_message_as_player(session, message, player_id, category=None):
             raise Exception("Failed to send message")
 
 
+async def set_pinned_announcement(session, message):
+    """Set the game's pinned banner via the mod's ChatManager direct-write path.
+
+    Uses a bogus playerId so ``GetPlayerControllerFromUniqueId`` fails and
+    ChatManager.AnnounceServerMessage falls back to writing
+    ``GameState.Net_ServerConfig.PinnedAnnounce`` directly — no online admin
+    required, and no ``[Admin] CHANGE PinnedAnnounce`` log line. The banner is
+    runtime-only state (the game clears it on boot), so this is re-applied
+    after every server start (see tasks.py spawn_pinned_announcement).
+    """
+    await _write_limiter.acquire()
+    data = {
+        "message": message,
+        "playerId": "0",
+        "isPinned": True,
+    }
+    async with session.post("/messages/announce", json=data) as resp:
+        if resp.status != 200:
+            raise Exception("Failed to set pinned announcement")
+
+
 async def teleport_player(
     session,
     player_id,
@@ -174,6 +195,7 @@ async def teleport_player(
     no_vehicles=False,
     reset_trailers=None,
     reset_carried_vehicles=None,
+    remove_cargo=None,
     force=False,
 ):
     await _write_limiter.acquire()
@@ -188,6 +210,8 @@ async def teleport_player(
         data["bResetTrailers"] = reset_trailers
     if reset_carried_vehicles is not None:
         data["bResetCarriedVehicles"] = reset_carried_vehicles
+    if remove_cargo is not None:
+        data["bRemoveCargo"] = remove_cargo
     if rotation:
         data["Rotation"] = rotation
     async with session.post(f"/players/{player_id}/teleport", json=data) as resp:
