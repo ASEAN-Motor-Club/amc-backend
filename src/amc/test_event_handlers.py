@@ -1161,6 +1161,25 @@ class RunRowResolutionTests(TestCase):
         ).afirst()
         self.assertEqual(lst.total_time_seconds, 142.5)
 
+    async def test_new_run_closes_out_previous_unfinished_row(self):
+        """The game resets to state 1 for a new run without announcing the
+        previous run's finish — the prior In-Progress row is assumed
+        Finished before the new run's row is created (freeman 2026-09-05)."""
+        event_data = _make_event_data(state=2)
+        event_data["EventGuid"] = self.RUN_GUID
+        run1, _ = await _upsert_game_event(event_data)
+
+        new_data = _make_event_data(state=1)
+        new_data["EventGuid"] = self.RUN_GUID
+        run2, transition = await _upsert_game_event(new_data)
+
+        self.assertIsNotNone(run2)
+        self.assertNotEqual(run2.pk, run1.pk)
+        self.assertEqual(run2.state, 1)
+        self.assertIsNone(transition)
+        await run1.arefresh_from_db()
+        self.assertEqual(run1.state, 3)  # assumed Finished
+
     async def test_ownerless_add_event_creates_auto_event(self):
         """Backend-posted auto TTs carry OwnerCharacterId.UniqueNetId == "" —
         the upsert must not crash on the BigInteger lookup and must still
