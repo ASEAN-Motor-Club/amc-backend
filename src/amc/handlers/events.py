@@ -463,10 +463,17 @@ async def handle_passed_race_section(event, player, character, ctx):
     # 19.88/16.83 matched TotalTime deltas exactly). The SSE stream never
     # carries the cumulative LapTimes/BestLapTime snapshot mid-race — that was
     # the polling-era data source — so laps are reconstructed here.
+    #
+    # Sentinel guard: the game sends LaptimeSeconds = seconds-since-server-boot
+    # (~6300s observed) on start-line crossings. A real lap is always a subset
+    # of TotalTimeSeconds; the sentinel is orders of magnitude larger than the
+    # fresh TotalTime of the crossing that carries it (verified live: 6329 vs
+    # 6.75). Subset check rejects it; the old 10M ceiling did NOT (sentinel is
+    # boot time, not a huge constant — it grows every boot).
     completed_lap = (
         section_index == 0
         and game_event_char.first_section_total_time_seconds is not None
-        and 0 < laptime_seconds < 10_000_000
+        and 0 < laptime_seconds <= total_time_seconds
     )
 
     # Update section index and total time

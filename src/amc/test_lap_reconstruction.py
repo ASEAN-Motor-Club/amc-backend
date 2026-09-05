@@ -111,7 +111,11 @@ class LapReconstructionTests(TestCase):
         self.assertEqual(gec.laps, 3)
 
     async def test_sentinel_laptime_not_recorded(self, *mocks):
-        """A huge LaptimeSeconds (game sentinel) on a later S0 crossing is ignored."""
+        """Countdown-restart sentinel (boot age, ~6300s, > TotalTime) is ignored.
+
+        Live-observed 2026-09-05: start line S0(TotalTime=6.75,
+        LaptimeSeconds=6329) arrived with first_section already set from an
+        aborted countdown — must not count as a lap."""
         player, character = await self._setup()
 
         await dispatch(
@@ -123,7 +127,7 @@ class LapReconstructionTests(TestCase):
         )
         await dispatch(
             "ServerPassedRaceSection",
-            _section(0, 43.32, 20_000_000.0),
+            _section(0, 6.75, 6329.98),
             player,
             character,
             _make_ctx(),
