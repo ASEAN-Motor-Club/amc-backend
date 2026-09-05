@@ -151,3 +151,57 @@ class LapReconstructionTests(TestCase):
         gec = await self._gec()
         self.assertEqual(gec.lap_times, [])
         self.assertEqual(gec.laps, 1)
+
+    async def test_circuit_lap_completion_un_finishes_premature_last_section(
+        self, *mocks
+    ):
+        """NumLaps==0 circuit: the natural-finish rule fires prematurely at
+        the last section (S1 here, num_sections-1), but a genuine S0
+        lap-completion after it proves the route is a circuit — un-finish
+        and keep reconstructing laps (live quali evidence 19.88/16.83)."""
+        player, character = await self._setup()
+
+        # Start line.
+        await dispatch(
+            "ServerPassedRaceSection",
+            _section(0, 23.44, 5221.59),
+            player,
+            character,
+            _make_ctx(),
+        )
+        # Last section of a NumLaps=0 route -> premature natural finish.
+        await dispatch(
+            "ServerPassedRaceSection",
+            _section(1, 29.55, 6.1),
+            player,
+            character,
+            _make_ctx(),
+        )
+        gec = await self._gec()
+        self.assertTrue(gec.finished)
+
+        # A real S0 lap completion arrives -> circuit detected, un-finish.
+        await dispatch(
+            "ServerPassedRaceSection",
+            _section(0, 43.32, 19.88),
+            player,
+            character,
+            _make_ctx(),
+        )
+        gec = await self._gec()
+        self.assertFalse(gec.finished)
+        self.assertEqual(gec.lap_times, [19.88])
+        self.assertEqual(gec.laps, 2)
+
+        # Lapping continues.
+        await dispatch(
+            "ServerPassedRaceSection",
+            _section(0, 60.15, 16.83),
+            player,
+            character,
+            _make_ctx(),
+        )
+        gec = await self._gec()
+        self.assertEqual(gec.lap_times, [19.88, 16.83])
+        self.assertEqual(gec.best_lap_time, 16.83)
+        self.assertEqual(gec.laps, 3)

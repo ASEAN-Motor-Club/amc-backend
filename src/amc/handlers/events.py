@@ -470,11 +470,6 @@ async def handle_passed_race_section(event, player, character, ctx):
         )
         return 0, 0, 0, 0
 
-    # Do not update finished players — their final times are already stored
-    # and later section events are stragglers from the delayed SSE bursts.
-    if game_event_char.finished:
-        return 0, 0, 0, 0
-
     laptime_seconds = data.get("LaptimeSeconds", 0)
     # A section-0 crossing AFTER the first one (the start line, recorded in
     # first_section_total_time_seconds) completes a lap, and LaptimeSeconds is
@@ -494,6 +489,29 @@ async def handle_passed_race_section(event, player, character, ctx):
         and game_event_char.first_section_total_time_seconds is not None
         and 0 < laptime_seconds <= total_time_seconds
     )
+
+    # Do not update finished players — their final times are already stored
+    # and later section events are stragglers from the delayed SSE bursts.
+    # EXCEPTION (NumLaps==0 routes): the natural-finish rule below fires on
+    # the last section of a 0-lap run, which is correct for point-to-point
+    # sprints but premature for circuit-style TTs where the player keeps
+    # lapping (live evidence 2026-09-05: quali laps 19.88/16.83 continued
+    # after the S1 crossing that had already finished the run).  A genuine
+    # lap-completion S0 crossing after that proves the route is a circuit:
+    # un-finish and keep reconstructing.  The flag may thus flip once per
+    # run; NumLaps>=1 finished runs never un-finish.
+    un_finished = False
+    if game_event_char.finished:
+        num_laps_now = (
+            game_event.race_setup.num_laps
+            if game_event.race_setup is not None
+            else 0
+        )
+        if completed_lap and num_laps_now == 0:
+            game_event_char.finished = False
+            un_finished = True
+        else:
+            return 0, 0, 0, 0
 
     # Update section index and total time
     game_event_char.section_index = section_index
@@ -539,6 +557,8 @@ async def handle_passed_race_section(event, player, character, ctx):
         update_fields += ["lap_times", "best_lap_time"]
         if just_finished:
             update_fields.append("finished")
+    if un_finished:
+        update_fields.append("finished")
     await game_event_char.asave(update_fields=update_fields)
 
     # Record lap section time
