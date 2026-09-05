@@ -808,9 +808,19 @@ class RaceSetup(models.Model):
 
     @staticmethod
     def normalize_config(race_setup):
-        """Recursively coerce integer leaves to float so that JSON drift
-        between serialization paths (e.g. ``0`` vs ``0.0``, ``10`` vs
-        ``10.0``) does not produce different hashes for the same setup.
+        """Recursively coerce integer leaves to float and quantize floats so
+        that drift between serialization paths does not produce different
+        hashes for the same setup.
+
+        Two drift sources, both observed live:
+        - int/float leaf drift (``0`` vs ``0.0``, ``10`` vs ``10.0``) between
+          older stored rows and game re-emissions;
+        - quaternion float64 noise: the game re-emits ``Rotation`` quaternions
+          with run-to-run double-precision jitter (~1e-14, verified 2026-09-05:
+          the same ``/setup_event`` route hashed to different rows with
+          ``Rotation.W = 0.22719833571551`` vs ``0.22719833571552617``).
+          Rounding every float to 6 decimals collapses that jitter while
+          staying far below game physics precision.
 
         Bools are instances of int in Python and are preserved as-is.
         """
@@ -819,7 +829,7 @@ class RaceSetup(models.Model):
         if isinstance(race_setup, int):
             return float(race_setup)
         if isinstance(race_setup, float):
-            return race_setup
+            return round(race_setup, 6)
         if isinstance(race_setup, dict):
             return {
                 key: RaceSetup.normalize_config(value)

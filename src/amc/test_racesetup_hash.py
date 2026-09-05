@@ -23,6 +23,11 @@ mig_normalize = _migration._normalize
 mig_normalized_hash = _migration._normalized_hash
 rehash_and_merge = _migration.rehash_and_merge
 
+_migration_0234 = import_module("amc.migrations.0234_racesetup_rehash_quantize")
+mig234_normalize = _migration_0234._normalize
+mig234_normalized_hash = _migration_0234._normalized_hash
+rehash_and_merge_quantize = _migration_0234.rehash_and_merge
+
 INT_CONFIG = {
     "NumLaps": 0,
     "Route": {
@@ -92,10 +97,63 @@ class RaceSetupHashNormalizationTestCase(TestCase):
         )
 
     def test_model_and_migration_normalize_agree(self):
-        assert RaceSetup.normalize_config(INT_CONFIG) == mig_normalize(INT_CONFIG)
-        assert RaceSetup.calculate_hash(INT_CONFIG) == mig_normalized_hash(
+        # The agree-test targets the LATEST hash scheme (0234, quantized):
+        # the model's calculate_hash must match the newest migration's
+        # normalizer, or a re-hash pass would store hashes the live code
+        # never reproduces.
+        assert RaceSetup.normalize_config(INT_CONFIG) == mig234_normalize(INT_CONFIG)
+        assert RaceSetup.calculate_hash(INT_CONFIG) == mig234_normalized_hash(
             INT_CONFIG
         )
+        assert RaceSetup.calculate_hash(FLOAT_CONFIG) == mig234_normalized_hash(
+            FLOAT_CONFIG
+        )
+
+    def test_quaternion_float64_noise_hashes_identically(self):
+        """The game re-emits Rotation quaternions with ~1e-14 run-to-run
+        double-precision jitter (live evidence 2026-09-05: Rotation.W
+        0.22719833571551 vs 0.22719833571552617 for the same route).  The
+        quantizing normalizer must collapse that noise."""
+        noisy = {
+            **FLOAT_CONFIG,
+            "Route": {
+                **FLOAT_CONFIG["Route"],
+                "Waypoints": [
+                    {
+                        **FLOAT_CONFIG["Route"]["Waypoints"][0],
+                        "Rotation": {
+                            **FLOAT_CONFIG["Route"]["Waypoints"][0]["Rotation"],
+                            "W": 0.61681669714239123,
+                        },
+                    },
+                    *FLOAT_CONFIG["Route"]["Waypoints"][1:],
+                ],
+            },
+        }
+        assert RaceSetup.calculate_hash(FLOAT_CONFIG) == RaceSetup.calculate_hash(
+            noisy
+        )
+        assert RaceSetup.calculate_hash(noisy) == mig234_normalized_hash(noisy)
+
+    def test_raw_deephash_still_separates_quaternion_noise(self):
+        """Guards the premise: without quantization DeepHash splits them."""
+        noisy = {
+            **FLOAT_CONFIG,
+            "Route": {
+                **FLOAT_CONFIG["Route"],
+                "Waypoints": [
+                    {
+                        **FLOAT_CONFIG["Route"]["Waypoints"][0],
+                        "Rotation": {
+                            **FLOAT_CONFIG["Route"]["Waypoints"][0]["Rotation"],
+                            "W": 0.61681669714239123,
+                        },
+                    },
+                    *FLOAT_CONFIG["Route"]["Waypoints"][1:],
+                ],
+            },
+        }
+        assert DeepHash(FLOAT_CONFIG)[FLOAT_CONFIG] != DeepHash(noisy)[noisy]
 
 
 class RaceSetupRehashMigrationTestCase(TestCase):
@@ -134,7 +192,9 @@ class RaceSetupRehashMigrationTestCase(TestCase):
 
         assert not RaceSetup.objects.filter(id=drifted.id).exists()
         survivor.refresh_from_db()
-        assert survivor.hash == RaceSetup.calculate_hash(FLOAT_CONFIG)
+        # 0233's own scheme (int->float, no quantization): the stored hash
+        # must match the migration's normalizer, not the newer model code.
+        assert survivor.hash == mig_normalized_hash(FLOAT_CONFIG)
         scheduled.refresh_from_db()
         assert scheduled.race_setup_id == survivor.id
         game_event.refresh_from_db()
@@ -154,6 +214,80 @@ class RaceSetupRehashMigrationTestCase(TestCase):
             config__isnull=False, name="Electric Speed Trap"
         ).count()
         rehash_and_merge(apps, None)
+        count_after = RaceSetup.objects.filter(
+            config__isnull=False, name="Electric Speed Trap"
+        ).count()
+        assert count_before == 1
+        assert count_after == count_before
+
+
+class RaceSetupQuantizeMigrationTestCase(TestCase):
+    """Runs migration 0234's real logic (float quantization + merge)."""
+
+    def _make_setup(self, config, name):
+        return RaceSetup.objects.create(
+            config=config,
+            hash=DeepHash(config)[config],
+            name=name,
+        )
+
+    @staticmethod
+    def _with_quaternion_noise(config):
+        return {
+            **config,
+            "Route": {
+                **config["Route"],
+                "Waypoints": [
+                    {
+                        **config["Route"]["Waypoints"][0],
+                        "Rotation": {
+                            **config["Route"]["Waypoints"][0]["Rotation"],
+                            "W": 0.61681669714239123,
+                        },
+                    },
+                    *config["Route"]["Waypoints"][1:],
+                ],
+            },
+        }
+
+    def test_merge_collapses_quaternion_noise_and_repoints_fks(self):
+        survivor = self._make_setup(FLOAT_CONFIG, "Electric Speed Trap")
+        noisy = self._make_setup(
+            self._with_quaternion_noise(FLOAT_CONFIG), "Electric Speed Trap"
+        )
+        assert survivor.hash != noisy.hash
+
+        scheduled = ScheduledEvent.objects.create(
+            name="Electric Speed Trap - TT",
+            start_time=timezone.now(),
+            end_time=timezone.now() + timedelta(days=7),
+            race_setup=noisy,
+        )
+        game_event = GameEvent.objects.create(
+            name="session",
+            guid="FEDCBA9876543210FEDCBA9876543210",
+            state=0,
+            auto_created=False,
+            race_setup=noisy,
+        )
+
+        rehash_and_merge_quantize(apps, None)
+
+        assert not RaceSetup.objects.filter(id=noisy.id).exists()
+        survivor.refresh_from_db()
+        assert survivor.hash == mig234_normalized_hash(FLOAT_CONFIG)
+        scheduled.refresh_from_db()
+        assert scheduled.race_setup_id == survivor.id
+        game_event.refresh_from_db()
+        assert game_event.race_setup_id == survivor.id
+
+    def test_idempotent_on_second_run(self):
+        self._make_setup(FLOAT_CONFIG, "Electric Speed Trap")
+        rehash_and_merge_quantize(apps, None)
+        count_before = RaceSetup.objects.filter(
+            config__isnull=False, name="Electric Speed Trap"
+        ).count()
+        rehash_and_merge_quantize(apps, None)
         count_after = RaceSetup.objects.filter(
             config__isnull=False, name="Electric Speed Trap"
         ).count()
