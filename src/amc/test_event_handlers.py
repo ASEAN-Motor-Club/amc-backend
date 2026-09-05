@@ -23,6 +23,7 @@ from amc.models import (
     RaceSetup,
     ScheduledEvent,
 )
+from amc.events import print_results
 from amc.webhook_context import EventContext
 
 
@@ -598,6 +599,62 @@ class ScheduledEventAssociationTests(TestCase):
 # ---------------------------------------------------------------------------
 # Tests: finish results popup (2→3 transition)
 # ---------------------------------------------------------------------------
+
+
+class LapBreakdownTests(TestCase):
+    """print_results per-lap breakdown (pure formatting, no DB rows)."""
+
+    @staticmethod
+    def _participant(name, lap_times=None, net_time=120.0, finished=True):
+        from types import SimpleNamespace
+
+        return SimpleNamespace(
+            character=SimpleNamespace(name=name, guid="G" * 32),
+            net_time=net_time,
+            finished=finished,
+            wrong_engine=False,
+            wrong_vehicle=False,
+            best_lap_time=min(lap_times) if lap_times else 0,
+            lap_times=list(lap_times or []),
+        )
+
+    def test_breakdown_rows_with_best_delta_and_position(self):
+        p1 = self._participant("yuyou", [19.44, 17.99, 18.24])
+        p2 = self._participant("freeman", [20.10, 18.55, 18.90])
+        text = print_results([p1, p2])
+
+        self.assertIn("<Title>Lap breakdown</>", text)
+        # Row format: lap, lap time, delta to own best (BEST on fastest),
+        # in-lap position among all participants' same-index laps.
+        self.assertIn("  L1     19.440s     +1.450  P1", text)
+        self.assertIn("  L2     17.990s       BEST  P1", text)
+        self.assertIn("  L1     20.100s     +1.550  P2", text)
+        self.assertIn("  L2     18.550s       BEST  P2", text)
+        self.assertIn("  L3     18.900s     +0.350  P2", text)
+
+    def test_breakdown_omitted_when_no_laps(self):
+        p = self._participant("sprinter", [])
+        text = print_results([p])
+        self.assertNotIn("Lap breakdown", text)
+        self.assertIn("#01: ", text)  # legacy results layout unchanged
+
+    def test_breakdown_skips_sentinel_and_excludes_lapless(self):
+        p1 = self._participant("yuyou", [6329.98, 17.99])
+        p2 = self._participant("noLaps", [])
+        text = print_results([p1, p2])
+
+        self.assertNotIn("6329", text)  # boot-age sentinel never rendered
+        self.assertIn("  L1     17.990s       BEST", text)
+        # noLaps appears only in the results table, not the breakdown.
+        self.assertEqual(text.count("noLaps"), 1)
+        self.assertEqual(text.count("yuyou"), 2)
+
+    def test_single_participant_rows_have_no_position(self):
+        p = self._participant("solo", [11.32, 9.54])
+        text = print_results([p])
+        self.assertIn("  L1     11.320s     +1.780", text)
+        self.assertIn("  L2      9.540s       BEST", text)
+        self.assertNotIn("  P1", text)  # no in-lap position for solo runs
 
 
 class FinishResultsPopupTests(TestCase):
