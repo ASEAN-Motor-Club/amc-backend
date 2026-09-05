@@ -1446,6 +1446,35 @@ class SongRequestLog(models.Model):
 
 
 @final
+class ExclusiveProgressionBreak(models.Model):
+    """Audit row for a broken exclusive-progression flag.
+
+    Created when an armed character's login snapshot shows a level above what
+    the player's own observed sessions on this server left behind.  The journald
+    warning is ephemeral; this row is the durable who/when/old→new record and
+    the paper trail an admin consults before re-arming via /exclusive_unbreak.
+    """
+
+    character = models.ForeignKey(
+        Character, on_delete=models.CASCADE, related_name="progression_breaks"
+    )
+    level_field = models.CharField(max_length=30)
+    stored_level = models.PositiveIntegerField(null=True)
+    seen_level = models.PositiveIntegerField()
+    detected_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        verbose_name = "exclusive progression break"
+        verbose_name_plural = "exclusive progression breaks"
+
+    def __str__(self):
+        return (
+            f"{self.character.name}: {self.level_field} "
+            f"{self.stored_level} → {self.seen_level}"
+        )
+
+
+@final
 class PlayerStatusLog(models.Model):
     character = models.ForeignKey(
         Character, on_delete=models.CASCADE, related_name="status_logs"

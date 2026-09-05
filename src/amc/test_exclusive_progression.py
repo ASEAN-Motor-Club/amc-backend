@@ -36,8 +36,15 @@ class ExclusiveProgressionTests(TestCase):
     def setUp(self):
         # The login-window tracker is module-level; keep tests isolated.
         tasks_module._login_level_types_seen.clear()
+        tasks_module._logins_since_restart.clear()
+        tasks_module._unjudged_bursts.clear()
 
     async def _login(self, player_id: int, player_name: str):
+        # Mark this player as having logged in since the last (worker) start,
+        # so the burst is judged — the ServerStarted-forgiveness behavior
+        # (first login unjudged) is covered by
+        # test_exclusive_progression_fixes.py.
+        tasks_module._logins_since_restart.add(player_id)
         await process_log_event(
             PlayerLoginLogEvent(
                 timestamp=timezone.now(),

@@ -3,7 +3,7 @@ from django.db import migrations, models
 
 class Migration(migrations.Migration):
     dependencies = [
-        ("amc", "0232_player_muted_until"),
+        ("amc", "0234_racesetup_rehash_quantize"),
     ]
 
     operations = [
