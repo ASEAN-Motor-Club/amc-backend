@@ -479,6 +479,7 @@ async def handle_passed_race_section(event, player, character, ctx):
     # Update section index and total time
     game_event_char.section_index = section_index
     game_event_char.last_section_total_time_seconds = total_time_seconds
+    just_finished = False
     if completed_lap:
         game_event_char.lap_times = list(game_event_char.lap_times or []) + [
             laptime_seconds
@@ -487,11 +488,38 @@ async def handle_passed_race_section(event, player, character, ctx):
         if best <= 0 or laptime_seconds < best:
             game_event_char.best_lap_time = laptime_seconds
         game_event_char.laps += 1
+
+        # Multi-lap natural-finish detection.  Natural completion is a
+        # server-internal transition — the game never emits
+        # ChangeEventState(3) for it (verified live 2026-09-05: a 2-lap
+        # kart event recorded both laps in LapTimes {11.32, 9.54} yet the
+        # run stayed finished=False forever, since the single-lap rule
+        # only fires on the last section of NumLaps<=1 routes).  A
+        # multi-lap run finishes on the section-0 crossing that completes
+        # the final lap — exactly the crossing reconstructed above.
+        # NOTE: ``laps`` is 1 + completed-lap count (the initial 1 is the
+        # in-progress marker set on the first section crossing), so the
+        # final-lap condition is laps - 1 >= num_laps, not laps >= num_laps.
+        num_laps = None
+        if game_event.race_setup_id:
+            race_setup = await RaceSetup.objects.filter(
+                pk=game_event.race_setup_id
+            ).afirst()
+            num_laps = race_setup.num_laps if race_setup else None
+        if (
+            num_laps is not None
+            and num_laps >= 2
+            and game_event_char.laps - 1 >= num_laps
+        ):
+            game_event_char.finished = True
+            just_finished = True
     elif game_event_char.laps == 0:
         game_event_char.laps = 1
     update_fields = ["section_index", "last_section_total_time_seconds", "laps"]
     if completed_lap:
         update_fields += ["lap_times", "best_lap_time"]
+        if just_finished:
+            update_fields.append("finished")
     await game_event_char.asave(update_fields=update_fields)
 
     # Record lap section time
