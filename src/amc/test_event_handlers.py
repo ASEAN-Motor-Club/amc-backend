@@ -486,6 +486,131 @@ class EventDispatchTests(TestCase):
         ).afirst()
         self.assertFalse(gec.finished)
 
+    async def test_backend_finish_when_all_participants_finished(
+        self, mock_get_treasury, mock_get_rp_mode
+    ):
+        """The game never announces completion — when the section stream
+        says every participant finished, the backend performs the finish:
+        state 3 + results popup + EXP (freeman 2026-09-05)."""
+        mock_get_rp_mode.return_value = False
+        mock_get_treasury.return_value = 100_000
+
+        player = await sync_to_async(PlayerFactory)()
+        character = await sync_to_async(CharacterFactory)(
+            player=player, guid=CHAR_GUID
+        )
+
+        event_data = _make_event_data(state=2)
+        event_data["RaceSetup"] = {**RACE_SETUP_RAW, "NumLaps": 2}
+        game_event, _ = await _upsert_game_event(event_data)
+        await _upsert_game_event_character(game_event, event_data["Players"][0])
+
+        ctx = _make_ctx()
+
+        async def cross(section, total, laptime):
+            event = {
+                "hook": "ServerPassedRaceSection",
+                "timestamp": int(time.time()),
+                "data": {
+                    "CharacterGuid": str(character.guid),
+                    "EventGuid": EVENT_GUID,
+                    "SectionIndex": section,
+                    "TotalTimeSeconds": total,
+                    "LaptimeSeconds": laptime,
+                },
+            }
+            await dispatch("ServerPassedRaceSection", event, player, character, ctx)
+
+        with patch(
+            "amc.handlers.events._show_finish_results", new_callable=AsyncMock
+        ) as mock_popup, patch(
+            "amc.handlers.events._reward_event_exp", new_callable=AsyncMock
+        ) as mock_exp, patch(
+            "amc.handlers.events.delay", new=lambda coro, seconds: coro
+        ), patch(
+            "amc.handlers.events._throttled_update_embed", new_callable=AsyncMock
+        ):
+            # Start line + lap 1 (not finished yet).
+            await cross(0, 1.08, 2241.17)
+            await cross(1, 3.72, 2.63)
+            await cross(0, 12.42, 11.33)
+            await game_event.arefresh_from_db()
+            self.assertEqual(game_event.state, 2)
+            mock_popup.assert_not_awaited()
+
+            # Lap 2 completes -> all participants finished -> backend finish.
+            await cross(1, 14.33, 1.92)
+            await cross(0, 21.97, 9.55)
+            # Let the scheduled _maybe_finish_event task (and its nested
+            # popup/EXP tasks) run to completion.
+            pending = [
+                t for t in asyncio.all_tasks() if t is not asyncio.current_task()
+            ]
+            if pending:
+                await asyncio.wait_for(
+                    asyncio.gather(*pending, return_exceptions=True), timeout=2
+                )
+
+        await game_event.arefresh_from_db()
+        self.assertEqual(game_event.state, 3)
+        mock_popup.assert_awaited_once()
+        mock_exp.assert_awaited_once()
+
+    async def test_backend_finish_waits_for_all_participants(
+        self, mock_get_treasury, mock_get_rp_mode
+    ):
+        """A participant who has not finished blocks the backend finish."""
+        mock_get_rp_mode.return_value = False
+        mock_get_treasury.return_value = 100_000
+
+        player = await sync_to_async(PlayerFactory)()
+        character = await sync_to_async(CharacterFactory)(
+            player=player, guid=CHAR_GUID
+        )
+        other = await sync_to_async(CharacterFactory)(player=player)
+
+        event_data = _make_event_data(state=2)
+        event_data["RaceSetup"] = {**RACE_SETUP_RAW, "NumLaps": 1}
+        game_event, _ = await _upsert_game_event(event_data)
+        await _upsert_game_event_character(game_event, event_data["Players"][0])
+        # A second participant who never completes (valid GEC via the upsert
+        # helper — the model requires rank etc.).
+        other_info = {
+            "CharacterId": {
+                "UniqueNetId": "76561190000000001",
+                "CharacterGuid": str(other.guid),
+            },
+            "PlayerName": "other",
+        }
+        await _upsert_game_event_character(game_event, other_info)
+
+        ctx = _make_ctx()
+        event = {
+            "hook": "ServerPassedRaceSection",
+            "timestamp": int(time.time()),
+            "data": {
+                "CharacterGuid": str(character.guid),
+                "EventGuid": EVENT_GUID,
+                "SectionIndex": 0,
+                "TotalTimeSeconds": 10.0,
+                "LaptimeSeconds": 10.0,
+            },
+        }
+        with patch(
+            "amc.handlers.events._show_finish_results", new_callable=AsyncMock
+        ) as mock_popup, patch(
+            "amc.handlers.events.delay", new=lambda coro, seconds: coro
+        ):
+            # First S0 = start marker; second S0 completes lap 1 -> finished.
+            await dispatch("ServerPassedRaceSection", event, player, character, ctx)
+            event["data"]["TotalTimeSeconds"] = 20.0
+            event["data"]["LaptimeSeconds"] = 10.0
+            await dispatch("ServerPassedRaceSection", event, player, character, ctx)
+
+        await game_event.arefresh_from_db()
+        self.assertEqual(game_event.state, 2)  # other participant still racing
+        mock_popup.assert_not_awaited()
+
     async def test_remove_event_noop(self, mock_get_treasury, mock_get_rp_mode):
         mock_get_rp_mode.return_value = False
         mock_get_treasury.return_value = 100_000
@@ -882,20 +1007,39 @@ class RunRowResolutionTests(TestCase):
 
     async def test_natural_finish_marks_participant_finished(self):
         """Last section of a single-lap route (NumLaps=0, 2 waypoints → last
-        index 1) ⇒ participant finished=True; the event row itself is left
-        alone (the game owns the state machine)."""
+        index 1) ⇒ participant finished=True, and since the game never
+        announces completion the backend performs the finish itself: state
+        3 + results popup + EXP (freeman 2026-09-05)."""
         event_data = _make_event_data(state=2)
         event_data["EventGuid"] = self.RUN_GUID
         game_event, _ = await _upsert_game_event(event_data)
         await _upsert_game_event_character(game_event, event_data["Players"][0])
         ctx = _make_ctx()
 
-        await handle_passed_race_section(
-            self._section_event(0, 60.0), None, None, ctx
-        )
-        await handle_passed_race_section(
-            self._section_event(1, 142.5), None, None, ctx
-        )
+        with patch(
+            "amc.handlers.events._show_finish_results", new_callable=AsyncMock
+        ) as mock_popup, patch(
+            "amc.handlers.events._reward_event_exp", new_callable=AsyncMock
+        ), patch(
+            "amc.handlers.events.delay", new=lambda coro, seconds: coro
+        ), patch(
+            "amc.handlers.events._throttled_update_embed", new_callable=AsyncMock
+        ):
+            await handle_passed_race_section(
+                self._section_event(0, 60.0), None, None, ctx
+            )
+            await handle_passed_race_section(
+                self._section_event(1, 142.5), None, None, ctx
+            )
+            # Let the scheduled _maybe_finish_event task (and its nested
+            # popup/EXP tasks) run to completion.
+            pending = [
+                t for t in asyncio.all_tasks() if t is not asyncio.current_task()
+            ]
+            if pending:
+                await asyncio.wait_for(
+                    asyncio.gather(*pending, return_exceptions=True), timeout=2
+                )
 
         gec = await GameEventCharacter.objects.filter(game_event=game_event).afirst()
         await gec.arefresh_from_db()
@@ -906,7 +1050,8 @@ class RunRowResolutionTests(TestCase):
         self.assertAlmostEqual(gec.net_time, 82.5, places=5)
 
         await game_event.arefresh_from_db()
-        self.assertEqual(game_event.state, 2)  # untouched by the handler
+        self.assertEqual(game_event.state, 3)  # backend-detected finish
+        mock_popup.assert_awaited_once()
 
     async def test_multilap_route_does_not_natural_finish(self):
         """Multi-lap routes carry no reliable lap count on the section stream,
@@ -958,6 +1103,34 @@ class RunRowResolutionTests(TestCase):
         self.assertTrue(gec.finished)
         self.assertEqual(gec.laps, 2)  # start marker + 1 completed lap
         self.assertEqual(gec.lap_times, [300.0])
+
+    async def test_fresh_run_clears_snapshot_carried_laps(self):
+        """A re-run's start snapshot carries the PRIOR run's LapTimes/
+        BestLapTime — the run's first crossing must wipe them so the lap
+        breakdown shows only this run's laps (live evidence 2026-09-05:
+        GE31 held 4 stale entries from run 1)."""
+        event_data = _make_event_data(state=2)
+        event_data["EventGuid"] = self.RUN_GUID
+        game_event, _ = await _upsert_game_event(event_data)
+        gec = await _upsert_game_event_character(
+            game_event, event_data["Players"][0]
+        )
+        await GameEventCharacter.objects.filter(pk=gec.pk).aupdate(
+            lap_times=[11.32, 9.54], best_lap_time=9.54, laps=0
+        )
+        ctx = _make_ctx()
+
+        # First crossing of the new run: the start-line marker.
+        await handle_passed_race_section(
+            self._section_event(0, 60.0), None, None, ctx
+        )
+
+        gec = await GameEventCharacter.objects.filter(game_event=game_event).afirst()
+        await gec.arefresh_from_db()
+        self.assertEqual(gec.laps, 1)
+        self.assertEqual(gec.lap_times, [])  # stale prior-run laps wiped
+        self.assertEqual(gec.best_lap_time, 0)
+        self.assertEqual(gec.first_section_total_time_seconds, 60.0)
 
     async def test_finished_participant_ignores_late_sections(self):
         """Delayed SSE bursts re-deliver sections after the finish — a
