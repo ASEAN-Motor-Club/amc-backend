@@ -97,9 +97,13 @@ async def _upsert_game_event(event_data: dict):
         )
 
     # --- Owner ---
+    # NOTE: owner-less events (backend-posted auto TTs) carry
+    # OwnerCharacterId.UniqueNetId == "" — an empty string would crash the
+    # BigInteger lookup below (ValueError: invalid literal for int()).  Skip
+    # the lookup so the event is still created with owner=None/auto_created.
     owner = None
     owner_data = event_data.get("OwnerCharacterId", {})
-    if owner_data:
+    if owner_data and owner_data.get("UniqueNetId"):
         owner = await Character.objects.filter(
             player__unique_id=owner_data.get("UniqueNetId"),
             guid=owner_data.get("CharacterGuid"),
@@ -435,7 +439,17 @@ async def handle_passed_race_section(event, player, character, ctx):
     if not event_guid:
         return 0, 0, 0, 0
 
-    game_event = await GameEvent.objects.filter(guid=event_guid).afirst()
+    # The game keeps ONE event guid across re-runs (it resets the event to
+    # state 1 between runs), so multiple GameEvent rows exist per guid — one
+    # per run.  Always resolve to the LATEST row (the current run), matching
+    # _upsert_game_event's .alatest("start_time"); an unordered .afirst()
+    # returns the oldest row and lands section times on a stale run.
+    game_event = (
+        await GameEvent.objects.filter(guid=event_guid)
+        .select_related("race_setup")
+        .order_by("-start_time")
+        .afirst()
+    )
     if not game_event:
         logger.warning("ServerPassedRaceSection: GameEvent %s not found", event_guid)
         return 0, 0, 0, 0
@@ -476,6 +490,20 @@ async def handle_passed_race_section(event, player, character, ctx):
         and 0 < laptime_seconds <= total_time_seconds
     )
 
+    # Finished-participant guard.  The game auto-finishes the event once
+    # every participant completes the track, and once Finished there are no
+    # more waypoints to cross (freeman 2026-09-05) — later section events
+    # for a finished participant are only stragglers from delayed SSE
+    # bursts, so their final times are left untouched.  Completion itself
+    # is inferred per participant below, because the auto-finish state
+    # never reached SSE in the observed solo/partial-lobby runs:
+    #   - NumLaps==0 routes: the finish checkpoint is the LAST waypoint —
+    #     the first pass through num_sections-1 finishes the run (Rule A).
+    #   - NumLaps>=1 routes: the finish checkpoint is the FIRST waypoint —
+    #     the S0 crossing that completes lap N (Rule B below).
+    if game_event_char.finished:
+        return 0, 0, 0, 0
+
     # Update section index and total time
     game_event_char.section_index = section_index
     game_event_char.last_section_total_time_seconds = total_time_seconds
@@ -490,24 +518,22 @@ async def handle_passed_race_section(event, player, character, ctx):
         game_event_char.laps += 1
 
         # Rule B — N-lap natural-finish detection (NumLaps>=1).  Natural
-        # completion is a server-internal transition — ChangeEventState(3)
-        # never reached SSE in the observed runs (verified live 2026-09-05:
-        # a 2-lap kart event recorded both laps in LapTimes {11.32, 9.54}
-        # yet the run stayed finished=False forever).  In NumLaps>=1 routes
-        # the finish checkpoint is the FIRST waypoint (freeman 2026-09-05):
-        # a 1-lap run finishes on the first W0 lap crossing, an N-lap run on
-        # the section-0 crossing that completes the final lap — exactly the
-        # crossing reconstructed above.  (NumLaps==0 routes finish at the
-        # LAST waypoint instead — that rule lives in PR #83.)
-        # NOTE: ``laps`` is 1 + completed-lap count (the initial 1 is the
-        # in-progress marker set on the first section crossing), so the
-        # final-lap condition is laps - 1 >= num_laps, not laps >= num_laps.
-        num_laps = None
-        if game_event.race_setup_id:
-            race_setup = await RaceSetup.objects.filter(
-                pk=game_event.race_setup_id
-            ).afirst()
-            num_laps = race_setup.num_laps if race_setup else None
+        # completion is a server-internal transition — the game never emits
+        # ChangeEventState(3) for it (verified live 2026-09-05: a 2-lap
+        # kart event recorded both laps in LapTimes {11.32, 9.54} yet the
+        # run stayed finished=False forever).  In NumLaps>=1 routes the
+        # finish checkpoint is the FIRST waypoint (freeman 2026-09-05), so
+        # a 1-lap or N-lap run finishes on the section-0 crossing that
+        # completes the final lap — exactly the crossing reconstructed
+        # above.  NOTE: ``laps`` is 1 + completed-lap count (the initial 1
+        # is the in-progress marker set on the first section crossing), so
+        # the final-lap condition is laps - 1 >= num_laps, not
+        # laps >= num_laps.
+        num_laps = (
+            game_event.race_setup.num_laps
+            if game_event.race_setup is not None
+            else None
+        )
         if (
             num_laps is not None
             and num_laps >= 1
@@ -553,6 +579,23 @@ async def handle_passed_race_section(event, player, character, ctx):
                 first_section_total_time_seconds=0
             )
 
+    # Rule A — 0-lap natural finish.  The game's own auto-finish
+    # (ChangeEventState(3)) fires only when ALL players complete the track
+    # and never reaches the backend for solo/partial lobbies, so the run's
+    # row would stay In Progress forever (no finished flag, results popup,
+    # or EXP).  For NumLaps==0 routes the finish checkpoint is the LAST
+    # waypoint (freeman 2026-09-05): the first pass through
+    # num_sections-1 completes the track.  NumLaps>=1 routes finish at the
+    # first waypoint instead (Rule B above).
+    race_setup = game_event.race_setup
+    if (
+        race_setup is not None
+        and race_setup.num_laps == 0
+        and section_index == race_setup.num_sections - 1
+    ):
+        game_event_char.finished = True
+        await game_event_char.asave(update_fields=["finished"])
+
     # Update Discord embed to reflect section progress (throttled)
     asyncio.create_task(
         _throttled_update_embed(game_event.pk, ctx.discord_client)
@@ -574,7 +617,13 @@ async def handle_join_event(event, player, character, ctx):
     if not event_guid:
         return 0, 0, 0, 0
 
-    game_event = await GameEvent.objects.filter(guid=event_guid).afirst()
+    # Resolve to the LATEST row for this guid — one GameEvent row per run
+    # (see handle_passed_race_section).
+    game_event = (
+        await GameEvent.objects.filter(guid=event_guid)
+        .order_by("-start_time")
+        .afirst()
+    )
     if game_event is None:
         return 0, 0, 0, 0
 
@@ -592,7 +641,11 @@ async def handle_leave_event(event, player, character, ctx):
     if not event_guid:
         return 0, 0, 0, 0
 
-    game_event = await GameEvent.objects.filter(guid=event_guid).afirst()
+    game_event = (
+        await GameEvent.objects.filter(guid=event_guid)
+        .order_by("-start_time")
+        .afirst()
+    )
     if game_event is None:
         return 0, 0, 0, 0
 

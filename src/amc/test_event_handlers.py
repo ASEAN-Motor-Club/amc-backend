@@ -15,6 +15,7 @@ from amc.handlers.events import (
     _upsert_game_event,
     _upsert_game_event_character,
     handle_change_event_state,
+    handle_passed_race_section,
 )
 from amc.models import (
     GameEvent,
@@ -803,3 +804,164 @@ class FinishResultsPopupTests(TestCase):
             await asyncio.sleep(0.05)
 
         mock_popup.assert_not_awaited()
+
+
+# ---------------------------------------------------------------------------
+# Tests: per-run row resolution + natural finish detection
+#
+# The game keeps ONE event guid across re-runs (it resets the event to state 1
+# between runs), so the backend stores one GameEvent row per run.  Every guid
+# lookup must therefore resolve to the LATEST row, and a natural finish (which
+# never arrives as a ChangeEventState(3) SSE event — it is a server-internal
+# transition) must be derived from the last section crossing.
+# ---------------------------------------------------------------------------
+
+
+class RunRowResolutionTests(TestCase):
+    RUN_GUID = "AAAA1111BBBB2222CCCC3333DDDD4444"
+
+    def _section_event(self, section_index, total_time):
+        return {
+            "hook": "ServerPassedRaceSection",
+            "timestamp": int(time.time()),
+            "data": {
+                "CharacterGuid": CHAR_GUID,
+                "EventGuid": self.RUN_GUID,
+                "SectionIndex": section_index,
+                "TotalTimeSeconds": total_time,
+                "LaptimeSeconds": total_time,
+            },
+        }
+
+    async def _make_two_run_rows(self):
+        """Simulate two runs of one game event: run 1 created + started
+        (state 2), then the game resets the event to state 1 → a second
+        GameEvent row is created for run 2."""
+        event_data = _make_event_data(state=1)
+        event_data["EventGuid"] = self.RUN_GUID
+        run1, _ = await _upsert_game_event(event_data)
+
+        event_data["State"] = 2
+        run1, _ = await _upsert_game_event(event_data)
+
+        event_data["State"] = 1  # game reset between runs → new row
+        run2, _ = await _upsert_game_event(event_data)
+        self.assertNotEqual(run1.pk, run2.pk)
+
+        # Deterministic start_time ordering (auto_now_add resolution).
+        await GameEvent.objects.filter(pk=run1.pk).aupdate(
+            start_time=timezone.now() - timedelta(minutes=5)
+        )
+
+        for run in (run1, run2):
+            await _upsert_game_event_character(run, event_data["Players"][0])
+        return run1, run2
+
+    async def test_section_events_target_latest_run_row(self):
+        run1, run2 = await self._make_two_run_rows()
+        ctx = _make_ctx()
+
+        await handle_passed_race_section(
+            self._section_event(0, 12.5), None, None, ctx
+        )
+
+        gec2 = await GameEventCharacter.objects.filter(game_event=run2).afirst()
+        await gec2.arefresh_from_db()
+        self.assertEqual(gec2.section_index, 0)
+        self.assertEqual(gec2.last_section_total_time_seconds, 12.5)
+
+        # The stale run-1 row must stay untouched.
+        gec1 = await GameEventCharacter.objects.filter(game_event=run1).afirst()
+        await gec1.arefresh_from_db()
+        self.assertEqual(gec1.section_index, -1)
+        self.assertEqual(gec1.last_section_total_time_seconds, 0)
+
+    async def test_natural_finish_marks_participant_finished(self):
+        """Last section of a single-lap route (NumLaps=0, 2 waypoints → last
+        index 1) ⇒ participant finished=True; the event row itself is left
+        alone (the game owns the state machine)."""
+        event_data = _make_event_data(state=2)
+        event_data["EventGuid"] = self.RUN_GUID
+        game_event, _ = await _upsert_game_event(event_data)
+        await _upsert_game_event_character(game_event, event_data["Players"][0])
+        ctx = _make_ctx()
+
+        await handle_passed_race_section(
+            self._section_event(0, 60.0), None, None, ctx
+        )
+        await handle_passed_race_section(
+            self._section_event(1, 142.5), None, None, ctx
+        )
+
+        gec = await GameEventCharacter.objects.filter(game_event=game_event).afirst()
+        await gec.arefresh_from_db()
+        self.assertTrue(gec.finished)
+        self.assertEqual(gec.last_section_total_time_seconds, 142.5)
+        self.assertEqual(gec.first_section_total_time_seconds, 60.0)
+        # net_time is a DB-generated column: last - first.
+        self.assertAlmostEqual(gec.net_time, 82.5, places=5)
+
+        await game_event.arefresh_from_db()
+        self.assertEqual(game_event.state, 2)  # untouched by the handler
+
+    async def test_multilap_route_does_not_natural_finish(self):
+        """Multi-lap routes carry no reliable lap count on the section stream,
+        so crossing the last section of a lap must NOT mark finished."""
+        event_data = _make_event_data(state=2)
+        event_data["EventGuid"] = self.RUN_GUID
+        event_data["RaceSetup"] = {**RACE_SETUP_RAW, "NumLaps": 3}
+        game_event, _ = await _upsert_game_event(event_data)
+        await _upsert_game_event_character(game_event, event_data["Players"][0])
+        ctx = _make_ctx()
+
+        await handle_passed_race_section(
+            self._section_event(1, 142.5), None, None, ctx
+        )
+
+        gec = await GameEventCharacter.objects.filter(game_event=game_event).afirst()
+        await gec.arefresh_from_db()
+        self.assertFalse(gec.finished)
+
+    async def test_finished_participant_ignores_late_sections(self):
+        """Delayed SSE bursts re-deliver sections after the finish — a
+        finished participant must not be updated again."""
+        event_data = _make_event_data(state=2)
+        event_data["EventGuid"] = self.RUN_GUID
+        game_event, _ = await _upsert_game_event(event_data)
+        await _upsert_game_event_character(game_event, event_data["Players"][0])
+        ctx = _make_ctx()
+
+        await handle_passed_race_section(
+            self._section_event(0, 60.0), None, None, ctx
+        )
+        await handle_passed_race_section(
+            self._section_event(1, 142.5), None, None, ctx
+        )
+        # Straggler re-delivery with a different total must be ignored.
+        await handle_passed_race_section(
+            self._section_event(1, 999.0), None, None, ctx
+        )
+
+        gec = await GameEventCharacter.objects.filter(game_event=game_event).afirst()
+        await gec.arefresh_from_db()
+        self.assertTrue(gec.finished)
+        self.assertEqual(gec.last_section_total_time_seconds, 142.5)
+        lst = await LapSectionTime.objects.filter(
+            game_event_character=gec, section_index=1
+        ).afirst()
+        self.assertEqual(lst.total_time_seconds, 142.5)
+
+    async def test_ownerless_add_event_creates_auto_event(self):
+        """Backend-posted auto TTs carry OwnerCharacterId.UniqueNetId == "" —
+        the upsert must not crash on the BigInteger lookup and must still
+        create the row with owner=None / auto_created=True."""
+        event_data = _make_event_data(state=1)
+        event_data["EventGuid"] = self.RUN_GUID
+        event_data["OwnerCharacterId"] = {"UniqueNetId": "", "CharacterGuid": ""}
+
+        game_event, transition = await _upsert_game_event(event_data)
+
+        self.assertIsNotNone(game_event)
+        self.assertIsNone(game_event.owner_id)
+        self.assertTrue(game_event.auto_created)
+        self.assertIsNone(transition)
