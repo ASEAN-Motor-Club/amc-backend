@@ -254,6 +254,10 @@ def format_time(total_seconds: float) -> str:
   Returns:
     A string representing the time in MM:SS.sss format.
   """
+    if total_seconds is None:
+        # Participants without any section crossing have a NULL net time —
+        # render a dash instead of crashing the popup build.
+        return "-"
     if not isinstance(total_seconds, (int, float)):
         raise TypeError("Input must be a number (int or float).")
     if total_seconds < 0:

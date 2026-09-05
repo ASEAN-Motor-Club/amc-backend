@@ -143,6 +143,13 @@ async def _upsert_game_event(event_data: dict):
             game_event.scheduled_event = scheduled_event
         await game_event.asave()
     except GameEvent.DoesNotExist:
+        # The game resets the event to state 1 for a new run without ever
+        # announcing the previous run's finish (no hookable event at
+        # completion — freeman 2026-09-05): assume any prior run row still
+        # marked In Progress was Finished before creating the new run's row.
+        await GameEvent.objects.filter(
+            guid=event_guid, state__lt=3
+        ).aupdate(state=3)
         try:
             existing_event = await (
                 GameEvent.objects.filter(
@@ -312,6 +319,41 @@ async def _show_finish_results(game_event_id: int, http_client_mod):
         logger.exception(
             "Failed to show finish results popup for event %s", game_event_id
         )
+
+
+async def _maybe_finish_event(game_event_id: int, http_client_mod, discord_client):
+    """Backend-side event finish.
+
+    The game emits no hookable event when all participants complete the
+    course (freeman 2026-09-05) — the run's state simply stays 2 forever —
+    so when every participant row is finished the backend performs the
+    finish itself: state 3 + results popup + EXP, exactly what the 2→3 SSE
+    transition does.  The conditional UPDATE makes concurrent callers (two
+    final crossings in the same tick) run the sequence only once.
+    """
+    all_finished = not await GameEventCharacter.objects.filter(
+        game_event_id=game_event_id, finished=False
+    ).aexists()
+    if not all_finished:
+        return
+    updated = await GameEvent.objects.filter(
+        pk=game_event_id, state__lt=3
+    ).aupdate(state=3)
+    if not updated:
+        return
+    logger.info(
+        "Backend-detected finish for event %s (all participants complete)",
+        game_event_id,
+    )
+    asyncio.create_task(
+        delay(_show_finish_results(game_event_id, http_client_mod), 5)
+    )
+    asyncio.create_task(
+        delay(_reward_event_exp(game_event_id, http_client_mod), 10)
+    )
+    asyncio.create_task(
+        _throttled_update_embed(game_event_id, discord_client, force=True)
+    )
 
 
 async def _update_discord_event_embed(game_event_id: int, discord_client):
@@ -490,13 +532,13 @@ async def handle_passed_race_section(event, player, character, ctx):
         and 0 < laptime_seconds <= total_time_seconds
     )
 
-    # Finished-participant guard.  The game auto-finishes the event once
-    # every participant completes the track, and once Finished there are no
-    # more waypoints to cross (freeman 2026-09-05) — later section events
-    # for a finished participant are only stragglers from delayed SSE
-    # bursts, so their final times are left untouched.  Completion itself
-    # is inferred per participant below, because the auto-finish state
-    # never reached SSE in the observed solo/partial-lobby runs:
+    # Finished-participant guard.  The game emits NO hookable event when
+    # participants complete the course — no ChangeEventState(3), the run's
+    # state simply stays 2 forever (freeman 2026-09-05) — so completion is
+    # inferred per participant below and the backend performs the finish
+    # itself (_maybe_finish_event) once everyone is done.  Later section
+    # events for a finished participant are only stragglers from delayed
+    # SSE bursts, so their final times are left untouched:
     #   - NumLaps==0 routes: the finish checkpoint is the LAST waypoint —
     #     the first pass through num_sections-1 finishes the run (Rule A).
     #   - NumLaps>=1 routes: the finish checkpoint is the FIRST waypoint —
@@ -508,6 +550,7 @@ async def handle_passed_race_section(event, player, character, ctx):
     game_event_char.section_index = section_index
     game_event_char.last_section_total_time_seconds = total_time_seconds
     just_finished = False
+    fresh_run = False
     if completed_lap:
         game_event_char.lap_times = list(game_event_char.lap_times or []) + [
             laptime_seconds
@@ -543,7 +586,17 @@ async def handle_passed_race_section(event, player, character, ctx):
             just_finished = True
     elif game_event_char.laps == 0:
         game_event_char.laps = 1
+        # The start snapshot of a new run carries the PRIOR run's
+        # LapTimes/BestLapTime (the game resets player state late — live
+        # evidence 2026-09-05: GE31's row held 4 stale entries from run 1),
+        # so drop them at the run's first crossing; this run's laps are
+        # reconstructed from scratch below.
+        fresh_run = True
+        game_event_char.lap_times = []
+        game_event_char.best_lap_time = 0
     update_fields = ["section_index", "last_section_total_time_seconds", "laps"]
+    if fresh_run:
+        update_fields += ["lap_times", "best_lap_time"]
     if completed_lap:
         update_fields += ["lap_times", "best_lap_time"]
         if just_finished:
@@ -588,13 +641,25 @@ async def handle_passed_race_section(event, player, character, ctx):
     # num_sections-1 completes the track.  NumLaps>=1 routes finish at the
     # first waypoint instead (Rule B above).
     race_setup = game_event.race_setup
+    rule_a_fired = False
     if (
         race_setup is not None
         and race_setup.num_laps == 0
         and section_index == race_setup.num_sections - 1
     ):
         game_event_char.finished = True
+        rule_a_fired = True
         await game_event_char.asave(update_fields=["finished"])
+
+    # Backend-side event finish: the game never announces completion, so
+    # once the section stream says every participant is done, the backend
+    # performs the finish itself (state 3 + results popup + EXP).
+    if just_finished or rule_a_fired:
+        asyncio.create_task(
+            _maybe_finish_event(
+                game_event.pk, ctx.http_client_mod, ctx.discord_client
+            )
+        )
 
     # Update Discord embed to reflect section progress (throttled)
     asyncio.create_task(
