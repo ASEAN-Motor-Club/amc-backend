@@ -390,6 +390,101 @@ class EventDispatchTests(TestCase):
         self.assertIsNotNone(lst)
         self.assertEqual(lst.total_time_seconds, 142.5)
 
+    async def test_multi_lap_natural_finish_on_final_s0(
+        self, mock_get_treasury, mock_get_rp_mode
+    ):
+        """A 2-lap route finishes on the S0 crossing that completes the
+        final lap (live-observed 2026-09-05: both laps drove, LapTimes
+        recorded, finished stayed False forever)."""
+        mock_get_rp_mode.return_value = False
+        mock_get_treasury.return_value = 100_000
+
+        player = await sync_to_async(PlayerFactory)()
+        character = await sync_to_async(CharacterFactory)(
+            player=player, guid=CHAR_GUID
+        )
+
+        event_data = _make_event_data(state=2)
+        event_data["RaceSetup"] = {**RACE_SETUP_RAW, "NumLaps": 2}
+        game_event, _ = await _upsert_game_event(event_data)
+        await _upsert_game_event_character(game_event, event_data["Players"][0])
+
+        ctx = _make_ctx()
+
+        async def cross(section, total, laptime):
+            event = {
+                "hook": "ServerPassedRaceSection",
+                "timestamp": int(time.time()),
+                "data": {
+                    "CharacterGuid": str(character.guid),
+                    "EventGuid": EVENT_GUID,
+                    "SectionIndex": section,
+                    "TotalTimeSeconds": total,
+                    "LaptimeSeconds": laptime,
+                },
+            }
+            await dispatch("ServerPassedRaceSection", event, player, character, ctx)
+
+        # Start line: sentinel LaptimeSeconds (boot time) is rejected as a lap
+        await cross(0, 1.08, 2241.17)
+        # Lap 1
+        await cross(1, 3.72, 2.63)
+        await cross(2, 6.52, 2.80)
+        await cross(3, 8.20, 1.68)
+        await cross(0, 12.42, 11.33)
+        gec = await GameEventCharacter.objects.filter(
+            game_event=game_event, character=character
+        ).afirst()
+        self.assertFalse(gec.finished)
+
+        # Lap 2 completes -> natural finish
+        await cross(1, 14.33, 1.92)
+        await cross(2, 16.90, 2.57)
+        await cross(3, 18.47, 1.57)
+        await cross(0, 21.97, 9.55)
+
+        gec = await GameEventCharacter.objects.filter(
+            game_event=game_event, character=character
+        ).afirst()
+        self.assertTrue(gec.finished)
+        # laps = 1 in-progress marker + 2 completed laps
+        self.assertEqual(gec.laps, 3)
+        self.assertEqual(gec.best_lap_time, 9.55)
+
+    async def test_zero_lap_event_does_not_finish_on_s0(
+        self, mock_get_treasury, mock_get_rp_mode
+    ):
+        mock_get_rp_mode.return_value = False
+        mock_get_treasury.return_value = 100_000
+
+        player = await sync_to_async(PlayerFactory)()
+        character = await sync_to_async(CharacterFactory)(
+            player=player, guid=CHAR_GUID
+        )
+
+        event_data = _make_event_data(state=2)  # RACE_SETUP_RAW NumLaps=0
+        game_event, _ = await _upsert_game_event(event_data)
+        await _upsert_game_event_character(game_event, event_data["Players"][0])
+
+        event = {
+            "hook": "ServerPassedRaceSection",
+            "timestamp": int(time.time()),
+            "data": {
+                "CharacterGuid": str(character.guid),
+                "EventGuid": EVENT_GUID,
+                "SectionIndex": 0,
+                "TotalTimeSeconds": 69.73,
+                "LaptimeSeconds": 69.73,
+            },
+        }
+        ctx = _make_ctx()
+        await dispatch("ServerPassedRaceSection", event, player, character, ctx)
+
+        gec = await GameEventCharacter.objects.filter(
+            game_event=game_event, character=character
+        ).afirst()
+        self.assertFalse(gec.finished)
+
     async def test_remove_event_noop(self, mock_get_treasury, mock_get_rp_mode):
         mock_get_rp_mode.return_value = False
         mock_get_treasury.return_value = 100_000

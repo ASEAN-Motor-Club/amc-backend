@@ -475,14 +475,71 @@ async def handle_passed_race_section(event, player, character, ctx):
     if game_event_char.finished:
         return 0, 0, 0, 0
 
+    laptime_seconds = data.get("LaptimeSeconds", 0)
+    # A section-0 crossing AFTER the first one (the start line, recorded in
+    # first_section_total_time_seconds) completes a lap, and LaptimeSeconds is
+    # then the just-completed lap's time (verified live 2026-09-05: S0 splits
+    # 19.88/16.83 matched TotalTime deltas exactly). The SSE stream never
+    # carries the cumulative LapTimes/BestLapTime snapshot mid-race — that was
+    # the polling-era data source — so laps are reconstructed here.
+    #
+    # Sentinel guard: the game sends LaptimeSeconds = seconds-since-server-boot
+    # (~6300s observed) on start-line crossings. A real lap is always a subset
+    # of TotalTimeSeconds; the sentinel is orders of magnitude larger than the
+    # fresh TotalTime of the crossing that carries it (verified live: 6329 vs
+    # 6.75). Subset check rejects it; the old 10M ceiling did NOT (sentinel is
+    # boot time, not a huge constant — it grows every boot).
+    completed_lap = (
+        section_index == 0
+        and game_event_char.first_section_total_time_seconds is not None
+        and 0 < laptime_seconds <= total_time_seconds
+    )
+
     # Update section index and total time
     game_event_char.section_index = section_index
     game_event_char.last_section_total_time_seconds = total_time_seconds
-    if game_event_char.laps == 0:
+    just_finished = False
+    if completed_lap:
+        game_event_char.lap_times = list(game_event_char.lap_times or []) + [
+            laptime_seconds
+        ]
+        best = game_event_char.best_lap_time or 0
+        if best <= 0 or laptime_seconds < best:
+            game_event_char.best_lap_time = laptime_seconds
+        game_event_char.laps += 1
+
+        # Multi-lap natural-finish detection.  Natural completion is a
+        # server-internal transition — the game never emits
+        # ChangeEventState(3) for it (verified live 2026-09-05: a 2-lap
+        # kart event recorded both laps in LapTimes {11.32, 9.54} yet the
+        # run stayed finished=False forever, since the single-lap rule
+        # only fires on the last section of NumLaps<=1 routes).  A
+        # multi-lap run finishes on the section-0 crossing that completes
+        # the final lap — exactly the crossing reconstructed above.
+        # NOTE: ``laps`` is 1 + completed-lap count (the initial 1 is the
+        # in-progress marker set on the first section crossing), so the
+        # final-lap condition is laps - 1 >= num_laps, not laps >= num_laps.
+        num_laps = None
+        if game_event.race_setup_id:
+            race_setup = await RaceSetup.objects.filter(
+                pk=game_event.race_setup_id
+            ).afirst()
+            num_laps = race_setup.num_laps if race_setup else None
+        if (
+            num_laps is not None
+            and num_laps >= 2
+            and game_event_char.laps - 1 >= num_laps
+        ):
+            game_event_char.finished = True
+            just_finished = True
+    elif game_event_char.laps == 0:
         game_event_char.laps = 1
-    await game_event_char.asave(
-        update_fields=["section_index", "last_section_total_time_seconds", "laps"]
-    )
+    update_fields = ["section_index", "last_section_total_time_seconds", "laps"]
+    if completed_lap:
+        update_fields += ["lap_times", "best_lap_time"]
+        if just_finished:
+            update_fields.append("finished")
+    await game_event_char.asave(update_fields=update_fields)
 
     # Record lap section time
     if section_index >= 0 and game_event_char.laps >= 1:
