@@ -490,36 +490,23 @@ async def handle_passed_race_section(event, player, character, ctx):
         and 0 < laptime_seconds <= total_time_seconds
     )
 
-    # Finished-participant guard.  The game's own auto-finish —
-    # ChangeEventState(3), which fires only when ALL players complete the
-    # track (freeman 2026-09-05) — never reaches SSE for solo/partial
-    # lobbies, so completion is inferred per participant:
+    # Finished-participant guard.  The game auto-finishes the event once
+    # every participant completes the track, and once Finished there are no
+    # more waypoints to cross (freeman 2026-09-05) — later section events
+    # for a finished participant are only stragglers from delayed SSE
+    # bursts, so their final times are left untouched.  Completion itself
+    # is inferred per participant below, because the auto-finish state
+    # never reached SSE in the observed solo/partial-lobby runs:
     #   - NumLaps==0 routes: the finish checkpoint is the LAST waypoint —
     #     the first pass through num_sections-1 finishes the run (Rule A).
     #   - NumLaps>=1 routes: the finish checkpoint is the FIRST waypoint —
     #     the S0 crossing that completes lap N (Rule B below).
-    # Later section events for a finished participant are stragglers from
-    # delayed SSE bursts.  EXCEPTION: a finished NumLaps==0 participant on
-    # a loop-style route (practice/quali TTs) keeps lapping — keep
-    # reconstructing their laps while the finish snapshot (section index /
-    # last total / net time) stays frozen.  finished is never un-set (the
-    # un-finish flip-flop experiment was removed 2026-09-05).
-    finished_0lap = False
     if game_event_char.finished:
-        num_laps_now = (
-            game_event.race_setup.num_laps
-            if game_event.race_setup is not None
-            else None
-        )
-        if num_laps_now == 0:
-            finished_0lap = True
-        else:
-            return 0, 0, 0, 0
+        return 0, 0, 0, 0
 
-    # Update section index and total time (frozen for finished 0-lap runs)
-    if not finished_0lap:
-        game_event_char.section_index = section_index
-        game_event_char.last_section_total_time_seconds = total_time_seconds
+    # Update section index and total time
+    game_event_char.section_index = section_index
+    game_event_char.last_section_total_time_seconds = total_time_seconds
     just_finished = False
     if completed_lap:
         game_event_char.lap_times = list(game_event_char.lap_times or []) + [
@@ -556,24 +543,15 @@ async def handle_passed_race_section(event, player, character, ctx):
             just_finished = True
     elif game_event_char.laps == 0:
         game_event_char.laps = 1
-    update_fields = ["laps"]
-    if not finished_0lap:
-        update_fields += ["section_index", "last_section_total_time_seconds"]
+    update_fields = ["section_index", "last_section_total_time_seconds", "laps"]
     if completed_lap:
         update_fields += ["lap_times", "best_lap_time"]
         if just_finished:
             update_fields.append("finished")
     await game_event_char.asave(update_fields=update_fields)
 
-    # Record lap section time.  For finished 0-lap runs only lap-completion
-    # (S0) crossings get rows — their lap index is advanced so they cannot
-    # collide with the finish snapshot's rows, while straggler
-    # re-deliveries (completed_lap=False) cannot overwrite them.
-    if (
-        section_index >= 0
-        and game_event_char.laps >= 1
-        and (not finished_0lap or completed_lap)
-    ):
+    # Record lap section time
+    if section_index >= 0 and game_event_char.laps >= 1:
         lap = game_event_char.laps - 1
         await LapSectionTime.objects.aupdate_or_create(
             game_event_character=game_event_char,
@@ -591,11 +569,7 @@ async def handle_passed_race_section(event, player, character, ctx):
     # because the SSE handler never receives lap count updates; the ``laps``
     # field in the DB would stay at 1 throughout the race, causing every
     # subsequent section-0 crossing to overwrite the value.
-    if (
-        not finished_0lap
-        and section_index == 0
-        and game_event_char.first_section_total_time_seconds is None
-    ):
+    if section_index == 0 and game_event_char.first_section_total_time_seconds is None:
         if total_time_seconds < 10_000_000:
             await GameEventCharacter.objects.filter(pk=game_event_char.pk).aupdate(
                 first_section_total_time_seconds=total_time_seconds
@@ -615,8 +589,7 @@ async def handle_passed_race_section(event, player, character, ctx):
     # first waypoint instead (Rule B above).
     race_setup = game_event.race_setup
     if (
-        not finished_0lap
-        and race_setup is not None
+        race_setup is not None
         and race_setup.num_laps == 0
         and section_index == race_setup.num_sections - 1
     ):

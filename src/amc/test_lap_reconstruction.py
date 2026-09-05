@@ -20,6 +20,7 @@ from amc.models import GameEventCharacter
 from amc.test_event_handlers import (
     CHAR_GUID,
     EVENT_GUID,
+    RACE_SETUP_RAW,
     _make_ctx,
     _make_event_data,
 )
@@ -42,12 +43,14 @@ def _section(section_index, total, laptime):
 @patch("amc.webhook.get_rp_mode", new_callable=AsyncMock)
 @patch("amc.webhook.get_treasury_fund_balance", new_callable=AsyncMock)
 class LapReconstructionTests(TestCase):
-    async def _setup(self):
+    async def _setup(self, num_laps=None):
         player = await sync_to_async(PlayerFactory)()
         character = await sync_to_async(CharacterFactory)(
             player=player, guid=CHAR_GUID
         )
         event_data = _make_event_data(state=2)
+        if num_laps is not None:
+            event_data["RaceSetup"] = {**RACE_SETUP_RAW, "NumLaps": num_laps}
         game_event, _ = await _upsert_game_event(event_data)
         gec = await _upsert_game_event_character(game_event, event_data["Players"][0])
         self._gec_pk = gec.pk
@@ -57,8 +60,12 @@ class LapReconstructionTests(TestCase):
         return await GameEventCharacter.objects.aget(pk=self._gec_pk)
 
     async def test_lap_sequence_reconstructs_laps_and_best(self, *mocks):
-        """start S0 -> 3 mids -> lap1 S0 -> lap2 S0 = 2 laps, best = min."""
-        player, character = await self._setup()
+        """start S0 -> 3 mids -> lap1 S0 -> lap2 S0 = 2 laps, best = min.
+
+        NumLaps=4 (like the live 4-lap quali): a mid-race run keeps crossing
+        sections between lap completions, so reconstruction must survive
+        them."""
+        player, character = await self._setup(num_laps=4)
 
         # Race start: first section-0 crossing sets first_section, no lap.
         await dispatch(
@@ -151,60 +158,3 @@ class LapReconstructionTests(TestCase):
         gec = await self._gec()
         self.assertEqual(gec.lap_times, [])
         self.assertEqual(gec.laps, 1)
-
-    async def test_zero_lap_finished_participant_keeps_lapping(self, *mocks):
-        """NumLaps==0 routes finish at the LAST waypoint (first pass through
-        num_sections-1).  On a loop-style route the player keeps lapping
-        afterwards: finished stays True (no flip-flop), lap reconstruction
-        continues, and the finish snapshot (section index / last total) is
-        frozen at the finish crossing (freeman 2026-09-05 geometry)."""
-        player, character = await self._setup()
-
-        # Start line.
-        await dispatch(
-            "ServerPassedRaceSection",
-            _section(0, 23.44, 5221.59),
-            player,
-            character,
-            _make_ctx(),
-        )
-        # Last section of a NumLaps=0 route -> natural finish (Rule A).
-        await dispatch(
-            "ServerPassedRaceSection",
-            _section(1, 29.55, 6.1),
-            player,
-            character,
-            _make_ctx(),
-        )
-        gec = await self._gec()
-        self.assertTrue(gec.finished)
-
-        # Lapping continues: lap completions are still reconstructed but
-        # the participant is NOT un-finished.
-        await dispatch(
-            "ServerPassedRaceSection",
-            _section(0, 43.32, 19.88),
-            player,
-            character,
-            _make_ctx(),
-        )
-        gec = await self._gec()
-        self.assertTrue(gec.finished)
-        self.assertEqual(gec.lap_times, [19.88])
-        self.assertEqual(gec.laps, 2)
-
-        await dispatch(
-            "ServerPassedRaceSection",
-            _section(0, 60.15, 16.83),
-            player,
-            character,
-            _make_ctx(),
-        )
-        gec = await self._gec()
-        self.assertEqual(gec.lap_times, [19.88, 16.83])
-        self.assertEqual(gec.best_lap_time, 16.83)
-        self.assertEqual(gec.laps, 3)
-        # Finish snapshot frozen at the finish crossing (29.55), not the
-        # later lap totals — net time stays the first-loop time.
-        self.assertEqual(gec.section_index, 1)
-        self.assertEqual(gec.last_section_total_time_seconds, 29.55)
