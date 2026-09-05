@@ -11,7 +11,7 @@ from django.utils import timezone  # noqa: E402
 from amc.tasks import process_log_line  # noqa: E402
 import amc.tasks as tasks_module  # noqa: E402
 from necesse.tasks import process_necesse_log  # noqa: E402
-from amc.events import monitor_events, send_event_embeds, post_random_events  # noqa: E402
+from amc.events import monitor_events, send_event_embeds  # noqa: E402
 from amc.locations import monitor_locations, run_location_listener  # noqa: E402
 from amc.characterlocation_stats import refresh_all_vehicle_stats  # noqa: E402
 from amc.webhook import monitor_webhook, WEBHOOK_SSE_ENABLED  # noqa: E402
@@ -272,8 +272,9 @@ class WorkerSettings:
         cron(monitor_supply_chain_events, second=47),
         # pyrefly: ignore [bad-argument-type]
         cron(send_rescue_reminders, second=set(range(0, 60, 15))),
-        # pyrefly: ignore [bad-argument-type]
-        cron(post_random_events, hour={0, 3, 6, 9, 12, 15, 18, 21}, minute=0, second=15),
+        # post_random_events (auto-TT posting) removed 2026-09-05 (freeman):
+        # pivoting to user-driven event setup via commands. The function stays
+        # in amc.events for reference/reuse; only its schedule was removed.
         # cron(monitor_server_condition, minute=set(range(3, 60, 5))),
         # cron(monitor_rp_mode, second=set(range(7, 60, 13))),
     ]
