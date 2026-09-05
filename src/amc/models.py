@@ -807,9 +807,33 @@ class RaceSetup(models.Model):
     )
 
     @staticmethod
+    def normalize_config(race_setup):
+        """Recursively coerce integer leaves to float so that JSON drift
+        between serialization paths (e.g. ``0`` vs ``0.0``, ``10`` vs
+        ``10.0``) does not produce different hashes for the same setup.
+
+        Bools are instances of int in Python and are preserved as-is.
+        """
+        if isinstance(race_setup, bool):
+            return race_setup
+        if isinstance(race_setup, int):
+            return float(race_setup)
+        if isinstance(race_setup, float):
+            return race_setup
+        if isinstance(race_setup, dict):
+            return {
+                key: RaceSetup.normalize_config(value)
+                for key, value in race_setup.items()
+            }
+        if isinstance(race_setup, (list, tuple)):
+            return [RaceSetup.normalize_config(value) for value in race_setup]
+        return race_setup
+
+    @staticmethod
     def calculate_hash(race_setup):
-        hashes = DeepHash(race_setup)
-        return hashes[race_setup]
+        normalized = RaceSetup.normalize_config(race_setup)
+        hashes = DeepHash(normalized)
+        return hashes[normalized]
 
     @override
     def __str__(self):
