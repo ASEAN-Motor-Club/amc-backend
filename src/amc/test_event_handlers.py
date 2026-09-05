@@ -484,6 +484,59 @@ class EventDispatchTests(TestCase):
         ).afirst()
         self.assertFalse(gec.finished)
 
+    async def test_one_lap_finishes_on_s0_not_last_waypoint(
+        self, mock_get_treasury, mock_get_rp_mode
+    ):
+        """NumLaps>=1 routes finish at the FIRST waypoint (freeman
+        2026-09-05): crossing the last waypoint must not finish a 1-lap
+        run; the S0 crossing that completes the lap does."""
+        mock_get_rp_mode.return_value = False
+        mock_get_treasury.return_value = 100_000
+
+        player = await sync_to_async(PlayerFactory)()
+        character = await sync_to_async(CharacterFactory)(
+            player=player, guid=CHAR_GUID
+        )
+
+        event_data = _make_event_data(state=2)
+        event_data["RaceSetup"] = {**RACE_SETUP_RAW, "NumLaps": 1}
+        game_event, _ = await _upsert_game_event(event_data)
+        await _upsert_game_event_character(game_event, event_data["Players"][0])
+
+        ctx = _make_ctx()
+
+        async def cross(section, total, laptime):
+            event = {
+                "hook": "ServerPassedRaceSection",
+                "timestamp": int(time.time()),
+                "data": {
+                    "CharacterGuid": str(character.guid),
+                    "EventGuid": EVENT_GUID,
+                    "SectionIndex": section,
+                    "TotalTimeSeconds": total,
+                    "LaptimeSeconds": laptime,
+                },
+            }
+            await dispatch("ServerPassedRaceSection", event, player, character, ctx)
+
+        # Start line: sentinel LaptimeSeconds (boot time) is rejected as a lap
+        await cross(0, 1.08, 2241.17)
+        # Last waypoint of a NumLaps=1 route — NOT the finish checkpoint.
+        await cross(1, 3.72, 2.63)
+        gec = await GameEventCharacter.objects.filter(
+            game_event=game_event, character=character
+        ).afirst()
+        self.assertFalse(gec.finished)
+
+        # S0 crossing completes lap 1 -> the finish checkpoint -> finished.
+        await cross(0, 5.20, 4.12)
+        gec = await GameEventCharacter.objects.filter(
+            game_event=game_event, character=character
+        ).afirst()
+        self.assertTrue(gec.finished)
+        self.assertEqual(gec.laps, 2)  # start marker + 1 completed lap
+        self.assertEqual(gec.lap_times, [4.12])
+
     async def test_remove_event_noop(self, mock_get_treasury, mock_get_rp_mode):
         mock_get_rp_mode.return_value = False
         mock_get_treasury.return_value = 100_000

@@ -20,6 +20,7 @@ from amc.models import GameEventCharacter
 from amc.test_event_handlers import (
     CHAR_GUID,
     EVENT_GUID,
+    RACE_SETUP_RAW,
     _make_ctx,
     _make_event_data,
 )
@@ -42,12 +43,14 @@ def _section(section_index, total, laptime):
 @patch("amc.webhook.get_rp_mode", new_callable=AsyncMock)
 @patch("amc.webhook.get_treasury_fund_balance", new_callable=AsyncMock)
 class LapReconstructionTests(TestCase):
-    async def _setup(self):
+    async def _setup(self, num_laps=None):
         player = await sync_to_async(PlayerFactory)()
         character = await sync_to_async(CharacterFactory)(
             player=player, guid=CHAR_GUID
         )
         event_data = _make_event_data(state=2)
+        if num_laps is not None:
+            event_data["RaceSetup"] = {**RACE_SETUP_RAW, "NumLaps": num_laps}
         game_event, _ = await _upsert_game_event(event_data)
         gec = await _upsert_game_event_character(game_event, event_data["Players"][0])
         self._gec_pk = gec.pk
@@ -57,8 +60,13 @@ class LapReconstructionTests(TestCase):
         return await GameEventCharacter.objects.aget(pk=self._gec_pk)
 
     async def test_lap_sequence_reconstructs_laps_and_best(self, *mocks):
-        """start S0 -> 3 mids -> lap1 S0 -> lap2 S0 = 2 laps, best = min."""
-        player, character = await self._setup()
+        """start S0 -> 3 mids -> lap1 S0 -> lap2 S0 = 2 laps, best = min.
+
+        NumLaps=4 (like the live 4-lap quali): a mid-race run keeps crossing
+        sections between lap completions, so reconstruction must survive
+        them (with NumLaps=0 the first mid-section crossing would finish a
+        0-lap run — PR #83's last-waypoint rule)."""
+        player, character = await self._setup(num_laps=4)
 
         # Race start: first section-0 crossing sets first_section, no lap.
         await dispatch(

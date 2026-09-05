@@ -489,14 +489,16 @@ async def handle_passed_race_section(event, player, character, ctx):
             game_event_char.best_lap_time = laptime_seconds
         game_event_char.laps += 1
 
-        # Multi-lap natural-finish detection.  Natural completion is a
-        # server-internal transition — the game never emits
-        # ChangeEventState(3) for it (verified live 2026-09-05: a 2-lap
-        # kart event recorded both laps in LapTimes {11.32, 9.54} yet the
-        # run stayed finished=False forever, since the single-lap rule
-        # only fires on the last section of NumLaps<=1 routes).  A
-        # multi-lap run finishes on the section-0 crossing that completes
-        # the final lap — exactly the crossing reconstructed above.
+        # Rule B — N-lap natural-finish detection (NumLaps>=1).  Natural
+        # completion is a server-internal transition — ChangeEventState(3)
+        # never reached SSE in the observed runs (verified live 2026-09-05:
+        # a 2-lap kart event recorded both laps in LapTimes {11.32, 9.54}
+        # yet the run stayed finished=False forever).  In NumLaps>=1 routes
+        # the finish checkpoint is the FIRST waypoint (freeman 2026-09-05):
+        # a 1-lap run finishes on the first W0 lap crossing, an N-lap run on
+        # the section-0 crossing that completes the final lap — exactly the
+        # crossing reconstructed above.  (NumLaps==0 routes finish at the
+        # LAST waypoint instead — that rule lives in PR #83.)
         # NOTE: ``laps`` is 1 + completed-lap count (the initial 1 is the
         # in-progress marker set on the first section crossing), so the
         # final-lap condition is laps - 1 >= num_laps, not laps >= num_laps.
@@ -508,7 +510,7 @@ async def handle_passed_race_section(event, player, character, ctx):
             num_laps = race_setup.num_laps if race_setup else None
         if (
             num_laps is not None
-            and num_laps >= 2
+            and num_laps >= 1
             and game_event_char.laps - 1 >= num_laps
         ):
             game_event_char.finished = True
