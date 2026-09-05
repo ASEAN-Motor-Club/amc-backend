@@ -293,6 +293,57 @@ def participant_lap_segment(participant):
     return f" BL {best} LL {last}"
 
 
+def _lap_breakdown_lines(participants):
+    """Per-lap performance breakdown rendered under the results table.
+
+    One row per recorded lap per participant: lap number, lap time, delta
+    to the participant's own best lap ("BEST" on the fastest), and the
+    position that lap achieved among all participants' same-index laps
+    (so a driver can see which lap lost them the race).  The section is
+    omitted entirely when nobody recorded a lap, so sprint / time-trial
+    popups stay byte-identical to the legacy layout.
+
+    Display-side sentinel filter: boot-age values can leak into
+    ``lap_times`` via the game's own start snapshots (live evidence
+    2026-09-05: 6329.98 as a first entry) and are never real laps — a
+    single lap above 600s is not renderable on any current route.
+    """
+    def display_laps(participant):
+        return [t for t in (participant.lap_times or []) if 0 < t <= 600]
+
+    blocks = []  # (participant, laps) for everyone with at least one lap
+    per_lap_laps = []  # per_lap_laps[i] = lap-i times across participants
+    for participant in participants:
+        laps = display_laps(participant)
+        if not laps:
+            continue
+        blocks.append((participant, laps))
+        for i, t in enumerate(laps):
+            if len(per_lap_laps) <= i:
+                per_lap_laps.append([])
+            per_lap_laps[i].append(t)
+
+    if not blocks:
+        return []
+
+    def lap_position(i, t):
+        if len(per_lap_laps[i]) <= 1:
+            return ""
+        faster = sum(1 for other in per_lap_laps[i] if other < t)
+        return f"P{faster + 1}"
+
+    lines = ["", "<Title>Lap breakdown</>"]
+    for participant, laps in blocks:
+        best = min(laps)
+        lines.append(f"<Bold>{participant.character.name.ljust(16)}</>")
+        for i, t in enumerate(laps):
+            marker = "BEST" if t == best else f"+{t - best:.3f}"
+            position = lap_position(i, t)
+            suffix = f"  {position}" if position else ""
+            lines.append(f"  L{i + 1}  {t:>9.3f}s  {marker:>9}{suffix}")
+    return lines
+
+
 def print_results(participants):
     def best_lap(participant):
         return format_lap(participant.best_lap_time)
@@ -327,6 +378,7 @@ def print_results(participants):
         print_result(participant, rank)
         for rank, participant in enumerate(participants, start=1)
     ]
+    lines += _lap_breakdown_lines(participants)
     return "\n".join(lines)
 
 
