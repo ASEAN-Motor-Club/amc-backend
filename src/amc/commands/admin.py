@@ -27,6 +27,7 @@ from amc.vehicles import spawn_registered_vehicle, register_player_vehicles
 from amc.models import (
     Character,
     CharacterVehicle,
+    ExclusiveProgressionBreak,
     Player,
     VehicleDealership,
     WorldText,
@@ -1167,4 +1168,71 @@ async def cmd_clear_forced_name(ctx: CommandContext, target_player_name: str):
     )
     await ctx.announce(
         f"{ctx.character.name} removed the forced name on {target_player_name}."
+    )
+
+
+@registry.register(
+    "/exclusive_unbreak",
+    description=gettext_lazy(
+        "Re-arm a character's exclusive-progression flag (Admin)"
+    ),
+    category="Admin",
+)
+async def cmd_exclusive_unbreak(ctx: CommandContext, target_player_name: str):
+    """Re-arm a broken exclusive-progression flag after manual review.
+
+    Breaks are recorded in ExclusiveProgressionBreak (who/when/old→new);
+    consult that history before re-arming.  Re-arming means "this character's
+    progression is trusted again" — the next login burst re-judges from the
+    then-current stored levels.
+    """
+    if not ctx.player_info or not ctx.player_info.get("bIsAdmin"):
+        await ctx.reply(_("Admin-only"))
+        return
+
+    target_player, target_character = await _resolve_offline_player_by_name(
+        target_player_name
+    )
+    if target_character is None:
+        await ctx.reply(
+            _(
+                "<Title>Not Found</>\n\nNo unambiguous character named "
+                "{name} — exact names only when several players share it."
+            ).format(name=target_player_name)
+        )
+        return
+
+    previous = target_character.exclusive_progression
+    if previous is True:
+        await ctx.reply(
+            _(
+                "<Title>Already Armed</>\n\n{name}'s exclusive-progression "
+                "flag is already True — nothing to do."
+            ).format(name=target_character.name)
+        )
+        return
+
+    await Character.objects.filter(pk=target_character.pk).aupdate(
+        exclusive_progression=True
+    )
+    logger.info(
+        "Exclusive progression re-armed by %s for %s (unique_id=%s, "
+        "previous flag=%s; break history: %s)",
+        ctx.character.name if ctx.character else "?",
+        target_character.name,
+        target_player.unique_id if target_player else "?",
+        previous,
+        [
+            b
+            async for b in ExclusiveProgressionBreak.objects.filter(
+                character=target_character
+            ).values_list("level_field", "stored_level", "seen_level")
+        ],
+    )
+
+    await ctx.reply(
+        _(
+            "<Title>Progression Re-armed</>\n\n{name}'s exclusive-progression "
+            "flag is True again (was {previous})."
+        ).format(name=target_character.name, previous=previous)
     )
