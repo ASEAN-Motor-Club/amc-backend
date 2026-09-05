@@ -272,12 +272,28 @@ def format_time(total_seconds: float) -> str:
     return f"{formatted_minutes}:{formatted_seconds}"
 
 
-def print_results(participants):
-    def format_lap(seconds):
-        if seconds is None or seconds <= 0:
-            return "-"
-        return format_time(seconds)
+def format_lap(seconds):
+    """Lap time for display; '-' when no lap was recorded."""
+    if seconds is None or seconds <= 0:
+        return "-"
+    return format_time(seconds)
 
+
+def participant_lap_segment(participant):
+    """' BL <best> LL <last>' suffix for Discord participant lines.
+
+    Empty string when the participant recorded no laps, so sprint and
+    time-trial lines stay byte-identical to the legacy format.
+    """
+    laps = participant.lap_times or []
+    best = format_lap(participant.best_lap_time)
+    last = format_lap(laps[-1]) if laps else "-"
+    if best == "-" and last == "-":
+        return ""
+    return f" BL {best} LL {last}"
+
+
+def print_results(participants):
     def best_lap(participant):
         return format_lap(participant.best_lap_time)
 
@@ -453,6 +469,7 @@ def create_event_embed(game_event):
                     progress_str = f"{progress_percentage:.1f}%"
 
             participant_line = f"{rank}. {participant.character.name} ({progress_str})"
+            participant_line += participant_lap_segment(participant)
 
             if participant.wrong_vehicle:
                 participant_line += " [Wrong Vehicle]"

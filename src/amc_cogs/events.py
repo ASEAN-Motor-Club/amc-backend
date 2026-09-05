@@ -11,6 +11,7 @@ from random import Random
 from discord.ext import commands
 from django.conf import settings
 from amc.models import GameEventCharacter
+from amc.events import participant_lap_segment
 from .utils import create_player_autocomplete
 from amc.mod_server import join_player_to_event, kick_player_from_event, get_events
 
@@ -353,6 +354,7 @@ class EventsCog(commands.Cog):
                     progress_str = f"{progress_percentage:.1f}%"
 
             participant_line = f"{rank}. {participant.character.name} ({progress_str})"
+            participant_line += participant_lap_segment(participant)
             if scheduled_event.time_trial:
                 participant_line += f" ({participant.attempts_count} attempts)"
 

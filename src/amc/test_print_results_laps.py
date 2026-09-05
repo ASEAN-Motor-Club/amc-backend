@@ -7,7 +7,11 @@ events where at least one participant has lap data.
 
 from types import SimpleNamespace
 
-from amc.events import print_results
+from amc.events import (
+    create_event_embed,
+    participant_lap_segment,
+    print_results,
+)
 
 
 def participant(
@@ -16,6 +20,8 @@ def participant(
     finished=True,
     best_lap_time: float | None = 0.0,
     lap_times: list[float] | None = None,
+    laps=1,
+    section_index=-1,
 ):
     return SimpleNamespace(
         character=SimpleNamespace(name=name),
@@ -25,6 +31,8 @@ def participant(
         wrong_vehicle=False,
         best_lap_time=best_lap_time,
         lap_times=lap_times if lap_times is not None else [],
+        laps=laps,
+        section_index=section_index,
     )
 
 
@@ -91,3 +99,57 @@ def test_long_best_lap_alignment():
 
     assert "BL 10:20.500" in out
     assert "LL 10:20.500" in out
+
+
+def test_lap_segment_with_laps():
+    """Discord suffix carries both best and last lap."""
+    p = participant(best_lap_time=96.2, lap_times=[96.2, 103.9])
+    assert participant_lap_segment(p) == " BL 01:36.200 LL 01:43.900"
+
+
+def test_lap_segment_empty_without_laps():
+    """No lap data -> empty suffix, so sprint/TT lines stay byte-identical."""
+    assert participant_lap_segment(participant()) == ""
+    assert participant_lap_segment(participant(best_lap_time=None, lap_times=None)) == ""
+
+
+def test_lap_segment_best_only_in_lap_times():
+    p = participant(best_lap_time=0.0, lap_times=[95.0])
+    assert participant_lap_segment(p) == " BL - LL 01:35.000"
+
+
+def _embed_participants_field(participants):
+    game_event = SimpleNamespace(
+        name="Qualifying",
+        state=1,
+        race_setup=SimpleNamespace(
+            hash="abc123",
+            num_laps=2,
+            num_sections=10,
+            vehicles=[],
+            engines=[],
+        ),
+        scheduled_event=None,
+        participants=SimpleNamespace(all=lambda: participants),
+    )
+    embed = create_event_embed(game_event)
+    field = next(f for f in embed.fields if f.name == "👥 Participants")
+    assert field.value is not None
+    return field.value
+
+
+def test_event_embed_shows_laps():
+    """Discord event embed participant lines carry BL/LL for lap events."""
+    value = _embed_participants_field(
+        [
+            participant(name="Fast", best_lap_time=96.2, lap_times=[96.2, 103.9]),
+            participant(name="Slow", net_time=None, finished=False),
+        ]
+    )
+    fast_line = next(line for line in value.split("\n") if "Fast" in line)
+    slow_line = next(line for line in value.split("\n") if "Slow" in line)
+
+    assert "BL 01:36.200" in fast_line
+    assert "LL 01:43.900" in fast_line
+    assert "BL" not in slow_line
+    assert "LL" not in slow_line
