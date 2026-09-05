@@ -513,18 +513,20 @@ async def handle_passed_race_section(event, player, character, ctx):
                 first_section_total_time_seconds=0
             )
 
-    # Natural-finish detection.  A natural finish is a server-internal event
-    # transition — the game never sends the client→server ChangeEventState
-    # RPC for it, so state 3 never reaches the backend and the run's row
-    # stays In Progress forever (no finished flag, results popup, or EXP).
-    # Mark the participant finished when they cross the last section of a
-    # single-lap route (NumLaps<=1).  Multi-lap routes cannot be detected
-    # this way — the section stream carries no reliable lap count — so those
-    # keep depending on the abort/DQ ChangeEventState(3) snapshots.
+    # Natural-finish detection (Rule A — 0-lap routes).  The game
+    # auto-finishes the event once ALL participants complete the track, and
+    # once Finished there are no more waypoints to cross (freeman
+    # 2026-09-05) — but that state never reached the backend in the
+    # observed solo/partial-lobby runs, so the run's row would stay In
+    # Progress forever (no finished flag, results popup, or EXP).  For
+    # NumLaps==0 routes the finish checkpoint is the LAST waypoint: the
+    # first pass through num_sections-1 completes the track.  NumLaps>=1
+    # routes finish at the FIRST waypoint instead — the S0 lap-completion
+    # crossing in PR #86.
     race_setup = game_event.race_setup
     if (
         race_setup is not None
-        and race_setup.num_laps <= 1
+        and race_setup.num_laps == 0
         and section_index == race_setup.num_sections - 1
     ):
         game_event_char.finished = True
