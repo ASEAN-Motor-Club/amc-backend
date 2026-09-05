@@ -356,3 +356,137 @@ class ExclusiveUnbreakCommandTests(TestCase):
             await cmd_exclusive_unbreak(ctx, "Nobody")
         await char.arefresh_from_db()
         self.assertIs(char.exclusive_progression, False)
+
+
+class FreshCharacterArmingTests(TestCase):
+    """A brand-new level-1 character gets the flag during its FIRST login.
+
+    Real sequence (freeman 2026-09-05): the login line creates the Character
+    row (level fields NULL, flag NULL via aupdate_or_create defaults), then
+    the client uploads its table as the 7-line all-1 burst ~2s later.  The
+    arming check (whole table == 1) passes exactly at the last burst event —
+    the flag is armed on first login, not one login late.  Arming is also not
+    gated on the ServerStarted-forgiveness `judged` flag: a brand-new
+    player's first login post-restart still arms.
+    """
+
+    def setUp(self):
+        tasks_module._login_level_types_seen.clear()
+        tasks_module._logins_since_restart.clear()
+        tasks_module._unjudged_bursts.clear()
+
+    async def test_arms_at_first_login_burst_completion(self):
+        # Row exactly as the login handler creates it: everything NULL.
+        player = await Player.objects.acreate(unique_id=777200)
+        char = await Character.objects.acreate(
+            name="BrandNew", player=player, guid="guid_new777",
+        )
+        self.assertIsNone(char.exclusive_progression)
+        self.assertIsNone(char.driver_level)
+
+        # First login since worker start (no ServerStarted seen, marker set
+        # empty) → this burst is also the forgiveness-unjudged window; arming
+        # must fire anyway.
+        await process_log_event(
+            PlayerLoginLogEvent(
+                timestamp=timezone.now(), player_name="BrandNew", player_id=777200
+            ),
+            ctx={},
+        )
+
+        # The client uploads its table: all 7 types at level 1.
+        for i, level_type in enumerate(ALL_LEVEL_TYPES):
+            await process_log_event(
+                PlayerLevelChangedLogEvent(
+                    timestamp=timezone.now(), player_name="BrandNew",
+                    player_id=777200, level_type=level_type, level_value=1,
+                ),
+                ctx={},
+            )
+            await char.arefresh_from_db()
+            if i < len(ALL_LEVEL_TYPES) - 1:
+                # Not armed before the whole table is observable.
+                self.assertIsNone(
+                    char.exclusive_progression,
+                    f"premature arm after {level_type}",
+                )
+        self.assertIs(char.exclusive_progression, True)
+
+        # Second login (judged): burst of 1s == stored → flag survives.
+        await process_log_event(
+            PlayerLoginLogEvent(
+                timestamp=timezone.now(), player_name="BrandNew", player_id=777200
+            ),
+            ctx={},
+        )
+        for level_type in ALL_LEVEL_TYPES:
+            await process_log_event(
+                PlayerLevelChangedLogEvent(
+                    timestamp=timezone.now(), player_name="BrandNew",
+                    player_id=777200, level_type=level_type, level_value=1,
+                ),
+                ctx={},
+            )
+        await char.arefresh_from_db()
+        self.assertIs(char.exclusive_progression, True)
+
+    async def test_mid_burst_row_creation_arms_second_login(self):
+        """Documented M2 residual: when the mod API is slow and the row only
+        comes into existence mid-burst, the skipped early types leave NULL
+        stored levels, so the all-1 arming check can't pass until the second
+        login's burst."""
+        player = await Player.objects.acreate(unique_id=777201)
+        tasks_module._logins_since_restart.add(777201)  # judged burst
+        # Login could not create the row (GUID unresolved) — the first two
+        # burst lines are skipped (no row yet).
+        await process_log_event(
+            PlayerLoginLogEvent(
+                timestamp=timezone.now(), player_name="LateRow", player_id=777201
+            ),
+            ctx={},
+        )
+        for level_type in ALL_LEVEL_TYPES[:2]:
+            await process_log_event(
+                PlayerLevelChangedLogEvent(
+                    timestamp=timezone.now(), player_name="LateRow",
+                    player_id=777201, level_type=level_type, level_value=1,
+                ),
+                ctx={},
+            )
+        # Row appears (created by a later pipeline event, e.g. the mod roster
+        # sync) — remaining burst lines land on it.
+        char = await Character.objects.acreate(
+            name="LateRow", player=player, guid="guid_late777",
+        )
+        for level_type in ALL_LEVEL_TYPES[2:]:
+            await process_log_event(
+                PlayerLevelChangedLogEvent(
+                    timestamp=timezone.now(), player_name="LateRow",
+                    player_id=777201, level_type=level_type, level_value=1,
+                ),
+                ctx={},
+            )
+        await char.arefresh_from_db()
+        # driver/taxi were skipped while the row was missing → NULL → the
+        # first login cannot arm.
+        self.assertIsNone(char.driver_level)
+        self.assertIsNone(char.exclusive_progression)
+
+        # Second login: full burst observed → armed.
+        await process_log_event(
+            PlayerLoginLogEvent(
+                timestamp=timezone.now(), player_name="LateRow", player_id=777201
+            ),
+            ctx={},
+        )
+        for level_type in ALL_LEVEL_TYPES:
+            await process_log_event(
+                PlayerLevelChangedLogEvent(
+                    timestamp=timezone.now(), player_name="LateRow",
+                    player_id=777201, level_type=level_type, level_value=1,
+                ),
+                ctx={},
+            )
+        await char.arefresh_from_db()
+        self.assertIs(char.exclusive_progression, True)
+        self.assertEqual(char.driver_level, 1)
