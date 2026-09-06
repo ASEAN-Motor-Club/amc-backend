@@ -1,11 +1,13 @@
 import asyncio
 import aiohttp
 from concurrent.futures import ThreadPoolExecutor
+import logging
 from arq.connections import RedisSettings
 from arq import cron
 import django
 
 django.setup()
+logger = logging.getLogger(__name__)
 from django.conf import settings  # noqa: E402
 from django.utils import timezone  # noqa: E402
 from amc.tasks import process_log_line  # noqa: E402
@@ -15,6 +17,7 @@ from amc.events import monitor_events, send_event_embeds  # noqa: E402
 from amc.locations import monitor_locations, run_location_listener  # noqa: E402
 from amc.characterlocation_stats import refresh_all_vehicle_stats  # noqa: E402
 from amc.webhook import monitor_webhook, WEBHOOK_SSE_ENABLED  # noqa: E402
+from amc.handlers.events import crosscheck_live_events  # noqa: E402
 from amc.sse_client import run_sse_listener  # noqa: E402
 from amc.ubi import handout_ubi, TASK_FREQUENCY as UBI_TASK_FREQUENCY  # noqa: E402
 from amc.deliverypoints import monitor_deliverypoints  # noqa: E402
@@ -212,6 +215,12 @@ async def criminal_record_decay_tick(ctx):
     await tick_criminal_record_decay(ctx["http_client_mod"])
 
 
+async def crosscheck_events_tick(ctx):
+    """Read-only drift report every 5s: live event state vs the DB."""
+    for line in await crosscheck_live_events(ctx["http_client_mod"]):
+        logger.warning("event crosscheck drift: %s", line)
+
+
 class WorkerSettings:
     functions = [
         process_log_line,
@@ -237,6 +246,10 @@ class WorkerSettings:
         cron(police_suspect_locations_tick, second=set(range(5, 60, 5))),
         # pyrefly: ignore [bad-argument-type]
         cron(criminal_record_decay_tick, minute=None, second=30),  # every minute at :30s
+        # Event crosscheck — read-only live-vs-DB drift report, only does
+        # real work while an event is in Ready/Racing.
+        # pyrefly: ignore [bad-argument-type]
+        cron(crosscheck_events_tick, second=set(range(0, 60, 5))),
         # pyrefly: ignore [bad-argument-type]
         cron(handout_ubi, minute=set(range(0, 60, UBI_TASK_FREQUENCY)), second=37),
         # pyrefly: ignore [bad-argument-type]

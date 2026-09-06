@@ -14,6 +14,7 @@ from amc.handlers import dispatch
 from amc.handlers.events import (
     _upsert_game_event,
     _upsert_game_event_character,
+    crosscheck_live_events,
     handle_add_event,
     handle_change_event_state,
     handle_join_event,
@@ -104,6 +105,7 @@ def _make_event_data(state=1, players=None):
         "EventGuid": EVENT_GUID,
         "EventName": "Test Event",
         "State": state,
+        "EventType": 1,
         "OwnerCharacterId": {
             "UniqueNetId": PLAYER_ID,
             "CharacterGuid": CHAR_GUID,
@@ -657,6 +659,107 @@ class LeaveReconcileTests(TestCase):
                 game_event=game_event, character__guid=member["CharacterId"]["CharacterGuid"]
             ).aexists()
         )
+
+
+OTHER_GUID = "AABBCCDDEEFF00112233445566778899"
+
+
+@patch("amc.handlers.events.get_events", new_callable=AsyncMock)
+class CrosscheckTests(TestCase):
+    """Read-only live-vs-DB drift report (freeman 2026-09-06)."""
+
+    async def test_ignores_finished_and_non_race_events(self, mock_get_live):
+        mock_get_live.return_value = [
+            dict(_make_event_data(state=3)),
+            dict(_make_event_data(state=1), EventType=2),
+        ]
+        self.assertEqual(await crosscheck_live_events(object()), [])
+
+    async def test_missing_db_row_reported(self, mock_get_live):
+        mock_get_live.return_value = [
+            dict(_make_event_data(state=1), EventGuid=OTHER_GUID, EventName="Ghost")
+        ]
+        drift = await crosscheck_live_events(object())
+        self.assertEqual(len(drift), 1)
+        self.assertIn("NO DB ROW", drift[0])
+        self.assertIn(OTHER_GUID[:8], drift[0])
+
+    async def test_unrecorded_joiner_reported(self, mock_get_live):
+        event_data = _make_event_data(state=1)
+        await _upsert_game_event(event_data)
+        joiner = _roster_member(8, "invisible")
+        mock_get_live.return_value = [dict(event_data, Players=[joiner])]
+        drift = await crosscheck_live_events(object())
+        self.assertEqual(len(drift), 1)
+        self.assertIn("unrecorded joiner(s) ['invisible']", drift[0])
+
+    async def test_phantom_never_raced_row_reported(self, mock_get_live):
+        event_data = _make_event_data(state=1)
+        game_event, _ = await _upsert_game_event(event_data)
+        present = _roster_member(9, "present")
+        phantom = _roster_member(10, "gone")
+        for member in (present, phantom):
+            await _upsert_game_event_character(game_event, member)
+        mock_get_live.return_value = [dict(event_data, Players=[present])]
+        drift = await crosscheck_live_events(object())
+        self.assertEqual(len(drift), 1)
+        self.assertIn("phantom never-raced row(s) ['gone']", drift[0])
+
+    async def test_raced_dnf_absent_from_roster_not_reported(self, mock_get_live):
+        event_data = _make_event_data(state=1)
+        game_event, _ = await _upsert_game_event(event_data)
+        raced = _roster_member(11, "raceddnf")
+        raced_row = await _upsert_game_event_character(game_event, raced)
+        raced_row.laps = 2
+        await raced_row.asave(update_fields=["laps"])
+        mock_get_live.return_value = [dict(event_data, Players=[])]
+        self.assertEqual(await crosscheck_live_events(object()), [])
+
+    async def test_flag_drift_racing_reported(self, mock_get_live):
+        event_data = _make_event_data(state=2)
+        game_event, _ = await _upsert_game_event(event_data)
+        racer = _roster_member(12, "racer")
+        await _upsert_game_event_character(game_event, racer)
+        mock_get_live.return_value = [
+            dict(event_data, Players=[dict(racer, bWrongEngine=True)])
+        ]
+        drift = await crosscheck_live_events(object())
+        self.assertEqual(len(drift), 1)
+        self.assertIn("flag drift", drift[0])
+        self.assertIn("wrong_engine live=True db=False", drift[0])
+
+    async def test_finished_racer_flag_drift_not_reported(self, mock_get_live):
+        event_data = _make_event_data(state=2)
+        game_event, _ = await _upsert_game_event(event_data)
+        finisher = _roster_member(13, "finisher")
+        await _upsert_game_event_character(game_event, finisher)
+        mock_get_live.return_value = [
+            dict(event_data, Players=[dict(finisher, bFinished=True, bWrongVehicle=True)])
+        ]
+        self.assertEqual(await crosscheck_live_events(object()), [])
+
+    async def test_lobby_flags_not_compared(self, mock_get_live):
+        event_data = _make_event_data(state=1)
+        game_event, _ = await _upsert_game_event(event_data)
+        on_foot = _roster_member(14, "onfoot")
+        await _upsert_game_event_character(game_event, on_foot)
+        mock_get_live.return_value = [
+            dict(event_data, Players=[dict(on_foot, bWrongVehicle=True, bWrongEngine=True)])
+        ]
+        self.assertEqual(await crosscheck_live_events(object()), [])
+
+    async def test_state_drift_reported(self, mock_get_live):
+        event_data = _make_event_data(state=1)
+        await _upsert_game_event(event_data)
+        mock_get_live.return_value = [dict(event_data, State=2, Players=[])]
+        drift = await crosscheck_live_events(object())
+        self.assertEqual(len(drift), 1)
+        self.assertIn("state drift db=1 live=2", drift[0])
+
+    async def test_fetch_failure_throttled_and_empty(self, mock_get_live):
+        mock_get_live.side_effect = Exception("mod down")
+        self.assertEqual(await crosscheck_live_events(object()), [])
+        self.assertEqual(await crosscheck_live_events(object()), [])
 
 
 # ---------------------------------------------------------------------------
