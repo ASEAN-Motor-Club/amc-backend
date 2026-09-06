@@ -217,23 +217,25 @@ async def _upsert_game_event_character(game_event, player_info: dict):
         "disqualified": player_info.get("bDisqualified", False),
         "lap_times": list(player_info.get("LapTimes", [])),
     }
-    if game_event.state < 2:
-        defaults.update(
-            {
-                "wrong_vehicle": player_info.get("bWrongVehicle", False),
-                "wrong_engine": player_info.get("bWrongEngine", False),
-            }
-        )
+
+    # Wrong-vehicle/engine verdicts are the game's race-start evaluation
+    # (the state-2 payload — the same moment vanilla flags in-game).  The
+    # game's per-player snapshot is STICKY across a restart: the state-1
+    # reset payload re-sends the PRIOR run's verdict, so writing flags
+    # from any other payload logged a re-run after the player swapped to
+    # a legal vehicle with the previous run's Wrong Engine/Vehicle flags
+    # (prod evidence 2026-09-06, guid 0EF8F49D…; the stale values then
+    # survive to the results popup, the Discord embed, and /conclude_event
+    # prize/points eligibility).  Only a state-2 payload may write flags,
+    # on create and update alike.
+    if game_event.state == 2:
+        defaults["wrong_vehicle"] = player_info.get("bWrongVehicle", False)
+        defaults["wrong_engine"] = player_info.get("bWrongEngine", False)
 
     game_event_character, _ = await GameEventCharacter.objects.aupdate_or_create(
         character=character,
         game_event=game_event,
         defaults=defaults,
-        create_defaults={
-            **defaults,
-            "wrong_vehicle": player_info.get("bWrongVehicle", False),
-            "wrong_engine": player_info.get("bWrongEngine", False),
-        },
     )
 
     # Record lap section times
