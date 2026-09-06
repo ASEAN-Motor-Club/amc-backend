@@ -4,7 +4,7 @@ from datetime import timedelta
 from decimal import Decimal
 from django.utils import timezone
 from amc.command_framework import registry, CommandContext, CommandRegistry
-from amc.vehicles import format_driveline_game
+from amc.vehicles import final_drive_ratio_display, format_driveline_game
 from amc.commands.admin import (
     cmd_bill,
     cmd_exit,
@@ -1784,6 +1784,7 @@ class CommandsTestCase(TestCase):
                 {"Key": "SmallBlock_240HP", "Slot": 2},
                 {"Key": "201", "Slot": 5},
                 {"Key": "Turbocharger_Stage1", "Slot": 7},
+                {"Key": "107", "Slot": 4},
                 {"Key": "CustomTurbo_XYZ", "Slot": 8},
             ],
         }
@@ -1808,6 +1809,10 @@ class CommandsTestCase(TestCase):
                 return_value=[],
             ),
             patch(
+                "amc.mod_detection.get_final_drive_ratios",
+                return_value={"107": 4.78},
+            ),
+            patch(
                 "amc.commands.vehicles.refresh_player_name", new=AsyncMock()
             ) as mock_refresh,
         ):
@@ -1823,6 +1828,8 @@ class CommandsTestCase(TestCase):
             self.assertIn("model 1.0.0 · data 2026.09.2", output)
             # drivetrain line from DriveInfo
             self.assertIn("Drivetrain: RWD — 2/4 wheels, 1/2 axles", output)
+            # final-drive ratio enrichment: opaque preset id + resolved ratio
+            self.assertIn("FinalDriveRatio: 107 (4.78)", output)
             # inline marker + summary line (format_key_string space-cases keys)
             self.assertIn("LSD0: Custom Turbo X Y Z [unknown]", output)
             self.assertIn("1 unknown part(s)", output)
@@ -2079,6 +2086,24 @@ class CommandsTestCase(TestCase):
             format_driveline_game(info),
             "Drivetrain: AWD (RWD) — 2/4 wheels, 1/2 axles",
         )
+
+    def test_final_drive_ratio_display_from_catalogue(self):
+        with patch(
+            "amc.mod_detection.get_final_drive_ratios",
+            return_value={"107": 4.78, "fd_2.44": 2.44},
+        ):
+            self.assertEqual(final_drive_ratio_display("107"), "4.78")
+            self.assertEqual(final_drive_ratio_display("FD_2.44"), "2.44")
+            self.assertEqual(final_drive_ratio_display("SmallBlock_240HP"), "")
+
+    def test_final_drive_ratio_display_from_id_encoding(self):
+        """Generated FD{int}_{frac} rows have NULL ratio in the DB — the id
+        encodes it (0.05 steps, minor is /100: 'FD1_5' = 1.50)."""
+        with patch("amc.mod_detection.get_final_drive_ratios", return_value={}):
+            self.assertEqual(final_drive_ratio_display("FD3_05"), "3.05")
+            self.assertEqual(final_drive_ratio_display("FD1_5"), "1.5")
+            self.assertEqual(final_drive_ratio_display("FD25_95"), "25.95")
+            self.assertEqual(final_drive_ratio_display(""), "")
 
     # --- Incompatible Parts Detection Tests ---
 
