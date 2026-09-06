@@ -304,6 +304,30 @@ def format_driveline_game(drive_info: dict | None) -> str:
     return f"Drivetrain: {label} — {driven}/{total} wheels, {driven_axles}/{axles} axles"
 
 
+_FD_NAME_RE = re.compile(r"FD(\d+)_(\d+)$", re.IGNORECASE)
+
+
+def final_drive_ratio_display(key: str) -> str:
+    """Human-readable ratio for a FinalDriveRatio part key ('107' -> '4.78').
+
+    FDR part ids are opaque to players: numeric presets ('102' = 3.08,
+    '107' = 4.78), FD_x.y named rows, and generated FD{int}_{frac} rows
+    (0.05 steps, minor is /100 — 'FD1_5' = 1.50). Resolution order: the
+    gamedata ratio column, then the id encoding. Empty string when the key
+    is not a final-drive part or the ratio is unknown.
+    """
+    from amc.mod_detection import get_final_drive_ratios
+
+    ratio = get_final_drive_ratios().get((key or "").lower())
+    if ratio is None:
+        m = _FD_NAME_RE.match(key or "")
+        if m:
+            # minor is the literal decimal digits (0.05 steps): '05'->0.05,
+            # '5'->0.50 (right-padded — FD1_05 and FD1_5 are distinct rows)
+            ratio = int(m.group(1)) + int(m.group(2).ljust(2, "0")) / 100.0
+    return f"{ratio:g}" if ratio else ""
+
+
 async def spawn_player_vehicle(
     http_client_mod,
     character,

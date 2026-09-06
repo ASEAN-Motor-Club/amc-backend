@@ -8,11 +8,13 @@ from amc.vehicles import (
     format_vehicle_name,
     format_vehicle_part_game,
     format_driveline_game,
+    final_drive_ratio_display,
     despawn_personal_vehicles,
     register_player_vehicles,
     spawn_registered_vehicle,
     format_key_string,
 )
+from amc.enums import VehiclePartSlot
 from powercalc.vehicle_setup import compute_popup_lines
 from amc.mod_detection import (
     detect_custom_parts,
@@ -256,6 +258,10 @@ async def cmd_check_parts(ctx: CommandContext, target_player_name: Optional[str]
 
     def _part_line(part):
         line = format_vehicle_part_game(part)
+        if part.get("Slot") == VehiclePartSlot.FinalDriveRatio.value:
+            ratio = final_drive_ratio_display(part.get("Key") or "")
+            if ratio:
+                line += f" ({ratio})"
         key_lower = (part.get("Key") or "").lower()
         if key_lower in custom_keys:
             line += " [unknown]"

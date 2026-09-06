@@ -190,6 +190,42 @@ def get_stock_part_keys() -> set[str]:
     return _stock_part_keys
 
 
+_final_drive_ratios: dict[str, float] | None = None
+
+
+def get_final_drive_ratios() -> dict[str, float]:
+    """Map of FinalDriveRatio part id -> ratio (ids lowercased), cached.
+
+    Covers the numeric preset rows (101-112) and the FD_x.y named rows, whose
+    `final_drive_ratio` column is populated. The generated FD{int}_{frac} rows
+    have NULL ratio in the DB — their ratio is encoded in the id and parsed at
+    display time instead (see amc.vehicles.final_drive_ratio_display).
+    """
+    global _final_drive_ratios
+    if _final_drive_ratios is None:
+        out: dict[str, float] = {}
+        try:
+            conn = sqlite3.connect(
+                f"file:{GAME_DB_PATH}?mode=ro",
+                uri=True,
+                timeout=5,
+            )
+            try:
+                for part_id, ratio in conn.execute(
+                    "SELECT id, final_drive_ratio FROM vehicle_parts "
+                    "WHERE part_type='FinalDriveRatio'"
+                ):
+                    if ratio is not None and ratio > 0:
+                        out[str(part_id).lower()] = float(ratio)
+            finally:
+                conn.close()
+        except Exception as e:  # noqa: BLE001 — degrade to empty, display falls back to id
+            log.error(f"Failed to load final drive ratios: {e}")
+            out = {}
+        _final_drive_ratios = out
+    return _final_drive_ratios
+
+
 def _slot_name(slot_value: int) -> str:
     """Get human-readable slot name from slot enum value."""
     try:
