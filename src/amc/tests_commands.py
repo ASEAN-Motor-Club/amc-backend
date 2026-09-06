@@ -4,6 +4,7 @@ from datetime import timedelta
 from decimal import Decimal
 from django.utils import timezone
 from amc.command_framework import registry, CommandContext, CommandRegistry
+from amc.vehicles import format_driveline_game
 from amc.commands.admin import (
     cmd_bill,
     cmd_exit,
@@ -17,7 +18,7 @@ from amc.commands.admin import (
     cmd_spawn_vehicle,
     cmd_tp_player,
 )
-from amc.commands.vehicles import cmd_check_mods, cmd_rent
+from amc.commands.vehicles import cmd_check_mods, cmd_check_parts, cmd_rent
 from amc.commands.decals import cmd_apply_decal, cmd_decals, cmd_save_decal
 from amc.commands.events import (
     cmd_auto_grid,
@@ -1758,6 +1759,326 @@ class CommandsTestCase(TestCase):
             mock_refresh.assert_awaited_once_with(
                 self.ctx.character, self.ctx.http_client_mod, has_custom_parts=False
             )
+
+    # --- Check Parts Tests (wider-scope popup + powercalc integration) ---
+
+    async def test_cmd_check_parts_self_full_popup(self):
+        """Power block + drivetrain + inline [unknown] marker + flags line."""
+        mock_last_vehicle = {
+            "vehicle": {
+                "vehicleId": 1001,
+                "fullName": "Elisa2_C Default__Elisa2",
+                "classFullName": "Class /Game/Cars/Models/Elisa2",
+                "DriveInfo": {
+                    "drive_type": "RWD",
+                    "driven_wheel_count": 2,
+                    "total_wheel_count": 4,
+                    "total_axle_count": 2,
+                    "driven_axle_indices": [1],
+                },
+            }
+        }
+        mock_parts = {
+            "vehicleId": 1001,
+            "parts": [
+                {"Key": "SmallBlock_240HP", "Slot": 2},
+                {"Key": "201", "Slot": 5},
+                {"Key": "Turbocharger_Stage1", "Slot": 7},
+                {"Key": "CustomTurbo_XYZ", "Slot": 8},
+            ],
+        }
+
+        with (
+            patch(
+                "amc.commands.vehicles.get_player_last_vehicle",
+                new=AsyncMock(return_value=mock_last_vehicle),
+            ),
+            patch(
+                "amc.commands.vehicles.get_player_last_vehicle_parts",
+                new=AsyncMock(return_value=mock_parts),
+            ),
+            patch(
+                "amc.commands.vehicles.detect_custom_parts",
+                return_value=[
+                    {"key": "CustomTurbo_XYZ", "slot": "LSD0", "slot_value": 8}
+                ],
+            ),
+            patch(
+                "amc.commands.vehicles.detect_incompatible_parts",
+                return_value=[],
+            ),
+            patch(
+                "amc.commands.vehicles.refresh_player_name", new=AsyncMock()
+            ) as mock_refresh,
+        ):
+            await cmd_check_parts(self.ctx)
+
+            self.ctx.reply.assert_called()
+            output = self.ctx.reply.call_args[0][0]
+            self.assertIn("Parts Check", output)
+            # power block: validated golden dyno build (SmallBlock_240HP+201+Stage1)
+            self.assertIn("Power: 293.2 hp @ 6,216 rpm", output)
+            self.assertIn("413.0 Nm @ 4,355 rpm", output)
+            self.assertIn("Intake 201 · Turbo Turbocharger_Stage1", output)
+            self.assertIn("model 1.0.0 · data 2026.09.2", output)
+            # drivetrain line from DriveInfo
+            self.assertIn("Drivetrain: RWD — 2/4 wheels, 1/2 axles", output)
+            # inline marker + summary line (format_key_string space-cases keys)
+            self.assertIn("LSD0: Custom Turbo X Y Z [unknown]", output)
+            self.assertIn("1 unknown part(s)", output)
+            self.assertNotIn("[incompatible]", output)
+            # self-check re-syncs the [MODS] tag like /check_mods
+            mock_refresh.assert_awaited_once_with(
+                self.ctx.character, self.ctx.http_client_mod, has_custom_parts=True
+            )
+
+    async def test_cmd_check_parts_stock_no_markers(self):
+        """All-stock vehicle: no markers, no flags line, tag cleared."""
+        mock_last_vehicle = {
+            "vehicle": {
+                "vehicleId": 1001,
+                "fullName": "Elisa2_C Default__Elisa2",
+                "classFullName": "Class /Game/Cars/Models/Elisa2",
+            }
+        }
+        mock_parts = {
+            "vehicleId": 1001,
+            "parts": [
+                {"Key": "SmallBlock_240HP", "Slot": 2},
+                {"Key": "201", "Slot": 5},
+            ],
+        }
+
+        with (
+            patch(
+                "amc.commands.vehicles.get_player_last_vehicle",
+                new=AsyncMock(return_value=mock_last_vehicle),
+            ),
+            patch(
+                "amc.commands.vehicles.get_player_last_vehicle_parts",
+                new=AsyncMock(return_value=mock_parts),
+            ),
+            patch(
+                "amc.commands.vehicles.detect_custom_parts",
+                return_value=[],
+            ),
+            patch(
+                "amc.commands.vehicles.detect_incompatible_parts",
+                return_value=[],
+            ),
+            patch(
+                "amc.commands.vehicles.refresh_player_name", new=AsyncMock()
+            ) as mock_refresh,
+        ):
+            await cmd_check_parts(self.ctx)
+
+            output = self.ctx.reply.call_args[0][0]
+            self.assertIn("Power: 244.4 hp", output)  # intake 201 + NA (no turbo slot)
+            self.assertIn("Turbo none", output)
+            self.assertNotIn("[unknown]", output)
+            self.assertNotIn("unknown part(s)", output)
+            self.assertIn("Drivetrain: Unknown", output)  # no DriveInfo in payload
+            mock_refresh.assert_awaited_once_with(
+                self.ctx.character, self.ctx.http_client_mod, has_custom_parts=False
+            )
+
+    async def test_cmd_check_parts_unknown_engine(self):
+        """Engine outside the model data -> explicit Power: Unknown, never fabricated."""
+        mock_last_vehicle = {
+            "vehicle": {
+                "vehicleId": 1001,
+                "fullName": "Elisa2_C Default__Elisa2",
+                "classFullName": "Class /Game/Cars/Models/Elisa2",
+            }
+        }
+        mock_parts = {
+            "vehicleId": 1001,
+            "parts": [{"Key": "Ghost_Engine_999", "Slot": 2}],
+        }
+
+        with (
+            patch(
+                "amc.commands.vehicles.get_player_last_vehicle",
+                new=AsyncMock(return_value=mock_last_vehicle),
+            ),
+            patch(
+                "amc.commands.vehicles.get_player_last_vehicle_parts",
+                new=AsyncMock(return_value=mock_parts),
+            ),
+            patch(
+                "amc.commands.vehicles.detect_custom_parts",
+                return_value=[],
+            ),
+            patch(
+                "amc.commands.vehicles.detect_incompatible_parts",
+                return_value=[],
+            ),
+            patch(
+                "amc.commands.vehicles.refresh_player_name", new=AsyncMock()
+            ),
+        ):
+            await cmd_check_parts(self.ctx)
+
+            output = self.ctx.reply.call_args[0][0]
+            self.assertIn("Power: Unknown", output)
+            self.assertNotIn("hp @", output)
+
+    async def test_cmd_check_parts_ev_fixed_rating(self):
+        """Vanilla Electric_* engine (asset-only in the model) -> fixed rating."""
+        mock_last_vehicle = {
+            "vehicle": {
+                "vehicleId": 1001,
+                "fullName": "SomeEV_C Default__SomeEV",
+                "classFullName": "Class /Game/Cars/Models/SomeEV",
+            }
+        }
+        mock_parts = {
+            "vehicleId": 1001,
+            "parts": [{"Key": "Electric_300HP", "Slot": 2}],
+        }
+
+        with (
+            patch(
+                "amc.commands.vehicles.get_player_last_vehicle",
+                new=AsyncMock(return_value=mock_last_vehicle),
+            ),
+            patch(
+                "amc.commands.vehicles.get_player_last_vehicle_parts",
+                new=AsyncMock(return_value=mock_parts),
+            ),
+            patch(
+                "amc.commands.vehicles.detect_custom_parts",
+                return_value=[],
+            ),
+            patch(
+                "amc.commands.vehicles.detect_incompatible_parts",
+                return_value=[],
+            ),
+            patch(
+                "amc.commands.vehicles.refresh_player_name", new=AsyncMock()
+            ),
+        ):
+            await cmd_check_parts(self.ctx)
+
+            output = self.ctx.reply.call_args[0][0]
+            self.assertIn("Power: 308 hp (fixed motor rating)", output)
+
+    async def test_cmd_check_parts_no_parts(self):
+        """Empty parts payload keeps the existing 'No parts found' path."""
+        with (
+            patch(
+                "amc.commands.vehicles.get_player_last_vehicle",
+                new=AsyncMock(
+                    return_value={
+                        "vehicle": {
+                            "vehicleId": 1001,
+                            "fullName": "Jemusi_C Default__Jemusi",
+                            "classFullName": "Class /Game/Vehicles/Jemusi",
+                        }
+                    }
+                ),
+            ),
+            patch(
+                "amc.commands.vehicles.get_player_last_vehicle_parts",
+                new=AsyncMock(return_value={"parts": []}),
+            ),
+        ):
+            await cmd_check_parts(self.ctx)
+
+            output = self.ctx.reply.call_args[0][0]
+            self.assertIn("No parts found", output)
+
+    async def test_cmd_check_parts_no_vehicle(self):
+        with (
+            patch(
+                "amc.commands.vehicles.get_player_last_vehicle",
+                new=AsyncMock(return_value={"vehicle": None}),
+            ),
+            patch(
+                "amc.commands.vehicles.get_player_last_vehicle_parts",
+                new=AsyncMock(return_value={"parts": []}),
+            ),
+        ):
+            await cmd_check_parts(self.ctx)
+
+            output = self.ctx.reply.call_args[0][0]
+            self.assertIn("No Vehicle", output)
+
+    async def test_cmd_check_parts_target(self):
+        """Admin cross-check resolves the target's vehicle."""
+        self.ctx.player_info["bIsAdmin"] = True
+
+        mock_players = [("pid-99", {"name": "SomePlayer", "character_guid": "cg-99"})]
+        mock_last_vehicle = {
+            "vehicle": {
+                "vehicleId": 2002,
+                "fullName": "Miramar_C Default__Miramar",
+                "classFullName": "Class /Game/Vehicles/Miramar",
+            }
+        }
+        mock_parts = {
+            "vehicleId": 2002,
+            "parts": [{"Key": "SmallBlock_240HP", "Slot": 2}],
+        }
+
+        with (
+            patch(
+                "amc.commands.vehicles.get_players",
+                new=AsyncMock(return_value=mock_players),
+            ),
+            patch(
+                "amc.commands.vehicles.get_player_last_vehicle",
+                new=AsyncMock(return_value=mock_last_vehicle),
+            ),
+            patch(
+                "amc.commands.vehicles.get_player_last_vehicle_parts",
+                new=AsyncMock(return_value=mock_parts),
+            ),
+            patch(
+                "amc.commands.vehicles.detect_custom_parts",
+                return_value=[],
+            ),
+            patch(
+                "amc.commands.vehicles.detect_incompatible_parts",
+                return_value=[],
+            ),
+        ):
+            await cmd_check_parts(self.ctx, "SomePlayer")
+
+            self.ctx.reply.assert_called()
+            output = self.ctx.reply.call_args[0][0]
+            self.assertIn("Parts Check", output)
+            self.assertIn("Power: 238.6 hp", output)
+
+    def test_format_driveline_game_missing(self):
+        self.assertEqual(format_driveline_game(None), "Drivetrain: Unknown")
+        self.assertEqual(format_driveline_game({}), "Drivetrain: Unknown")
+
+    def test_format_driveline_game_full(self):
+        info = {
+            "drive_type": "AWD",
+            "driven_wheel_count": 4,
+            "total_wheel_count": 4,
+            "total_axle_count": 2,
+            "driven_axle_indices": [0, 1],
+        }
+        self.assertEqual(
+            format_driveline_game(info), "Drivetrain: AWD — 4/4 wheels, 2/2 axles"
+        )
+
+    def test_format_driveline_game_effective_label(self):
+        info = {
+            "drive_type": "AWD",
+            "effective_drive_type": "RWD",
+            "driven_wheel_count": 2,
+            "total_wheel_count": 4,
+            "total_axle_count": 2,
+            "driven_axle_indices": [1],
+        }
+        self.assertEqual(
+            format_driveline_game(info),
+            "Drivetrain: AWD (RWD) — 2/4 wheels, 1/2 axles",
+        )
 
     # --- Incompatible Parts Detection Tests ---
 

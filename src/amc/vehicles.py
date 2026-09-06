@@ -280,6 +280,30 @@ def format_vehicle_name(vehicle_full_name):
     return vehicle_name
 
 
+def format_driveline_game(drive_info: dict | None) -> str:
+    """One-line drivetrain summary from the mod's DriveInfo payload.
+
+    DriveInfo is live server-actor state (differentials, per-wheel drive
+    shafts, axles — see MTDediMod ``GetDriveInfo``). Missing/empty payload
+    renders an explicit "Unknown" rather than being dropped, so an admin can
+    tell "no data" from "nothing to say".
+    """
+    if not drive_info:
+        return "Drivetrain: Unknown"
+    drive_type = drive_info.get("drive_type", "Unknown")
+    effective = drive_info.get("effective_drive_type", drive_type)
+    driven = drive_info.get("driven_wheel_count", 0)
+    total = drive_info.get("total_wheel_count", 0)
+    axles = drive_info.get("total_axle_count", 0)
+    driven_axles = len(drive_info.get("driven_axle_indices", []))
+
+    label = drive_type
+    if effective != drive_type:
+        label = f"{drive_type} ({effective})"
+
+    return f"Drivetrain: {label} — {driven}/{total} wheels, {driven_axles}/{axles} axles"
+
+
 async def spawn_player_vehicle(
     http_client_mod,
     character,
