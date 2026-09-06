@@ -17,6 +17,7 @@ from amc.handlers.events import (
     handle_add_event,
     handle_change_event_state,
     handle_join_event,
+    handle_leave_event,
     handle_passed_race_section,
 )
 from amc.models import (
@@ -518,6 +519,144 @@ class JoinEventReconcileTests(TestCase):
             ).aexists()
         )
         self.assertEqual(await GameEvent.objects.filter(guid=EVENT_GUID).acount(), 1)
+
+
+ROSTER_GUID = "DDD1C74946EFF3F8834C9AAB3D0E3181"
+
+
+def _roster_member(slot, name, **overrides):
+    member = _make_joiner(
+        CharacterId={
+            "UniqueNetId": f"76561199000000{slot:03d}",
+            "CharacterGuid": f"{chr(65 + slot)}{ROSTER_GUID[1:]}",
+        },
+        PlayerName=name,
+    )
+    member.update(overrides)
+    return member
+
+
+@patch("amc.handlers.events.get_event_state", new_callable=AsyncMock)
+class LeaveReconcileTests(TestCase):
+    """Events are only joinable while Ready (freeman 2026-09-06): joiners
+    AND leavers both happen pre-race, so the roster reconciles prune
+    never-raced rows of characters no longer in the event."""
+
+    async def test_leave_prunes_never_raced_participant(self, mock_get_live):
+        event_data = _make_event_data(state=1)
+        game_event, _ = await _upsert_game_event(event_data)
+        stayer = _roster_member(1, "stayer")
+        leaver = _roster_member(2, "leaver")
+        for member in (stayer, leaver):
+            await _upsert_game_event_character(game_event, member)
+
+        # Live roster after the leave: only the stayer remains.
+        mock_get_live.return_value = dict(event_data, Players=[stayer])
+        await handle_leave_event(
+            {"data": {"EventGuid": EVENT_GUID}},
+            None,
+            None,
+            _make_ctx(http_client_mod=object()),
+        )
+
+        self.assertFalse(
+            await GameEventCharacter.objects.filter(
+                game_event=game_event, character__guid=leaver["CharacterId"]["CharacterGuid"]
+            ).aexists()
+        )
+        self.assertTrue(
+            await GameEventCharacter.objects.filter(
+                game_event=game_event, character__guid=stayer["CharacterId"]["CharacterGuid"]
+            ).aexists()
+        )
+
+    async def test_leave_never_deletes_raced_or_finished_rows(self, mock_get_live):
+        event_data = _make_event_data(state=1)
+        game_event, _ = await _upsert_game_event(event_data)
+        finisher = _roster_member(3, "finisher", bFinished=True)
+        finished_row = await _upsert_game_event_character(game_event, finisher)
+        self.assertTrue(finished_row.finished)
+        raced_dnf = _roster_member(4, "raceddnf")
+        raced_row = await _upsert_game_event_character(game_event, raced_dnf)
+        raced_row.laps = 1
+        await raced_row.asave(update_fields=["laps"])
+
+        # Both absent from the live roster — but they raced; never delete.
+        mock_get_live.return_value = dict(event_data, Players=[])
+        await handle_leave_event(
+            {"data": {"EventGuid": EVENT_GUID}},
+            None,
+            None,
+            _make_ctx(http_client_mod=object()),
+        )
+
+        self.assertTrue(
+            await GameEventCharacter.objects.filter(pk=finished_row.pk).aexists()
+        )
+        self.assertTrue(
+            await GameEventCharacter.objects.filter(pk=raced_row.pk).aexists()
+        )
+
+    async def test_start_transition_prunes_pre_race_phantoms(self, mock_get_live):
+        """A Ready-state joiner whose leave SSE was missed must not enter
+        the race roster as a phantom DNF — the start reconcile prunes
+        never-raced rows absent from the live roster."""
+        await handle_add_event(
+            {"data": {"Event": _make_event_data(state=1, players=[])}},
+            None,
+            None,
+            _make_ctx(http_client_mod=object()),
+        )
+        run_row = (
+            await GameEvent.objects.filter(guid=EVENT_GUID)
+            .order_by("-start_time")
+            .afirst()
+        )
+        phantom = _roster_member(5, "phantom")
+        await _upsert_game_event_character(run_row, phantom)
+
+        racer = _roster_member(6, "racer", bWrongEngine=True)
+        start_payload = _make_event_data(state=2, players=[])
+        mock_get_live.return_value = dict(start_payload, Players=[racer])
+        await handle_change_event_state(
+            {"data": {"Event": start_payload}}, None, None, _make_ctx(http_client_mod=object())
+        )
+
+        self.assertFalse(
+            await GameEventCharacter.objects.filter(
+                game_event=run_row, character__guid=phantom["CharacterId"]["CharacterGuid"]
+            ).aexists()
+        )
+        racer_row = await GameEventCharacter.objects.filter(
+            game_event=run_row, character__guid=racer["CharacterId"]["CharacterGuid"]
+        ).afirst()
+        self.assertIsNotNone(racer_row)
+        self.assertTrue(racer_row.wrong_engine)
+
+    async def test_malformed_payload_missing_players_prunes_nothing(self, mock_get_live):
+        """A truncated live payload without an explicit Players roster must
+        not be mistaken for an empty roster — prune nothing, sync nothing
+        (freeman: consider edge cases now that we depend on pulling)."""
+        event_data = _make_event_data(state=1)
+        game_event, _ = await _upsert_game_event(event_data)
+        member = _roster_member(7, "innocent")
+        await _upsert_game_event_character(game_event, member)
+
+        malformed = dict(event_data)
+        del malformed["Players"]
+        mock_get_live.return_value = malformed
+        await handle_leave_event(
+            {"data": {"EventGuid": EVENT_GUID}},
+            None,
+            None,
+            _make_ctx(http_client_mod=object()),
+        )
+
+        self.assertTrue(
+            await GameEventCharacter.objects.filter(
+                game_event=game_event, character__guid=member["CharacterId"]["CharacterGuid"]
+            ).aexists()
+        )
 
 
 # ---------------------------------------------------------------------------
