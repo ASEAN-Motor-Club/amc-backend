@@ -11,8 +11,10 @@ No DB needed -- pure computation over the committed snapshot.
 import pytest
 
 from powercalc import compute_setup, data_version, model_version, provenance, search
+from powercalc import data as pdata
 from powercalc.data import intake_part, turbo_part
-from powercalc.model import intake_multiplier, rich_eval, turbo_spool
+from powercalc.model import W_PER_HP, intake_multiplier, rich_eval, turbo_spool
+from powercalc.vehicle_setup import compute_popup_lines, resolve
 
 DYNO = provenance()["validation"]
 
@@ -143,3 +145,91 @@ def test_turbo_struct_values():
     eco = turbo_part("Turbocharger_EcoStage3")
     assert eco is not None
     assert eco["TorqueMultiplier"] == 0.7  # "reduced hp" eco branch
+
+
+# --- vehicle_setup: live parts payload -> /check_parts popup lines --------
+
+
+def _parts(engine=None, intake=None, turbo=None, extra=None):
+    parts = []
+    if engine:
+        parts.append({"Slot": 2, "Key": engine})
+    if intake:
+        parts.append({"Slot": 5, "Key": intake})
+    if turbo:
+        parts.append({"Slot": 7, "Key": turbo})
+    if extra:
+        parts.extend(extra)
+    return parts
+
+
+def test_vehicle_setup_petrol_exact_matches_compute():
+    lines = compute_popup_lines(
+        _parts("SmallBlock_240HP", "201", "Turbocharger_Stage1")
+    )
+    res = compute_setup("SmallBlock_240HP", intake_part="201", turbo_part="Turbocharger_Stage1")
+    assert lines[0] == (
+        f"Power: {res.peak_power_hp:.1f} hp @ {res.peak_power_rpm:,.0f} rpm"
+        f" · {res.peak_torque_nm:.1f} Nm @ {res.peak_torque_rpm:,.0f} rpm"
+    )
+    # pinned to the validated dyno build (test_golden_dyno_case)
+    assert lines[0].startswith("Power: 293.2 hp @ 6,216 rpm")
+    assert lines[1] == "Intake 201 · Turbo Turbocharger_Stage1 · engine 250 kg"
+    assert lines[2] == f"model {model_version()} · data {data_version()}"
+
+
+def test_vehicle_setup_na_when_no_turbo_slot():
+    lines = compute_popup_lines(_parts("SmallBlock_240HP", "201"))
+    res = compute_setup("SmallBlock_240HP", intake_part="201")
+    assert lines[0] == (
+        f"Power: {res.peak_power_hp:.1f} hp @ {res.peak_power_rpm:,.0f} rpm"
+        f" · {res.peak_torque_nm:.1f} Nm @ {res.peak_torque_rpm:,.0f} rpm"
+    )
+    assert "Turbo none" in lines[1]
+    assert "unmodelled" not in lines[0]
+
+
+def test_vehicle_setup_case_insensitive_keys():
+    """Game row-name casing drift is tolerated (same rule as mod_detection)."""
+    lines = compute_popup_lines(_parts("smallblock_240hp", "201"))
+    assert lines[0].startswith("Power: ")
+    assert "unmodelled" not in lines[0]
+
+
+def test_vehicle_setup_unmodelled_turbo_falls_back_to_na():
+    lines = compute_popup_lines(_parts("SmallBlock_240HP", "201", "NotARealTurbo_Stage9"))
+    res = compute_setup("SmallBlock_240HP", intake_part="201")
+    assert lines[0].startswith("Power: ")
+    assert f"{res.peak_power_hp:.1f} hp" in lines[0]
+    assert "(unmodelled turbo — NA baseline)" in lines[0]
+
+
+def test_vehicle_setup_unmodelled_intake_falls_back_to_stock():
+    lines = compute_popup_lines(_parts("SmallBlock_240HP", "MysteryIntake_9", None))
+    assert "(unmodelled intake — stock baseline)" in lines[0]
+
+
+def test_vehicle_setup_ev_fixed_rating():
+    lines = compute_popup_lines([{"Slot": 2, "Key": "Electric_300HP"}])
+    asset = pdata.engine_asset("Electric_300HP")
+    expected = (asset["MotorMaxPower"] / 10.0) / W_PER_HP
+    assert lines == [f"Power: {expected:.0f} hp (fixed motor rating)"]
+
+
+def test_vehicle_setup_unknown_engine_is_explicit():
+    lines = compute_popup_lines(_parts("Ghost_Engine_999"))
+    assert lines == ["Power: Unknown"]
+
+
+def test_vehicle_setup_no_engine_slot_is_empty():
+    assert compute_popup_lines(_parts(intake="201")) == []
+    assert compute_popup_lines([]) == []
+
+
+def test_vehicle_setup_resolve_flags():
+    vs = resolve(_parts("SmallBlock_240HP", "201", "Turbocharger_Stage1"))
+    assert vs.engine_key == "SmallBlock_240HP"
+    assert vs.engine_known and vs.intake_known and vs.turbo_known
+    assert not vs.is_ev
+    ev = resolve([{"Slot": 2, "Key": "Electric_300HP"}])
+    assert ev.is_ev and ev.engine_known

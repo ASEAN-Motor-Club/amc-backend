@@ -7,11 +7,13 @@ from amc.game_server import get_players
 from amc.vehicles import (
     format_vehicle_name,
     format_vehicle_part_game,
+    format_driveline_game,
     despawn_personal_vehicles,
     register_player_vehicles,
     spawn_registered_vehicle,
     format_key_string,
 )
+from powercalc.vehicle_setup import compute_popup_lines
 from amc.mod_detection import (
     detect_custom_parts,
     detect_incompatible_parts,
@@ -118,22 +120,8 @@ async def cmd_check_mods(ctx: CommandContext, target_player_name: Optional[str] 
             has_custom_parts=bool(custom or incompatible),
         )
 
-    # Build drivetrain summary from DriveInfo
-    drive_info = vehicle.get("DriveInfo", {})
-    drive_line = ""
-    if drive_info:
-        drive_type = drive_info.get("drive_type", "Unknown")
-        effective = drive_info.get("effective_drive_type", drive_type)
-        driven = drive_info.get("driven_wheel_count", 0)
-        total = drive_info.get("total_wheel_count", 0)
-        axles = drive_info.get("total_axle_count", 0)
-        driven_axles = len(drive_info.get("driven_axle_indices", []))
-
-        label = drive_type
-        if effective != drive_type:
-            label = f"{drive_type} ({effective})"
-
-        drive_line = f"\nDrivetrain: {label} — {driven}/{total} wheels, {driven_axles}/{axles} axles"
+    # Build drivetrain summary from DriveInfo (live server-actor state)
+    drive_line = f"\n{format_driveline_game(vehicle.get('DriveInfo', {}))}"
 
     issues = []
     if custom:
@@ -240,20 +228,62 @@ async def cmd_check_parts(ctx: CommandContext, target_player_name: Optional[str]
         )
         return
 
-    sorted_parts = sorted(parts, key=lambda p: p.get("Slot", 0))
-    parts_lines = "\n".join(format_vehicle_part_game(p) for p in sorted_parts)
+    # Custom/incompatible detection — same semantics as /check_mods
+    whitelist = None
+    is_on_duty = await PoliceSession.objects.filter(
+        character=ctx.character, ended_at__isnull=True
+    ).aexists()
+    if is_on_duty:
+        whitelist = POLICE_DUTY_WHITELIST
+    custom = detect_custom_parts(parts, whitelist=whitelist)
+    incompatible = detect_incompatible_parts(parts, vehicle["fullName"])
 
-    await ctx.reply(
-        _(
-            "<Title>Parts List</>"
-            "\n\n<Bold>{name}</> — {vehicle}"
-            "\n\n{parts}"
-        ).format(
-            name=target_player_name,
-            vehicle=vehicle_name,
-            parts=parts_lines,
+    # Re-sync the [MODS] tag when checking own vehicle (same as /check_mods)
+    if checking_self:
+        await refresh_player_name(
+            ctx.character,
+            ctx.http_client_mod,
+            has_custom_parts=bool(custom or incompatible),
         )
+
+    # Power block from the installed engine/intake/turbo — the compute sweep
+    # runs in a thread so it never blocks the shared event loop
+    power_lines = await asyncio.to_thread(compute_popup_lines, parts)
+    drive_line = format_driveline_game(vehicle.get("DriveInfo", {}))
+
+    custom_keys = {p["key"].lower() for p in custom}
+    incompat_keys = {p["key"].lower() for p in incompatible}
+
+    def _part_line(part):
+        line = format_vehicle_part_game(part)
+        key_lower = (part.get("Key") or "").lower()
+        if key_lower in custom_keys:
+            line += " [unknown]"
+        if key_lower in incompat_keys:
+            line += " [incompatible]"
+        return line
+
+    sorted_parts = sorted(parts, key=lambda p: p.get("Slot", 0))
+    parts_lines = "\n".join(_part_line(p) for p in sorted_parts)
+
+    flag_bits = []
+    if custom:
+        flag_bits.append(f"{len(custom)} unknown part(s)")
+    if incompatible:
+        flag_bits.append(f"{len(incompatible)} incompatible part(s)")
+    flags_line = (
+        "\n\n<Small>" + ", ".join(flag_bits) + "</>" if flag_bits else ""
     )
+
+    msg = _(
+        "<Title>Parts Check</>"
+        "\n\n<Bold>{name}</> — {vehicle}"
+    ).format(name=target_player_name, vehicle=vehicle_name)
+    if power_lines:
+        msg += "\n\n" + "\n".join(power_lines)
+    msg += "\n\n" + drive_line
+    msg += "\n\n" + parts_lines + flags_line
+    await ctx.reply(msg)
 
 
 @registry.register(
