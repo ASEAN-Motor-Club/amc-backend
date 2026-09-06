@@ -289,17 +289,28 @@ async def _upsert_game_event_character(game_event, player_info: dict):
     return game_event_character
 
 
-async def _reconcile_event_players(http_client_mod, event_guid: str, require_state=None):
+async def _reconcile_event_players(
+    http_client_mod, event_guid: str, require_state=None, prune_absent=False
+):
     """Re-sync a race event's participants from the mod's live state.
 
     The SSE hooks only carry event snapshots at Add/state-change moments —
-    players who join in between never appear in any payload, so they were
-    never recorded at all (prod 2026-09-06: a 10-player lobby where 3
-    joiners had no rows, and a wrong-engine participant the start snapshot
-    missed).  ``GET /events/{guid}`` on the mod webserver returns the SAME
-    serialization the SSE hooks emit (the Lua ChangeEventState hook feeds
-    ``GetEvents`` output straight into the webhook), so the standard upsert
-    path consumes it unchanged.
+    players who join while the event sits in Ready never appear in any
+    payload, so they were never recorded at all (prod 2026-09-06: a
+    10-player lobby where 3 joiners had no rows, and a wrong-engine
+    participant the start snapshot missed).  ``GET /events/{guid}`` on the
+    mod webserver returns the SAME serialization the SSE hooks emit (the
+    Lua ChangeEventState hook feeds ``GetEvents`` output straight into the
+    webhook), so the standard upsert path consumes it unchanged.
+
+    When *prune_absent* is set, rows for characters no longer in the live
+    roster are deleted — events are only joinable while Ready, so a
+    joiner-then-leaver must not linger as a phantom participant (their
+    unfinished row would render as DNF in results and block the backend
+    finish in partial lobbies).  Pruning only ever touches never-raced
+    rows (``finished=False, laps=0``): raced results and DNFs are never
+    deleted, and pruning happens exclusively pre-race (live state 1, or
+    the 1→2 start transition before any crossing).
 
     When *require_state* is set, the reconcile is skipped unless the live
     event is in that state — guards the start-transition call against a
@@ -327,8 +338,23 @@ async def _reconcile_event_players(http_client_mod, event_guid: str, require_sta
         )
         return None
     game_event, _ = await _upsert_game_event(live_event)
+    live_guids = []
     for player_info in live_event.get("Players", []):
         await _upsert_game_event_character(game_event, player_info)
+        guid = (player_info.get("CharacterId") or {}).get("CharacterGuid", "")
+        if guid:
+            live_guids.append(guid)
+    if prune_absent and (live_event.get("State") == 1 or require_state == 2):
+        pruned = await GameEventCharacter.objects.filter(
+            game_event=game_event,
+            finished=False,
+            laps=0,
+        ).exclude(character__guid__in=live_guids).adelete()
+        if pruned[0]:
+            logger.info(
+                "Pruned %s never-raced participant row(s) no longer in event %s",
+                pruned[0], event_guid,
+            )
     return game_event
 
 
@@ -518,7 +544,10 @@ async def handle_change_event_state(event, player, character, ctx):
     # state on every transition into racing so nobody starts unrecorded.
     if transition and transition[1] == 2:
         await _reconcile_event_players(
-            ctx.http_client_mod, event_data.get("EventGuid"), require_state=2
+            ctx.http_client_mod,
+            event_data.get("EventGuid"),
+            require_state=2,
+            prune_absent=True,
         )
 
     if transition and transition[1] == 3:
@@ -759,7 +788,9 @@ async def handle_join_event(event, player, character, ctx):
     if not event_guid:
         return 0, 0, 0, 0
 
-    game_event = await _reconcile_event_players(ctx.http_client_mod, event_guid)
+    game_event = await _reconcile_event_players(
+        ctx.http_client_mod, event_guid, prune_absent=True
+    )
     if game_event is None:
         # Live fetch unavailable — fall back to the latest known row so
         # the embed update below still targets the current run.
@@ -780,16 +811,30 @@ async def handle_join_event(event, player, character, ctx):
 
 @register("ServerLeaveEvent")
 async def handle_leave_event(event, player, character, ctx):
-    """Handle ServerLeaveEvent: trigger Discord embed update for the event."""
+    """Handle ServerLeaveEvent: sync the roster + update the Discord embed.
+
+    Events are only joinable while Ready, so a joiner who then leaves must
+    not linger as a phantom participant — their unfinished row would
+    render as DNF in results and block the backend finish in partial
+    lobbies.  Reconcile from the mod's live state: refresh the roster and
+    prune never-raced rows of characters no longer in the event (raced
+    results and DNFs are never deleted).
+    """
     event_guid = event["data"].get("EventGuid", "")
     if not event_guid:
         return 0, 0, 0, 0
 
-    game_event = (
-        await GameEvent.objects.filter(guid=event_guid)
-        .order_by("-start_time")
-        .afirst()
+    game_event = await _reconcile_event_players(
+        ctx.http_client_mod, event_guid, prune_absent=True
     )
+    if game_event is None:
+        # Live fetch unavailable — fall back to the latest known row so
+        # the embed update below still targets the current run.
+        game_event = (
+            await GameEvent.objects.filter(guid=event_guid)
+            .order_by("-start_time")
+            .afirst()
+        )
     if game_event is None:
         return 0, 0, 0, 0
 
