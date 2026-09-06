@@ -193,6 +193,16 @@ class CharacterManager(models.Manager.from_queryset(CharacterQuerySet)):  # type
         3. Finding a character by name, even if it now has a GUID.
         4. Creating new characters with or without a GUID.
         """
+        # Log lines carry the runtime-tagged display name ("[M] Hamster",
+        # "[XR] Player", ...). Tags are backend-applied display state, never
+        # part of the character's real name — strip them up front so they
+        # can't leak into character.name via the update/rename paths below
+        # (incident 2026-09-06: a vehicle-EXIT log line tagged "[M] Hamster"
+        # rewrote character.name and the mod tag then never fully cleared).
+        from amc.player_tags import strip_all_tags
+
+        player_name = strip_all_tags(player_name)
+
         player, player_created = await Player.objects.aget_or_create(
             unique_id=player_id
         )
