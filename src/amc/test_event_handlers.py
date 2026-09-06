@@ -243,6 +243,65 @@ class UpsertGameEventCharacterTests(TestCase):
         await gec.arefresh_from_db()
         self.assertEqual(gec.first_section_total_time_seconds, 0)
 
+    async def test_start_payload_writes_wrong_flags(self):
+        """The state-2 start payload is the game's race-start evaluation —
+        its verdict is authoritative (prod: run 1 in a wrong vehicle/engine)."""
+        event_data = _make_event_data(state=2)
+        player_info = event_data["Players"][0]
+        player_info["bWrongVehicle"] = True
+        player_info["bWrongEngine"] = True
+
+        game_event, _ = await _upsert_game_event(event_data)
+        gec = await _upsert_game_event_character(game_event, player_info)
+        await gec.arefresh_from_db()
+        self.assertTrue(gec.wrong_vehicle)
+        self.assertTrue(gec.wrong_engine)
+
+    async def test_restart_payload_never_writes_wrong_flags(self):
+        """Regression (prod 2026-09-06, guid 0EF8F49D…): the state-1 reset
+        payload re-sends the game's STICKY prior-run verdict, so a re-run
+        after swapping to a legal vehicle was logged with the previous
+        run's Wrong Engine/Vehicle flags.  Flags may only be written by
+        the state-2 start payload, on create and update alike."""
+        # Run 1: started (and flagged) in a wrong vehicle/engine.
+        run1_data = _make_event_data(state=2)
+        run1_player = run1_data["Players"][0]
+        run1_player["bWrongVehicle"] = True
+        run1_player["bWrongEngine"] = True
+        run1_event, _ = await _upsert_game_event(run1_data)
+        run1_gec = await _upsert_game_event_character(run1_event, run1_player)
+        await run1_gec.arefresh_from_db()
+        self.assertTrue(run1_gec.wrong_vehicle)
+
+        # Restart while still carrying the stale verdict: creates the new
+        # run's row + participant but must NOT write the flags.
+        restart_data = _make_event_data(state=1, players=[dict(run1_player)])
+        run2_event, _ = await _upsert_game_event(restart_data)
+        self.assertIsNotNone(run2_event)
+        self.assertNotEqual(run2_event.pk, run1_event.pk)
+        run2_gec = await _upsert_game_event_character(
+            run2_event, restart_data["Players"][0]
+        )
+        await run2_gec.arefresh_from_db()
+        self.assertFalse(run2_gec.wrong_vehicle)
+        self.assertFalse(run2_gec.wrong_engine)
+
+        # Run 2 starts in the now-legal vehicle: the fresh state-2
+        # evaluation wins, and run 1's verdict is untouched.
+        run2_start = _make_event_data(
+            state=2,
+            players=[dict(run1_player, bWrongVehicle=False, bWrongEngine=False)],
+        )
+        started_event, _ = await _upsert_game_event(run2_start)
+        self.assertEqual(started_event.pk, run2_event.pk)
+        await _upsert_game_event_character(started_event, run2_start["Players"][0])
+        await run2_gec.arefresh_from_db()
+        self.assertFalse(run2_gec.wrong_vehicle)
+        self.assertFalse(run2_gec.wrong_engine)
+        await run1_gec.arefresh_from_db()
+        self.assertTrue(run1_gec.wrong_vehicle)
+        self.assertTrue(run1_gec.wrong_engine)
+
 
 # ---------------------------------------------------------------------------
 # Tests: dispatch to event handlers
