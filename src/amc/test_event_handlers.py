@@ -633,6 +633,31 @@ class LeaveReconcileTests(TestCase):
         self.assertIsNotNone(racer_row)
         self.assertTrue(racer_row.wrong_engine)
 
+    async def test_malformed_payload_missing_players_prunes_nothing(self, mock_get_live):
+        """A truncated live payload without an explicit Players roster must
+        not be mistaken for an empty roster — prune nothing, sync nothing
+        (freeman: consider edge cases now that we depend on pulling)."""
+        event_data = _make_event_data(state=1)
+        game_event, _ = await _upsert_game_event(event_data)
+        member = _roster_member(7, "innocent")
+        await _upsert_game_event_character(game_event, member)
+
+        malformed = dict(event_data)
+        del malformed["Players"]
+        mock_get_live.return_value = malformed
+        await handle_leave_event(
+            {"data": {"EventGuid": EVENT_GUID}},
+            None,
+            None,
+            _make_ctx(http_client_mod=object()),
+        )
+
+        self.assertTrue(
+            await GameEventCharacter.objects.filter(
+                game_event=game_event, character__guid=member["CharacterId"]["CharacterGuid"]
+            ).aexists()
+        )
+
 
 # ---------------------------------------------------------------------------
 # Tests: dispatch to event handlers

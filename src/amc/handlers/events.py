@@ -338,6 +338,15 @@ async def _reconcile_event_players(
         )
         return None
     game_event, _ = await _upsert_game_event(live_event)
+    if "Players" not in live_event:
+        # Malformed/truncated payload: without an explicit roster we can't
+        # tell joiners from leavers — sync nothing, prune nothing.  The
+        # SSE pipeline (and everything else) would be equally broken.
+        logger.warning(
+            "Live event %s payload missing Players — skipping roster sync",
+            event_guid,
+        )
+        return game_event
     live_guids = []
     for player_info in live_event.get("Players", []):
         await _upsert_game_event_character(game_event, player_info)
