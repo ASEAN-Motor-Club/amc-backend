@@ -290,7 +290,8 @@ async def _upsert_game_event_character(game_event, player_info: dict):
 
 
 async def _reconcile_event_players(
-    http_client_mod, event_guid: str, require_state=None, prune_absent=False
+    http_client_mod, event_guid: str, require_state=None, prune_absent=False,
+    live_event=None,
 ):
     """Re-sync a race event's participants from the mod's live state.
 
@@ -302,6 +303,10 @@ async def _reconcile_event_players(
     mod webserver returns the SAME serialization the SSE hooks emit (the
     Lua ChangeEventState hook feeds ``GetEvents`` output straight into the
     webhook), so the standard upsert path consumes it unchanged.
+
+    *live_event* accepts a pre-fetched ``GET /events`` payload (the
+    crosscheck poll already holds one) — when given, no per-guid fetch
+    happens at all.
 
     When *prune_absent* is set, rows for characters no longer in the live
     roster are deleted — events are only joinable while Ready, so a
@@ -322,15 +327,16 @@ async def _reconcile_event_players(
     is inherited from ``_upsert_game_event_character``: flags only while
     racing and not finished, finished participants frozen.
     """
-    if http_client_mod is None:
-        return None
-    try:
-        live_event = await get_event_state(http_client_mod, event_guid)
-    except Exception:
-        logger.exception("Live event fetch failed for %s", event_guid)
-        return None
-    if not live_event:
-        return None
+    if live_event is None:
+        if http_client_mod is None:
+            return None
+        try:
+            live_event = await get_event_state(http_client_mod, event_guid)
+        except Exception:
+            logger.exception("Live event fetch failed for %s", event_guid)
+            return None
+        if not live_event:
+            return None
     if require_state is not None and live_event.get("State") != require_state:
         logger.warning(
             "Live event %s in state %s, expected %s — skipping reconcile",
@@ -368,26 +374,42 @@ async def _reconcile_event_players(
 
 
 # Event crosscheck (freeman 2026-09-06: "calls the /events endpoint every
-# few seconds when there's an event, so we can cross check") — read-only
-# drift reporting.  Consecutive-failure throttle so a dead mod webserver
-# doesn't spam the journal every 5 seconds (first failure + once a minute).
+# few seconds when there's an event, so we can cross check") — the modern
+# descendant of the 1-year-ago poll tracker (e7211f8 monitor_events: pull
+# GET /events live state every tick and process_event ALL of it).  SSE took
+# over hook DELIVERY in c737a7f, but the game emits no hook for the owner's
+# auto-join (the host is ALWAYS in the event) nor for setup edits, so the
+# Ready-state reconcile has no hook-based substitute — polling live state
+# is the only mechanism that can ever record them (freeman, 2026-09-06).
+# Ready events therefore reconcile unconditionally through the same guarded
+# upserts the join/start reconciles use; Racing events stay read-only (the
+# section stream owns racing truth — poll writes there would race it with
+# stale snapshots; flags are the start-of-run verdict, single write point).
+# Consecutive-failure throttle so a dead mod webserver doesn't spam the
+# journal every 5 seconds (first failure + once a minute).
 _crosscheck_consecutive_failures = 0
 _CROSSCHECK_FAILURE_LOG_EVERY = 12
 
 
 async def crosscheck_live_events(http_client_mod) -> list[str]:
-    """Compare live event state (``GET /events``) against the DB.
+    """Poll live event state (``GET /events``) against the DB.
 
-    NEVER writes — repairs stay on the join/leave/start reconciles.  For
-    every live race event still in Ready/Racing, reports:
+    For every live race event still in Ready/Racing:
 
-    * a missing ``GameEvent`` row (AddEvent/start SSE lost),
-    * state drift (live vs row — may just be an SSE in flight),
-    * roster drift: unrecorded joiners, and never-raced phantom rows of
-      leavers (raced DNF rows are legitimate and never reported),
-    * wrong-vehicle/engine flag drift — only while racing and for
-      participants that are not finished (lobby snapshots flag everyone
-      on foot; finished rows are frozen).
+    * **Ready (state 1)** — reconciled unconditionally from live state
+      (the e7211f8 ``monitor_events`` semantics): recreates a lost
+      GameEvent row, records the auto-joined host and every joiner,
+      prunes never-raced leavers, links the current RaceSetup (hand-built
+      events AddEvent with an empty setup and edits emit no hook), and
+      syncs state.  Silent when healthy — the upserts are the modern
+      state-gated ones: no lobby flags, no ``lap_times`` writes, finished
+      rows frozen.  The per-guid fetch + ``require_state=1`` closes the
+      race where the event goes racing between the list snapshot and the
+      upsert (a stale snapshot would close the racing run as finished and
+      spawn a phantom lobby row).
+    * **Racing (state 2)** — read-only drift report: missing row, state
+      drift, roster drift, wrong-vehicle/engine flag drift (unfinished
+      participants only).
 
     Returns human-readable drift lines (empty list = in sync).
     """
@@ -423,6 +445,26 @@ async def crosscheck_live_events(http_client_mod) -> list[str]:
         row = await (
             GameEvent.objects.filter(guid=guid).order_by("-start_time").afirst()
         )
+
+        if state == 1:
+            # Ready lobby — unconditional reconcile from live state, the
+            # 1-year-ago monitor_events semantics (see block comment):
+            # nothing else can ever record the auto-joined host or a
+            # setup edit.  Fetch fresh per-guid and require state 1 so an
+            # event that went racing between the list snapshot and now
+            # is left for the start hook instead of being reset.
+            if row is None:
+                logger.info(
+                    "Event crosscheck: recovered missing GameEvent row for %s",
+                    guid,
+                )
+            await _reconcile_event_players(
+                http_client_mod, guid, require_state=1, prune_absent=True
+            )
+            continue
+
+        # Racing (state 2): read-only drift report — the section stream
+        # owns racing rows; the poll never writes them.
         if row is None:
             drift.append(
                 f"{label}: NO DB ROW — AddEvent/start SSE lost?"
@@ -466,26 +508,25 @@ async def crosscheck_live_events(http_client_mod) -> list[str]:
                 f"{label}: phantom never-raced row(s) {phantoms} (leaver not pruned?)"
             )
 
-        if state == 2:
-            for g, player in live_by_guid.items():
-                db_row = db_by_guid.get(g)
-                if db_row is None or db_row.finished or player.get("bFinished", False):
-                    continue
-                mismatches = []
-                for field, key in (
-                    ("wrong_vehicle", "bWrongVehicle"),
-                    ("wrong_engine", "bWrongEngine"),
-                ):
-                    live_value = bool(player.get(key, False))
-                    if live_value != bool(getattr(db_row, field)):
-                        mismatches.append(
-                            f"{field} live={live_value} db={getattr(db_row, field)}"
-                        )
-                if mismatches:
-                    drift.append(
-                        f"{label}: flag drift {player.get('PlayerName', '?')}:"
-                        f" {'; '.join(mismatches)}"
+        for g, player in live_by_guid.items():
+            db_row = db_by_guid.get(g)
+            if db_row is None or db_row.finished or player.get("bFinished", False):
+                continue
+            mismatches = []
+            for field, key in (
+                ("wrong_vehicle", "bWrongVehicle"),
+                ("wrong_engine", "bWrongEngine"),
+            ):
+                live_value = bool(player.get(key, False))
+                if live_value != bool(getattr(db_row, field)):
+                    mismatches.append(
+                        f"{field} live={live_value} db={getattr(db_row, field)}"
                     )
+            if mismatches:
+                drift.append(
+                    f"{label}: flag drift {player.get('PlayerName', '?')}:"
+                    f" {'; '.join(mismatches)}"
+                )
     return drift
 
 

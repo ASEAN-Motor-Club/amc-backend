@@ -216,7 +216,7 @@ async def criminal_record_decay_tick(ctx):
 
 
 async def crosscheck_events_tick(ctx):
-    """Read-only drift report every 5s: live event state vs the DB."""
+    """Drift report + Ready-state reconcile every 5s: live events vs DB."""
     for line in await crosscheck_live_events(ctx["http_client_mod"]):
         logger.warning("event crosscheck drift: %s", line)
 
