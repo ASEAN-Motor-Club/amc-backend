@@ -92,6 +92,27 @@ async def get_rent_info(session, house_guid):
         return data.get("data", {})
 
 
+async def get_event_state(session, event_guid):
+    """Fetch one race event's live state from the mod's ``GET /events/{guid}``.
+
+    Returns the FMTEvent dict — the SAME serialization the SSE
+    ``ServerAddEvent``/``ServerChangeEventState`` hooks emit (the Lua
+    hooks feed ``GetEvents`` output straight into the webhook), so it
+    feeds ``handlers.events._upsert_game_event`` unchanged.
+
+    Returns ``None`` when the event no longer exists (404); raises on
+    transport/mod errors — callers decide how to degrade.
+    """
+    async with session.get(f"/events/{event_guid}", timeout=FAST_TIMEOUT) as resp:
+        if resp.status == 404:
+            return None
+        if resp.status != 200:
+            raise Exception(f"Failed to fetch event {event_guid} (status={resp.status})")
+        data = await resp.json()
+    events = data.get("data") or []
+    return events[0] if events else None
+
+
 async def transfer_exp(session, player_id, level_type, exp, message=""):
     """Grant experience points to a player.
 

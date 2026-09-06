@@ -24,7 +24,7 @@ from django.utils import timezone
 
 from amc.events import create_event_embed, show_results_popup
 from amc.handlers import register
-from amc.mod_server import transfer_exp
+from amc.mod_server import get_event_state, transfer_exp
 from amc.models import (
     Character,
     GameEvent,
@@ -210,13 +210,20 @@ async def _upsert_game_event_character(game_event, player_info: dict):
             "LastSectionTotalTimeSeconds", 0
         ),
         "section_index": player_info.get("SectionIndex", -1),
-        "best_lap_time": player_info.get("BestLapTime", 0),
         "rank": player_info.get("Rank", 0),
         "laps": player_info.get("Laps", 0),
         "finished": player_info.get("bFinished", False),
         "disqualified": player_info.get("bDisqualified", False),
-        "lap_times": list(player_info.get("LapTimes", [])),
     }
+    # NOTE: ``lap_times`` / ``best_lap_time`` are deliberately NOT taken
+    # from the payload.  The game's per-player LapTimes array ACCUMULATES
+    # across re-runs and is never cleared game-side (prod evidence
+    # 2026-09-06, guid 80A047D1…: live lobby snapshots carried 12-14
+    # entries for a 5-lap event), so writing it here contaminated fresh
+    # run rows and the results popup showed L1..L12 for a 5-lap race.
+    # Per-lap truth is reconstructed from the section stream in
+    # ``handle_passed_race_section`` — the payload write was a
+    # polling-era remnant that only ever stomped it.
 
     # Wrong-vehicle/engine verdicts are the game's race-start evaluation
     # (the state-2 payload — the same moment vanilla flags in-game).  The
@@ -227,8 +234,11 @@ async def _upsert_game_event_character(game_event, player_info: dict):
     # (prod evidence 2026-09-06, guid 0EF8F49D…; the stale values then
     # survive to the results popup, the Discord embed, and /conclude_event
     # prize/points eligibility).  Only a state-2 payload may write flags,
-    # on create and update alike.
-    if game_event.state == 2:
+    # on create and update alike.  Once the player is finished the verdict
+    # window is closed — they commonly exit the vehicle right after
+    # completing the course, and a late snapshot would then read them as
+    # wrong (lobby live checks show EVERYONE wrong while on foot).
+    if game_event.state == 2 and not player_info.get("bFinished", False):
         defaults["wrong_vehicle"] = player_info.get("bWrongVehicle", False)
         defaults["wrong_engine"] = player_info.get("bWrongEngine", False)
 
@@ -236,6 +246,10 @@ async def _upsert_game_event_character(game_event, player_info: dict):
         character=character,
         game_event=game_event,
         defaults=defaults,
+        # New rows keep the historical "no lap recorded yet" value instead
+        # of NULL — only best_lap_time differs from the update defaults;
+        # lap_times keeps its [] model default.
+        create_defaults={**defaults, "best_lap_time": 0},
     )
 
     # Record lap section times
@@ -273,6 +287,49 @@ async def _upsert_game_event_character(game_event, player_info: dict):
             )
 
     return game_event_character
+
+
+async def _reconcile_event_players(http_client_mod, event_guid: str, require_state=None):
+    """Re-sync a race event's participants from the mod's live state.
+
+    The SSE hooks only carry event snapshots at Add/state-change moments —
+    players who join in between never appear in any payload, so they were
+    never recorded at all (prod 2026-09-06: a 10-player lobby where 3
+    joiners had no rows, and a wrong-engine participant the start snapshot
+    missed).  ``GET /events/{guid}`` on the mod webserver returns the SAME
+    serialization the SSE hooks emit (the Lua ChangeEventState hook feeds
+    ``GetEvents`` output straight into the webhook), so the standard upsert
+    path consumes it unchanged.
+
+    When *require_state* is set, the reconcile is skipped unless the live
+    event is in that state — guards the start-transition call against a
+    fetch that raced a concurrent restart (a state-1 result would create a
+    phantom per-run row).
+
+    Returns the upserted GameEvent, or None when the live fetch fails,
+    the event is gone, or the state guard rejects it.  Flag/finish safety
+    is inherited from ``_upsert_game_event_character``: flags only while
+    racing and not finished, finished participants frozen.
+    """
+    if http_client_mod is None:
+        return None
+    try:
+        live_event = await get_event_state(http_client_mod, event_guid)
+    except Exception:
+        logger.exception("Live event fetch failed for %s", event_guid)
+        return None
+    if not live_event:
+        return None
+    if require_state is not None and live_event.get("State") != require_state:
+        logger.warning(
+            "Live event %s in state %s, expected %s — skipping reconcile",
+            event_guid, live_event.get("State"), require_state,
+        )
+        return None
+    game_event, _ = await _upsert_game_event(live_event)
+    for player_info in live_event.get("Players", []):
+        await _upsert_game_event_character(game_event, player_info)
+    return game_event
 
 
 async def _reward_event_exp(game_event_id: int, http_client_mod):
@@ -454,6 +511,15 @@ async def handle_change_event_state(event, player, character, ctx):
     # Process all players
     for player_info in event_data.get("Players", []):
         await _upsert_game_event_character(game_event, player_info)
+
+    # The state-change snapshot was taken at hook time; players who joined
+    # mid-countdown can be missing from it entirely (prod: a wrong-engine
+    # participant the start payload missed).  Re-sync from the mod's live
+    # state on every transition into racing so nobody starts unrecorded.
+    if transition and transition[1] == 2:
+        await _reconcile_event_players(
+            ctx.http_client_mod, event_data.get("EventGuid"), require_state=2
+        )
 
     if transition and transition[1] == 3:
         asyncio.create_task(
@@ -679,18 +745,29 @@ async def handle_remove_event(event, player, character, ctx):
 
 @register("ServerJoinEvent")
 async def handle_join_event(event, player, character, ctx):
-    """Handle ServerJoinEvent: trigger Discord embed update for the event."""
+    """Handle ServerJoinEvent: record the joiner + update the Discord embed.
+
+    The join SSE carries only the guid — no player data — and joiners who
+    arrive between AddEvent/ChangeEventState snapshots never appear in any
+    payload, so they were never recorded.  Reconcile the participant set
+    from the mod's live event state (``_reconcile_event_players``), which
+    creates the joiner's row (and refreshes everyone else's) with the
+    game's current per-player values.  Flag writes stay gated to racing
+    state and finished participants stay frozen, per the upsert rules.
+    """
     event_guid = event["data"].get("EventGuid", "")
     if not event_guid:
         return 0, 0, 0, 0
 
-    # Resolve to the LATEST row for this guid — one GameEvent row per run
-    # (see handle_passed_race_section).
-    game_event = (
-        await GameEvent.objects.filter(guid=event_guid)
-        .order_by("-start_time")
-        .afirst()
-    )
+    game_event = await _reconcile_event_players(ctx.http_client_mod, event_guid)
+    if game_event is None:
+        # Live fetch unavailable — fall back to the latest known row so
+        # the embed update below still targets the current run.
+        game_event = (
+            await GameEvent.objects.filter(guid=event_guid)
+            .order_by("-start_time")
+            .afirst()
+        )
     if game_event is None:
         return 0, 0, 0, 0
 
