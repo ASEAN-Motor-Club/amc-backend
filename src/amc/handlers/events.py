@@ -24,7 +24,7 @@ from django.utils import timezone
 
 from amc.events import create_event_embed, show_results_popup
 from amc.handlers import register
-from amc.mod_server import get_event_state, transfer_exp
+from amc.mod_server import get_event_state, get_events, transfer_exp
 from amc.models import (
     Character,
     GameEvent,
@@ -365,6 +365,128 @@ async def _reconcile_event_players(
                 pruned[0], event_guid,
             )
     return game_event
+
+
+# Event crosscheck (freeman 2026-09-06: "calls the /events endpoint every
+# few seconds when there's an event, so we can cross check") — read-only
+# drift reporting.  Consecutive-failure throttle so a dead mod webserver
+# doesn't spam the journal every 5 seconds (first failure + once a minute).
+_crosscheck_consecutive_failures = 0
+_CROSSCHECK_FAILURE_LOG_EVERY = 12
+
+
+async def crosscheck_live_events(http_client_mod) -> list[str]:
+    """Compare live event state (``GET /events``) against the DB.
+
+    NEVER writes — repairs stay on the join/leave/start reconciles.  For
+    every live race event still in Ready/Racing, reports:
+
+    * a missing ``GameEvent`` row (AddEvent/start SSE lost),
+    * state drift (live vs row — may just be an SSE in flight),
+    * roster drift: unrecorded joiners, and never-raced phantom rows of
+      leavers (raced DNF rows are legitimate and never reported),
+    * wrong-vehicle/engine flag drift — only while racing and for
+      participants that are not finished (lobby snapshots flag everyone
+      on foot; finished rows are frozen).
+
+    Returns human-readable drift lines (empty list = in sync).
+    """
+    global _crosscheck_consecutive_failures
+    try:
+        events = await get_events(http_client_mod)
+    except Exception as exc:
+        _crosscheck_consecutive_failures += 1
+        if _crosscheck_consecutive_failures == 1 or (
+            _crosscheck_consecutive_failures % _CROSSCHECK_FAILURE_LOG_EVERY == 0
+        ):
+            logger.error(
+                "Event crosscheck: live fetch failed (%s consecutive) — %s: %s",
+                _crosscheck_consecutive_failures,
+                type(exc).__name__,
+                exc,
+            )
+        return []
+    _crosscheck_consecutive_failures = 0
+
+    drift: list[str] = []
+    for live_event in events:
+        if live_event.get("EventType") != 1:
+            continue
+        state = live_event.get("State")
+        if state not in (1, 2):
+            continue
+        guid = live_event.get("EventGuid", "")
+        if not guid:
+            continue
+        label = f"event {guid[:8]}… {live_event.get('EventName', '')!r} (state={state})"
+
+        row = await (
+            GameEvent.objects.filter(guid=guid).order_by("-start_time").afirst()
+        )
+        if row is None:
+            drift.append(
+                f"{label}: NO DB ROW — AddEvent/start SSE lost?"
+                f" players={len(live_event.get('Players') or [])}"
+            )
+            continue
+
+        if row.state != state:
+            drift.append(
+                f"{label}: state drift db={row.state} live={state} (SSE may be in flight)"
+            )
+
+        participants = [
+            p
+            async for p in GameEventCharacter.objects.filter(
+                game_event=row
+            ).select_related("character")
+        ]
+        db_by_guid = {p.character.guid: p for p in participants}
+        live_by_guid = {}
+        for player in live_event.get("Players") or []:
+            player_guid = (player.get("CharacterId") or {}).get("CharacterGuid", "")
+            if player_guid:
+                live_by_guid[player_guid] = player
+
+        missing = sorted(
+            player.get("PlayerName", "?")
+            for g, player in live_by_guid.items()
+            if g not in db_by_guid
+        )
+        if missing:
+            drift.append(f"{label}: unrecorded joiner(s) {missing}")
+
+        phantoms = sorted(
+            db_row.character.name
+            for g, db_row in db_by_guid.items()
+            if g not in live_by_guid and not db_row.finished and not db_row.laps
+        )
+        if phantoms:
+            drift.append(
+                f"{label}: phantom never-raced row(s) {phantoms} (leaver not pruned?)"
+            )
+
+        if state == 2:
+            for g, player in live_by_guid.items():
+                db_row = db_by_guid.get(g)
+                if db_row is None or db_row.finished or player.get("bFinished", False):
+                    continue
+                mismatches = []
+                for field, key in (
+                    ("wrong_vehicle", "bWrongVehicle"),
+                    ("wrong_engine", "bWrongEngine"),
+                ):
+                    live_value = bool(player.get(key, False))
+                    if live_value != bool(getattr(db_row, field)):
+                        mismatches.append(
+                            f"{field} live={live_value} db={getattr(db_row, field)}"
+                        )
+                if mismatches:
+                    drift.append(
+                        f"{label}: flag drift {player.get('PlayerName', '?')}:"
+                        f" {'; '.join(mismatches)}"
+                    )
+    return drift
 
 
 async def _reward_event_exp(game_event_id: int, http_client_mod):
