@@ -14,7 +14,9 @@ from amc.handlers import dispatch
 from amc.handlers.events import (
     _upsert_game_event,
     _upsert_game_event_character,
+    handle_add_event,
     handle_change_event_state,
+    handle_join_event,
     handle_passed_race_section,
 )
 from amc.models import (
@@ -301,6 +303,221 @@ class UpsertGameEventCharacterTests(TestCase):
         await run1_gec.arefresh_from_db()
         self.assertTrue(run1_gec.wrong_vehicle)
         self.assertTrue(run1_gec.wrong_engine)
+
+    async def test_snapshot_lap_data_never_written(self):
+        """Regression (prod 2026-09-06, guid 80A047D1…): the game's
+        per-player LapTimes array ACCUMULATES across re-runs and is never
+        cleared game-side (live lobby carried 12-14 entries for a 5-lap
+        event), so payload-driven writes contaminated fresh run rows and
+        the popup showed L1..L12.  Lap data is reconstruction-only; the
+        per-run ``Laps`` counter is still honored."""
+        event_data = _make_event_data(state=2)
+        game_event, _ = await _upsert_game_event(event_data)
+
+        player_info = event_data["Players"][0]
+        player_info["LapTimes"] = [1.0] * 12  # accumulated game-side garbage
+        player_info["BestLapTime"] = 9.9
+        player_info["Laps"] = 5
+
+        gec = await _upsert_game_event_character(game_event, player_info)
+        await gec.arefresh_from_db()
+        self.assertEqual(gec.lap_times, [])
+        self.assertEqual(gec.best_lap_time, 0)
+        self.assertEqual(gec.laps, 5)
+
+        # The update path can't stomp reconstructed laps either.
+        gec.lap_times = [7.5]
+        await gec.asave(update_fields=["lap_times"])
+        await _upsert_game_event_character(game_event, player_info)
+        await gec.arefresh_from_db()
+        self.assertEqual(gec.lap_times, [7.5])
+
+    async def test_finished_participant_flags_frozen_even_before_row_update(self):
+        """A finished player exiting their vehicle must never pick up wrong
+        flags — even when the DB row doesn't know they finished yet (the
+        payload does): the verdict window closes at bFinished."""
+        event_data = _make_event_data(state=2)
+        game_event, _ = await _upsert_game_event(event_data)
+
+        player_info = event_data["Players"][0]
+        player_info["bWrongVehicle"] = False
+        gec = await _upsert_game_event_character(game_event, player_info)
+        self.assertFalse(gec.wrong_vehicle)
+
+        # Player finishes; the row isn't marked yet, but the payload says
+        # bFinished=True while they're already out of the vehicle.
+        player_info["bFinished"] = True
+        player_info["bWrongVehicle"] = True
+        player_info["bWrongEngine"] = True
+        await _upsert_game_event_character(game_event, player_info)
+
+        await gec.arefresh_from_db()
+        self.assertTrue(gec.finished)
+        self.assertFalse(gec.wrong_vehicle)
+        self.assertFalse(gec.wrong_engine)
+
+
+# ---------------------------------------------------------------------------
+# Tests: live reconciliation (ServerJoinEvent + start transition)
+# ---------------------------------------------------------------------------
+
+
+LATE_JOINER_ID = "76561199000000001"
+LATE_JOINER_GUID = "AAA1C74946EFF3F8834C9AAB3D0E3181"
+
+
+def _make_joiner(**overrides):
+    player = {
+        "CharacterId": {"UniqueNetId": LATE_JOINER_ID, "CharacterGuid": LATE_JOINER_GUID},
+        "PlayerName": "latejoiner",
+        "Rank": 0,
+        "SectionIndex": -1,
+        "Laps": 0,
+        "BestLapTime": 0.0,
+        "LastSectionTotalTimeSeconds": 0.0,
+        "bFinished": False,
+        "bDisqualified": False,
+        "bWrongVehicle": False,
+        "bWrongEngine": False,
+        "LapTimes": [],
+        "Reward_Money": {"BaseValue": 0},
+    }
+    player.update(overrides)
+    return player
+
+
+@patch("amc.handlers.events.get_event_state", new_callable=AsyncMock)
+class JoinEventReconcileTests(TestCase):
+    async def test_join_records_player_between_snapshots(self, mock_get_live):
+        """Joiners who arrive after the last Add/ChangeEventState snapshot
+        were never recorded at all (prod: 3 of 10 lobby members had no
+        rows).  The join now reconciles from the mod's live event state."""
+        event_data = _make_event_data(state=1)
+        game_event, _ = await _upsert_game_event(event_data)
+
+        # Lobby live state: the joiner shows wrong flags purely because
+        # they're on foot — lobby values must NOT become flags.
+        joiner = _make_joiner(bWrongVehicle=True, bWrongEngine=True, LapTimes=[11.0, 12.0])
+        mock_get_live.return_value = dict(event_data, Players=[joiner])
+
+        ctx = _make_ctx(http_client_mod=object())
+        result = await handle_join_event(
+            {"data": {"EventGuid": EVENT_GUID}}, None, None, ctx
+        )
+        self.assertEqual(result, (0, 0, 0, 0))
+
+        row = await GameEventCharacter.objects.filter(
+            character__player__unique_id=LATE_JOINER_ID
+        ).afirst()
+        self.assertIsNotNone(row)
+        self.assertFalse(row.wrong_vehicle)
+        self.assertFalse(row.wrong_engine)
+        self.assertEqual(row.lap_times, [])
+        mock_get_live.assert_awaited_once()
+
+    async def test_join_during_race_marks_wrong_engine(self, mock_get_live):
+        """Prod (freeman's event): a wrong-engine participant was unmarked
+        because no snapshot ever carried their verdict.  A join reconcile
+        while racing records the game's live evaluation."""
+        event_data = _make_event_data(state=2)
+        await _upsert_game_event(event_data)
+
+        joiner = _make_joiner(bWrongEngine=True)
+        mock_get_live.return_value = dict(event_data, Players=[joiner])
+
+        await handle_join_event({"data": {"EventGuid": EVENT_GUID}}, None, None, _make_ctx(http_client_mod=object()))
+
+        row = await GameEventCharacter.objects.filter(
+            character__player__unique_id=LATE_JOINER_ID
+        ).afirst()
+        self.assertIsNotNone(row)
+        self.assertTrue(row.wrong_engine)
+        self.assertFalse(row.wrong_vehicle)
+
+    async def test_join_does_not_update_finished_participant(self, mock_get_live):
+        """Finished participants stay frozen: they exit the vehicle right
+        after completing the course and the live state then reads them as
+        wrong (prod lobby: EVERYONE shows wrong while on foot)."""
+        event_data = _make_event_data(state=2)
+        game_event, _ = await _upsert_game_event(event_data)
+
+        finisher = _make_joiner(bFinished=True)
+        gec = await _upsert_game_event_character(game_event, finisher)
+        self.assertTrue(gec.finished)
+
+        mock_get_live.return_value = dict(
+            event_data, Players=[_make_joiner(bFinished=True, bWrongVehicle=True, bWrongEngine=True)]
+        )
+        await handle_join_event({"data": {"EventGuid": EVENT_GUID}}, None, None, _make_ctx(http_client_mod=object()))
+
+        await gec.arefresh_from_db()
+        self.assertTrue(gec.finished)
+        self.assertFalse(gec.wrong_vehicle)
+        self.assertFalse(gec.wrong_engine)
+
+    async def test_join_survives_live_fetch_failure(self, mock_get_live):
+        mock_get_live.side_effect = Exception("mod unreachable")
+        await _upsert_game_event(_make_event_data(state=1))
+
+        result = await handle_join_event(
+            {"data": {"EventGuid": EVENT_GUID}}, None, None, _make_ctx(http_client_mod=object())
+        )
+        self.assertEqual(result, (0, 0, 0, 0))
+        # No rows were created for the joiner, and the handler didn't raise.
+        self.assertFalse(
+            await GameEventCharacter.objects.filter(
+                character__player__unique_id=LATE_JOINER_ID
+            ).aexists()
+        )
+
+    async def test_start_transition_reconciles_omitted_players(self, mock_get_live):
+        """The start snapshot can omit mid-countdown joiners entirely; the
+        1→2 transition re-syncs from live state so nobody starts
+        unrecorded (prod: wrong-engine participant unmarked)."""
+        await handle_add_event(
+            {"data": {"Event": _make_event_data(state=1, players=[])}},
+            None,
+            None,
+            _make_ctx(http_client_mod=object()),
+        )
+
+        start_payload = _make_event_data(state=2, players=[])
+        racer = _make_joiner(bWrongEngine=True)
+        mock_get_live.return_value = dict(start_payload, Players=[racer])
+
+        await handle_change_event_state(
+            {"data": {"Event": start_payload}}, None, None, _make_ctx(http_client_mod=object())
+        )
+
+        row = await GameEventCharacter.objects.filter(
+            character__player__unique_id=LATE_JOINER_ID
+        ).afirst()
+        self.assertIsNotNone(row)
+        self.assertTrue(row.wrong_engine)
+
+    async def test_start_transition_skips_reconcile_on_state_race(self, mock_get_live):
+        """If the live fetch raced a concurrent restart and still reports
+        state 1, the reconcile must not create a phantom per-run row."""
+        await handle_add_event(
+            {"data": {"Event": _make_event_data(state=1, players=[])}},
+            None,
+            None,
+            _make_ctx(http_client_mod=object()),
+        )
+
+        start_payload = _make_event_data(state=2, players=[])
+        mock_get_live.return_value = dict(start_payload, Players=[_make_joiner()], State=1)
+
+        await handle_change_event_state(
+            {"data": {"Event": start_payload}}, None, None, _make_ctx(http_client_mod=object())
+        )
+
+        self.assertFalse(
+            await GameEventCharacter.objects.filter(
+                character__player__unique_id=LATE_JOINER_ID
+            ).aexists()
+        )
+        self.assertEqual(await GameEvent.objects.filter(guid=EVENT_GUID).acount(), 1)
 
 
 # ---------------------------------------------------------------------------
