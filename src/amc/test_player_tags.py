@@ -664,3 +664,86 @@ async def test_refresh_player_name_police_suppresses_crim(mock_set_name):
 
     await character.arefresh_from_db()
     assert character.custom_name == "[P1] TestPlayer"
+
+
+# --- log-line name resolution: runtime tags never poison character.name ---
+# Incident 2026-09-06 (Hamster, staging): the vehicle-EXIT log line carried
+# the tagged in-game name "[M] Hamster"; aget_or_create_character_player
+# overwrote character.name with it (GUID-path defaults / no-GUID fallback
+# rename), baking the [M] tag into the canonical name so the mod tag could
+# never fully clear. Tags are backend-applied display state, never part of
+# the real name.
+
+
+@pytest.mark.django_db
+@pytest.mark.asyncio
+async def test_aget_or_create_tagged_guid_line_keeps_clean_name():
+    from asgiref.sync import sync_to_async
+
+    from amc.factories import CharacterFactory, PlayerFactory
+    from amc.models import Character, Player
+
+    player = await sync_to_async(PlayerFactory)()
+    character = await sync_to_async(CharacterFactory)(
+        player=player,
+        name="Hamster",
+        guid="guidtag1",
+    )
+    try:
+        resolved, _, created, _ = await (
+            Character.objects.aget_or_create_character_player(
+                "[M] Hamster", player.unique_id, "guidtag1"
+            )
+        )
+        assert resolved.pk == character.pk
+        assert created is False
+        await resolved.arefresh_from_db()
+        assert resolved.name == "Hamster"
+    finally:
+        await Player.objects.filter(pk=player.pk).adelete()
+
+
+@pytest.mark.django_db
+@pytest.mark.asyncio
+async def test_aget_or_create_tagged_no_guid_line_keeps_clean_name():
+    from asgiref.sync import sync_to_async
+
+    from amc.factories import CharacterFactory, PlayerFactory
+    from amc.models import Character, Player
+
+    player = await sync_to_async(PlayerFactory)()
+    character = await sync_to_async(CharacterFactory)(
+        player=player,
+        name="Hamster",
+        guid="guidtag2",
+    )
+    try:
+        resolved, _, created, _ = await (
+            Character.objects.aget_or_create_character_player(
+                "[M] Hamster", player.unique_id, None
+            )
+        )
+        assert resolved.pk == character.pk
+        assert created is False
+        await resolved.arefresh_from_db()
+        assert resolved.name == "Hamster"
+    finally:
+        await Player.objects.filter(pk=player.pk).adelete()
+
+
+@pytest.mark.django_db
+@pytest.mark.asyncio
+async def test_aget_or_create_tagged_line_creates_clean_name():
+    from amc.models import Character, Player
+
+    try:
+        resolved, _, created, _ = await (
+            Character.objects.aget_or_create_character_player(
+                "[M] Newbie", "76561199000000002", "guidtag3"
+            )
+        )
+        assert created is True
+        await resolved.arefresh_from_db()
+        assert resolved.name == "Newbie"
+    finally:
+        await Player.objects.filter(unique_id="76561199000000002").adelete()
