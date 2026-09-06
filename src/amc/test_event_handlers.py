@@ -77,7 +77,7 @@ CHAR_GUID = "E603C74946EFF3F8834C9AAB3D0E3181"
 PLAYER_ID = "76561198378447512"
 
 
-def _make_event_data(state=1, players=None):
+def _make_event_data(state=1, players=None, race_setup_empty=False):
     """Build a full FMTEvent dict as emitted by the C++ ServerAddEvent hook."""
     if players is None:
         players = [
@@ -110,7 +110,7 @@ def _make_event_data(state=1, players=None):
             "UniqueNetId": PLAYER_ID,
             "CharacterGuid": CHAR_GUID,
         },
-        "RaceSetup": RACE_SETUP_RAW,
+        "RaceSetup": {} if race_setup_empty else RACE_SETUP_RAW,
         "Players": players,
     }
 
@@ -666,7 +666,16 @@ OTHER_GUID = "AABBCCDDEEFF00112233445566778899"
 
 @patch("amc.handlers.events.get_events", new_callable=AsyncMock)
 class CrosscheckTests(TestCase):
-    """Read-only live-vs-DB drift report (freeman 2026-09-06)."""
+    """Ready events reconcile unconditionally from live state (the
+    1-year-ago monitor_events semantics); racing events are read-only."""
+
+    def _state_fetch(self, payload):
+        """Mock the per-guid fetch the Ready reconcile performs."""
+        return patch(
+            "amc.handlers.events.get_event_state",
+            new_callable=AsyncMock,
+            return_value=payload,
+        )
 
     async def test_ignores_finished_and_non_race_events(self, mock_get_live):
         mock_get_live.return_value = [
@@ -675,25 +684,56 @@ class CrosscheckTests(TestCase):
         ]
         self.assertEqual(await crosscheck_live_events(object()), [])
 
-    async def test_missing_db_row_reported(self, mock_get_live):
+    async def test_missing_db_row_ready_recovered(self, mock_get_live):
+        """Ready lobby with no row (AddEvent SSE lost): the poll recreates
+        row + roster from live state."""
+        payload = dict(
+            _make_event_data(state=1), EventGuid=OTHER_GUID, EventName="Ghost"
+        )
+        mock_get_live.return_value = [payload]
+        with self._state_fetch(payload):
+            drift = await crosscheck_live_events(object())
+        self.assertEqual(drift, [])
+        row = await GameEvent.objects.filter(guid=OTHER_GUID).afirst()
+        self.assertIsNotNone(row)
+        self.assertTrue(
+            await GameEventCharacter.objects.filter(game_event=row).aexists()
+        )
+
+    async def test_missing_db_row_racing_report_only(self, mock_get_live):
+        """Racing event with no row: reported only — the start reconcile
+        owns racing writes, the poll never creates racing rows."""
         mock_get_live.return_value = [
-            dict(_make_event_data(state=1), EventGuid=OTHER_GUID, EventName="Ghost")
+            dict(_make_event_data(state=2), EventGuid=OTHER_GUID, EventName="Ghost")
         ]
         drift = await crosscheck_live_events(object())
         self.assertEqual(len(drift), 1)
         self.assertIn("NO DB ROW", drift[0])
-        self.assertIn(OTHER_GUID[:8], drift[0])
+        self.assertEqual(
+            await GameEvent.objects.filter(guid=OTHER_GUID).acount(), 0
+        )
 
-    async def test_unrecorded_joiner_reported(self, mock_get_live):
+    async def test_unrecorded_joiner_reconciled(self, mock_get_live):
+        """Owner-join case (freeman 2026-09-06): the host is always
+        auto-joined and never fires ServerJoinEvent, so the poll is the
+        only thing that can record them.  Lobby upserts write no flags —
+        the live payload's bWrongVehicle is meaningless while on foot."""
         event_data = _make_event_data(state=1)
         await _upsert_game_event(event_data)
-        joiner = _roster_member(8, "invisible")
+        joiner = _roster_member(8, "invisible", bWrongVehicle=True)
         mock_get_live.return_value = [dict(event_data, Players=[joiner])]
-        drift = await crosscheck_live_events(object())
-        self.assertEqual(len(drift), 1)
-        self.assertIn("unrecorded joiner(s) ['invisible']", drift[0])
+        with self._state_fetch(dict(event_data, Players=[joiner])):
+            drift = await crosscheck_live_events(object())
+        self.assertEqual(drift, [])
+        row = await GameEvent.objects.filter(guid=EVENT_GUID).afirst()
+        joiner_row = await GameEventCharacter.objects.filter(
+            game_event=row, character__name="invisible"
+        ).afirst()
+        self.assertIsNotNone(joiner_row)
+        self.assertFalse(joiner_row.wrong_vehicle)
+        self.assertFalse(joiner_row.wrong_engine)
 
-    async def test_phantom_never_raced_row_reported(self, mock_get_live):
+    async def test_phantom_never_raced_row_pruned(self, mock_get_live):
         event_data = _make_event_data(state=1)
         game_event, _ = await _upsert_game_event(event_data)
         present = _roster_member(9, "present")
@@ -701,9 +741,91 @@ class CrosscheckTests(TestCase):
         for member in (present, phantom):
             await _upsert_game_event_character(game_event, member)
         mock_get_live.return_value = [dict(event_data, Players=[present])]
-        drift = await crosscheck_live_events(object())
-        self.assertEqual(len(drift), 1)
-        self.assertIn("phantom never-raced row(s) ['gone']", drift[0])
+        with self._state_fetch(dict(event_data, Players=[present])):
+            drift = await crosscheck_live_events(object())
+        self.assertEqual(drift, [])
+        self.assertFalse(
+            await GameEventCharacter.objects.filter(
+                game_event=game_event, character__name="gone"
+            ).aexists()
+        )
+
+    async def test_ready_setup_edit_healed(self, mock_get_live):
+        """Setup edits emit no hook — AddEvent is the only payload that
+        ever carries setup, so an edited event keeps its stale creation
+        snapshot until the poll reconciles (freeman's waypoints case)."""
+        event_data = _make_event_data(state=1)
+        game_event, _ = await _upsert_game_event(event_data)
+        old_hash = game_event.race_setup.hash
+        edited = dict(
+            event_data,
+            RaceSetup={**RACE_SETUP_RAW, "NumLaps": 2},
+            Players=[],
+        )
+        mock_get_live.return_value = [edited]
+        with self._state_fetch(edited):
+            drift = await crosscheck_live_events(object())
+        self.assertEqual(drift, [])
+        row = await GameEvent.objects.filter(guid=EVENT_GUID).select_related(
+            "race_setup"
+        ).afirst()
+        self.assertEqual(row.state, 1)
+        self.assertNotEqual(row.race_setup.hash, old_hash)
+        self.assertEqual(row.race_setup.config["NumLaps"], 2)
+
+    async def test_ready_setup_added_after_empty_add_event(self, mock_get_live):
+        """Hand-built events AddEvent with an empty RaceSetup (creator
+        draws waypoints afterwards) — the row starts with no setup at all
+        and the poll links it once the live setup exists (prod 2026-09-06,
+        guid 995216FF…: 'racesetup is empty')."""
+        event_data = _make_event_data(state=1, race_setup_empty=True)
+        game_event, _ = await _upsert_game_event(event_data)
+        self.assertIsNone(game_event.race_setup_id)
+        live = _make_event_data(state=1, players=[])
+        mock_get_live.return_value = [live]
+        with self._state_fetch(live):
+            drift = await crosscheck_live_events(object())
+        self.assertEqual(drift, [])
+        row = await GameEvent.objects.filter(guid=EVENT_GUID).select_related(
+            "race_setup"
+        ).afirst()
+        self.assertIsNotNone(row.race_setup)
+        self.assertEqual(row.race_setup.config["Route"]["RouteName"], "Test Route")
+
+    async def test_ready_missing_players_key_not_reconciled(self, mock_get_live):
+        """Malformed payload without Players: sync and prune nothing —
+        same contract as the leave reconcile (freeman: consider edge cases
+        now that we depend on pulling)."""
+        event_data = _make_event_data(state=1)
+        game_event, _ = await _upsert_game_event(event_data)
+        innocent = _roster_member(15, "innocent")
+        await _upsert_game_event_character(game_event, innocent)
+        malformed = dict(event_data)
+        del malformed["Players"]
+        mock_get_live.return_value = [malformed]
+        with self._state_fetch(malformed):
+            drift = await crosscheck_live_events(object())
+        self.assertEqual(drift, [])
+        self.assertTrue(
+            await GameEventCharacter.objects.filter(
+                game_event=game_event, character__name="innocent"
+            ).aexists()
+        )
+
+    async def test_ready_event_went_racing_mid_tick_guard(self, mock_get_live):
+        """The list snapshot said Ready but the event went racing before
+        the per-guid fetch: require_state=1 rejects it — no lobby row is
+        created, and an existing racing row is left untouched (a stale
+        snapshot must not close a racing run as finished)."""
+        event_data = _make_event_data(state=1)
+        racing_row, _ = await _upsert_game_event(dict(event_data, State=2))
+        self.assertEqual(racing_row.state, 2)
+        mock_get_live.return_value = [event_data]  # stale snapshot: says Ready
+        with self._state_fetch(dict(event_data, State=2)):
+            drift = await crosscheck_live_events(object())
+        self.assertEqual(drift, [])
+        row = await GameEvent.objects.filter(guid=EVENT_GUID).afirst()
+        self.assertEqual(row.state, 2)
 
     async def test_raced_dnf_absent_from_roster_not_reported(self, mock_get_live):
         event_data = _make_event_data(state=1)
@@ -712,8 +834,16 @@ class CrosscheckTests(TestCase):
         raced_row = await _upsert_game_event_character(game_event, raced)
         raced_row.laps = 2
         await raced_row.asave(update_fields=["laps"])
-        mock_get_live.return_value = [dict(event_data, Players=[])]
-        self.assertEqual(await crosscheck_live_events(object()), [])
+        live = dict(event_data, Players=[])
+        mock_get_live.return_value = [live]
+        with self._state_fetch(live):
+            drift = await crosscheck_live_events(object())
+        self.assertEqual(drift, [])
+        self.assertTrue(
+            await GameEventCharacter.objects.filter(
+                game_event=game_event, character__name="raceddnf"
+            ).aexists()
+        )
 
     async def test_flag_drift_racing_reported(self, mock_get_live):
         event_data = _make_event_data(state=2)
@@ -743,10 +873,18 @@ class CrosscheckTests(TestCase):
         game_event, _ = await _upsert_game_event(event_data)
         on_foot = _roster_member(14, "onfoot")
         await _upsert_game_event_character(game_event, on_foot)
-        mock_get_live.return_value = [
-            dict(event_data, Players=[dict(on_foot, bWrongVehicle=True, bWrongEngine=True)])
-        ]
-        self.assertEqual(await crosscheck_live_events(object()), [])
+        live = dict(
+            event_data, Players=[dict(on_foot, bWrongVehicle=True, bWrongEngine=True)]
+        )
+        mock_get_live.return_value = [live]
+        with self._state_fetch(live):
+            drift = await crosscheck_live_events(object())
+        self.assertEqual(drift, [])
+        row = await GameEventCharacter.objects.filter(
+            game_event=game_event, character__name="onfoot"
+        ).afirst()
+        self.assertFalse(row.wrong_vehicle)
+        self.assertFalse(row.wrong_engine)
 
     async def test_state_drift_reported(self, mock_get_live):
         event_data = _make_event_data(state=1)
