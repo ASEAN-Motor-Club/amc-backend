@@ -279,12 +279,14 @@ Use <Highlight>/faction</Highlight> on Discord to join the Police faction and ga
 
 
 async def _welcome_new_player(http_client_mod, character, player):
-    """Exit vehicle and teleport a brand new player to the skydive point."""
-    try:
-        await force_exit_vehicle(http_client_mod, str(character.guid))
-    except Exception as e:
-        logger.exception(f"Failed to exit vehicle for new player {character.name}: {e}")
+    """Teleport a brand new player to the skydive point, with or without vehicle.
 
+    The mod's teleport handler picks the path by pawn type: on foot it uses
+    ServerTeleportCharacter; in a vehicle it moves the vehicle with the player
+    (same as /tp2marker and the impound relocation). The old exit-first +
+    no_vehicles flow raced the asynchronous ServerExitVehicle and was refused
+    with 400 "Player is inside a vehicle" every time.
+    """
     try:
         skydive_tp = await TeleportPoint.objects.aget(name__iexact="skydive")
         location = {
@@ -296,7 +298,6 @@ async def _welcome_new_player(http_client_mod, character, player):
             http_client_mod,
             str(player.unique_id),
             location,
-            no_vehicles=True,
         )
         logger.info(f"Teleported new player {character.name} to skydive point")
     except TeleportPoint.DoesNotExist:
@@ -660,7 +661,8 @@ async def _login_guid_dependent_actions(
                     player_id=str(player.unique_id),
                 )
             )
-            # Exit vehicle and teleport to skydive so new players start fresh
+            # Teleport to skydive so new players start fresh (vehicle comes
+            # along if they spawned inside one — tp2marker-style pawn-agnostic)
             asyncio.create_task(
                 _welcome_new_player(http_client_mod, character, player)
             )
