@@ -308,6 +308,97 @@ async def cmd_remove_garage(ctx: CommandContext):
         )
 
 
+FUEL_PUMP_ASSET_PATH = "/Game/Objects/Fuel/FuelPump_02.FuelPump_02_C"
+
+
+@registry.register(
+    "/spawn_fuel_pump",
+    description=gettext_lazy("Spawn a fuel pump at your location"),
+    category="Admin",
+)
+async def cmd_spawn_fuel_pump(ctx: CommandContext, name: str):
+    if not ctx.player_info or not ctx.player_info.get("bIsAdmin"):
+        return
+
+    loc = {**ctx.player_info["Location"]}
+    loc["Z"] -= 90
+    player_data = await get_player(
+        ctx.http_client_mod, str(ctx.player.unique_id), force_refresh=True
+    )
+    rot = player_data.get("Rotation", {}) if player_data else {}
+
+    wo = await WorldObject.objects.acreate(
+        asset_path=FUEL_PUMP_ASSET_PATH,
+        location_x=loc["X"],
+        location_y=loc["Y"],
+        location_z=loc["Z"],
+        yaw=rot.get("Yaw", 0),
+        notes=name.strip(),
+    )
+    # Deterministic tag so /remove_fuel_pump can despawn it, including after
+    # restart respawns via /spawn_assets.
+    wo.tag = f"fuel_pump_{wo.pk}"
+    await wo.asave()
+
+    await spawn_assets(ctx.http_client_mod, [wo.generate_asset_data()])
+    await ctx.reply(
+        _("<Title>Fuel Pump Spawned</>\n\n'{}' spawned at your location.").format(
+            name.strip()
+        )
+    )
+
+
+@registry.register(
+    "/remove_fuel_pump",
+    description=gettext_lazy("Remove nearby fuel pumps (within 10m)"),
+    category="Admin",
+)
+async def cmd_remove_fuel_pump(ctx: CommandContext):
+    if not ctx.player_info or not ctx.player_info.get("bIsAdmin"):
+        return
+
+    player_loc = ctx.player_info["Location"]
+    player_x, player_y, player_z = player_loc["X"], player_loc["Y"], player_loc["Z"]
+
+    RADIUS = 1000
+
+    removed_count = 0
+    failed_despawn_count = 0
+
+    async for wo in WorldObject.objects.filter(asset_path=FUEL_PUMP_ASSET_PATH):
+        wx, wy, wz = wo.location_x, wo.location_y, wo.location_z
+        distance = (
+            (player_x - wx) ** 2 + (player_y - wy) ** 2 + (player_z - wz) ** 2
+        ) ** 0.5
+        if distance > RADIUS:
+            continue
+
+        if wo.tag:
+            try:
+                await despawn_by_tag(ctx.http_client_mod, wo.tag)
+            except Exception:
+                failed_despawn_count += 1
+
+        await wo.adelete()
+        removed_count += 1
+
+    if removed_count > 0:
+        msg = _(
+            "<Title>Fuel Pump Removed</>\n\nRemoved {count} fuel pump(s) near your location."
+        ).format(count=removed_count)
+        if failed_despawn_count > 0:
+            msg += _(
+                "\n\n<Warning>Failed to despawn {count} fuel pump(s) from the game world. They were removed from the database only.</>"
+            ).format(count=failed_despawn_count)
+        await ctx.reply(msg)
+    else:
+        await ctx.reply(
+            _(
+                "<Title>No Fuel Pumps Found</>\n\nNo fuel pumps within 10m of your location."
+            )
+        )
+
+
 @registry.register(
     "/spawn", description=gettext_lazy("Spawn a vehicle"), category="Admin"
 )

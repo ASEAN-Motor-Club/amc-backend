@@ -9,11 +9,13 @@ from amc.mod_detection import load_known_mod_parts, match_known_mod_parts
 from amc.commands.admin import (
     cmd_bill,
     cmd_exit,
+    cmd_remove_fuel_pump,
     cmd_save_vehicle,
     cmd_spawn,
     cmd_spawn_assets,
     cmd_spawn_dealerships,
     cmd_spawn_displays,
+    cmd_spawn_fuel_pump,
     cmd_spawn_garage_single,
     cmd_spawn_garages,
     cmd_spawn_vehicle,
@@ -59,7 +61,7 @@ from amc.commands.police import cmd_police
 from amc.commands.wanted import cmd_wanted
 
 
-from amc.models import Character, CriminalRecord, Player, PoliceSession
+from amc.models import Character, CriminalRecord, Player, PoliceSession, WorldObject
 # Import other models as needed for mocking or actual DB tests if we go that route
 
 
@@ -1155,6 +1157,135 @@ class CommandsTestCase(TestCase):
             await cmd_spawn_garage_single(self.ctx, "MyGarage")
             mock_create.assert_called()
             self.ctx.announce.assert_called()
+
+    async def test_cmd_spawn_fuel_pump(self):
+        from amc.commands.admin import FUEL_PUMP_ASSET_PATH
+
+        self.ctx.player_info["bIsAdmin"] = True
+        self.ctx.player_info["Location"] = {"X": 100, "Y": 200, "Z": 300}
+
+        mock_wo = MagicMock()
+        mock_wo.pk = 7
+        mock_wo.asave = AsyncMock()
+
+        def real_generate_asset_data():
+            # Real (unsaved) model instance so the true generate_asset_data
+            # shape is asserted, not a MagicMock.
+            return WorldObject(
+                pk=7,
+                asset_path=FUEL_PUMP_ASSET_PATH,
+                location_x=100,
+                location_y=200,
+                location_z=210,
+                yaw=45,
+                scale=1.0,
+                tag=mock_wo.tag,
+            ).generate_asset_data()
+
+        mock_wo.generate_asset_data.side_effect = real_generate_asset_data
+
+        with (
+            patch(
+                "amc.commands.admin.get_player",
+                new=AsyncMock(return_value={"Rotation": {"Yaw": 45}}),
+            ),
+            patch(
+                "amc.models.WorldObject.objects.acreate",
+                new=AsyncMock(return_value=mock_wo),
+            ) as mock_create,
+            patch(
+                "amc.commands.admin.spawn_assets", new=AsyncMock()
+            ) as mock_spawn_assets,
+        ):
+            await cmd_spawn_fuel_pump(self.ctx, "My Pump")
+
+            # Created at player location with Z-90 offset and the given name
+            kwargs = mock_create.call_args.kwargs
+            self.assertEqual(kwargs["asset_path"], FUEL_PUMP_ASSET_PATH)
+            self.assertEqual(kwargs["location_x"], 100)
+            self.assertEqual(kwargs["location_y"], 200)
+            self.assertEqual(kwargs["location_z"], 210)
+            self.assertEqual(kwargs["yaw"], 45)
+            self.assertEqual(kwargs["notes"], "My Pump")
+
+            # Deterministic tag assigned and persisted before spawning
+            mock_wo.asave.assert_awaited()
+            self.assertEqual(mock_wo.tag, "fuel_pump_7")
+
+            # Spawned via the mod asset endpoint with the tag embedded
+            mock_spawn_assets.assert_awaited_once()
+            assets = mock_spawn_assets.await_args.args[1]
+            self.assertEqual(len(assets), 1)
+            self.assertEqual(assets[0]["AssetPath"], FUEL_PUMP_ASSET_PATH)
+            self.assertEqual(assets[0]["tag"], "fuel_pump_7")
+            self.assertEqual(assets[0]["Location"]["Z"], 210)
+            self.assertEqual(assets[0]["Rotation"]["Yaw"], 45)
+
+            self.ctx.reply.assert_called()
+
+    async def test_cmd_spawn_fuel_pump_non_admin(self):
+        self.ctx.player_info = {}
+
+        with (
+            patch("amc.commands.admin.get_player", new=AsyncMock()) as mock_gp,
+            patch(
+                "amc.models.WorldObject.objects.acreate", new=AsyncMock()
+            ) as mock_create,
+            patch("amc.commands.admin.spawn_assets", new=AsyncMock()),
+        ):
+            await cmd_spawn_fuel_pump(self.ctx, "Nope")
+            mock_gp.assert_not_awaited()
+            mock_create.assert_not_awaited()
+            self.ctx.reply.assert_not_called()
+
+    async def test_cmd_remove_fuel_pump(self):
+        from amc.commands.admin import FUEL_PUMP_ASSET_PATH
+
+        self.ctx.player_info["bIsAdmin"] = True
+        self.ctx.player_info["Location"] = {"X": 0, "Y": 0, "Z": 0}
+
+        near = MagicMock()
+        near.location_x, near.location_y, near.location_z = 100, 0, 0
+        near.tag = "fuel_pump_1"
+        near.adelete = AsyncMock()
+        far = MagicMock()
+        far.location_x, far.location_y, far.location_z = 5000, 0, 0
+        far.tag = "fuel_pump_2"
+        far.adelete = AsyncMock()
+
+        with (
+            patch(
+                "amc.commands.admin.despawn_by_tag", new=AsyncMock()
+            ) as mock_despawn,
+            patch("amc.models.WorldObject.objects.filter") as mock_filter,
+        ):
+            mock_filter.return_value.__aiter__.return_value = [near, far]
+
+            await cmd_remove_fuel_pump(self.ctx)
+
+            # Only the nearby pump is despawned and deleted
+            mock_despawn.assert_awaited_once_with(
+                self.ctx.http_client_mod, "fuel_pump_1"
+            )
+            near.adelete.assert_awaited_once()
+            far.adelete.assert_not_awaited()
+            self.ctx.reply.assert_called()
+            self.assertIn("Removed 1", self.ctx.reply.call_args.args[0])
+            self.assertIn(FUEL_PUMP_ASSET_PATH, str(mock_filter.call_args))
+
+    async def test_cmd_remove_fuel_pump_none_nearby(self):
+        self.ctx.player_info["bIsAdmin"] = True
+        self.ctx.player_info["Location"] = {"X": 0, "Y": 0, "Z": 0}
+
+        with (
+            patch("amc.commands.admin.despawn_by_tag", new=AsyncMock()),
+            patch("amc.models.WorldObject.objects.filter") as mock_filter,
+        ):
+            mock_filter.return_value.__aiter__.return_value = []
+
+            await cmd_remove_fuel_pump(self.ctx)
+            self.ctx.reply.assert_called()
+            self.assertIn("No Fuel Pumps Found", self.ctx.reply.call_args.args[0])
 
     async def test_cmd_spawn(self):
         self.ctx.player_info["bIsAdmin"] = True

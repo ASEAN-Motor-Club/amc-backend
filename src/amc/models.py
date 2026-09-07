@@ -2997,19 +2997,25 @@ class WorldObject(models.Model):
     yaw = models.FloatField(default=0.0, help_text="Rotation in degrees (0=X+, 90=Y+)")
     scale = models.FloatField(default=1.0, help_text="Uniform scale factor")
 
+    tag = models.CharField(max_length=256, null=True, blank=True)
+    notes = models.TextField(blank=True)
+
     def generate_asset_data(self):
         current_location = {
             "Z": self.location_z,
             "X": self.location_x,
             "Y": self.location_y,
         }
-        return {
+        data = {
             "AssetPath": self.asset_path,
             "decal": {"DecalLayers": {}},
             "Location": current_location,
             "scale": {"X": self.scale, "Z": self.scale, "Y": self.scale},
             "Rotation": {"Roll": 0, "Pitch": 0, "Yaw": self.yaw},
         }
+        if self.tag:
+            data["tag"] = self.tag
+        return data
 
 
 @final
