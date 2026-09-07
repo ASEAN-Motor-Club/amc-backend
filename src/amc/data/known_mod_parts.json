@@ -1,7 +1,7 @@
 {
   "more-tuning": {
     "label": "More Tuning",
-    "source": "Nexus mods/18 (client-side mod); full catalogue extracted from qxZap_MoreTuning 2026-09 pak (sha256 0c36be4d6cea1bc6) via mt-pak-extract",
+    "source": "Nexus mods/18 (client-side mod); full catalogue extracted from qxZap_MoreTuning 2026-09 pak (sha256 0c36be4d6cea1bc6) via mt-pak-extract; No_* aero keys are runtime-injected by the mod UI (absent from all pak tables), added from live observation",
     "updated": "2026-09-07",
     "keys": [
       "13b",
@@ -300,6 +300,7 @@
       "nissanCVTNismo",
       "nissanCVTSR20",
       "nissanRE0F10A",
+      "No_Bonnet",
       "Offroad60",
       "OffroadTire60",
       "opelF17",
