@@ -4,7 +4,7 @@ from datetime import timedelta
 from decimal import Decimal
 from django.utils import timezone
 from amc.command_framework import registry, CommandContext, CommandRegistry
-from amc.vehicles import final_drive_ratio_display, format_driveline_game
+from amc.vehicles import final_drive_ratio_display
 from amc.mod_detection import load_known_mod_parts, match_known_mod_parts
 from amc.commands.admin import (
     cmd_bill,
@@ -1764,19 +1764,12 @@ class CommandsTestCase(TestCase):
     # --- Check Parts Tests (wider-scope popup + powercalc integration) ---
 
     async def test_cmd_check_parts_self_full_popup(self):
-        """Power block + drivetrain + inline [unknown] marker + flags line."""
+        """Power block + inline [unknown] marker + flags line."""
         mock_last_vehicle = {
             "vehicle": {
                 "vehicleId": 1001,
                 "fullName": "Elisa2_C Default__Elisa2",
                 "classFullName": "Class /Game/Cars/Models/Elisa2",
-                "DriveInfo": {
-                    "drive_type": "RWD",
-                    "driven_wheel_count": 2,
-                    "total_wheel_count": 4,
-                    "total_axle_count": 2,
-                    "driven_axle_indices": [1],
-                },
             }
         }
         mock_parts = {
@@ -1827,8 +1820,7 @@ class CommandsTestCase(TestCase):
             self.assertIn("413.0 Nm @ 4,355 rpm", output)
             self.assertIn("Intake 201 · Turbo Turbocharger_Stage1", output)
             self.assertIn("model 1.0.0 · data 2026.09.2", output)
-            # drivetrain line from DriveInfo
-            self.assertIn("Drivetrain: RWD — 2/4 wheels, 1/2 axles", output)
+            # drivetrain line removed — DriveInfo is not server-populated
             # final-drive ratio enrichment: opaque preset id + resolved ratio
             self.assertIn("FinalDriveRatio: 107 (4.78)", output)
             # inline marker + summary line (format_key_string space-cases keys)
@@ -1946,7 +1938,6 @@ class CommandsTestCase(TestCase):
             self.assertIn("Turbo none", output)
             self.assertNotIn("[unknown]", output)
             self.assertNotIn("unknown part(s)", output)
-            self.assertIn("Drivetrain: Unknown", output)  # no DriveInfo in payload
             mock_refresh.assert_awaited_once_with(
                 self.ctx.character, self.ctx.http_client_mod, has_custom_parts=False
             )
@@ -2118,36 +2109,6 @@ class CommandsTestCase(TestCase):
             output = self.ctx.reply.call_args[0][0]
             self.assertIn("Parts Check", output)
             self.assertIn("Power: 238.6 hp", output)
-
-    def test_format_driveline_game_missing(self):
-        self.assertEqual(format_driveline_game(None), "Drivetrain: Unknown")
-        self.assertEqual(format_driveline_game({}), "Drivetrain: Unknown")
-
-    def test_format_driveline_game_full(self):
-        info = {
-            "drive_type": "AWD",
-            "driven_wheel_count": 4,
-            "total_wheel_count": 4,
-            "total_axle_count": 2,
-            "driven_axle_indices": [0, 1],
-        }
-        self.assertEqual(
-            format_driveline_game(info), "Drivetrain: AWD — 4/4 wheels, 2/2 axles"
-        )
-
-    def test_format_driveline_game_effective_label(self):
-        info = {
-            "drive_type": "AWD",
-            "effective_drive_type": "RWD",
-            "driven_wheel_count": 2,
-            "total_wheel_count": 4,
-            "total_axle_count": 2,
-            "driven_axle_indices": [1],
-        }
-        self.assertEqual(
-            format_driveline_game(info),
-            "Drivetrain: AWD (RWD) — 2/4 wheels, 1/2 axles",
-        )
 
     def test_final_drive_ratio_display_from_catalogue(self):
         with patch(
@@ -2377,101 +2338,6 @@ class CommandsTestCase(TestCase):
             output = self.ctx.reply.call_args[0][0]
             self.assertIn("Mod Check", output)
             self.assertIn("incompatible", output)
-
-    async def test_cmd_check_mods_shows_drive_info(self):
-        """DriveInfo from the mod server should appear in the output."""
-
-        mock_last_vehicle = {
-            "vehicle": {
-                "vehicleId": 4004,
-                "fullName": "Jemusi_C Default__Jemusi",
-                "classFullName": "Class /Game/Vehicles/Jemusi",
-                "DriveInfo": {
-                    "drive_type": "RWD",
-                    "effective_drive_type": "RWD",
-                    "driven_wheel_count": 2,
-                    "total_wheel_count": 4,
-                    "driven_axle_indices": [1],
-                    "total_axle_count": 2,
-                    "num_differentials": 1,
-                },
-            }
-        }
-        mock_parts = {
-            "vehicleId": 4004,
-            "parts": [{"Key": "StockEngine", "Slot": 0}],
-        }
-
-        with (
-            patch(
-                "amc.commands.vehicles.get_player_last_vehicle",
-                new=AsyncMock(return_value=mock_last_vehicle),
-            ),
-            patch(
-                "amc.commands.vehicles.get_player_last_vehicle_parts",
-                new=AsyncMock(return_value=mock_parts),
-            ),
-            patch("amc.commands.vehicles.detect_custom_parts", return_value=[]),
-            patch("amc.commands.vehicles.detect_incompatible_parts", return_value=[]),
-        ):
-            await cmd_check_mods(self.ctx)
-
-            self.ctx.reply.assert_called()
-            output = self.ctx.reply.call_args[0][0]
-            self.assertIn("Drivetrain: RWD", output)
-            self.assertIn("2/4 wheels", output)
-            self.assertIn("1/2 axles", output)
-
-    async def test_cmd_check_mods_shows_parttime_awd(self):
-        """Part-time AWD should show the effective drive type in parentheses."""
-
-        mock_last_vehicle = {
-            "vehicle": {
-                "vehicleId": 5005,
-                "fullName": "Longhorn_C Default__Longhorn",
-                "classFullName": "Class /Game/Vehicles/Longhorn",
-                "DriveInfo": {
-                    "drive_type": "AWD",
-                    "effective_drive_type": "Part-time",
-                    "driven_wheel_count": 4,
-                    "total_wheel_count": 4,
-                    "driven_axle_indices": [0, 1],
-                    "total_axle_count": 2,
-                    "num_differentials": 3,
-                    "current_disconnected_diffs": ["FrontDiff"],
-                },
-            }
-        }
-        mock_parts = {
-            "vehicleId": 5005,
-            "parts": [{"Key": "CustomTurbo_XYZ", "Slot": 5}],
-        }
-
-        with (
-            patch(
-                "amc.commands.vehicles.get_player_last_vehicle",
-                new=AsyncMock(return_value=mock_last_vehicle),
-            ),
-            patch(
-                "amc.commands.vehicles.get_player_last_vehicle_parts",
-                new=AsyncMock(return_value=mock_parts),
-            ),
-            patch(
-                "amc.commands.vehicles.detect_custom_parts",
-                return_value=[
-                    {"key": "CustomTurbo_XYZ", "slot": "Turbocharger", "slot_value": 5}
-                ],
-            ),
-            patch("amc.commands.vehicles.detect_incompatible_parts", return_value=[]),
-        ):
-            await cmd_check_mods(self.ctx)
-
-            self.ctx.reply.assert_called()
-            output = self.ctx.reply.call_args[0][0]
-            self.assertIn("Mod Check", output)
-            self.assertIn("AWD (Part-time)", output)
-            self.assertIn("4/4 wheels", output)
-            self.assertIn("2/2 axles", output)
 
 
 class ArrestCommandTestCase(TestCase):
