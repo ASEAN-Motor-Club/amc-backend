@@ -536,6 +536,81 @@ async def _resolve_guid(http_client_mod, player_id, player_name, http_client=Non
     return None, None
 
 
+async def _deferred_login_completion(
+    player_name,
+    player_id,
+    timestamp,
+    http_client,
+    http_client_mod,
+):
+    """Complete a login that raced ahead of the client load.
+
+    The game reports a joining player with an all-zeros character GUID until
+    the client finishes loading, so on slow loads `_resolve_guid_for_login`
+    exhausts its retry budget, `aget_or_create_character` returns no
+    character (GUID-less rows are never created), and every GUID-dependent
+    login action would silently no-op — including the new-player welcome.
+
+    This polls for the GUID to appear (the game API serves it seconds after
+    the client finishes loading), creates the character, then runs the same
+    immediate + GUID-dependent actions the normal login path runs.
+    """
+    try:
+        character_guid, _ = await _resolve_guid(
+            http_client_mod, player_id, player_name, http_client=http_client
+        )
+        if not character_guid:
+            logger.warning(
+                f"Deferred login completion for {player_name} ({player_id}) "
+                f"abandoned — GUID never resolved"
+            )
+            return
+
+        character, player, _character_created, _player_info = (
+            await aget_or_create_character(
+                player_name,
+                player_id,
+                http_client_mod,
+                http_client,
+                character_guid=character_guid,
+            )
+        )
+        if character is None:
+            logger.warning(
+                f"Deferred login completion for {player_name} ({player_id}) "
+                f"abandoned — character unresolvable even with GUID"
+            )
+            return
+
+        # Same immediate actions the normal login path runs when it has a
+        # character (session tracking, queued messages, name sync/moderation).
+        await process_login_event(character.id, timestamp)
+        asyncio.create_task(send_player_messages(http_client_mod, player))
+        await refresh_player_name(character, http_client_mod)
+        from amc.name_policy import run_name_moderation
+
+        asyncio.create_task(
+            run_name_moderation(character, player, http_client, http_client_mod)
+        )
+
+        # GUID-dependent side effects (welcome popup, tag checks, teleport…).
+        # This coroutine only runs when no character existed at login time,
+        # i.e. a brand-new player — pass character_created=True so the
+        # new-player popup and spawn checks fire even if a concurrent event
+        # (level-changed burst) created the character row a moment earlier.
+        await _login_guid_dependent_actions(
+            character,
+            player,
+            player_name,
+            player_id,
+            http_client,
+            http_client_mod,
+            True,
+        )
+    except Exception as e:
+        logger.exception(f"Deferred login completion failed for {player_name}: {e}")
+
+
 async def _login_guid_dependent_actions(
     character,
     player,
@@ -1317,12 +1392,23 @@ async def process_log_event(
                 # already resolved forced_name into the account; read it here.
                 # Deterministic — no LLM gating on login.
                 try:
-                    welcome_name = player.forced_name or character.name
-                    welcome_message, _is_new = get_welcome_message(
-                        welcome_name,
-                        is_new=is_new_player,
-                        last_online=character.last_online,
-                    )
+                    if character is not None:
+                        welcome_name = player.forced_name or character.name
+                        welcome_message, _is_new = get_welcome_message(
+                            welcome_name,
+                            is_new=is_new_player,
+                            last_online=character.last_online,
+                        )
+                    else:
+                        # The login raced ahead of the client load: no GUID
+                        # could be resolved, so aget_or_create_character
+                        # returned no character (GUID-less rows are never
+                        # created). That state only occurs for a player with
+                        # no DB history at all — greet them as new by their
+                        # raw in-game name instead of crashing on None.
+                        welcome_message, _is_new = get_welcome_message(
+                            player_name, is_new=True, last_online=None
+                        )
                     if welcome_message:
                         asyncio.create_task(
                             announce(welcome_message, http_client, delay=5)
@@ -1331,17 +1417,31 @@ async def process_log_event(
                     logger.exception(f"Failed to greet player: {e}")
 
                 # Fire-and-forget: GUID-dependent actions (popup, tag checks, teleport)
-                asyncio.create_task(
-                    _login_guid_dependent_actions(
-                        character,
-                        player,
-                        player_name,
-                        player_id,
-                        http_client,
-                        http_client_mod,
-                        is_new_player,
+                if character is not None:
+                    asyncio.create_task(
+                        _login_guid_dependent_actions(
+                            character,
+                            player,
+                            player_name,
+                            player_id,
+                            http_client,
+                            http_client_mod,
+                            is_new_player,
+                        )
                     )
-                )
+                else:
+                    # Character resolution lost the login race (slow client
+                    # load). Defer instead of skipping: poll for the GUID,
+                    # create the character, then run the actions that need it.
+                    asyncio.create_task(
+                        _deferred_login_completion(
+                            player_name,
+                            player_id,
+                            timestamp,
+                            http_client,
+                            http_client_mod,
+                        )
+                    )
 
                 # Fire-and-forget: sync faction Discord role on login
                 if discord_client and player.discord_user_id:
