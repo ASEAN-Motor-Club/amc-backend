@@ -2170,13 +2170,23 @@ class CommandsTestCase(TestCase):
     # --- Known-Mod Part Registry Tests (second detection layer) ---
 
     def test_load_known_mod_parts_seeded(self):
-        """Registry ships with the live-confirmed More Tuning keys."""
+        """Registry ships the full extracted More Tuning catalogue, including
+        the 4 keys observed live on prod (Yuuka's Elisa2)."""
         registry = load_known_mod_parts()
         self.assertIn("more-tuning", registry)
         mt = registry["more-tuning"]
         self.assertEqual(mt["label"], "More Tuning")
-        for key in ("20tfsi", "gm6t70", "superchargerstage3", "rallytire"):
+        for key in (
+            "20tfsi",
+            "gm6t70",
+            "superchargerstage3",
+            "rallytire",
+            "damper1000_1000",
+            "2wayclutchpacklsd_100_40",
+        ):
             self.assertIn(key, mt["keys"])
+        # full extracted catalogue (2026-09 MT pak), not just the observed few
+        self.assertGreater(len(mt["keys"]), 400)
 
     def test_match_known_mod_parts_case_insensitive(self):
         """Matching lowercases both sides; non-registry unknowns stay out."""
