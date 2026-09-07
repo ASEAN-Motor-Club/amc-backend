@@ -17,10 +17,12 @@ lowercase to handle casing mismatches (e.g. game sends Bike_i4_160HP
 but DataTable RowName is Bike_I4_160HP).
 """
 
+import json
 import os
 import sqlite3
 import logging
 from collections import defaultdict
+from pathlib import Path
 from typing import Optional
 
 from amc.enums import VehiclePartSlot
@@ -232,6 +234,73 @@ def _slot_name(slot_value: int) -> str:
         return VehiclePartSlot(slot_value).name
     except ValueError:
         return f"Unknown({slot_value})"
+
+
+# --- Known client-mod part registry (second detection layer) -----------------
+# Parts unknown to the stock catalogue may belong to known client-side mods
+# (e.g. More Tuning). Those are listed in a separate data file so the popup
+# can show a mod label instead of the generic [unknown] marker. The stock
+# catalogue in gamedata.db stays untouched.
+KNOWN_MOD_PARTS_PATH = Path(__file__).parent / "data" / "known_mod_parts.json"
+
+_known_mod_parts: dict[str, dict] | None = None
+
+
+def load_known_mod_parts() -> dict[str, dict]:
+    """Load the known-mod part registry from the packaged JSON file, cached.
+
+    Returns {mod_id: {"label": str, "keys": set[str] (lowercased),
+    "prefixes": tuple[str, ...] (lowercased)}}. Degrades to {} with a warning
+    when the file is missing or invalid — detection keeps working, unknown
+    parts just stay [unknown].
+    """
+    global _known_mod_parts
+    if _known_mod_parts is None:
+        registry: dict[str, dict] = {}
+        try:
+            with open(KNOWN_MOD_PARTS_PATH, encoding="utf-8") as f:
+                raw = json.load(f)
+            for mod_id, entry in raw.items():
+                if not isinstance(entry, dict):
+                    continue
+                registry[mod_id] = {
+                    "label": str(entry.get("label") or mod_id),
+                    "keys": {str(k).lower() for k in entry.get("keys", [])},
+                    "prefixes": tuple(
+                        str(p).lower() for p in entry.get("prefixes", [])
+                    ),
+                }
+        except (OSError, ValueError) as e:
+            log.warning(f"Failed to load known-mod part registry: {e}")
+        _known_mod_parts = registry
+    return _known_mod_parts
+
+
+def match_known_mod_parts(parts: list[dict]) -> list[tuple[dict, str]]:
+    """Second detection layer: match stock-unknown parts against known
+    client-mod part keys.
+
+    `parts` should be the output of detect_custom_parts (entries with 'key'
+    in original case) — only parts the stock catalogue doesn't know can be
+    mod parts. Returns [(part, mod_label), ...] in input order; unmatched
+    parts are simply absent. Matching is case-insensitive on exact keys,
+    plus optional per-mod key prefixes.
+    """
+    registry = load_known_mod_parts()
+    if not registry or not parts:
+        return []
+    matched: list[tuple[dict, str]] = []
+    for part in parts:
+        key = str(part.get("key") or "").lower()
+        if not key:
+            continue
+        for entry in registry.values():
+            if key in entry["keys"] or (
+                entry["prefixes"] and key.startswith(entry["prefixes"])
+            ):
+                matched.append((part, entry["label"]))
+                break
+    return matched
 
 
 def detect_custom_parts(

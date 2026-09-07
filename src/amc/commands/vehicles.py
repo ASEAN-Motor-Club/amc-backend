@@ -15,12 +15,14 @@ from amc.vehicles import (
     format_key_string,
 )
 from amc.enums import VehiclePartSlot
+from collections import Counter
 from powercalc.vehicle_setup import compute_popup_lines
 from amc.mod_detection import (
     detect_custom_parts,
     detect_incompatible_parts,
     format_custom_parts_game,
     format_incompatible_parts_game,
+    match_known_mod_parts,
     POLICE_DUTY_WHITELIST,
 )
 from amc.models import CharacterVehicle, PoliceSession
@@ -239,6 +241,17 @@ async def cmd_check_parts(ctx: CommandContext, target_player_name: Optional[str]
         whitelist = POLICE_DUTY_WHITELIST
     custom = detect_custom_parts(parts, whitelist=whitelist)
     incompatible = detect_incompatible_parts(parts, vehicle["fullName"])
+    # Second detection layer: parts unknown to the stock catalogue may belong
+    # to a known client-side mod (e.g. More Tuning) — label them instead of
+    # the generic [unknown] marker. They stay inside `custom`, so the [MODS]
+    # tag semantics are unchanged.
+    known_mod = match_known_mod_parts(custom)
+    known_mod_labels: dict[str, str] = {}
+    matched_keys: set[str] = set()
+    for part, label in known_mod:
+        known_mod_labels.setdefault(part["key"].lower(), label)
+        matched_keys.add(part["key"].lower())
+    unknown_parts = [p for p in custom if p["key"].lower() not in matched_keys]
 
     # Re-sync the [MODS] tag when checking own vehicle (same as /check_mods)
     if checking_self:
@@ -253,7 +266,7 @@ async def cmd_check_parts(ctx: CommandContext, target_player_name: Optional[str]
     power_lines = await asyncio.to_thread(compute_popup_lines, parts)
     drive_line = format_driveline_game(vehicle.get("DriveInfo", {}))
 
-    custom_keys = {p["key"].lower() for p in custom}
+    custom_keys = {p["key"].lower() for p in unknown_parts}
     incompat_keys = {p["key"].lower() for p in incompatible}
 
     def _part_line(part):
@@ -263,7 +276,9 @@ async def cmd_check_parts(ctx: CommandContext, target_player_name: Optional[str]
             if ratio:
                 line += f" ({ratio})"
         key_lower = (part.get("Key") or "").lower()
-        if key_lower in custom_keys:
+        if key_lower in known_mod_labels:
+            line += f" [{known_mod_labels[key_lower]}]"
+        elif key_lower in custom_keys:
             line += " [unknown]"
         if key_lower in incompat_keys:
             line += " [incompatible]"
@@ -273,8 +288,11 @@ async def cmd_check_parts(ctx: CommandContext, target_player_name: Optional[str]
     parts_lines = "\n".join(_part_line(p) for p in sorted_parts)
 
     flag_bits = []
-    if custom:
-        flag_bits.append(f"{len(custom)} unknown part(s)")
+    label_counts = Counter(label for _part, label in known_mod)
+    for label in sorted(label_counts):
+        flag_bits.append(f"{label_counts[label]} {label} part(s)")
+    if unknown_parts:
+        flag_bits.append(f"{len(unknown_parts)} unknown part(s)")
     if incompatible:
         flag_bits.append(f"{len(incompatible)} incompatible part(s)")
     flags_line = (
