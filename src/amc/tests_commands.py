@@ -5,6 +5,7 @@ from decimal import Decimal
 from django.utils import timezone
 from amc.command_framework import registry, CommandContext, CommandRegistry
 from amc.vehicles import final_drive_ratio_display, format_driveline_game
+from amc.mod_detection import load_known_mod_parts, match_known_mod_parts
 from amc.commands.admin import (
     cmd_bill,
     cmd_exit,
@@ -1839,6 +1840,67 @@ class CommandsTestCase(TestCase):
                 self.ctx.character, self.ctx.http_client_mod, has_custom_parts=True
             )
 
+    async def test_cmd_check_parts_known_mod_marker(self):
+        """Known client-mod parts get a [More Tuning] label instead of
+        [unknown]; genuinely unknown parts keep [unknown]; both still count
+        as modded for the [MODS] re-sync."""
+        mock_last_vehicle = {
+            "vehicle": {
+                "vehicleId": 1001,
+                "fullName": "Elisa2_C Default__Elisa2",
+                "classFullName": "Class /Game/Cars/Models/Elisa2",
+            }
+        }
+        mock_parts = {
+            "vehicleId": 1001,
+            "parts": [
+                {"Key": "20tfsi", "Slot": 2},
+                {"Key": "CustomTurbo_XYZ", "Slot": 8},
+            ],
+        }
+        mt_part = {"key": "20tfsi", "slot": "Engine", "slot_value": 2}
+        unknown_part = {"key": "CustomTurbo_XYZ", "slot": "LSD0", "slot_value": 8}
+
+        with (
+            patch(
+                "amc.commands.vehicles.get_player_last_vehicle",
+                new=AsyncMock(return_value=mock_last_vehicle),
+            ),
+            patch(
+                "amc.commands.vehicles.get_player_last_vehicle_parts",
+                new=AsyncMock(return_value=mock_parts),
+            ),
+            patch(
+                "amc.commands.vehicles.detect_custom_parts",
+                return_value=[mt_part, unknown_part],
+            ),
+            patch(
+                "amc.commands.vehicles.detect_incompatible_parts",
+                return_value=[],
+            ),
+            patch(
+                "amc.commands.vehicles.match_known_mod_parts",
+                return_value=[(mt_part, "More Tuning")],
+            ),
+            patch(
+                "amc.commands.vehicles.refresh_player_name", new=AsyncMock()
+            ) as mock_refresh,
+        ):
+            await cmd_check_parts(self.ctx)
+
+            self.ctx.reply.assert_called()
+            output = self.ctx.reply.call_args[0][0]
+            # known-mod part labeled, unknown part still [unknown]
+            self.assertIn("[More Tuning]", output)
+            self.assertIn("LSD0: Custom Turbo X Y Z [unknown]", output)
+            # split summary counts (entry-based: per-wheel parts count each)
+            self.assertIn("1 More Tuning part(s)", output)
+            self.assertIn("1 unknown part(s)", output)
+            # both count as modded for the tag — unchanged semantics
+            mock_refresh.assert_awaited_once_with(
+                self.ctx.character, self.ctx.http_client_mod, has_custom_parts=True
+            )
+
     async def test_cmd_check_parts_stock_no_markers(self):
         """All-stock vehicle: no markers, no flags line, tag cleared."""
         mock_last_vehicle = {
@@ -2104,6 +2166,57 @@ class CommandsTestCase(TestCase):
             self.assertEqual(final_drive_ratio_display("FD1_5"), "1.5")
             self.assertEqual(final_drive_ratio_display("FD25_95"), "25.95")
             self.assertEqual(final_drive_ratio_display(""), "")
+
+    # --- Known-Mod Part Registry Tests (second detection layer) ---
+
+    def test_load_known_mod_parts_seeded(self):
+        """Registry ships with the live-confirmed More Tuning keys."""
+        registry = load_known_mod_parts()
+        self.assertIn("more-tuning", registry)
+        mt = registry["more-tuning"]
+        self.assertEqual(mt["label"], "More Tuning")
+        for key in ("20tfsi", "gm6t70", "superchargerstage3", "rallytire"):
+            self.assertIn(key, mt["keys"])
+
+    def test_match_known_mod_parts_case_insensitive(self):
+        """Matching lowercases both sides; non-registry unknowns stay out."""
+        parts = [
+            {"key": "Gm6T70", "slot": "Transmission", "slot_value": 3},
+            {"key": "TotallyCustom_Part", "slot": "LSD0", "slot_value": 8},
+        ]
+        matched = match_known_mod_parts(parts)
+        self.assertEqual([label for _part, label in matched], ["More Tuning"])
+        self.assertEqual(matched[0][0]["key"], "Gm6T70")
+
+    def test_match_known_mod_parts_prefixes(self):
+        """Per-mod prefix entries match part-key families."""
+        from amc import mod_detection
+
+        synthetic = {
+            "some-mod": {
+                "label": "Some Mod",
+                "keys": set(),
+                "prefixes": ("superchargerstage",),
+            }
+        }
+        with patch.object(mod_detection, "load_known_mod_parts", return_value=synthetic):
+            matched = match_known_mod_parts(
+                [{"key": "SuperchargerStage2", "slot": "Turbo", "slot_value": 7}]
+            )
+        self.assertEqual([label for _part, label in matched], ["Some Mod"])
+
+    def test_load_known_mod_parts_missing_file_degrades(self):
+        """Missing/corrupt registry degrades to {} — detection keeps working."""
+        from pathlib import Path
+
+        with (
+            patch(
+                "amc.mod_detection.KNOWN_MOD_PARTS_PATH",
+                Path("/nonexistent/known_mod_parts.json"),
+            ),
+            patch("amc.mod_detection._known_mod_parts", None),
+        ):
+            self.assertEqual(load_known_mod_parts(), {})
 
     # --- Incompatible Parts Detection Tests ---
 
