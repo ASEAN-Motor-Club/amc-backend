@@ -732,3 +732,134 @@ class GarageRestartSpawnTests(TestCase):
         refreshed = await Garage.objects.aget(id=garage.id)
         self.assertIsNone(refreshed.tag)
         self.assertEqual(garage_spawn.await_count, 3)
+
+
+class LoginRaceDeferredCompletionTests(TestCase):
+    """A login that races ahead of the client load (no GUID resolvable) must
+    still greet the player and must defer — not silently skip — the
+    GUID-dependent actions.
+
+    Regression 2026-09-08: two brand-new players got no welcome message
+    because the greet block crashed on `character.name` when character
+    resolution lost the load race (character=None), and
+    _login_guid_dependent_actions crashed on `character.guid`. Both errors
+    were swallowed, leaving brand-new players ungreeted with no welcome
+    popup, tag checks, or GUID persistence.
+    """
+
+    RACE_GUID = "RACE0000GUID0000TEST0000000001"
+
+    async def _drain_pending_tasks(self):
+        import asyncio
+
+        pending = [t for t in asyncio.all_tasks() if t is not asyncio.current_task()]
+        if pending:
+            await asyncio.wait_for(
+                asyncio.gather(*pending, return_exceptions=True), timeout=2
+            )
+
+    async def test_unresolved_guid_login_still_greets_new_player(self):
+        import amc.tasks as tasks_module
+        from amc.server_logs import PlayerLoginLogEvent
+
+        player_id = 555_003
+        event = PlayerLoginLogEvent(
+            timestamp=timezone.now(),
+            player_id=player_id,
+            player_name="RaceRookie",
+        )
+        try:
+            with patch(
+                "amc.tasks._resolve_guid_for_login",
+                AsyncMock(return_value=(None, None)),
+            ), patch(
+                "amc.tasks._deferred_login_completion", new_callable=AsyncMock
+            ) as mock_deferred, patch(
+                "amc.tasks.announce", new_callable=AsyncMock
+            ) as mock_announce, patch(
+                "amc.mute.reapply_mute_on_login", new_callable=AsyncMock
+            ):
+                await tasks_module.process_log_event(
+                    event,
+                    ctx={
+                        "http_client": None,
+                        "http_client_mod": None,
+                        "startup_time": timezone.now() - timedelta(hours=1),
+                    },
+                )
+                await self._drain_pending_tasks()
+
+            self.assertEqual(
+                mock_deferred.await_count,
+                1,
+                "login with unresolved GUID must defer completion, not skip it",
+            )
+            self.assertEqual(mock_announce.await_count, 1)
+            message = mock_announce.await_args.args[0]
+            self.assertIn("Welcome RaceRookie", message)
+            self.assertIn("/help", message)
+        finally:
+            await Player.objects.filter(unique_id=player_id).adelete()
+
+    async def test_deferred_login_completion_creates_character_and_completes(self):
+        import amc.tasks as tasks_module
+
+        player_id = 555_004
+        timestamp = timezone.now()
+        try:
+            with patch(
+                "amc.tasks._resolve_guid",
+                AsyncMock(return_value=(self.RACE_GUID, None)),
+            ), patch(
+                "amc.tasks.get_player_info", AsyncMock(return_value=None)
+            ), patch(
+                "amc.tasks.process_login_event", new_callable=AsyncMock
+            ) as mock_process_login, patch(
+                "amc.tasks.send_player_messages", new_callable=AsyncMock
+            ), patch(
+                "amc.tasks.refresh_player_name", new_callable=AsyncMock
+            ), patch(
+                "amc.name_policy.run_name_moderation", new_callable=AsyncMock
+            ), patch(
+                "amc.tasks._login_guid_dependent_actions", new_callable=AsyncMock
+            ) as mock_guid_actions:
+                await tasks_module._deferred_login_completion(
+                    "RaceRookie",
+                    player_id,
+                    timestamp,
+                    AsyncMock(),  # http_client
+                    AsyncMock(),  # http_client_mod
+                )
+
+            character = await Character.objects.aget(guid=self.RACE_GUID)
+            self.assertEqual(character.name, "RaceRookie")
+            mock_process_login.assert_awaited_once()
+            self.assertEqual(mock_process_login.await_args.args[0], character.id)
+            self.assertEqual(mock_process_login.await_args.args[1], timestamp)
+            mock_guid_actions.assert_awaited_once()
+            # character_created must be True so the new-player popup fires
+            # even though the login-time DB pre-check couldn't see a GUID.
+            self.assertTrue(mock_guid_actions.await_args.args[6])
+        finally:
+            await Player.objects.filter(unique_id=player_id).adelete()
+
+    async def test_deferred_login_completion_gives_up_cleanly(self):
+        import amc.tasks as tasks_module
+
+        player_id = 555_005
+        with patch(
+            "amc.tasks._resolve_guid", AsyncMock(return_value=(None, None))
+        ), patch(
+            "amc.tasks.process_login_event", new_callable=AsyncMock
+        ) as mock_process_login:
+            await tasks_module._deferred_login_completion(
+                "NeverLoads", player_id, timezone.now(), AsyncMock(), AsyncMock()
+            )
+
+        mock_process_login.assert_not_awaited()
+        self.assertFalse(
+            await Character.objects.filter(guid=self.RACE_GUID).aexists()
+        )
+        self.assertFalse(
+            await Player.objects.filter(unique_id=player_id).aexists()
+        )
