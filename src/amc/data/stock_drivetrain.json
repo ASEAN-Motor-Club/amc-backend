@@ -1,0 +1,761 @@
+{
+  "AirCity": {
+    "differentials": 1,
+    "lsd_slots": [],
+    "names": [
+      "Differential1_GEN_VARIABLE"
+    ]
+  },
+  "Ambi": {
+    "differentials": 1,
+    "lsd_slots": [],
+    "names": [
+      "Differential_GEN_VARIABLE"
+    ]
+  },
+  "Atlas_4x2_Semi": {
+    "differentials": 1,
+    "lsd_slots": [],
+    "names": [
+      "Differential1_GEN_VARIABLE"
+    ]
+  },
+  "Atlas_6x2_Dryvan": {
+    "differentials": 1,
+    "lsd_slots": [],
+    "names": [
+      "Differential_GEN_VARIABLE"
+    ]
+  },
+  "Atlas_6x2_Semi": {
+    "differentials": 1,
+    "lsd_slots": [],
+    "names": [
+      "Differential_GEN_VARIABLE"
+    ]
+  },
+  "Atlas_6x2_Tanker": {
+    "differentials": 1,
+    "lsd_slots": [],
+    "names": [
+      "Differential_GEN_VARIABLE"
+    ]
+  },
+  "Atlas_6x4_Semi": {
+    "differentials": 2,
+    "lsd_slots": [],
+    "names": [
+      "Differential1_GEN_VARIABLE",
+      "Differential2_GEN_VARIABLE"
+    ]
+  },
+  "Atlas_8x4_Dump": {
+    "differentials": 2,
+    "lsd_slots": [
+      "RearLSD"
+    ],
+    "names": [
+      "Differential1_GEN_VARIABLE",
+      "Differential2_GEN_VARIABLE"
+    ]
+  },
+  "Bongo": {
+    "differentials": 1,
+    "lsd_slots": [],
+    "names": [
+      "Differential_GEN_VARIABLE"
+    ]
+  },
+  "Boxy": {
+    "differentials": 1,
+    "lsd_slots": [],
+    "names": [
+      "Differential_GEN_VARIABLE"
+    ]
+  },
+  "Campy": {
+    "differentials": 1,
+    "lsd_slots": [],
+    "names": [
+      "Differential_GEN_VARIABLE"
+    ]
+  },
+  "Cervos": {
+    "differentials": 1,
+    "lsd_slots": [],
+    "names": [
+      "Differential_GEN_VARIABLE"
+    ]
+  },
+  "CheetahMk1": {
+    "differentials": 1,
+    "lsd_slots": [],
+    "names": [
+      "Differential1_GEN_VARIABLE"
+    ]
+  },
+  "Compacty": {
+    "differentials": 1,
+    "lsd_slots": [],
+    "names": [
+      "Differential1_GEN_VARIABLE"
+    ]
+  },
+  "Cora": {
+    "differentials": 1,
+    "lsd_slots": [],
+    "names": [
+      "Differential_GEN_VARIABLE"
+    ]
+  },
+  "Daffy": {
+    "differentials": 1,
+    "lsd_slots": [],
+    "names": [
+      "Differential_GEN_VARIABLE"
+    ]
+  },
+  "Dory": {
+    "differentials": 1,
+    "lsd_slots": [],
+    "names": [
+      "Differential_GEN_VARIABLE"
+    ]
+  },
+  "DoryWrecker": {
+    "differentials": 1,
+    "lsd_slots": [],
+    "names": [
+      "Differential_GEN_VARIABLE"
+    ]
+  },
+  "Duke": {
+    "differentials": 1,
+    "lsd_slots": [],
+    "names": [
+      "Differential_GEN_VARIABLE"
+    ]
+  },
+  "Dumbi": {
+    "differentials": 1,
+    "lsd_slots": [],
+    "names": [
+      "Differential1_GEN_VARIABLE"
+    ]
+  },
+  "Dumpy": {
+    "differentials": 2,
+    "lsd_slots": [
+      "RearLSD"
+    ],
+    "names": [
+      "Differential1_GEN_VARIABLE",
+      "Differential2_GEN_VARIABLE"
+    ]
+  },
+  "EVan": {
+    "differentials": 1,
+    "lsd_slots": [],
+    "names": [
+      "Differential_GEN_VARIABLE"
+    ]
+  },
+  "Elisa": {
+    "differentials": 1,
+    "lsd_slots": [],
+    "names": [
+      "Differential_GEN_VARIABLE"
+    ]
+  },
+  "ElisaTaxi": {
+    "differentials": 1,
+    "lsd_slots": [],
+    "names": [
+      "Differential_GEN_VARIABLE"
+    ]
+  },
+  "Elisa_Police": {
+    "differentials": 1,
+    "lsd_slots": [],
+    "names": [
+      "Differential_GEN_VARIABLE"
+    ]
+  },
+  "EnfoGT": {
+    "differentials": 2,
+    "lsd_slots": [
+      "FrontLSD",
+      "RearLSD"
+    ],
+    "names": [
+      "DifferentialF_GEN_VARIABLE",
+      "DifferentialR_GEN_VARIABLE"
+    ]
+  },
+  "Essam": {
+    "differentials": 1,
+    "lsd_slots": [],
+    "names": [
+      "Differential_GEN_VARIABLE"
+    ]
+  },
+  "FL1": {
+    "differentials": 2,
+    "lsd_slots": [
+      "RearLSD"
+    ],
+    "names": [
+      "Differential1_GEN_VARIABLE",
+      "Differential2_GEN_VARIABLE"
+    ]
+  },
+  "FormulaSCM": {
+    "differentials": 1,
+    "lsd_slots": [],
+    "names": [
+      "Differential_GEN_VARIABLE"
+    ]
+  },
+  "Fortem": {
+    "differentials": 1,
+    "lsd_slots": [],
+    "names": [
+      "Differential_GEN_VARIABLE"
+    ]
+  },
+  "Fox": {
+    "differentials": 2,
+    "lsd_slots": [
+      "FrontLSD",
+      "RearLSD"
+    ],
+    "names": [
+      "DifferentialF_GEN_VARIABLE",
+      "DifferentialR_GEN_VARIABLE"
+    ]
+  },
+  "GolimaRotator": {
+    "differentials": 2,
+    "lsd_slots": [
+      "RearLSD"
+    ],
+    "names": [
+      "Differential1_GEN_VARIABLE",
+      "Differential2_GEN_VARIABLE"
+    ]
+  },
+  "Golima_Semi": {
+    "differentials": 2,
+    "lsd_slots": [
+      "RearLSD"
+    ],
+    "names": [
+      "Differential1_GEN_VARIABLE",
+      "Differential2_GEN_VARIABLE"
+    ]
+  },
+  "Jemusi": {
+    "differentials": 3,
+    "lsd_slots": [
+      "FrontLSD",
+      "RearLSD"
+    ],
+    "names": [
+      "Differential0_GEN_VARIABLE",
+      "Differential1_GEN_VARIABLE",
+      "Differential2_GEN_VARIABLE"
+    ]
+  },
+  "Jemusi_Dump": {
+    "differentials": 3,
+    "lsd_slots": [
+      "FrontLSD",
+      "RearLSD"
+    ],
+    "names": [
+      "Differential0_GEN_VARIABLE",
+      "Differential1_GEN_VARIABLE",
+      "Differential2_GEN_VARIABLE"
+    ]
+  },
+  "Jemusi_Semi": {
+    "differentials": 3,
+    "lsd_slots": [
+      "FrontLSD",
+      "RearLSD"
+    ],
+    "names": [
+      "Differential0_GEN_VARIABLE",
+      "Differential1_GEN_VARIABLE",
+      "Differential2_GEN_VARIABLE"
+    ]
+  },
+  "Jemusi_Tanker": {
+    "differentials": 3,
+    "lsd_slots": [
+      "FrontLSD",
+      "RearLSD"
+    ],
+    "names": [
+      "Differential0_GEN_VARIABLE",
+      "Differential1_GEN_VARIABLE",
+      "Differential2_GEN_VARIABLE"
+    ]
+  },
+  "Kart_01": {
+    "differentials": 1,
+    "lsd_slots": [],
+    "names": [
+      "Differential_GEN_VARIABLE"
+    ]
+  },
+  "Kira_Box": {
+    "differentials": 1,
+    "lsd_slots": [],
+    "names": [
+      "Differential1_GEN_VARIABLE"
+    ]
+  },
+  "Kira_Flatbed": {
+    "differentials": 1,
+    "lsd_slots": [],
+    "names": [
+      "Differential1_GEN_VARIABLE"
+    ]
+  },
+  "Kira_Rollback": {
+    "differentials": 1,
+    "lsd_slots": [],
+    "names": [
+      "Differential1_GEN_VARIABLE"
+    ]
+  },
+  "Kira_Tanker": {
+    "differentials": 1,
+    "lsd_slots": [],
+    "names": [
+      "Differential1_GEN_VARIABLE"
+    ]
+  },
+  "Kira_Van": {
+    "differentials": 1,
+    "lsd_slots": [],
+    "names": [
+      "Differential_GEN_VARIABLE"
+    ]
+  },
+  "Koma": {
+    "differentials": 1,
+    "lsd_slots": [],
+    "names": [
+      "Differential_GEN_VARIABLE"
+    ]
+  },
+  "Kuda_Dyrvan_4x2": {
+    "differentials": 1,
+    "lsd_slots": [],
+    "names": [
+      "Differential_GEN_VARIABLE"
+    ]
+  },
+  "Kuda_Flatbed_4x2": {
+    "differentials": 1,
+    "lsd_slots": [],
+    "names": [
+      "Differential_GEN_VARIABLE"
+    ]
+  },
+  "Kuda_LiveFishTank_4x2": {
+    "differentials": 1,
+    "lsd_slots": [],
+    "names": [
+      "Differential_GEN_VARIABLE"
+    ]
+  },
+  "Kuda_Semi": {
+    "differentials": 1,
+    "lsd_slots": [],
+    "names": [
+      "Differential_GEN_VARIABLE"
+    ]
+  },
+  "Liliput": {
+    "differentials": 1,
+    "lsd_slots": [],
+    "names": [
+      "Differential1_GEN_VARIABLE"
+    ]
+  },
+  "Lobo": {
+    "differentials": 1,
+    "lsd_slots": [],
+    "names": [
+      "Differential_GEN_VARIABLE"
+    ]
+  },
+  "Longhorn_Rollback": {
+    "differentials": 2,
+    "lsd_slots": [
+      "FrontLSD",
+      "RearLSD"
+    ],
+    "names": [
+      "Differential1_GEN_VARIABLE",
+      "Differential2_GEN_VARIABLE"
+    ]
+  },
+  "Longhorn_Semi": {
+    "differentials": 2,
+    "lsd_slots": [
+      "RearLSD"
+    ],
+    "names": [
+      "Differential1_GEN_VARIABLE",
+      "Differential2_GEN_VARIABLE"
+    ]
+  },
+  "Magis": {
+    "differentials": 1,
+    "lsd_slots": [],
+    "names": [
+      "Differential_GEN_VARIABLE"
+    ]
+  },
+  "Maity": {
+    "differentials": 2,
+    "lsd_slots": [
+      "RearLSD"
+    ],
+    "names": [
+      "Differential1_GEN_VARIABLE",
+      "Differential2_GEN_VARIABLE"
+    ]
+  },
+  "Micky": {
+    "differentials": 1,
+    "lsd_slots": [],
+    "names": [
+      "Differential_GEN_VARIABLE"
+    ]
+  },
+  "Mitage": {
+    "differentials": 2,
+    "lsd_slots": [
+      "FrontLSD",
+      "RearLSD"
+    ],
+    "names": [
+      "DifferentialF_GEN_VARIABLE",
+      "DifferentialR_GEN_VARIABLE"
+    ]
+  },
+  "Mixi": {
+    "differentials": 2,
+    "lsd_slots": [
+      "RearLSD"
+    ],
+    "names": [
+      "Differential1_GEN_VARIABLE",
+      "Differential2_GEN_VARIABLE"
+    ]
+  },
+  "Monarch": {
+    "differentials": 1,
+    "lsd_slots": [],
+    "names": [
+      "Differential_GEN_VARIABLE"
+    ]
+  },
+  "Monarch_Limo": {
+    "differentials": 1,
+    "lsd_slots": [],
+    "names": [
+      "Differential_GEN_VARIABLE"
+    ]
+  },
+  "Muhan": {
+    "differentials": 2,
+    "lsd_slots": [
+      "FrontLSD",
+      "RearLSD"
+    ],
+    "names": [
+      "DifferentialF_GEN_VARIABLE",
+      "DifferentialR_GEN_VARIABLE"
+    ]
+  },
+  "Muhan_Police": {
+    "differentials": 2,
+    "lsd_slots": [
+      "FrontLSD",
+      "RearLSD"
+    ],
+    "names": [
+      "DifferentialF_GEN_VARIABLE",
+      "DifferentialR_GEN_VARIABLE"
+    ]
+  },
+  "Neo": {
+    "differentials": 3,
+    "lsd_slots": [
+      "CenterLSD",
+      "FrontLSD",
+      "RearLSD"
+    ],
+    "names": [
+      "DifferentialC_GEN_VARIABLE",
+      "DifferentialF_GEN_VARIABLE",
+      "DifferentialR_GEN_VARIABLE"
+    ]
+  },
+  "Nimo": {
+    "differentials": 1,
+    "lsd_slots": [],
+    "names": [
+      "Differential_GEN_VARIABLE"
+    ]
+  },
+  "Nuke": {
+    "differentials": 1,
+    "lsd_slots": [],
+    "names": [
+      "Differential_GEN_VARIABLE"
+    ]
+  },
+  "NukePolice": {
+    "differentials": 1,
+    "lsd_slots": [],
+    "names": [
+      "Differential_GEN_VARIABLE"
+    ]
+  },
+  "Panther": {
+    "differentials": 1,
+    "lsd_slots": [],
+    "names": [
+      "Differential_GEN_VARIABLE"
+    ]
+  },
+  "Police": {
+    "differentials": 1,
+    "lsd_slots": [],
+    "names": [
+      "Differential_GEN_VARIABLE"
+    ]
+  },
+  "PoliceInterceptor1": {
+    "differentials": 1,
+    "lsd_slots": [],
+    "names": [
+      "Differential_GEN_VARIABLE"
+    ]
+  },
+  "Pulio": {
+    "differentials": 1,
+    "lsd_slots": [],
+    "names": [
+      "Differential_GEN_VARIABLE"
+    ]
+  },
+  "Pulse": {
+    "differentials": 1,
+    "lsd_slots": [],
+    "names": [
+      "Differential_GEN_VARIABLE"
+    ]
+  },
+  "Raton": {
+    "differentials": 2,
+    "lsd_slots": [
+      "FrontLSD",
+      "RearLSD"
+    ],
+    "names": [
+      "DifferentialF_GEN_VARIABLE",
+      "DifferentialR_GEN_VARIABLE"
+    ]
+  },
+  "Raven": {
+    "differentials": 1,
+    "lsd_slots": [],
+    "names": [
+      "Differential_GEN_VARIABLE"
+    ]
+  },
+  "Roadmaster": {
+    "differentials": 1,
+    "lsd_slots": [],
+    "names": [
+      "Differential1_GEN_VARIABLE"
+    ]
+  },
+  "SCM_Kart_One": {
+    "differentials": 1,
+    "lsd_slots": [],
+    "names": [
+      "Differential_GEN_VARIABLE"
+    ]
+  },
+  "SRT": {
+    "differentials": 1,
+    "lsd_slots": [],
+    "names": [
+      "Differential_GEN_VARIABLE"
+    ]
+  },
+  "SV200": {
+    "differentials": 1,
+    "lsd_slots": [],
+    "names": [
+      "Differential1_GEN_VARIABLE"
+    ]
+  },
+  "Savannah": {
+    "differentials": 1,
+    "lsd_slots": [],
+    "names": [
+      "Differential_GEN_VARIABLE"
+    ]
+  },
+  "Spider": {
+    "differentials": 1,
+    "lsd_slots": [],
+    "names": [
+      "Differential_GEN_VARIABLE"
+    ]
+  },
+  "Stagon": {
+    "differentials": 1,
+    "lsd_slots": [],
+    "names": [
+      "Differential_GEN_VARIABLE"
+    ]
+  },
+  "Stella": {
+    "differentials": 1,
+    "lsd_slots": [],
+    "names": [
+      "Differential_GEN_VARIABLE"
+    ]
+  },
+  "Stinger": {
+    "differentials": 1,
+    "lsd_slots": [],
+    "names": [
+      "Differential_GEN_VARIABLE"
+    ]
+  },
+  "Tavan": {
+    "differentials": 1,
+    "lsd_slots": [],
+    "names": [
+      "Differential_GEN_VARIABLE"
+    ]
+  },
+  "Tavan_Ambulance": {
+    "differentials": 1,
+    "lsd_slots": [],
+    "names": [
+      "Differential_GEN_VARIABLE"
+    ]
+  },
+  "Terra": {
+    "differentials": 1,
+    "lsd_slots": [
+      "RearLSD"
+    ],
+    "names": [
+      "Differential1_GEN_VARIABLE"
+    ]
+  },
+  "Titan": {
+    "differentials": 2,
+    "lsd_slots": [
+      "RearLSD"
+    ],
+    "names": [
+      "Differential1_GEN_VARIABLE",
+      "Differential2_GEN_VARIABLE"
+    ]
+  },
+  "Townie": {
+    "differentials": 1,
+    "lsd_slots": [],
+    "names": [
+      "Differential_GEN_VARIABLE"
+    ]
+  },
+  "Tronko": {
+    "differentials": 2,
+    "lsd_slots": [
+      "RearLSD"
+    ],
+    "names": [
+      "Differential1_GEN_VARIABLE",
+      "Differential2_GEN_VARIABLE"
+    ]
+  },
+  "Trophy2": {
+    "differentials": 1,
+    "lsd_slots": [],
+    "names": [
+      "Differential_GEN_VARIABLE"
+    ]
+  },
+  "Trophy_Air": {
+    "differentials": 1,
+    "lsd_slots": [],
+    "names": [
+      "Differential_GEN_VARIABLE"
+    ]
+  },
+  "Trophy_Taxi": {
+    "differentials": 1,
+    "lsd_slots": [],
+    "names": [
+      "Differential_GEN_VARIABLE"
+    ]
+  },
+  "Tuscan": {
+    "differentials": 1,
+    "lsd_slots": [],
+    "names": [
+      "Differential_GEN_VARIABLE"
+    ]
+  },
+  "Vani": {
+    "differentials": 1,
+    "lsd_slots": [],
+    "names": [
+      "Differential_GEN_VARIABLE"
+    ]
+  },
+  "Vista": {
+    "differentials": 1,
+    "lsd_slots": [],
+    "names": [
+      "Differential_GEN_VARIABLE"
+    ]
+  },
+  "Zino": {
+    "differentials": 1,
+    "lsd_slots": [],
+    "names": [
+      "Differential_GEN_VARIABLE"
+    ]
+  },
+  "Zydro": {
+    "differentials": 1,
+    "lsd_slots": [],
+    "names": [
+      "Differential_GEN_VARIABLE"
+    ]
+  },
+  "Zydro_Police": {
+    "differentials": 1,
+    "lsd_slots": [],
+    "names": [
+      "Differential_GEN_VARIABLE"
+    ]
+  }
+}

@@ -1,7 +1,9 @@
 import asyncio
 import typing
+import json
 import re
 import logging
+from pathlib import Path
 from django.contrib.gis.geos import Point
 from amc.models import CharacterVehicle, PoliceSession
 from amc.mod_server import (
@@ -302,6 +304,79 @@ def format_driveline_game(drive_info: dict | None) -> str:
         label = f"{drive_type} ({effective})"
 
     return f"Drivetrain: {label} — {driven}/{total} wheels, {driven_axles}/{axles} axles"
+
+
+# --- Stock drivetrain reference (client-visible scope qualifier) -------------
+# Per-vehicle differential layout extracted from the vanilla vehicle blueprints
+# (mt-pak-extract parses of Cars/Models/<Model>/<Model>.uasset). Comparing live
+# DriveInfo against it flags server-deployed drivetrain conversion paks. It can
+# NEVER vouch for the client: client-side-only definition overrides do not
+# replicate, so a matching layout is reported as "(server-side)" — a scope
+# statement, not a "stock/unmodified" verdict.
+STOCK_DRIVETRAIN_PATH = Path(__file__).parent / "data" / "stock_drivetrain.json"
+
+_stock_drivetrain: dict[str, dict] | None = None
+
+
+def load_stock_drivetrain() -> dict[str, dict]:
+    """Load the per-vehicle stock drivetrain reference, cached.
+
+    Returns {model: {"differentials": int, "names": [...], "lsd_slots": [...]}}.
+    Degrades to {} with a warning when the file is missing or invalid.
+    """
+    global _stock_drivetrain
+    if _stock_drivetrain is None:
+        registry: dict[str, dict] = {}
+        try:
+            with open(STOCK_DRIVETRAIN_PATH, encoding="utf-8") as f:
+                raw = json.load(f)
+            for model, entry in raw.items():
+                if not isinstance(entry, dict):
+                    continue
+                registry[model] = {
+                    "differentials": int(entry.get("differentials") or 0),
+                    "names": list(entry.get("names") or []),
+                    "lsd_slots": list(entry.get("lsd_slots") or []),
+                }
+        except (OSError, ValueError) as e:
+            logger.warning(f"Failed to load stock drivetrain reference: {e}")
+        _stock_drivetrain = registry
+    return _stock_drivetrain
+
+
+def stock_model_from_class_name(class_full_name: str | None) -> str | None:
+    """Vehicle model name from an actor class path.
+
+    'Class /Game/Cars/Models/Panther' -> 'Panther'. None when the path does not
+    point under /Game/Cars/Models/.
+    """
+    if not class_full_name:
+        return None
+    m = re.search(r"/Game/Cars/Models/([^/.]+)", class_full_name)
+    return m.group(1) if m else None
+
+
+def format_driveline_checked(drive_info: dict | None, class_full_name: str) -> str:
+    """Drivetrain line for /check_parts with scope qualifier / modified flag.
+
+    - missing DriveInfo -> "Drivetrain: Unknown" (explicit no-data)
+    - live differentials differ from the stock blueprint reference ->
+      "... [modified: N diffs, stock M]"
+    - otherwise -> "... (server-side)" — reports what the server reads without
+      claiming the client is unmodified (client-side-only overrides never
+      replicate, so a matching layout is not proof of a clean client).
+    """
+    if not drive_info:
+        return "Drivetrain: Unknown"
+    base = format_driveline_game(drive_info)
+    model = stock_model_from_class_name(class_full_name)
+    ref = load_stock_drivetrain().get(model) if model else None
+    if not ref:
+        return f"{base} (server-side)"
+    live_n = drive_info.get("num_differentials")
+    if isinstance(live_n, int) and live_n != ref["differentials"]:
+        return f"{base} [modified: {live_n} diffs, stock {ref['differentials']}]"
+    return f"{base} (server-side)"
 
 
 _FD_NAME_RE = re.compile(r"FD(\d+)_(\d+)$", re.IGNORECASE)

@@ -7,6 +7,7 @@ from amc.game_server import get_players
 from amc.vehicles import (
     format_vehicle_name,
     format_vehicle_part_game,
+    format_driveline_checked,
     format_driveline_game,
     final_drive_ratio_display,
     despawn_personal_vehicles,
@@ -251,7 +252,9 @@ async def cmd_check_parts(ctx: CommandContext, target_player_name: Optional[str]
     # Power block from the installed engine/intake/turbo — the compute sweep
     # runs in a thread so it never blocks the shared event loop
     power_lines = await asyncio.to_thread(compute_popup_lines, parts)
-    drive_line = format_driveline_game(vehicle.get("DriveInfo", {}))
+    drive_line = format_driveline_checked(
+        vehicle.get("DriveInfo") or {}, vehicle.get("classFullName") or ""
+    )
 
     custom_keys = {p["key"].lower() for p in custom}
     incompat_keys = {p["key"].lower() for p in incompatible}

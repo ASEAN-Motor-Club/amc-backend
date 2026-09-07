@@ -4,7 +4,11 @@ from datetime import timedelta
 from decimal import Decimal
 from django.utils import timezone
 from amc.command_framework import registry, CommandContext, CommandRegistry
-from amc.vehicles import final_drive_ratio_display, format_driveline_game
+from amc.vehicles import (
+    final_drive_ratio_display,
+    format_driveline_game,
+    load_stock_drivetrain,
+)
 from amc.commands.admin import (
     cmd_bill,
     cmd_exit,
@@ -1826,8 +1830,9 @@ class CommandsTestCase(TestCase):
             self.assertIn("413.0 Nm @ 4,355 rpm", output)
             self.assertIn("Intake 201 · Turbo Turbocharger_Stage1", output)
             self.assertIn("model 1.0.0 · data 2026.09.2", output)
-            # drivetrain line from DriveInfo
-            self.assertIn("Drivetrain: RWD — 2/4 wheels, 1/2 axles", output)
+            # drivetrain line from DriveInfo — Elisa2 has no stock reference
+            # entry, so the server-read value gets the scope qualifier only
+            self.assertIn("Drivetrain: RWD — 2/4 wheels, 1/2 axles (server-side)", output)
             # final-drive ratio enrichment: opaque preset id + resolved ratio
             self.assertIn("FinalDriveRatio: 107 (4.78)", output)
             # inline marker + summary line (format_key_string space-cases keys)
@@ -2104,6 +2109,112 @@ class CommandsTestCase(TestCase):
             self.assertEqual(final_drive_ratio_display("FD1_5"), "1.5")
             self.assertEqual(final_drive_ratio_display("FD25_95"), "25.95")
             self.assertEqual(final_drive_ratio_display(""), "")
+
+    # --- Stock Drivetrain Reference Tests ---
+
+    def test_load_stock_drivetrain_seeded(self):
+        """Reference ships the extracted vanilla fleet (96 vehicles)."""
+        reg = load_stock_drivetrain()
+        self.assertGreater(len(reg), 90)
+        self.assertEqual(reg["Panther"]["differentials"], 1)
+        self.assertEqual(reg["Neo"]["differentials"], 3)
+        self.assertEqual(reg["EnfoGT"]["differentials"], 2)
+
+    def test_stock_model_from_class_name(self):
+        from amc.vehicles import stock_model_from_class_name as fn
+
+        self.assertEqual(fn("Class /Game/Cars/Models/Panther"), "Panther")
+        self.assertEqual(
+            fn("Class /Game/Cars/Models/Elisa2.Elisa2_C"), "Elisa2"
+        )
+        self.assertIsNone(fn("Class /Game/Maps/Jeju/Foo"))
+        self.assertIsNone(fn(""))
+        self.assertIsNone(fn(None))
+
+    def test_format_driveline_checked_cases(self):
+        from amc.vehicles import format_driveline_checked as fn
+
+        di = {
+            "drive_type": "RWD",
+            "driven_wheel_count": 2,
+            "total_wheel_count": 4,
+            "total_axle_count": 2,
+            "driven_axle_indices": [1],
+            "num_differentials": 1,
+        }
+        ref = {"Panther": {"differentials": 1, "names": [], "lsd_slots": []}}
+        with patch("amc.vehicles.load_stock_drivetrain", return_value=ref):
+            # missing DriveInfo -> explicit Unknown
+            self.assertEqual(fn(None, "Class /Game/Cars/Models/Panther"), "Drivetrain: Unknown")
+            self.assertEqual(fn({}, "Class /Game/Cars/Models/Panther"), "Drivetrain: Unknown")
+            # match -> server-side scope, never a stock claim
+            self.assertEqual(
+                fn(di, "Class /Game/Cars/Models/Panther"),
+                "Drivetrain: RWD — 2/4 wheels, 1/2 axles (server-side)",
+            )
+            # mismatch -> modified flag with both counts
+            awd = dict(di, drive_type="AWD", driven_wheel_count=4, num_differentials=3)
+            self.assertEqual(
+                fn(awd, "Class /Game/Cars/Models/Panther"),
+                "Drivetrain: AWD — 4/4 wheels, 1/2 axles [modified: 3 diffs, stock 1]",
+            )
+            # no num_differentials in payload -> falls back to qualifier
+            self.assertEqual(
+                fn({k: v for k, v in di.items() if k != "num_differentials"},
+                   "Class /Game/Cars/Models/Panther"),
+                "Drivetrain: RWD — 2/4 wheels, 1/2 axles (server-side)",
+            )
+        # unknown model -> qualifier only, even with a weird diff count
+        self.assertEqual(
+            fn(dict(di, num_differentials=7), "Class /Game/Cars/Models/NotInRef"),
+            "Drivetrain: RWD — 2/4 wheels, 1/2 axles (server-side)",
+        )
+
+    async def test_cmd_check_parts_drivetrain_modified_flag(self):
+        """A Panther with 3 diffs (stock 1) flags [modified] in the popup."""
+        mock_last_vehicle = {
+            "vehicle": {
+                "vehicleId": 1001,
+                "fullName": "Panther_C Default__Panther",
+                "classFullName": "Class /Game/Cars/Models/Panther",
+                "DriveInfo": {
+                    "drive_type": "AWD",
+                    "driven_wheel_count": 4,
+                    "total_wheel_count": 4,
+                    "total_axle_count": 2,
+                    "driven_axle_indices": [0, 1],
+                    "num_differentials": 3,
+                },
+            }
+        }
+        mock_parts = {"parts": [{"Key": "DefaultBody", "Slot": 1}]}
+        with (
+            patch(
+                "amc.commands.vehicles.get_player_last_vehicle",
+                new=AsyncMock(return_value=mock_last_vehicle),
+            ),
+            patch(
+                "amc.commands.vehicles.get_player_last_vehicle_parts",
+                new=AsyncMock(return_value=mock_parts),
+            ),
+            patch(
+                "amc.commands.vehicles.detect_custom_parts",
+                return_value=[],
+            ),
+            patch(
+                "amc.commands.vehicles.detect_incompatible_parts",
+                return_value=[],
+            ),
+            patch(
+                "amc.commands.vehicles.refresh_player_name", new=AsyncMock()
+            ),
+        ):
+            await cmd_check_parts(self.ctx)
+            output = self.ctx.reply.call_args[0][0]
+            self.assertIn(
+                "Drivetrain: AWD — 4/4 wheels, 2/2 axles [modified: 3 diffs, stock 1]",
+                output,
+            )
 
     # --- Incompatible Parts Detection Tests ---
 
