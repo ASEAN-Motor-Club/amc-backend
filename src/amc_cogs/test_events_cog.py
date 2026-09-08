@@ -5,10 +5,12 @@ the event-server instance is not guaranteed to be running), event selection
 (single / ambiguous / name / GUID prefix), the deferred-response flow, and the
 error paths (fetch failure, join/kick failure).
 
-Note: an earlier version of this file used ``async def test_*`` methods inside
-django ``TestCase`` classes — unittest collection never awaited those
-coroutines, so they passed vacuously. These tests are plain
-``pytest.mark.asyncio`` functions that actually execute.
+The previous version asserted against ``response.send_message``; since these
+commands now defer and reply via followups, the assertions target
+``followup.send``. Written as explicit ``pytest.mark.asyncio`` functions (the
+``async def``-in-``TestCase`` style of the originals also executes — Django 5.2
+wraps it with ``async_to_sync`` — but the explicit markers make the execution
+path obvious).
 """
 
 from unittest.mock import AsyncMock, MagicMock, patch
