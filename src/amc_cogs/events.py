@@ -194,8 +194,10 @@ class EventsCog(commands.Cog):
         self.bot = bot
         self.teams_channel_id = teams_channel_id
         self.last_embed_message = None
+        # Main-server client: join/kick act on Main Server events (#80), and the
+        # event-server instance (EVENT_GAME_SERVER_API_URL) may not be running.
         self.player_autocomplete_factory = create_player_autocomplete(
-            self.bot.event_http_client_game
+            self.bot.http_client_game
         )
 
     @commands.Cog.listener()
@@ -478,6 +480,15 @@ class EventsCog(commands.Cog):
     async def player_autocomplete(self, interaction, current):
         return await self.player_autocomplete_factory(interaction, current)
 
+    async def _fetch_events_or_respond(self, ctx):
+        """Deferred-response safe: returns the events list, or None after
+        reporting the failure to the followup."""
+        try:
+            return await get_events(self.bot.http_client_mod)
+        except Exception as e:  # noqa: BLE001 - report mod/transport errors to Discord
+            await ctx.followup.send(f"❌ Could not fetch active events: {e}")
+            return None
+
     @app_commands.command(
         name="join_player_to_event",
         description="Joins a player into an event (Main Server)",
@@ -487,9 +498,12 @@ class EventsCog(commands.Cog):
     async def join_player_to_event(
         self, ctx, player_id: str, event: str | None = None
     ):
-        events = await get_events(self.bot.http_client_mod)
+        await ctx.response.defer()
+        events = await self._fetch_events_or_respond(ctx)
+        if events is None:
+            return
         if not events:
-            await ctx.response.send_message("No active events")
+            await ctx.followup.send("No active events")
             return
 
         selected = _select_event(events, event)
@@ -498,16 +512,23 @@ class EventsCog(commands.Cog):
                 f"- **{e['EventName']}** (`{e['EventGuid'][:8]}`)"
                 for e in events[:10]
             )
-            await ctx.response.send_message(
+            await ctx.followup.send(
                 "Multiple active events — specify one by name or GUID prefix:\n"
                 f"{listing}"
             )
             return
 
-        await join_player_to_event(
-            self.bot.http_client_mod, selected["EventGuid"], player_id
-        )
-        await ctx.response.send_message(
+        try:
+            await join_player_to_event(
+                self.bot.http_client_mod, selected["EventGuid"], player_id
+            )
+        except Exception as e:  # noqa: BLE001 - report mod/transport errors to Discord
+            await ctx.followup.send(
+                f"❌ Join failed — {e}\n"
+                "(HTTP 400 usually means the player is not online on the Main Server)"
+            )
+            return
+        await ctx.followup.send(
             f"Player {player_id} joined **{selected['EventName']}**"
         )
 
@@ -520,9 +541,12 @@ class EventsCog(commands.Cog):
     async def kick_player_from_event(
         self, ctx, player_id: str, event: str | None = None
     ):
-        events = await get_events(self.bot.http_client_mod)
+        await ctx.response.defer()
+        events = await self._fetch_events_or_respond(ctx)
+        if events is None:
+            return
         if not events:
-            await ctx.response.send_message("No active events")
+            await ctx.followup.send("No active events")
             return
 
         selected = _select_event(events, event)
@@ -531,16 +555,23 @@ class EventsCog(commands.Cog):
                 f"- **{e['EventName']}** (`{e['EventGuid'][:8]}`)"
                 for e in events[:10]
             )
-            await ctx.response.send_message(
+            await ctx.followup.send(
                 "Multiple active events — specify one by name or GUID prefix:\n"
                 f"{listing}"
             )
             return
 
-        await kick_player_from_event(
-            self.bot.http_client_mod, selected["EventGuid"], player_id
-        )
-        await ctx.response.send_message(
+        try:
+            await kick_player_from_event(
+                self.bot.http_client_mod, selected["EventGuid"], player_id
+            )
+        except Exception as e:  # noqa: BLE001 - report mod/transport errors to Discord
+            await ctx.followup.send(
+                f"❌ Kick failed — {e}\n"
+                "(HTTP 400 usually means the player is not online on the Main Server)"
+            )
+            return
+        await ctx.followup.send(
             f"Player {player_id} kicked from **{selected['EventName']}**"
         )
 

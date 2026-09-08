@@ -148,7 +148,10 @@ async def join_player_to_event(session, event_guid, player_id):
     }
     async with session.post(f"/events/{event_guid}/join", json=data) as resp:
         if resp.status != 204:
-            raise Exception("Failed to join event")
+            body = await resp.text()
+            raise Exception(
+                f"Failed to join event (HTTP {resp.status}, body={body[:200]})"
+            )
 
 
 async def kick_player_from_event(session, event_guid, player_id):
@@ -158,13 +161,19 @@ async def kick_player_from_event(session, event_guid, player_id):
     }
     async with session.post(f"/events/{event_guid}/leave", json=data) as resp:
         if resp.status != 204:
-            raise Exception("Failed to kick player from event")
+            body = await resp.text()
+            raise Exception(
+                f"Failed to kick player from event (HTTP {resp.status}, body={body[:200]})"
+            )
 
 
 async def get_events(session):
     async with session.get("/events", timeout=FAST_TIMEOUT) as resp:
         if resp.status != 200:
-            raise Exception("Failed to fetch events")
+            body = await resp.text()
+            raise Exception(
+                f"Failed to fetch events (HTTP {resp.status}, body={body[:200]})"
+            )
         data = await resp.json()
         return data["data"]
 

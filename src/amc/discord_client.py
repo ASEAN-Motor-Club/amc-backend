@@ -27,6 +27,11 @@ from amc_cogs.active_role import ActiveRoleCog
 
 
 class AMCDiscordBot(commands.Bot):
+    # Bounds every cog command's HTTP call so interactions answer inside the
+    # token window — mirrors GAME_SERVER_TIMEOUT in amc_backend/worker.py
+    # (can't import it here: worker imports this module).
+    GAME_SERVER_TIMEOUT = aiohttp.ClientTimeout(total=10)
+
     def __init__(self, *args, **kwargs):
         kwargs.setdefault("command_prefix", "/")
         super().__init__(*args, **kwargs)
@@ -36,16 +41,16 @@ class AMCDiscordBot(commands.Bot):
 
     async def setup_hook(self):
         self.http_client_game = aiohttp.ClientSession(
-            base_url=settings.GAME_SERVER_API_URL
+            base_url=settings.GAME_SERVER_API_URL, timeout=self.GAME_SERVER_TIMEOUT
         )
         self.http_client_mod = aiohttp.ClientSession(
-            base_url=settings.MOD_SERVER_API_URL
+            base_url=settings.MOD_SERVER_API_URL, timeout=self.GAME_SERVER_TIMEOUT
         )
         self.event_http_client_game = aiohttp.ClientSession(
-            base_url=settings.EVENT_GAME_SERVER_API_URL
+            base_url=settings.EVENT_GAME_SERVER_API_URL, timeout=self.GAME_SERVER_TIMEOUT
         )
         self.event_http_client_mod = aiohttp.ClientSession(
-            base_url=settings.EVENT_MOD_SERVER_API_URL
+            base_url=settings.EVENT_MOD_SERVER_API_URL, timeout=self.GAME_SERVER_TIMEOUT
         )
         guild = discord.Object(id=settings.DISCORD_GUILD_ID)
         await self.add_cog(ModerationCog(self), guild=guild)
