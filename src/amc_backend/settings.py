@@ -337,6 +337,7 @@ DISCORD_VEHICLE_LOGS_CHANNEL_ID = int(
     os.environ.get("DISCORD_VEHICLE_LOGS_CHANNEL_ID", 0)
 )
 DISCORD_EVENTS_CHANNEL_ID = int(os.environ.get("DISCORD_EVENTS_CHANNEL_ID", 0))
+DISCORD_PARTS_LOG_CHANNEL_ID = int(os.environ.get("DISCORD_PARTS_LOG_CHANNEL_ID", 0))
 DISCORD_TEAMS_CHANNEL_ID = int(os.environ.get("DISCORD_TEAMS_CHANNEL_ID", 0))
 # Role allowed to use the event-admin Discord commands (join/kick to event).
 # Default preserves the pre-env literal; set explicitly in the amc-server flake.

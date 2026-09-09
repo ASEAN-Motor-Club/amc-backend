@@ -180,7 +180,7 @@ class UpsertGameEventCharacterTests(TestCase):
         game_event, _ = await _upsert_game_event(event_data)
 
         player_info = event_data["Players"][0]
-        gec = await _upsert_game_event_character(game_event, player_info)
+        gec, _created = await _upsert_game_event_character(game_event, player_info)
 
         self.assertIsNotNone(gec)
         self.assertEqual(gec.rank, 0)
@@ -193,13 +193,13 @@ class UpsertGameEventCharacterTests(TestCase):
 
         player_info = event_data["Players"][0]
         player_info["bFinished"] = True
-        gec = await _upsert_game_event_character(game_event, player_info)
+        gec, _created = await _upsert_game_event_character(game_event, player_info)
         self.assertIsNotNone(gec)
         self.assertTrue(gec.finished)
 
         # Second call should return None (already finished)
         player_info["Rank"] = 1
-        result = await _upsert_game_event_character(game_event, player_info)
+        result, _created = await _upsert_game_event_character(game_event, player_info)
         self.assertIsNone(result)
 
     async def test_records_lap_section_time(self):
@@ -212,7 +212,7 @@ class UpsertGameEventCharacterTests(TestCase):
         player_info["LastSectionTotalTimeSeconds"] = 69.73
         player_info["Rank"] = 1
 
-        gec = await _upsert_game_event_character(game_event, player_info)
+        gec, _created = await _upsert_game_event_character(game_event, player_info)
         self.assertIsNotNone(gec)
 
         lst = await LapSectionTime.objects.filter(
@@ -231,7 +231,7 @@ class UpsertGameEventCharacterTests(TestCase):
         player_info["Laps"] = 1
         player_info["LastSectionTotalTimeSeconds"] = 69.73
 
-        gec = await _upsert_game_event_character(game_event, player_info)
+        gec, _created = await _upsert_game_event_character(game_event, player_info)
         await gec.arefresh_from_db()
         self.assertEqual(gec.first_section_total_time_seconds, 69.73)
 
@@ -244,7 +244,7 @@ class UpsertGameEventCharacterTests(TestCase):
         player_info["Laps"] = 1
         player_info["LastSectionTotalTimeSeconds"] = 99_999_999.0  # buggy value
 
-        gec = await _upsert_game_event_character(game_event, player_info)
+        gec, _created = await _upsert_game_event_character(game_event, player_info)
         await gec.arefresh_from_db()
         self.assertEqual(gec.first_section_total_time_seconds, 0)
 
@@ -257,7 +257,7 @@ class UpsertGameEventCharacterTests(TestCase):
         player_info["bWrongEngine"] = True
 
         game_event, _ = await _upsert_game_event(event_data)
-        gec = await _upsert_game_event_character(game_event, player_info)
+        gec, _created = await _upsert_game_event_character(game_event, player_info)
         await gec.arefresh_from_db()
         self.assertTrue(gec.wrong_vehicle)
         self.assertTrue(gec.wrong_engine)
@@ -274,7 +274,7 @@ class UpsertGameEventCharacterTests(TestCase):
         run1_player["bWrongVehicle"] = True
         run1_player["bWrongEngine"] = True
         run1_event, _ = await _upsert_game_event(run1_data)
-        run1_gec = await _upsert_game_event_character(run1_event, run1_player)
+        run1_gec, _created = await _upsert_game_event_character(run1_event, run1_player)
         await run1_gec.arefresh_from_db()
         self.assertTrue(run1_gec.wrong_vehicle)
 
@@ -284,7 +284,7 @@ class UpsertGameEventCharacterTests(TestCase):
         run2_event, _ = await _upsert_game_event(restart_data)
         self.assertIsNotNone(run2_event)
         self.assertNotEqual(run2_event.pk, run1_event.pk)
-        run2_gec = await _upsert_game_event_character(
+        run2_gec, _created = await _upsert_game_event_character(
             run2_event, restart_data["Players"][0]
         )
         await run2_gec.arefresh_from_db()
@@ -322,7 +322,7 @@ class UpsertGameEventCharacterTests(TestCase):
         player_info["BestLapTime"] = 9.9
         player_info["Laps"] = 5
 
-        gec = await _upsert_game_event_character(game_event, player_info)
+        gec, _created = await _upsert_game_event_character(game_event, player_info)
         await gec.arefresh_from_db()
         self.assertEqual(gec.lap_times, [])
         self.assertEqual(gec.best_lap_time, 0)
@@ -344,7 +344,7 @@ class UpsertGameEventCharacterTests(TestCase):
 
         player_info = event_data["Players"][0]
         player_info["bWrongVehicle"] = False
-        gec = await _upsert_game_event_character(game_event, player_info)
+        gec, _created = await _upsert_game_event_character(game_event, player_info)
         self.assertFalse(gec.wrong_vehicle)
 
         # Player finishes; the row isn't marked yet, but the payload says
@@ -445,7 +445,7 @@ class JoinEventReconcileTests(TestCase):
         game_event, _ = await _upsert_game_event(event_data)
 
         finisher = _make_joiner(bFinished=True)
-        gec = await _upsert_game_event_character(game_event, finisher)
+        gec, _created = await _upsert_game_event_character(game_event, finisher)
         self.assertTrue(gec.finished)
 
         mock_get_live.return_value = dict(
@@ -576,10 +576,10 @@ class LeaveReconcileTests(TestCase):
         event_data = _make_event_data(state=1)
         game_event, _ = await _upsert_game_event(event_data)
         finisher = _roster_member(3, "finisher", bFinished=True)
-        finished_row = await _upsert_game_event_character(game_event, finisher)
+        finished_row, _created = await _upsert_game_event_character(game_event, finisher)
         self.assertTrue(finished_row.finished)
         raced_dnf = _roster_member(4, "raceddnf")
-        raced_row = await _upsert_game_event_character(game_event, raced_dnf)
+        raced_row, _created = await _upsert_game_event_character(game_event, raced_dnf)
         raced_row.laps = 1
         await raced_row.asave(update_fields=["laps"])
 
@@ -831,7 +831,7 @@ class CrosscheckTests(TestCase):
         event_data = _make_event_data(state=1)
         game_event, _ = await _upsert_game_event(event_data)
         raced = _roster_member(11, "raceddnf")
-        raced_row = await _upsert_game_event_character(game_event, raced)
+        raced_row, _created = await _upsert_game_event_character(game_event, raced)
         raced_row.laps = 2
         await raced_row.asave(update_fields=["laps"])
         live = dict(event_data, Players=[])
@@ -1025,7 +1025,7 @@ class EventDispatchTests(TestCase):
         player_info = event_data["Players"][0]
         player_info["SectionIndex"] = 0
         player_info["Laps"] = 1
-        gec = await _upsert_game_event_character(game_event, player_info)
+        gec, _created = await _upsert_game_event_character(game_event, player_info)
 
         event = {
             "hook": "ServerPassedRaceSection",
@@ -1768,7 +1768,7 @@ class RunRowResolutionTests(TestCase):
         event_data = _make_event_data(state=2)
         event_data["EventGuid"] = self.RUN_GUID
         game_event, _ = await _upsert_game_event(event_data)
-        gec = await _upsert_game_event_character(
+        gec, _created = await _upsert_game_event_character(
             game_event, event_data["Players"][0]
         )
         await GameEventCharacter.objects.filter(pk=gec.pk).aupdate(
