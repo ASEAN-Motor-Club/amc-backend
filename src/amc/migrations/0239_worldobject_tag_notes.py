@@ -3,7 +3,7 @@ from django.db import migrations, models
 
 class Migration(migrations.Migration):
     dependencies = [
-        ("amc", "0237_alter_namemoderationlog_action"),
+        ("amc", "0238_govcontributionlog"),
     ]
 
     operations = [

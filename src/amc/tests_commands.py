@@ -10,6 +10,7 @@ from amc.commands.admin import (
     cmd_bill,
     cmd_exit,
     cmd_remove_fuel_pump,
+    cmd_remove_garage,
     cmd_save_vehicle,
     cmd_spawn,
     cmd_spawn_assets,
@@ -1286,6 +1287,42 @@ class CommandsTestCase(TestCase):
             await cmd_remove_fuel_pump(self.ctx)
             self.ctx.reply.assert_called()
             self.assertIn("No Fuel Pumps Found", self.ctx.reply.call_args.args[0])
+
+    async def test_cmd_remove_garage(self):
+        self.ctx.player_info["bIsAdmin"] = True
+        self.ctx.player_info["Location"] = {"X": 0, "Y": 0, "Z": 0}
+
+        near = MagicMock()
+        near.config = {"Location": {"X": 100, "Y": 0, "Z": 0}}
+        near.tag = "garage_tag_1"
+        near.adelete = AsyncMock()
+        no_config = MagicMock()
+        no_config.config = None
+        no_config.adelete = AsyncMock()
+        far = MagicMock()
+        far.config = {"Location": {"X": 5000, "Y": 0, "Z": 0}}
+        far.tag = "garage_tag_2"
+        far.adelete = AsyncMock()
+
+        with (
+            patch(
+                "amc.commands.admin.despawn_by_tag", new=AsyncMock()
+            ) as mock_despawn,
+            patch("amc.models.Garage.objects.all") as mock_all,
+        ):
+            mock_all.return_value.__aiter__.return_value = [near, no_config, far]
+
+            await cmd_remove_garage(self.ctx)
+
+            # Nearby garage despawned + deleted; config-less and far ones skipped
+            mock_despawn.assert_awaited_once_with(
+                self.ctx.http_client_mod, "garage_tag_1"
+            )
+            near.adelete.assert_awaited_once()
+            no_config.adelete.assert_not_awaited()
+            far.adelete.assert_not_awaited()
+            self.ctx.reply.assert_called()
+            self.assertIn("Removed 1", self.ctx.reply.call_args.args[0])
 
     async def test_cmd_spawn(self):
         self.ctx.player_info["bIsAdmin"] = True
