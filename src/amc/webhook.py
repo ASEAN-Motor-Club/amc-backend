@@ -252,6 +252,7 @@ async def process_events(
     )
     active_term = await MinistryTerm.objects.filter(is_active=True).afirst()
 
+    fraud_flags: dict[int, bool] = {}
     for character_guid, es in grouped_player_events:
         if not character_guid:
             continue
@@ -316,12 +317,16 @@ async def process_events(
                 )
                 raise e
 
-        # Claw back money deposited by the game for zero-delivery cargos.
+        # Claw back money the game deposited for fraud-marked or
+        # zero-delivery events. The wallet transfer removes the money, and
+        # we subtract it from total_base_payment so profit splitting / loan
+        # repayment / savings only apply to the legitimate portion.
+        fraud_flags[character.pk] = total_clawback > 0
         if total_clawback > 0 and http_client_mod:
             await transfer_money(
                 http_client_mod,
                 int(-total_clawback),
-                "Non-Delivery Cargo",
+                "Fraud clawback",
                 str(character.player.unique_id),
             )
             total_base_payment -= total_clawback
@@ -356,7 +361,9 @@ async def process_events(
         )
 
     if http_client_mod:
-        await on_player_profits(player_profits, http_client_mod, http_client)
+        await on_player_profits(
+            player_profits, http_client_mod, http_client, fraud_flags=fraud_flags
+        )
 
     # Persist high-water marks after successful processing
     persist_watermarks(max_seq, last_processed, events)

@@ -37,7 +37,10 @@ from amc.mod_server import (
     transfer_money,
 )
 from amc.fraud_detection import validate_cargo_payment
-from amc.pipeline.discord import post_discord_delivery_embed
+from amc.pipeline.discord import (
+    post_discord_delivery_embed,
+    post_discord_fraud_alert,
+)
 from amc.pipeline.delivery import atomic_process_delivery
 from amc.police import SECURITY_BONUS_RATE, SECURITY_BONUS_MAX, get_active_police_count
 from amc.subsidies import get_subsidy_for_cargo, subsidise_player
@@ -103,6 +106,7 @@ async def handle_cargo_arrived(event, player, character, ctx):
         log.payment += get_cargo_bonus(log.cargo_key, log.payment, log.damage or 0)
 
     # --- 4. Fraud detection ---
+    total_fraud_excess = 0
     for log in logs:
         excess = await validate_cargo_payment(
             cargo_key=log.cargo_key,
@@ -112,6 +116,7 @@ async def handle_cargo_arrived(event, player, character, ctx):
             destination_point=log.destination_point,
         )
         if excess > 0:
+            total_fraud_excess += excess
             log.payment = max(0, log.payment - excess)
             logger.warning(
                 "Fraud detected (cargo): player=%s cargo=%s original=%d reduced=%d excess=%d",
@@ -120,6 +125,16 @@ async def handle_cargo_arrived(event, player, character, ctx):
                 log.payment + excess,
                 log.payment,
                 excess,
+            )
+            post_discord_fraud_alert(
+                ctx.discord_client,
+                kind="cargo_over_threshold",
+                character_name=character.name if character else "unknown",
+                player_id=str(character.player.unique_id) if character else "unknown",
+                original_payment=log.payment + excess,
+                clawed_back=excess,
+                final_payment=log.payment,
+                detail=f"Cargo {log.cargo_key} exceeded fraud thresholds.",
             )
 
     await ServerCargoArrivedLog.objects.abulk_create(logs)
@@ -356,7 +371,15 @@ async def handle_cargo_arrived(event, player, character, ctx):
                         message="Risk Premium",
                     )
 
-    return total_payment, total_subsidy, 0, 0
+    # Contract: base_pay includes the clawback amount; process_events claws
+    # total_fraud_excess from the wallet and subtracts it from the batch
+    # income so loan repayment / savings only see the legitimate portion.
+    return (
+        total_payment + total_fraud_excess,
+        total_subsidy,
+        0,
+        total_fraud_excess,
+    )
 
 
 # ---------------------------------------------------------------------------

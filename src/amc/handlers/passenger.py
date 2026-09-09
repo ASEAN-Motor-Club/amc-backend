@@ -13,6 +13,7 @@ from amc.handlers import register
 from amc.models import ServerPassengerArrivedLog
 from amc.mod_server import show_popup, transfer_money
 from amc.fraud_detection import validate_passenger_payment
+from amc.pipeline.discord import post_discord_fraud_alert
 from amc.subsidies import get_passenger_subsidy
 
 logger = logging.getLogger("amc.webhook.handlers.passenger")
@@ -58,12 +59,6 @@ async def handle_passenger_arrived(event, player, character, ctx):
         log.payment = 0
         await log.asave()
         if base_payment > 0 and character and ctx.http_client_mod:
-            await transfer_money(
-                ctx.http_client_mod,
-                int(-base_payment),
-                "Invalid Passenger",
-                str(character.player.unique_id),
-            )
             asyncio.create_task(
                 show_popup(
                     ctx.http_client_mod,
@@ -72,12 +67,24 @@ async def handle_passenger_arrived(event, player, character, ctx):
                     player_id=str(character.player.unique_id),
                 )
             )
+            post_discord_fraud_alert(
+                ctx.discord_client,
+                kind="passenger_zero_origin",
+                character_name=character.name,
+                player_id=str(character.player.unique_id),
+                original_payment=base_payment,
+                clawed_back=base_payment,
+                final_payment=0,
+                detail="Passenger event rejected: start location at world origin (0,0,0).",
+            )
         logger.warning(
             "Exploit detected: passenger with zero start location for player %s (payment=%s)",
             player.unique_id,
             base_payment,
         )
-        return 0, 0, 0, 0
+        # Contract: base_pay includes the clawback amount so the batch
+        # subtraction in process_events nets this event to zero.
+        return base_payment, 0, 0, base_payment
 
     # Fraud detection: validate payment against type ceiling
     passenger_type_int = int(log.passenger_type) if log.passenger_type else 0
@@ -93,6 +100,16 @@ async def handle_passenger_arrived(event, player, character, ctx):
             original,
             base_payment,
             fraud_excess,
+        )
+        post_discord_fraud_alert(
+            ctx.discord_client,
+            kind="passenger_over_ceiling",
+            character_name=character.name if character else "unknown",
+            player_id=str(player.unique_id),
+            original_payment=original,
+            clawed_back=fraud_excess,
+            final_payment=base_payment,
+            detail=f"Passenger type {passenger_type_int} exceeded the payment ceiling.",
         )
 
     # Taxi bonuses
@@ -185,7 +202,10 @@ async def handle_passenger_arrived(event, player, character, ctx):
             )
 
     subsidy = get_passenger_subsidy(log)
-    return log.payment, subsidy, 0, 0
+    # Contract: base_pay includes the clawback amount; process_events claws
+    # fraud_excess from the wallet and subtracts it from the batch income so
+    # loan repayment / savings only see the legitimate portion.
+    return log.payment + fraud_excess, subsidy, 0, fraud_excess
 
 
 @register("ServerAcceptPassenger")

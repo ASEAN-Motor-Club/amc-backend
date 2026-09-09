@@ -26,7 +26,10 @@ PARTY_BONUS_ENABLED = os.environ.get("PARTY_BONUS_ENABLED", "").lower() in (
 PARTY_BONUS_RATE = 0.05  # 5% per extra party member
 
 
-async def on_player_profits(player_profits, session, http_client=None):
+async def on_player_profits(
+    player_profits, session, http_client=None, fraud_flags=None
+):
+    fraud_flags = fraud_flags or {}
     for character, subsidy, base_payment, contract_payment in player_profits:
         await on_player_profit(
             character,
@@ -35,6 +38,7 @@ async def on_player_profits(player_profits, session, http_client=None):
             session,
             http_client,
             contract_payment=contract_payment,
+            fraud_marked=fraud_flags.get(character.pk, False),
         )
 
 
@@ -46,6 +50,7 @@ async def on_player_profit(
     http_client=None,
     contract_payment=0,
     skip_gov_redirect=False,
+    fraud_marked=False,
 ):
     """Process a player's profit after party splitting.
 
@@ -126,7 +131,9 @@ async def on_player_profit(
 
     loan_repayment = await repay_loan_for_profit(character, actual_income, session)
     savings = actual_income - loan_repayment
-    if savings > 0:
+    # Fraud-marked batches never sweep earnings into the bank: the money
+    # stays in the wallet where clawbacks can reach it.
+    if savings > 0 and not fraud_marked:
         await set_aside_player_savings(character, savings, session)
 
 
