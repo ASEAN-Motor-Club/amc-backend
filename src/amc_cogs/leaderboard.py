@@ -44,16 +44,20 @@ def _fmt_money(value: int) -> str:
 
 
 def _circle_rgba(png_bytes: bytes):
-    """Decode avatar PNG bytes and apply an antialiased circular alpha mask."""
-    import numpy as np
-    from matplotlib import image as mimage
+    """Decode avatar bytes, normalize to AVATAR_SIZE, apply an antialiased circular alpha mask.
 
-    arr = mimage.imread(io.BytesIO(png_bytes))
-    if arr.ndim == 2:
-        arr = np.dstack([arr] * 3)
-    if arr.shape[2] == 3:
-        arr = np.dstack([arr, np.ones(arr.shape[:2])])
-    arr = np.asarray(arr, dtype=float)
+    The Discord CDN ignores ?size= for default avatars and serves them at
+    256x256, so every image is resized to AVATAR_SIZE before masking —
+    OffsetImage's fixed zoom would otherwise render default avatars 2x too
+    large.
+    """
+    import numpy as np
+    from PIL import Image
+
+    img = Image.open(io.BytesIO(png_bytes)).convert("RGBA")
+    if img.width != AVATAR_SIZE or img.height != AVATAR_SIZE:
+        img = img.resize((AVATAR_SIZE, AVATAR_SIZE), Image.LANCZOS)
+    arr = np.asarray(img, dtype=float) / 255.0
     h, w = arr.shape[:2]
     n = min(h, w)
     yy, xx = np.mgrid[0:h, 0:w]

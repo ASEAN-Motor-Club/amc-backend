@@ -12,6 +12,7 @@ from django.test import TestCase
 from amc.factories import CharacterFactory
 from amc.models import GovContributionLog, Player
 from amc_cogs.leaderboard import (
+    AVATAR_SIZE,
     GOV_BOARD_FILE,
     LeaderboardCog,
     _circle_rgba,
@@ -67,6 +68,15 @@ class CircleMaskTests(TestCase):
         self.assertEqual(rgba[0, 0, 3], 0.0)
         self.assertEqual(rgba[h - 1, w - 1, 3], 0.0)
         self.assertEqual(rgba[h // 2, w // 2, 3], 1.0)
+
+    def test_default_avatar_256_normalized_to_avatar_size(self):
+        """Discord CDN serves default avatars at 256px regardless of ?size=;
+        the mask normalizes to AVATAR_SIZE so all discs render the same size."""
+        rgba = _circle_rgba(_png_bytes(256, 256))
+        self.assertEqual(rgba.shape[0], AVATAR_SIZE)
+        self.assertEqual(rgba.shape[1], AVATAR_SIZE)
+        self.assertEqual(rgba[0, 0, 3], 0.0)
+        self.assertEqual(rgba[AVATAR_SIZE // 2, AVATAR_SIZE // 2, 3], 1.0)
 
 
 class RenderGovBoardTests(TestCase):
