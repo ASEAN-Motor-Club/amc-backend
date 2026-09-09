@@ -36,6 +36,7 @@ from amc.models import (
     TeleportPoint,
 )
 from amc.enums import VehicleKey, VehicleKeyByLabel
+from amc.spawnable_objects import SPAWNABLE_OBJECT_CATEGORIES, SPAWNABLE_OBJECTS
 from django.contrib.gis.geos import Point
 from django.utils import timezone
 from django.utils.translation import gettext as _, gettext_lazy
@@ -867,6 +868,82 @@ async def cmd_spawn_asset(ctx: CommandContext, asset_path: str):
     await ctx.reply(
         _("Spawned asset: {path} (#{id})").format(
             path=asset_path, id=world_obj.pk
+        )
+    )
+
+
+@registry.register(
+    "/spawn_object",
+    description=gettext_lazy(
+        "Spawn a garage/world object by alias at your location (Admin)"
+    ),
+    category="Admin",
+)
+async def cmd_spawn_object(ctx: CommandContext, alias: str | None = None):
+    if not ctx.player_info or not ctx.player_info.get("bIsAdmin"):
+        await ctx.reply(_("Admin-only"))
+        return
+
+    if not alias:
+        lines = ["<Title>Spawnable Objects</>"]
+        for category in SPAWNABLE_OBJECT_CATEGORIES:
+            objs = [
+                o
+                for o in SPAWNABLE_OBJECTS.values()
+                if o.category == category
+            ]
+            lines.append("")
+            lines.append(f"<Bold>{category}</>")
+            lines.extend(f"{o.alias} — {o.description}" for o in objs)
+        await ctx.reply("\n".join(lines))
+        return
+
+    obj = SPAWNABLE_OBJECTS.get(alias.strip().lower())
+    if obj is None:
+        await ctx.reply(
+            _(
+                "<Title>Unknown Alias</>\n\n"
+                "No spawnable object named {alias}.\n"
+                "Use /spawn_object to list available aliases."
+            ).format(alias=alias)
+        )
+        return
+
+    try:
+        player_data = await get_player(
+            ctx.http_client_mod, str(ctx.player.unique_id), force_refresh=True
+        )
+    except Exception:  # a failed yaw fetch must not abort the spawn
+        logger.warning("spawn_object: get_player failed, falling back", exc_info=True)
+        player_data = None
+
+    view_loc = player_data.get("ViewLocation") if player_data else None
+    if view_loc:
+        loc = {"X": view_loc["X"], "Y": view_loc["Y"], "Z": view_loc["Z"]}
+    else:
+        loc = {
+            "X": ctx.player_info["Location"]["X"],
+            "Y": ctx.player_info["Location"]["Y"],
+            "Z": ctx.player_info["Location"]["Z"] - 30,
+        }
+    rot = player_data.get("Rotation", {}) if player_data else {}
+    yaw = rot.get("Yaw", 0.0)
+
+    await spawn_assets(
+        ctx.http_client_mod,
+        [{"AssetPath": obj.asset_path, "Location": loc, "Rotation": rot}],
+    )
+
+    world_obj = await WorldObject.objects.acreate(
+        asset_path=obj.asset_path,
+        location_x=loc["X"],
+        location_y=loc["Y"],
+        location_z=loc["Z"],
+        yaw=yaw,
+    )
+    await ctx.reply(
+        _("<Title>Object Spawned</>\n\n{desc} (<Bold>{alias}</>) spawned (#{id}).").format(
+            desc=obj.description, alias=obj.alias, id=world_obj.pk
         )
     )
 
