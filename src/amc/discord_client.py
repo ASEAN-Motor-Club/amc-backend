@@ -21,6 +21,7 @@ from amc_cogs.crime_stats import CrimeStatsCog
 from amc_cogs.faction_stats import FactionStatsCog
 from amc_cogs.housing import HousingCog
 from amc_cogs.power_calc import PowerCalcCog
+from amc_cogs.parts_audit import PartsAuditCog
 from amc_cogs.beammp_status import BeamMPStatusCog
 from amc_cogs.name_review import NameReviewCog
 from amc_cogs.active_role import ActiveRoleCog
@@ -67,6 +68,7 @@ class AMCDiscordBot(commands.Bot):
         await self.add_cog(FactionStatsCog(self), guild=guild)
         await self.add_cog(HousingCog(self), guild=guild)
         await self.add_cog(PowerCalcCog(self), guild=guild)
+        await self.add_cog(PartsAuditCog(self), guild=guild)
         await self.add_cog(BeamMPStatusCog(self), guild=guild)
         await self.add_cog(NameReviewCog(self), guild=guild)
         await self.add_cog(ActiveRoleCog(self), guild=guild)

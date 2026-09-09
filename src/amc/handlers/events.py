@@ -25,6 +25,7 @@ from django.utils import timezone
 from amc.events import create_event_embed, show_results_popup
 from amc.handlers import register
 from amc.mod_server import get_event_state, get_events, transfer_exp
+from amc.parts_audit import audit_event_join
 from amc.models import (
     Character,
     GameEvent,
@@ -183,15 +184,20 @@ async def _upsert_game_event(event_data: dict):
     return game_event, transition
 
 
-async def _upsert_game_event_character(game_event, player_info: dict):
-    """Create or update a ``GameEventCharacter`` from SSE player data."""
+async def _upsert_game_event_character(game_event, player_info: dict) -> tuple:
+    """Create or update a ``GameEventCharacter`` from SSE player data.
+
+    Returns ``(row, created)`` — ``created`` is True only for a brand-new
+    participant row (a fresh join in the current run), which the join audit
+    keys on.
+    """
     character_id = player_info.get("CharacterId", {})
     player_name = player_info.get("PlayerName", "")
     unique_net_id = character_id.get("UniqueNetId", "")
     character_guid = character_id.get("CharacterGuid", "")
 
     if not unique_net_id:
-        return None
+        return None, False
 
     character, *_ = await Character.objects.aget_or_create_character_player(
         player_name,
@@ -203,7 +209,7 @@ async def _upsert_game_event_character(game_event, player_info: dict):
         character=character, game_event=game_event, finished=True
     ).aexists()
     if player_finished:
-        return None
+        return None, False
 
     defaults = {
         "last_section_total_time_seconds": player_info.get(
@@ -242,7 +248,7 @@ async def _upsert_game_event_character(game_event, player_info: dict):
         defaults["wrong_vehicle"] = player_info.get("bWrongVehicle", False)
         defaults["wrong_engine"] = player_info.get("bWrongEngine", False)
 
-    game_event_character, _ = await GameEventCharacter.objects.aupdate_or_create(
+    game_event_character, created = await GameEventCharacter.objects.aupdate_or_create(
         character=character,
         game_event=game_event,
         defaults=defaults,
@@ -286,12 +292,12 @@ async def _upsert_game_event_character(game_event, player_info: dict):
                 first_section_total_time_seconds=0
             )
 
-    return game_event_character
+    return game_event_character, created
 
 
 async def _reconcile_event_players(
     http_client_mod, event_guid: str, require_state=None, prune_absent=False,
-    live_event=None,
+    live_event=None, discord_client=None,
 ):
     """Re-sync a race event's participants from the mod's live state.
 
@@ -354,11 +360,32 @@ async def _reconcile_event_players(
         )
         return game_event
     live_guids = []
+    # New-joiner audit (Yuuka 2026-09-09): every player who joins a Ready
+    # event — including the auto-joined host — gets a silent parts check
+    # logged to Discord.  Gated on live state 1: joins only happen pre-race,
+    # and the 1→2 start reconcile creating rows for a never-reconciled event
+    # must not mass-audit the whole lobby at the start signal.
+    audited_joiners: list[tuple[str, str]] = []
     for player_info in live_event.get("Players", []):
-        await _upsert_game_event_character(game_event, player_info)
-        guid = (player_info.get("CharacterId") or {}).get("CharacterGuid", "")
+        _, created = await _upsert_game_event_character(game_event, player_info)
+        character_id = player_info.get("CharacterId") or {}
+        guid = character_id.get("CharacterGuid", "")
+        if created and live_event.get("State") == 1 and guid:
+            audited_joiners.append((guid, player_info.get("PlayerName", "")))
         if guid:
             live_guids.append(guid)
+    if audited_joiners and http_client_mod is not None:
+        event_name = game_event.name or event_guid[:8]
+        for guid, player_name in audited_joiners:
+            try:
+                await audit_event_join(
+                    http_client_mod, guid, player_name, event_name, discord_client
+                )
+            except Exception:
+                logger.warning(
+                    "Join audit failed for %s in %s", player_name, event_guid,
+                    exc_info=True,
+                )
     if prune_absent and (live_event.get("State") == 1 or require_state == 2):
         pruned = await GameEventCharacter.objects.filter(
             game_event=game_event,
@@ -391,7 +418,7 @@ _crosscheck_consecutive_failures = 0
 _CROSSCHECK_FAILURE_LOG_EVERY = 12
 
 
-async def crosscheck_live_events(http_client_mod) -> list[str]:
+async def crosscheck_live_events(http_client_mod, discord_client=None) -> list[str]:
     """Poll live event state (``GET /events``) against the DB.
 
     For every live race event still in Ready/Racing:
@@ -459,7 +486,8 @@ async def crosscheck_live_events(http_client_mod) -> list[str]:
                     guid,
                 )
             await _reconcile_event_players(
-                http_client_mod, guid, require_state=1, prune_absent=True
+                http_client_mod, guid, require_state=1, prune_absent=True,
+                discord_client=discord_client,
             )
             continue
 
@@ -720,6 +748,7 @@ async def handle_change_event_state(event, player, character, ctx):
             event_data.get("EventGuid"),
             require_state=2,
             prune_absent=True,
+            discord_client=getattr(ctx, "discord_client", None),
         )
 
     if transition and transition[1] == 3:
@@ -961,7 +990,8 @@ async def handle_join_event(event, player, character, ctx):
         return 0, 0, 0, 0
 
     game_event = await _reconcile_event_players(
-        ctx.http_client_mod, event_guid, prune_absent=True
+        ctx.http_client_mod, event_guid, prune_absent=True,
+        discord_client=getattr(ctx, "discord_client", None),
     )
     if game_event is None:
         # Live fetch unavailable — fall back to the latest known row so
@@ -997,7 +1027,8 @@ async def handle_leave_event(event, player, character, ctx):
         return 0, 0, 0, 0
 
     game_event = await _reconcile_event_players(
-        ctx.http_client_mod, event_guid, prune_absent=True
+        ctx.http_client_mod, event_guid, prune_absent=True,
+        discord_client=getattr(ctx, "discord_client", None),
     )
     if game_event is None:
         # Live fetch unavailable — fall back to the latest known row so
