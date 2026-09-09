@@ -1896,6 +1896,12 @@ class ServerCargoArrivedLog(models.Model):
     payment = models.PositiveBigIntegerField()
     weight = models.FloatField(null=True, blank=True)
     damage = models.FloatField(null=True, blank=True)
+    # Game-side delivery job id (Net_DeliveryId). The mod re-emits
+    # ServerCargoArrived for one physical delivery in bursts; the handler
+    # pays only the first emission per (character, delivery_id, cargo_key)
+    # per day and books the rest with payment=0. Null for non-job
+    # deliveries (DeliveryId 0/absent) — never used as a dedupe key.
+    delivery_id = models.BigIntegerField(null=True, blank=True, db_index=True)
     sender_point = models.ForeignKey(
         "DeliveryPoint",
         models.SET_NULL,

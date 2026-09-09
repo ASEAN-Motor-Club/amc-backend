@@ -8,6 +8,7 @@ from __future__ import annotations
 import asyncio
 import itertools
 import logging
+from datetime import timedelta
 from operator import attrgetter
 
 from django.contrib.gis.geos import Point
@@ -82,6 +83,13 @@ async def handle_cargo_dumped(event, player, character, ctx):
 # ---------------------------------------------------------------------------
 
 
+# The mod re-emits ServerCargoArrived for one physical delivery in bursts
+# (2026-09-09: a single Coal run was emitted 17x and paid in full each
+# time). Emissions of the same (character, delivery_id, cargo_key) within
+# this window pay once; later emissions are booked with payment=0.
+DUPLICATE_DELIVERY_WINDOW = timedelta(hours=24)
+
+
 @register("ServerCargoArrived")
 async def handle_cargo_arrived(event, player, character, ctx):
     from amc.cargo import get_cargo_bonus
@@ -101,13 +109,30 @@ async def handle_cargo_arrived(event, player, character, ctx):
         ]
     )
 
+    # --- 2b. Duplicate-delivery suppression ---
+    # The game/mod re-emits arrivals for one delivery (same Net_DeliveryId).
+    # Only the first emission per (character, delivery_id, cargo_key) per
+    # window pays; duplicates are logged with payment=0 and excluded from
+    # every downstream step (bonus, clawback, subsidy, job, payment).
+    fresh_logs, duplicate_logs = await _split_duplicate_deliveries(
+        logs, character, timestamp
+    )
+    if duplicate_logs:
+        for log in duplicate_logs:
+            log.payment = 0
+        logger.warning(
+            "Duplicate cargo emissions suppressed: player=%s count=%d",
+            character.player.unique_id,
+            len(duplicate_logs),
+        )
+
     # --- 3. Apply game-level bonuses (damage bonus etc.) ---
-    for log in logs:
+    for log in fresh_logs:
         log.payment += get_cargo_bonus(log.cargo_key, log.payment, log.damage or 0)
 
     # --- 4. Fraud detection ---
     total_fraud_excess = 0
-    for log in logs:
+    for log in fresh_logs:
         excess = await validate_cargo_payment(
             cargo_key=log.cargo_key,
             payment=log.payment,
@@ -144,7 +169,7 @@ async def handle_cargo_arrived(event, player, character, ctx):
 
     guild_bonus_total = 0
     guild_session_bonuses: list[tuple[object, int]] = []
-    for log in logs:
+    for log in fresh_logs:
         session, bonus = await check_guild_cargo(
             character, log.cargo_key, log.payment, log.damage or 0
         )
@@ -182,10 +207,10 @@ async def handle_cargo_arrived(event, player, character, ctx):
             log.payment += bonus
     if guild_bonus_total > 0:
         await ServerCargoArrivedLog.objects.abulk_update(
-            logs, ["guild_session", "payment"]
+            fresh_logs, ["guild_session", "payment"]
         )
 
-    for log in logs:
+    for log in fresh_logs:
         if log.guild_session:
             from amc.guilds import check_guild_achievements
             await check_guild_achievements(character, log.guild_session, log, ctx.http_client_mod)
@@ -194,13 +219,13 @@ async def handle_cargo_arrived(event, player, character, ctx):
 
     # --- 6. Per-cargo-group: subsidy, delivery, job, supply chain ---
     total_subsidy = 0
-    total_payment = sum(log.payment for log in logs)
+    total_payment = sum(log.payment for log in fresh_logs)
     vehicle_key = character.last_vehicle_key or "" if character else ""
 
     key_by_cargo = attrgetter("cargo_key")
-    logs.sort(key=key_by_cargo)
+    fresh_logs.sort(key=key_by_cargo)
 
-    for cargo_key, group in itertools.groupby(logs, key=key_by_cargo):
+    for cargo_key, group in itertools.groupby(fresh_logs, key=key_by_cargo):
         group_list = list(group)
         quantity = len(group_list)
         payment = group_list[0].payment
@@ -408,6 +433,56 @@ def _parse_cargos(event):
     return valid_cargos
 
 
+def _extract_delivery_id(cargo) -> int | None:
+    """Net_DeliveryId as an int, or None when absent/zero/non-numeric.
+
+    DeliveryId 0 means 'non-job delivery' and is never used as a dedupe
+    key (it repeats across unrelated deliveries).
+    """
+    raw = cargo.get("Net_DeliveryId")
+    if raw in (None, 0, "0"):
+        return None
+    try:
+        return int(raw)
+    except (TypeError, ValueError):
+        return None
+
+
+async def _split_duplicate_deliveries(logs, character, timestamp):
+    """Split cargo logs into (fresh, duplicates) by prior emission.
+
+    A log is a duplicate when the same (character, delivery_id, cargo_key)
+    was already logged within DUPLICATE_DELIVERY_WINDOW. Logs without a
+    delivery id (DeliveryId 0/absent) are always fresh.
+    """
+    if character is None:
+        return list(logs), []
+    pending = {log.delivery_id for log in logs if log.delivery_id}
+    prior: set[tuple[int, str]] = set()
+    if pending:
+        prior = {
+            (delivery_id, cargo_key)
+            async for delivery_id, cargo_key in ServerCargoArrivedLog.objects.filter(
+                character=character,
+                delivery_id__in=pending,
+                timestamp__gte=timestamp - DUPLICATE_DELIVERY_WINDOW,
+            ).values_list("delivery_id", "cargo_key")
+        }
+    fresh, duplicates = [], []
+    seen: set[tuple[int, str]] = set()
+    for log in logs:
+        if log.delivery_id is None:
+            fresh.append(log)
+            continue
+        pair = (log.delivery_id, log.cargo_key)
+        if pair in prior or pair in seen:
+            duplicates.append(log)
+            continue
+        seen.add(pair)
+        fresh.append(log)
+    return fresh, duplicates
+
+
 async def _check_modded_vehicle(
     character, http_client_mod
 ) -> bool:
@@ -519,6 +594,7 @@ async def process_cargo_log(cargo, player, character, timestamp):
         payment=cargo["Net_Payment"],
         weight=cargo.get("Net_Weight", 0),
         damage=cargo["Net_Damage"],
+        delivery_id=_extract_delivery_id(cargo),
         sender_point=sender,
         destination_point=destination,
         data=cargo,
