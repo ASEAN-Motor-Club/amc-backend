@@ -295,6 +295,35 @@ async def _upsert_game_event_character(game_event, player_info: dict) -> tuple:
     return game_event_character, created
 
 
+async def _audit_new_joiners(
+    game_event, joined: list[tuple[str, str]], state, http_client_mod, discord_client
+) -> None:
+    """Silent parts audit for freshly created event-participant rows.
+
+    Shared by the Ready-state reconcile AND the ServerAddEvent /
+    ServerChangeEventState hooks: the creation hook records the
+    auto-joined host's row the instant an event appears (no
+    ServerJoinEvent exists for the host), so the crosscheck reconcile
+    alone never sees that row as ``created``.  Gated on state 1 — joins
+    only happen pre-race, and the 1→2 start reconcile creating rows for
+    a never-reconciled event must not mass-audit the whole lobby at the
+    start signal.
+    """
+    if not joined or state != 1 or http_client_mod is None:
+        return
+    event_name = game_event.name or game_event.guid[:8]
+    for guid, player_name in joined:
+        try:
+            await audit_event_join(
+                http_client_mod, guid, player_name, event_name, discord_client
+            )
+        except Exception:
+            logger.warning(
+                "Join audit failed for %s in %s", player_name, game_event.guid,
+                exc_info=True,
+            )
+
+
 async def _reconcile_event_players(
     http_client_mod, event_guid: str, require_state=None, prune_absent=False,
     live_event=None, discord_client=None,
@@ -360,11 +389,6 @@ async def _reconcile_event_players(
         )
         return game_event
     live_guids = []
-    # New-joiner audit (Yuuka 2026-09-09): every player who joins a Ready
-    # event — including the auto-joined host — gets a silent parts check
-    # logged to Discord.  Gated on live state 1: joins only happen pre-race,
-    # and the 1→2 start reconcile creating rows for a never-reconciled event
-    # must not mass-audit the whole lobby at the start signal.
     audited_joiners: list[tuple[str, str]] = []
     for player_info in live_event.get("Players", []):
         _, created = await _upsert_game_event_character(game_event, player_info)
@@ -374,18 +398,10 @@ async def _reconcile_event_players(
             audited_joiners.append((guid, player_info.get("PlayerName", "")))
         if guid:
             live_guids.append(guid)
-    if audited_joiners and http_client_mod is not None:
-        event_name = game_event.name or event_guid[:8]
-        for guid, player_name in audited_joiners:
-            try:
-                await audit_event_join(
-                    http_client_mod, guid, player_name, event_name, discord_client
-                )
-            except Exception:
-                logger.warning(
-                    "Join audit failed for %s in %s", player_name, event_guid,
-                    exc_info=True,
-                )
+    await _audit_new_joiners(
+        game_event, audited_joiners, live_event.get("State"),
+        http_client_mod, discord_client,
+    )
     if prune_absent and (live_event.get("State") == 1 or require_state == 2):
         pruned = await GameEventCharacter.objects.filter(
             game_event=game_event,
@@ -707,9 +723,20 @@ async def handle_add_event(event, player, character, ctx):
 
     game_event, _ = await _upsert_game_event(event_data)
 
-    # Process all players
+    # Process all players.  Freshly created rows in a Ready payload get the
+    # silent parts audit (Yuuka 2026-09-09): the auto-joined host's row is
+    # recorded HERE by the creation hook — before the crosscheck ever sees
+    # the event — so without this the host join is never audited.
+    joined: list[tuple[str, str]] = []
     for player_info in event_data.get("Players", []):
-        await _upsert_game_event_character(game_event, player_info)
+        _, created = await _upsert_game_event_character(game_event, player_info)
+        guid = (player_info.get("CharacterId") or {}).get("CharacterGuid", "")
+        if created and guid:
+            joined.append((guid, player_info.get("PlayerName", "")))
+    await _audit_new_joiners(
+        game_event, joined, event_data.get("State"),
+        ctx.http_client_mod, getattr(ctx, "discord_client", None),
+    )
 
     # Update Discord embed if one already exists for this event
     if game_event.discord_message_id:
@@ -734,9 +761,19 @@ async def handle_change_event_state(event, player, character, ctx):
         event_data.get("EventGuid"), game_event.state, transition,
     )
 
-    # Process all players
+    # Process all players (audit rule same as the AddEvent hook: a fresh
+    # row in a Ready payload = a join, e.g. an event re-opened into the
+    # lobby state).
+    joined: list[tuple[str, str]] = []
     for player_info in event_data.get("Players", []):
-        await _upsert_game_event_character(game_event, player_info)
+        _, created = await _upsert_game_event_character(game_event, player_info)
+        guid = (player_info.get("CharacterId") or {}).get("CharacterGuid", "")
+        if created and guid:
+            joined.append((guid, player_info.get("PlayerName", "")))
+    await _audit_new_joiners(
+        game_event, joined, event_data.get("State"),
+        ctx.http_client_mod, getattr(ctx, "discord_client", None),
+    )
 
     # The state-change snapshot was taken at hook time; players who joined
     # mid-countdown can be missing from it entirely (prod: a wrong-engine

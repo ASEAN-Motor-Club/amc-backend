@@ -80,20 +80,26 @@ def _audit_embed(player_name: str, vehicle: dict, parts: list[dict], source: str
     return embed
 
 
-async def _get_discord_channel(client):
-    """Resolve the audit channel; never hangs (bounded ready-wait, None when off)."""
+async def _resolve_audit_channel(client):
+    """Resolve the audit channel; never hangs (bounded ready-wait).
+
+    Returns ``(channel, disabled)`` — ``disabled`` is True when the feature
+    is OFF (channel id 0 or no client): callers treat that as "embed built,
+    delivery intentionally skipped" rather than a failure.  A configured
+    channel the bot cannot resolve (``get_channel`` None — private channel
+    the bot has no View-Channel access to) is NOT "disabled": it's a
+    misconfiguration the caller must surface.
+    """
     channel_id = int(settings.DISCORD_PARTS_LOG_CHANNEL_ID or 0)
-    if not channel_id:
-        return None
-    if client is None:
-        return None
+    if not channel_id or client is None:
+        return None, True
     if not client.is_ready():
         try:
             await asyncio.wait_for(client.wait_until_ready(), timeout=10)
         except asyncio.TimeoutError:
             logger.warning("Parts audit skipped — Discord client not ready")
-            return None
-    return client.get_channel(channel_id)
+            return None, False
+    return client.get_channel(channel_id), False
 
 
 async def audit_character(
@@ -105,10 +111,11 @@ async def audit_character(
 ) -> discord.Embed | None:
     """Fetch one character's last vehicle + parts and post the audit embed.
 
-    Returns the embed that was posted (or built, when no channel is
-    configured) so callers can count successes; None when the fetch failed
-    or there was nothing to audit.  Failures never propagate — a dead mod
-    endpoint or a missing channel must not break the join reconcile.
+    Returns the embed that was posted (or built when the feature is
+    disabled) so callers can count successes; None when the fetch failed,
+    there was nothing to audit, or the report could not be delivered.
+    Failures never propagate — a dead mod endpoint or a missing channel
+    must not break the join reconcile.
     """
     try:
         last_vehicle, parts_data = await asyncio.gather(
@@ -125,21 +132,37 @@ async def audit_character(
     vehicle = last_vehicle.get("vehicle")
     parts = parts_data.get("parts", [])
     if not vehicle or not parts:
+        logger.info(
+            "Parts audit skipped for %s (%s): mod returned no %s — player "
+            "may have no spawned vehicle yet",
+            player_name, character_guid,
+            "vehicle" if not vehicle else "parts data",
+        )
         return None
 
     embed = _audit_embed(player_name, vehicle, parts, source)
 
-    channel = await _get_discord_channel(discord_client)
+    channel, disabled = await _resolve_audit_channel(discord_client)
     if channel is None:
-        # Feature wired but channel unset/off: log the summary so it's
-        # still observable in the worker journal.
-        logger.info("Parts audit (%s) %s: %s", source, player_name, " | ".join(summarize_parts(parts)))
-        return embed
+        if disabled:
+            # Feature wired but channel unset/off: log the summary so it's
+            # still observable in the worker journal.
+            logger.info("Parts audit (%s) %s: %s", source, player_name, " | ".join(summarize_parts(parts)))
+            return embed
+        # Configured but unresolvable: private channel the bot can't see,
+        # deleted channel, stale ID. Loud — this must not pass silently.
+        logger.warning(
+            "Parts audit channel %s not found (bot lacks View Channel access "
+            "or channel is gone) — report for %s NOT delivered",
+            settings.DISCORD_PARTS_LOG_CHANNEL_ID, player_name,
+        )
+        return None
     try:
         await channel.send(embed=embed)
     except Exception:
         logger.warning("Parts audit Discord post failed for %s", player_name, exc_info=True)
         return None
+    logger.info("Parts audit delivered for %s (source: %s)", player_name, source)
     return embed
 
 

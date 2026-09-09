@@ -5,6 +5,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 
 from amc.handlers.events import _reconcile_event_players
+from amc.models import GameEvent
 from amc.parts_audit import summarize_parts
 
 pytestmark = [pytest.mark.asyncio]
@@ -130,9 +131,33 @@ class TestAuditCharacter:
             mock_settings.DISCORD_PARTS_LOG_CHANNEL_ID = 0
             result = await _audit(client, "guid-1", "tester")
 
-        # Still counts as audited (embed built), just nowhere to post it.
+        # Feature disabled: embed built (counts as audited), just nowhere
+        # to post it.
         assert result is not None
         client.get_channel.assert_not_called()
+
+    async def test_unresolvable_channel_returns_none_with_warning(self):
+        """Private channel the bot can't see: NOT delivered, not counted."""
+        client = MagicMock()
+        client.is_ready.return_value = True
+        client.get_channel.return_value = None  # bot lacks View Channel
+
+        async def fake_vehicle(session, guid):
+            return {"vehicle": {"fullName": "Elisa2"}}
+
+        async def fake_parts(session, guid, complete=False):
+            return {"parts": _installed_parts()}
+
+        with (
+            patch("amc.parts_audit.get_player_last_vehicle", fake_vehicle),
+            patch("amc.parts_audit.get_player_last_vehicle_parts", fake_parts),
+            patch("amc.parts_audit.settings") as mock_settings,
+        ):
+            mock_settings.DISCORD_PARTS_LOG_CHANNEL_ID = 12345
+            result = await _audit(client, "guid-1", "tester")
+
+        assert result is None
+        client.get_channel.assert_called_once_with(12345)
 
 
 async def _audit(client, guid, name):
@@ -201,37 +226,146 @@ class TestJoinAuditReconcile:
     async def test_audit_fires_once_for_new_joiner_and_not_for_known_row(self):
         audit = AsyncMock()
         live = _event_data(1, [_player("1", "alpha"), _player("2", "beta")])
-        with patch("amc.handlers.events.audit_event_join", audit):
-            game_event = await _reconcile_event_players(
-                object(), GUID, live_event=live
-            )
-            assert game_event is not None
-            assert audit.await_count == 2  # fresh join + fresh join
-            names = [call.args[2] for call in audit.await_args_list]
-            assert names == ["alpha", "beta"]
+        try:
+            with patch("amc.handlers.events.audit_event_join", audit):
+                game_event = await _reconcile_event_players(
+                    object(), GUID, live_event=live
+                )
+                assert game_event is not None
+                assert audit.await_count == 2  # fresh join + fresh join
+                names = [call.args[2] for call in audit.await_args_list]
+                assert names == ["alpha", "beta"]
 
-            # Reconcile again with the same roster: rows exist → no re-audit.
-            await _reconcile_event_players(object(), GUID, live_event=live)
-            assert audit.await_count == 2
+                # Reconcile again with the same roster: rows exist → no re-audit.
+                await _reconcile_event_players(object(), GUID, live_event=live)
+                assert audit.await_count == 2
+        finally:
+            await GameEvent.objects.filter(guid=GUID).adelete()
 
     async def test_no_audit_on_state_2_reconcile(self):
         audit = AsyncMock()
         # Event created while racing with an unrecorded lobby (the
         # start-transition backfill) — must not mass-audit.
         live = _event_data(2, [_player("3", "late")])
-        with patch("amc.handlers.events.audit_event_join", audit):
-            await _reconcile_event_players(object(), GUID, live_event=live)
-            assert audit.await_count == 0
+        try:
+            with patch("amc.handlers.events.audit_event_join", audit):
+                await _reconcile_event_players(object(), GUID, live_event=live)
+                assert audit.await_count == 0
+        finally:
+            await GameEvent.objects.filter(guid=GUID).adelete()
 
     async def test_no_audit_for_empty_roster_or_missing_players_key(self):
         audit = AsyncMock()
-        with patch("amc.handlers.events.audit_event_join", audit):
-            empty = _event_data(1, [])
-            await _reconcile_event_players(object(), GUID, live_event=empty)
-            malformed = dict(_event_data(1, [_player("4", "x")]))
-            malformed.pop("Players")
-            game_event = await _reconcile_event_players(
-                object(), GUID, live_event=malformed
-            )
-            assert game_event is not None
-            assert audit.await_count == 0
+        try:
+            with patch("amc.handlers.events.audit_event_join", audit):
+                empty = _event_data(1, [])
+                await _reconcile_event_players(object(), GUID, live_event=empty)
+                malformed = dict(_event_data(1, [_player("4", "x")]))
+                malformed.pop("Players")
+                game_event = await _reconcile_event_players(
+                    object(), GUID, live_event=malformed
+                )
+                assert game_event is not None
+                assert audit.await_count == 0
+        finally:
+            await GameEvent.objects.filter(guid=GUID).adelete()
+
+
+# ---------------------------------------------------------------------------
+# Hook wiring — the AddEvent hook records the auto-joined host's row BEFORE
+# the crosscheck reconcile ever runs, so the audit must fire there too
+# (prod miss 2026-09-09: host-only events were never audited).
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.django_db
+class TestJoinAuditHooks:
+    @staticmethod
+    def _ctx(http_client_mod=object(), discord_client=None):
+        from types import SimpleNamespace
+
+        return SimpleNamespace(
+            http_client_mod=http_client_mod, discord_client=discord_client
+        )
+
+    async def test_add_event_hook_audits_auto_joined_host(self):
+        from amc.handlers.events import handle_add_event
+
+        audit = AsyncMock()
+        try:
+            with patch("amc.handlers.events.audit_event_join", audit):
+                await handle_add_event(
+                    {"data": {"Event": _event_data(1, [_player("5", "host-1")])}},
+                    None,
+                    None,
+                    self._ctx(),
+                )
+                assert audit.await_count == 1
+                calls = audit.await_args_list
+                assert calls[0].args[1] == "CHAR5"
+                assert calls[0].args[2] == "host-1"
+                assert calls[0].args[3] == "Test Event"
+        finally:
+            await GameEvent.objects.filter(guid=GUID).adelete()
+
+    async def test_add_event_hook_no_audit_when_state_not_ready(self):
+        from amc.handlers.events import handle_add_event
+
+        audit = AsyncMock()
+        try:
+            with patch("amc.handlers.events.audit_event_join", audit):
+                await handle_add_event(
+                    {"data": {"Event": _event_data(2, [_player("6", "host-2")])}},
+                    None,
+                    None,
+                    self._ctx(),
+                )
+                assert audit.await_count == 0
+        finally:
+            await GameEvent.objects.filter(guid=GUID).adelete()
+
+    async def test_change_state_hook_audits_new_row_in_ready_payload(self):
+        from amc.handlers.events import handle_add_event, handle_change_event_state
+
+        audit = AsyncMock()
+        try:
+            with patch("amc.handlers.events.audit_event_join", audit):
+                # Event appears pre-seeded with an empty roster, then a
+                # state-1 payload arrives with a brand-new player.
+                await handle_add_event(
+                    {"data": {"Event": _event_data(1, [])}},
+                    None,
+                    None,
+                    self._ctx(),
+                )
+                await handle_change_event_state(
+                    {
+                        "data": {
+                            "Event": _event_data(1, [_player("7", "late-host")])
+                        }
+                    },
+                    None,
+                    None,
+                    self._ctx(),
+                )
+                assert audit.await_count == 1
+                calls = audit.await_args_list
+                assert calls[0].args[2] == "late-host"
+        finally:
+            await GameEvent.objects.filter(guid=GUID).adelete()
+
+    async def test_add_event_hook_no_audit_without_mod_client(self):
+        from amc.handlers.events import handle_add_event
+
+        audit = AsyncMock()
+        try:
+            with patch("amc.handlers.events.audit_event_join", audit):
+                await handle_add_event(
+                    {"data": {"Event": _event_data(1, [_player("8", "host-3")])}},
+                    None,
+                    None,
+                    self._ctx(http_client_mod=None),
+                )
+                assert audit.await_count == 0
+        finally:
+            await GameEvent.objects.filter(guid=GUID).adelete()
