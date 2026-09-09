@@ -11,11 +11,11 @@ from django.test import TestCase
 
 from amc.factories import CharacterFactory
 from amc.models import GovContributionLog, Player
+from amc_cogs.avatars import AVATAR_SIZE
+from amc_cogs.avatars import circle_rgba as _circle_rgba
 from amc_cogs.leaderboard import (
-    AVATAR_SIZE,
     GOV_BOARD_FILE,
     LeaderboardCog,
-    _circle_rgba,
     _fmt_money,
     _render_gov_board_png,
 )
