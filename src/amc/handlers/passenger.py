@@ -59,12 +59,6 @@ async def handle_passenger_arrived(event, player, character, ctx):
         log.payment = 0
         await log.asave()
         if base_payment > 0 and character and ctx.http_client_mod:
-            await transfer_money(
-                ctx.http_client_mod,
-                int(-base_payment),
-                "Invalid Passenger",
-                str(character.player.unique_id),
-            )
             asyncio.create_task(
                 show_popup(
                     ctx.http_client_mod,
@@ -88,7 +82,9 @@ async def handle_passenger_arrived(event, player, character, ctx):
             player.unique_id,
             base_payment,
         )
-        return 0, 0, 0, 0
+        # Contract: base_pay includes the clawback amount so the batch
+        # subtraction in process_events nets this event to zero.
+        return base_payment, 0, 0, base_payment
 
     # Fraud detection: validate payment against type ceiling
     passenger_type_int = int(log.passenger_type) if log.passenger_type else 0
@@ -206,7 +202,10 @@ async def handle_passenger_arrived(event, player, character, ctx):
             )
 
     subsidy = get_passenger_subsidy(log)
-    return log.payment, subsidy, 0, 0
+    # Contract: base_pay includes the clawback amount; process_events claws
+    # fraud_excess from the wallet and subtracts it from the batch income so
+    # loan repayment / savings only see the legitimate portion.
+    return log.payment + fraud_excess, subsidy, 0, fraud_excess
 
 
 @register("ServerAcceptPassenger")

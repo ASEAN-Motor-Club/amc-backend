@@ -61,7 +61,9 @@ async def handle_tow_request(event, player, character, ctx):
         case _:
             subsidy = 2_000 + payment * 0.5
 
-    return payment, subsidy, 0, 0
+    # Contract: base_pay includes the clawback amount; process_events claws
+    # fraud_excess from the wallet and subtracts it from the batch income.
+    return payment + fraud_excess, subsidy, 0, fraud_excess
 
 
 def _parse_timestamp(event):

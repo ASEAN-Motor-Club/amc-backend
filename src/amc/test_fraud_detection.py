@@ -1,4 +1,6 @@
+import asyncio
 import time
+from datetime import timedelta
 from unittest.mock import AsyncMock, MagicMock, patch
 
 from asgiref.sync import sync_to_async
@@ -24,7 +26,8 @@ from amc.models import (
     ServerTowRequestArrivedLog,
 )
 from amc.pipeline.discord import post_discord_fraud_alert
-from amc.webhook import process_event
+from amc.pipeline.profit import on_player_profit, on_player_profits
+from amc.webhook import process_event, process_events
 
 # ---------------------------------------------------------------------------
 # Pure function tests — validate_cargo_payment (async)
@@ -308,13 +311,15 @@ class FraudCargoIntegrationTests(TestCase):
         mock_treasury.return_value = 100_000
         player, character = await self._setup()
 
-        base_pay, _, _, _ = await process_event(
+        base_pay, _, _, clawback = await process_event(
             self._cargo_event(character, player, "BottlePallete", 500_000),
             player,
             character,
         )
         threshold = CARGO_PER_UNIT_THRESHOLDS["BottlePallete"]
-        self.assertEqual(base_pay, threshold)
+        # base_pay includes the clawback amount (process_events subtracts it).
+        self.assertEqual(base_pay, 500_000)
+        self.assertEqual(clawback, 500_000 - threshold)
 
     async def test_multiple_cargos_each_validated(self, mock_treasury, mock_rp):
         mock_rp.return_value = False
@@ -348,14 +353,15 @@ class FraudCargoIntegrationTests(TestCase):
                 "CharacterGuid": str(character.guid),
             },
         }
-        base_pay, _, _, _ = await process_event(event, player, character)
+        base_pay, _, _, clawback = await process_event(event, player, character)
 
         logs = [log async for log in ServerCargoArrivedLog.objects.all()]
         self.assertEqual(len(logs), 2)
         payments = sorted(log.payment for log in logs)
         self.assertEqual(payments[0], 5_000)
         self.assertEqual(payments[1], threshold)
-        self.assertEqual(base_pay, threshold + 5_000)
+        # base_pay includes the clawback amount (process_events subtracts it).
+        self.assertEqual(base_pay - clawback, threshold + 5_000)
 
 
 # ---------------------------------------------------------------------------
@@ -415,7 +421,8 @@ class FraudPassengerIntegrationTests(TestCase):
         log = await ServerPassengerArrivedLog.objects.afirst()
         ceiling = PASSENGER_PAYMENT_CEILINGS[2]
         self.assertEqual(log.payment, ceiling)
-        self.assertEqual(base_pay, ceiling)
+        # base_pay includes the clawback amount (process_events subtracts it).
+        self.assertEqual(base_pay, 10_000_000)
 
     async def test_inflated_hitchhiker_detected(self, mock_treasury, mock_rp):
         mock_rp.return_value = False
@@ -426,7 +433,8 @@ class FraudPassengerIntegrationTests(TestCase):
 
         log = await ServerPassengerArrivedLog.objects.afirst()
         self.assertEqual(log.payment, PASSENGER_PAYMENT_CEILINGS[1])
-        self.assertEqual(base_pay, PASSENGER_PAYMENT_CEILINGS[1])
+        # base_pay includes the clawback amount (process_events subtracts it).
+        self.assertEqual(base_pay, 5_000)
 
 
 # ---------------------------------------------------------------------------
@@ -481,7 +489,8 @@ class FraudTowIntegrationTests(TestCase):
         )
         log = await ServerTowRequestArrivedLog.objects.afirst()
         self.assertEqual(log.payment, TOW_PAYMENT_CEILING)
-        self.assertEqual(base_pay, TOW_PAYMENT_CEILING)
+        # base_pay includes the clawback amount (process_events subtracts it).
+        self.assertEqual(base_pay, 1_000_000)
 
     async def test_inflated_reduces_subsidy(self, mock_treasury, mock_rp):
         mock_rp.return_value = False
@@ -539,13 +548,17 @@ class FraudAlertWiringTests(TestCase):
         mock_rp.return_value = False
         player, character = await self._setup()
 
-        await process_event(
+        base_pay, _, _, clawback = await process_event(
             self._passenger_event(
                 player, 2, 10_000_000, {"X": 100, "Y": 100, "Z": 100}
             ),
             player,
             character,
         )
+
+        # Contract: base_pay includes the clawback amount.
+        self.assertEqual(base_pay, 10_000_000)
+        self.assertEqual(clawback, 10_000_000 - PASSENGER_PAYMENT_CEILINGS[2])
 
         mock_alert.assert_called_once()
         kwargs = mock_alert.call_args.kwargs
@@ -572,21 +585,25 @@ class FraudAlertWiringTests(TestCase):
         mock_alert.assert_not_called()
 
     @patch("amc.handlers.passenger.show_popup", new_callable=AsyncMock)
-    @patch("amc.handlers.passenger.transfer_money", new_callable=AsyncMock)
     @patch("amc.handlers.passenger.post_discord_fraud_alert")
     async def test_zero_origin_passenger_posts_alert(
-        self, mock_alert, mock_transfer, mock_popup, mock_treasury, mock_rp
+        self, mock_alert, mock_popup, mock_treasury, mock_rp
     ):
         mock_rp.return_value = False
         player, character = await self._setup()
 
-        await process_event(
+        base_pay, subsidy, contract, clawback = await process_event(
             self._passenger_event(player, 2, 5_000_000, {"X": 0, "Y": 0, "Z": 0}),
             player,
             character,
             http_client_mod=MagicMock(),
         )
 
+        # Contract: base_pay includes the clawback so the batch nets to zero.
+        self.assertEqual(
+            (base_pay, subsidy, contract, clawback),
+            (5_000_000, 0, 0, 5_000_000),
+        )
         mock_alert.assert_called_once()
         kwargs = mock_alert.call_args.kwargs
         self.assertEqual(kwargs["kind"], "passenger_zero_origin")
@@ -642,7 +659,13 @@ class FraudAlertWiringTests(TestCase):
                 "CharacterGuid": str(character.guid),
             },
         }
-        await process_event(event, player, character)
+        base_pay, _, _, clawback = await process_event(event, player, character)
+
+        # Contract: base_pay includes the clawback amount.
+        self.assertGreater(clawback, 0)
+        self.assertEqual(
+            base_pay - clawback, CARGO_PER_UNIT_THRESHOLDS["BottlePallete"]
+        )
 
         mock_alert.assert_called_once()
         kwargs = mock_alert.call_args.kwargs
@@ -703,3 +726,130 @@ class PostDiscordFraudAlertTests(TestCase):
         client.get_channel.side_effect = RuntimeError("boom")
         with override_settings(DISCORD_FRAUD_ALERT_CHANNEL_ID=123):
             self._alert(client)
+
+
+# ---------------------------------------------------------------------------
+# Fraud-marked batches disable the earnings (savings) deposit
+# ---------------------------------------------------------------------------
+
+
+class FraudSavingsSkipTests(TestCase):
+    """on_player_profit skips the savings sweep for fraud-marked batches."""
+
+    async def _character(self):
+        player = await sync_to_async(PlayerFactory)()
+        character = await sync_to_async(CharacterFactory)(player=player)
+        return character
+
+    @patch("amc.pipeline.profit.set_aside_player_savings", new_callable=AsyncMock)
+    @patch("amc.pipeline.profit.repay_loan_for_profit", new_callable=AsyncMock)
+    async def test_fraud_marked_skips_savings(self, mock_repay, mock_savings):
+        mock_repay.return_value = 0
+        character = await self._character()
+
+        await on_player_profit(
+            character, 0, 100_000, MagicMock(), fraud_marked=True
+        )
+
+        mock_savings.assert_not_awaited()
+
+    @patch("amc.pipeline.profit.set_aside_player_savings", new_callable=AsyncMock)
+    @patch("amc.pipeline.profit.repay_loan_for_profit", new_callable=AsyncMock)
+    async def test_clean_batch_still_sweeps_savings(
+        self, mock_repay, mock_savings
+    ):
+        mock_repay.return_value = 0
+        character = await self._character()
+
+        session = MagicMock()
+        await on_player_profit(
+            character, 0, 100_000, session, fraud_marked=False
+        )
+
+        mock_savings.assert_awaited_once_with(character, 100_000, session)
+
+    @patch("amc.pipeline.profit.on_player_profit", new_callable=AsyncMock)
+    async def test_on_player_profits_looks_up_fraud_flags(self, mock_profit):
+        character = await self._character()
+        other = await self._character()
+
+        await on_player_profits(
+            [(character, 0, 100, 0), (other, 0, 100, 0)],
+            MagicMock(),
+            fraud_flags={character.pk: True},
+        )
+
+        self.assertEqual(mock_profit.await_count, 2)
+        flagged = mock_profit.await_args_list[0].kwargs["fraud_marked"]
+        clean = mock_profit.await_args_list[1].kwargs["fraud_marked"]
+        self.assertTrue(flagged)
+        self.assertFalse(clean)
+
+
+# ---------------------------------------------------------------------------
+# process_events: fraud batches claw back from the wallet and flag profits
+# ---------------------------------------------------------------------------
+
+
+@patch("amc.webhook.get_rp_mode", new_callable=AsyncMock)
+@patch("amc.webhook.get_treasury_fund_balance", new_callable=AsyncMock)
+class FraudBatchProcessEventsTests(TestCase):
+    async def _setup(self):
+        player = await sync_to_async(PlayerFactory)()
+        character = await sync_to_async(CharacterFactory)(player=player)
+        await CharacterLocation.objects.acreate(
+            character=character,
+            location=Point(0, 0, 0),
+            vehicle_key="TestVehicle",
+        )
+        return player, character
+
+    @patch("amc.webhook.on_player_profits", new_callable=AsyncMock)
+    @patch("amc.webhook.transfer_money", new_callable=AsyncMock)
+    async def test_fraud_batch_claws_wallet_and_flags_profits(
+        self, mock_transfer, mock_profits, mock_treasury, mock_rp
+    ):
+        from django.utils import timezone
+
+        from amc.models import PlayerStatusLog
+
+        mock_rp.return_value = False
+        player, character = await self._setup()
+        await PlayerStatusLog.objects.acreate(
+            character=character,
+            timespan=(timezone.now() - timedelta(minutes=5), timezone.now()),
+        )
+
+        event = {
+            "hook": "ServerPassengerArrived",
+            "timestamp": int(time.time()),
+            "data": {
+                "CharacterGuid": str(character.guid),
+                "Passenger": {
+                    "Net_PassengerType": 2,
+                    "Net_Payment": 10_000_000,
+                    "Net_bArrived": True,
+                    "Net_Distance": 10_000,
+                    "Net_StartLocation": {"X": 100, "Y": 100, "Z": 100},
+                    "Net_DestinationLocation": {"X": 200, "Y": 200, "Z": 200},
+                },
+                "PlayerId": str(player.unique_id),
+            },
+        }
+
+        await process_events([event], http_client_mod=MagicMock())
+        await asyncio.sleep(0)
+
+        mock_transfer.assert_awaited_once()
+        args = mock_transfer.await_args.args
+        self.assertEqual(args[1], -(10_000_000 - PASSENGER_PAYMENT_CEILINGS[2]))
+        self.assertEqual(args[2], "Fraud clawback")
+
+        mock_profits.assert_awaited_once()
+        self.assertTrue(
+            mock_profits.await_args.kwargs["fraud_flags"][character.pk]
+        )
+        # Reported batch income is the legitimate portion only.
+        _, _, total_base, _ = mock_profits.await_args.args[0][0]
+        self.assertEqual(total_base, PASSENGER_PAYMENT_CEILINGS[2])
+
