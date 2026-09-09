@@ -13,6 +13,7 @@ from amc.handlers import register
 from amc.models import ServerPassengerArrivedLog
 from amc.mod_server import show_popup, transfer_money
 from amc.fraud_detection import validate_passenger_payment
+from amc.pipeline.discord import post_discord_fraud_alert
 from amc.subsidies import get_passenger_subsidy
 
 logger = logging.getLogger("amc.webhook.handlers.passenger")
@@ -72,6 +73,16 @@ async def handle_passenger_arrived(event, player, character, ctx):
                     player_id=str(character.player.unique_id),
                 )
             )
+            post_discord_fraud_alert(
+                ctx.discord_client,
+                kind="passenger_zero_origin",
+                character_name=character.name,
+                player_id=str(character.player.unique_id),
+                original_payment=base_payment,
+                clawed_back=base_payment,
+                final_payment=0,
+                detail="Passenger event rejected: start location at world origin (0,0,0).",
+            )
         logger.warning(
             "Exploit detected: passenger with zero start location for player %s (payment=%s)",
             player.unique_id,
@@ -93,6 +104,16 @@ async def handle_passenger_arrived(event, player, character, ctx):
             original,
             base_payment,
             fraud_excess,
+        )
+        post_discord_fraud_alert(
+            ctx.discord_client,
+            kind="passenger_over_ceiling",
+            character_name=character.name if character else "unknown",
+            player_id=str(player.unique_id),
+            original_payment=original,
+            clawed_back=fraud_excess,
+            final_payment=base_payment,
+            detail=f"Passenger type {passenger_type_int} exceeded the payment ceiling.",
         )
 
     # Taxi bonuses

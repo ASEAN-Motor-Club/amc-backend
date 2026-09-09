@@ -10,6 +10,7 @@ import logging
 from amc.handlers import register
 from amc.models import ServerTowRequestArrivedLog
 from amc.fraud_detection import validate_tow_payment
+from amc.pipeline.discord import post_discord_fraud_alert
 
 logger = logging.getLogger("amc.webhook.handlers.tow")
 
@@ -36,6 +37,16 @@ async def handle_tow_request(event, player, character, ctx):
             fraud_excess,
         )
         payment = max(0, payment - fraud_excess)
+        post_discord_fraud_alert(
+            ctx.discord_client,
+            kind="tow_over_ceiling",
+            character_name=character.name if character else "unknown",
+            player_id=str(player.unique_id),
+            original_payment=payment + fraud_excess,
+            clawed_back=fraud_excess,
+            final_payment=payment,
+            detail="Tow request payment exceeded the ceiling.",
+        )
 
     await ServerTowRequestArrivedLog.objects.acreate(
         timestamp=timestamp,

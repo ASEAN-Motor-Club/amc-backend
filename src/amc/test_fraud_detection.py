@@ -1,29 +1,30 @@
 import time
-from unittest.mock import patch, AsyncMock
-from django.test import TestCase
-from django.contrib.gis.geos import Point
-from asgiref.sync import sync_to_async
+from unittest.mock import AsyncMock, MagicMock, patch
 
-from amc.factories import PlayerFactory, CharacterFactory
-from amc.webhook import process_event
+from asgiref.sync import sync_to_async
+from django.contrib.gis.geos import Point
+from django.test import TestCase, override_settings
+
+from amc.factories import CharacterFactory, PlayerFactory
+from amc.fraud_detection import (
+    CARGO_MAX_ABSOLUTE_PAYMENT,
+    CARGO_PER_UNIT_THRESHOLDS,
+    PASSENGER_PAYMENT_CEILINGS,
+    TOW_PAYMENT_CEILING,
+    validate_cargo_payment,
+    validate_passenger_payment,
+    validate_tow_payment,
+)
 from amc.models import (
+    CharacterLocation,
+    Delivery,
     DeliveryPoint,
     ServerCargoArrivedLog,
     ServerPassengerArrivedLog,
     ServerTowRequestArrivedLog,
-    Delivery,
-    CharacterLocation,
 )
-from amc.fraud_detection import (
-    validate_cargo_payment,
-    validate_passenger_payment,
-    validate_tow_payment,
-    CARGO_PER_UNIT_THRESHOLDS,
-    CARGO_MAX_ABSOLUTE_PAYMENT,
-    PASSENGER_PAYMENT_CEILINGS,
-    TOW_PAYMENT_CEILING,
-)
-
+from amc.pipeline.discord import post_discord_fraud_alert
+from amc.webhook import process_event
 
 # ---------------------------------------------------------------------------
 # Pure function tests — validate_cargo_payment (async)
@@ -493,3 +494,212 @@ class FraudTowIntegrationTests(TestCase):
         )
         expected = 2_000 + TOW_PAYMENT_CEILING * 1.0
         self.assertEqual(subsidy, expected)
+
+
+# ---------------------------------------------------------------------------
+# Discord alert wiring for fraud clawbacks
+# ---------------------------------------------------------------------------
+
+
+@patch("amc.webhook.get_rp_mode", new_callable=AsyncMock)
+@patch("amc.webhook.get_treasury_fund_balance", new_callable=AsyncMock)
+class FraudAlertWiringTests(TestCase):
+    """Fraud clawbacks must surface a Discord alert, not just a log line."""
+
+    async def _setup(self):
+        player = await sync_to_async(PlayerFactory)()
+        character = await sync_to_async(CharacterFactory)(player=player)
+        await CharacterLocation.objects.acreate(
+            character=character,
+            location=Point(0, 0, 0),
+            vehicle_key="TestVehicle",
+        )
+        return player, character
+
+    @staticmethod
+    def _passenger_event(player, ptype, payment, start):
+        return {
+            "hook": "ServerPassengerArrived",
+            "timestamp": int(time.time()),
+            "data": {
+                "Passenger": {
+                    "Net_PassengerType": ptype,
+                    "Net_Payment": payment,
+                    "Net_bArrived": True,
+                    "Net_Distance": 10_000,
+                    "Net_StartLocation": start,
+                    "Net_DestinationLocation": {"X": 200, "Y": 200, "Z": 200},
+                },
+                "PlayerId": str(player.unique_id),
+            },
+        }
+
+    @patch("amc.handlers.passenger.post_discord_fraud_alert")
+    async def test_inflated_taxi_posts_alert(self, mock_alert, mock_treasury, mock_rp):
+        mock_rp.return_value = False
+        player, character = await self._setup()
+
+        await process_event(
+            self._passenger_event(
+                player, 2, 10_000_000, {"X": 100, "Y": 100, "Z": 100}
+            ),
+            player,
+            character,
+        )
+
+        mock_alert.assert_called_once()
+        kwargs = mock_alert.call_args.kwargs
+        self.assertEqual(kwargs["kind"], "passenger_over_ceiling")
+        self.assertEqual(kwargs["original_payment"], 10_000_000)
+        self.assertEqual(
+            kwargs["clawed_back"], 10_000_000 - PASSENGER_PAYMENT_CEILINGS[2]
+        )
+        self.assertEqual(kwargs["final_payment"], PASSENGER_PAYMENT_CEILINGS[2])
+
+    @patch("amc.handlers.passenger.post_discord_fraud_alert")
+    async def test_legitimate_passenger_no_alert(
+        self, mock_alert, mock_treasury, mock_rp
+    ):
+        mock_rp.return_value = False
+        player, character = await self._setup()
+
+        await process_event(
+            self._passenger_event(player, 2, 50_000, {"X": 100, "Y": 100, "Z": 100}),
+            player,
+            character,
+        )
+
+        mock_alert.assert_not_called()
+
+    @patch("amc.handlers.passenger.show_popup", new_callable=AsyncMock)
+    @patch("amc.handlers.passenger.transfer_money", new_callable=AsyncMock)
+    @patch("amc.handlers.passenger.post_discord_fraud_alert")
+    async def test_zero_origin_passenger_posts_alert(
+        self, mock_alert, mock_transfer, mock_popup, mock_treasury, mock_rp
+    ):
+        mock_rp.return_value = False
+        player, character = await self._setup()
+
+        await process_event(
+            self._passenger_event(player, 2, 5_000_000, {"X": 0, "Y": 0, "Z": 0}),
+            player,
+            character,
+            http_client_mod=MagicMock(),
+        )
+
+        mock_alert.assert_called_once()
+        kwargs = mock_alert.call_args.kwargs
+        self.assertEqual(kwargs["kind"], "passenger_zero_origin")
+        self.assertEqual(kwargs["original_payment"], 5_000_000)
+        self.assertEqual(kwargs["clawed_back"], 5_000_000)
+        self.assertEqual(kwargs["final_payment"], 0)
+
+    @patch("amc.handlers.tow.post_discord_fraud_alert")
+    async def test_inflated_tow_posts_alert(self, mock_alert, mock_treasury, mock_rp):
+        mock_rp.return_value = False
+        player, character = await self._setup()
+
+        tow_data = {
+            "Net_TowRequestFlags": 1,
+            "Net_Payment": 1_000_000,
+            "BodyDamage": 1.0,
+        }
+        event = {
+            "hook": "ServerTowRequestArrived",
+            "timestamp": int(time.time()),
+            "data": {"TowRequest": tow_data, "PlayerId": str(player.unique_id)},
+        }
+        await process_event(event, player, character)
+
+        mock_alert.assert_called_once()
+        kwargs = mock_alert.call_args.kwargs
+        self.assertEqual(kwargs["kind"], "tow_over_ceiling")
+        self.assertEqual(kwargs["original_payment"], 1_000_000)
+        self.assertEqual(kwargs["clawed_back"], 1_000_000 - TOW_PAYMENT_CEILING)
+        self.assertEqual(kwargs["final_payment"], TOW_PAYMENT_CEILING)
+
+    @patch("amc.handlers.cargo.post_discord_fraud_alert")
+    async def test_inflated_cargo_posts_alert(self, mock_alert, mock_treasury, mock_rp):
+        mock_rp.return_value = False
+        mock_treasury.return_value = 100_000
+        player, character = await self._setup()
+
+        event = {
+            "hook": "ServerCargoArrived",
+            "timestamp": int(time.time()),
+            "data": {
+                "Cargos": [
+                    {
+                        "Net_CargoKey": "BottlePallete",
+                        "Net_Payment": 500_000,
+                        "Net_Weight": 100.0,
+                        "Net_Damage": 0.0,
+                        "Net_SenderAbsoluteLocation": {"X": 0, "Y": 0, "Z": 0},
+                        "Net_DestinationLocation": {"X": 100_000, "Y": 0, "Z": 0},
+                    },
+                ],
+                "PlayerId": str(player.unique_id),
+                "CharacterGuid": str(character.guid),
+            },
+        }
+        await process_event(event, player, character)
+
+        mock_alert.assert_called_once()
+        kwargs = mock_alert.call_args.kwargs
+        self.assertEqual(kwargs["kind"], "cargo_over_threshold")
+        self.assertGreater(kwargs["clawed_back"], 0)
+        self.assertEqual(
+            kwargs["final_payment"], CARGO_PER_UNIT_THRESHOLDS["BottlePallete"]
+        )
+
+
+class PostDiscordFraudAlertTests(TestCase):
+    """post_discord_fraud_alert: no-op without config, never raises."""
+
+    def _alert(self, client):
+        post_discord_fraud_alert(
+            client,
+            kind="passenger_over_ceiling",
+            character_name="Tester",
+            player_id="123",
+            original_payment=10_000_000,
+            clawed_back=9_800_000,
+            final_payment=200_000,
+            detail="test",
+        )
+
+    def test_noop_without_channel(self):
+        client = MagicMock()
+        with override_settings(DISCORD_FRAUD_ALERT_CHANNEL_ID=0):
+            self._alert(client)
+        client.get_channel.assert_not_called()
+
+    def test_noop_without_client(self):
+        with override_settings(DISCORD_FRAUD_ALERT_CHANNEL_ID=123):
+            self._alert(None)
+
+    @patch("amc.pipeline.discord.asyncio")
+    def test_schedules_embed_send(self, mock_asyncio):
+        client = MagicMock()
+        channel = MagicMock()
+        client.get_channel.return_value = channel
+        with override_settings(DISCORD_FRAUD_ALERT_CHANNEL_ID=123):
+            self._alert(client)
+
+        client.get_channel.assert_called_once_with(123)
+        mock_asyncio.run_coroutine_threadsafe.assert_called_once()
+        channel.send.assert_called_once()
+        embed = channel.send.call_args.kwargs["embed"]
+        self.assertEqual(embed.title, "Fraud clawback")
+
+    def test_missing_channel_does_not_raise(self):
+        client = MagicMock()
+        client.get_channel.return_value = None
+        with override_settings(DISCORD_FRAUD_ALERT_CHANNEL_ID=123):
+            self._alert(client)
+
+    def test_client_error_is_swallowed(self):
+        client = MagicMock()
+        client.get_channel.side_effect = RuntimeError("boom")
+        with override_settings(DISCORD_FRAUD_ALERT_CHANNEL_ID=123):
+            self._alert(client)

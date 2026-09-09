@@ -37,6 +37,7 @@ from amc.mod_server import (
     transfer_money,
 )
 from amc.fraud_detection import validate_cargo_payment
+from amc.pipeline.discord import post_discord_fraud_alert
 from amc.pipeline.discord import post_discord_delivery_embed
 from amc.pipeline.delivery import atomic_process_delivery
 from amc.police import SECURITY_BONUS_RATE, SECURITY_BONUS_MAX, get_active_police_count
@@ -120,6 +121,16 @@ async def handle_cargo_arrived(event, player, character, ctx):
                 log.payment + excess,
                 log.payment,
                 excess,
+            )
+            post_discord_fraud_alert(
+                ctx.discord_client,
+                kind="cargo_over_threshold",
+                character_name=character.name if character else "unknown",
+                player_id=str(character.player.unique_id) if character else "unknown",
+                original_payment=log.payment + excess,
+                clawed_back=excess,
+                final_payment=log.payment,
+                detail=f"Cargo {log.cargo_key} exceeded fraud thresholds.",
             )
 
     await ServerCargoArrivedLog.objects.abulk_create(logs)
