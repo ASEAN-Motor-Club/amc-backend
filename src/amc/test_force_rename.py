@@ -146,7 +146,11 @@ async def test_refresh_player_name_restores_chosen_name_after_clear(mock_set_nam
     await refresh_player_name(character, session, has_custom_parts=False)
 
     await character.arefresh_from_db()
-    assert character.custom_name == "ChosenName"
+    # Display name restored to the chosen name. refresh_player_name stores
+    # custom_name=None when the display name equals the original character
+    # name (long-standing contract), so the restore shows up in the pushed
+    # name, not in custom_name.
+    assert character.custom_name is None
     assert "ChosenName" in mock_set_name.call_args.args[2]
 
 
