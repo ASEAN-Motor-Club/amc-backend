@@ -77,7 +77,12 @@ CARGO_PER_UNIT_THRESHOLDS: dict[str, float] = {
     "CornPallet": 15_000,
     "Container_20ft_01": 25_000,
     "Fuel": 8_000,
-    "Coal": 10_000,
+    # 10k shipped 2026-04-04 (faf7519) and now sits below the p99 of
+    # legitimate hauls (90d uncapped Net_Payment: p99 $13.8K, p99.9 $18.1K)
+    # — it trimmed the top ~1% of legit runs (2026-09-09 vssm: $10,727).
+    # $20K covers the legit tail with margin; real payment manipulation
+    # runs orders of magnitude higher.
+    "Coal": 20_000,
     "Container_40ft_01": 30_000,
     "MeatBox": 20_000,
     "ToyBoxes": 20_000,
