@@ -132,6 +132,12 @@ async def audit_character(
     vehicle = last_vehicle.get("vehicle")
     parts = parts_data.get("parts", [])
     if not vehicle or not parts:
+        logger.info(
+            "Parts audit skipped for %s (%s): mod returned no %s — player "
+            "may have no spawned vehicle yet",
+            player_name, character_guid,
+            "vehicle" if not vehicle else "parts data",
+        )
         return None
 
     embed = _audit_embed(player_name, vehicle, parts, source)
@@ -156,6 +162,7 @@ async def audit_character(
     except Exception:
         logger.warning("Parts audit Discord post failed for %s", player_name, exc_info=True)
         return None
+    logger.info("Parts audit delivered for %s (source: %s)", player_name, source)
     return embed
 
 

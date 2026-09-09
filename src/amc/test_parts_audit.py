@@ -269,3 +269,103 @@ class TestJoinAuditReconcile:
                 assert audit.await_count == 0
         finally:
             await GameEvent.objects.filter(guid=GUID).adelete()
+
+
+# ---------------------------------------------------------------------------
+# Hook wiring — the AddEvent hook records the auto-joined host's row BEFORE
+# the crosscheck reconcile ever runs, so the audit must fire there too
+# (prod miss 2026-09-09: host-only events were never audited).
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.django_db
+class TestJoinAuditHooks:
+    @staticmethod
+    def _ctx(http_client_mod=object(), discord_client=None):
+        from types import SimpleNamespace
+
+        return SimpleNamespace(
+            http_client_mod=http_client_mod, discord_client=discord_client
+        )
+
+    async def test_add_event_hook_audits_auto_joined_host(self):
+        from amc.handlers.events import handle_add_event
+
+        audit = AsyncMock()
+        try:
+            with patch("amc.handlers.events.audit_event_join", audit):
+                await handle_add_event(
+                    {"data": {"Event": _event_data(1, [_player("5", "host-1")])}},
+                    None,
+                    None,
+                    self._ctx(),
+                )
+                assert audit.await_count == 1
+                calls = audit.await_args_list
+                assert calls[0].args[1] == "CHAR5"
+                assert calls[0].args[2] == "host-1"
+                assert calls[0].args[3] == "Test Event"
+        finally:
+            await GameEvent.objects.filter(guid=GUID).adelete()
+
+    async def test_add_event_hook_no_audit_when_state_not_ready(self):
+        from amc.handlers.events import handle_add_event
+
+        audit = AsyncMock()
+        try:
+            with patch("amc.handlers.events.audit_event_join", audit):
+                await handle_add_event(
+                    {"data": {"Event": _event_data(2, [_player("6", "host-2")])}},
+                    None,
+                    None,
+                    self._ctx(),
+                )
+                assert audit.await_count == 0
+        finally:
+            await GameEvent.objects.filter(guid=GUID).adelete()
+
+    async def test_change_state_hook_audits_new_row_in_ready_payload(self):
+        from amc.handlers.events import handle_add_event, handle_change_event_state
+
+        audit = AsyncMock()
+        try:
+            with patch("amc.handlers.events.audit_event_join", audit):
+                # Event appears pre-seeded with an empty roster, then a
+                # state-1 payload arrives with a brand-new player.
+                await handle_add_event(
+                    {"data": {"Event": _event_data(1, [])}},
+                    None,
+                    None,
+                    self._ctx(),
+                )
+                await handle_change_event_state(
+                    {
+                        "data": {
+                            "Event": _event_data(1, [_player("7", "late-host")])
+                        }
+                    },
+                    None,
+                    None,
+                    self._ctx(),
+                )
+                assert audit.await_count == 1
+                calls = audit.await_args_list
+                assert calls[0].args[2] == "late-host"
+        finally:
+            await GameEvent.objects.filter(guid=GUID).adelete()
+
+    async def test_add_event_hook_no_audit_without_mod_client(self):
+        from amc.handlers.events import handle_add_event
+
+        audit = AsyncMock()
+        try:
+            with patch("amc.handlers.events.audit_event_join", audit):
+                await handle_add_event(
+                    {"data": {"Event": _event_data(1, [_player("8", "host-3")])}},
+                    None,
+                    None,
+                    self._ctx(http_client_mod=None),
+                )
+                assert audit.await_count == 0
+        finally:
+            await GameEvent.objects.filter(guid=GUID).adelete()

@@ -93,6 +93,15 @@ LOGGING = {
             "level": "INFO",
             "propagate": False,
         },
+        # Silent parts audit: INFO outcome lines (delivered / skipped) plus
+        # WARNING failures must reach the journal — the parent "amc" logger
+        # runs at ERROR and would swallow them (prod miss 2026-09-09: a dead
+        # audit path was invisible for exactly this reason).
+        "amc.parts_audit": {
+            "handlers": ["console"],
+            "level": "INFO",
+            "propagate": False,
+        },
     },
 }
 
