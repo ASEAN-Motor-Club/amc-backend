@@ -1,7 +1,6 @@
 import asyncio
 import io
 import logging
-import time
 import discord
 from discord import app_commands
 from discord.ext import tasks, commands
@@ -26,12 +25,15 @@ from amc.gov_employee import (
     top_gov_monthly,
     GOV_BOARD_LIMIT,
 )
+from amc_cogs.avatars import (
+    fetch_avatar_bytes,
+    get_avatar_rgba,
+    placeholder_rgba as _placeholder_rgba,
+)
 
 logger = logging.getLogger(__name__)
 
 GOV_BOARD_FILE = "gov_board.png"
-AVATAR_CACHE_TTL = 24 * 3600.0
-AVATAR_SIZE = 128
 
 
 def _fmt_money(value: int) -> str:
@@ -41,46 +43,6 @@ def _fmt_money(value: int) -> str:
     if value >= 1_000:
         return f"${value / 1_000:,.0f}K"
     return f"${value:,}"
-
-
-def _circle_rgba(png_bytes: bytes):
-    """Decode avatar bytes, normalize to AVATAR_SIZE, apply an antialiased circular alpha mask.
-
-    The Discord CDN ignores ?size= for default avatars and serves them at
-    256x256, so every image is resized to AVATAR_SIZE before masking —
-    OffsetImage's fixed zoom would otherwise render default avatars 2x too
-    large.
-    """
-    import numpy as np
-    from PIL import Image
-
-    img = Image.open(io.BytesIO(png_bytes)).convert("RGBA")
-    if img.width != AVATAR_SIZE or img.height != AVATAR_SIZE:
-        img = img.resize((AVATAR_SIZE, AVATAR_SIZE), Image.LANCZOS)
-    arr = np.asarray(img, dtype=float) / 255.0
-    h, w = arr.shape[:2]
-    n = min(h, w)
-    yy, xx = np.mgrid[0:h, 0:w]
-    d = np.sqrt((yy - (h - 1) / 2) ** 2 + (xx - (w - 1) / 2) ** 2)
-    alpha = np.clip(n / 2 - d + 0.5, 0.0, 1.0)
-    out = arr.copy()
-    out[..., 3] = np.minimum(out[..., 3], alpha)
-    return out
-
-
-def _placeholder_rgba():
-    """Neutral 'no avatar' disc for unlinked players / failed fetches."""
-    import numpy as np
-
-    n = 128
-    yy, xx = np.mgrid[0:n, 0:n]
-    d = np.sqrt((yy - (n - 1) / 2) ** 2 + (xx - (n - 1) / 2) ** 2)
-    alpha = np.clip(n / 2 - d + 0.5, 0.0, 1.0)
-    rgb = np.zeros((n, n, 3))
-    rgb[..., 0] = 0.29
-    rgb[..., 1] = 0.31
-    rgb[..., 2] = 0.35
-    return np.dstack([rgb, alpha])
 
 
 def _draw_panel(ax, title, rows, accent, rank_colors, dim, text, green) -> None:
@@ -278,26 +240,9 @@ class LeaderboardCog(commands.Cog):
 
     async def _get_avatar(self, discord_user_id: int) -> bytes | None:
         """Fetch a Discord user's avatar PNG bytes, cached for 24h."""
-        now = time.monotonic()
-        cached = self._avatar_cache.get(discord_user_id)
-        if cached is not None and now - cached[0] < AVATAR_CACHE_TTL:
-            return cached[1]
-        try:
-            user = self.bot.get_user(discord_user_id)
-            if user is None:
-                user = await self.bot.fetch_user(discord_user_id)
-            data = await user.display_avatar.with_size(AVATAR_SIZE).with_format(
-                "png"
-            ).read()
-        except Exception:
-            logger.warning(
-                "Avatar fetch failed for discord user %s",
-                discord_user_id,
-                exc_info=True,
-            )
-            return None
-        self._avatar_cache[discord_user_id] = (now, data)
-        return data
+        return await fetch_avatar_bytes(
+            self.bot, discord_user_id, self._avatar_cache
+        )
 
     async def _gov_board_rows(self):
         """Assemble the gov board row dicts (DB + avatar fetches)."""
@@ -306,22 +251,12 @@ class LeaderboardCog(commands.Cog):
         month_label = timezone.localtime(timezone.now()).strftime("%B")
 
         async def build_row(character, value):
-            avatar_bytes = None
             player = character.player
-            if player is not None and player.discord_user_id:
-                avatar_bytes = await self._get_avatar(player.discord_user_id)
-            avatar_rgba = None
-            if avatar_bytes is not None:
-                try:
-                    avatar_rgba = await asyncio.to_thread(
-                        _circle_rgba, avatar_bytes
-                    )
-                except Exception:
-                    logger.warning(
-                        "Avatar decode failed for discord user %s",
-                        player.discord_user_id if player else None,
-                        exc_info=True,
-                    )
+            avatar_rgba = await get_avatar_rgba(
+                self.bot,
+                player.discord_user_id if player is not None else None,
+                self._avatar_cache,
+            )
             return {
                 "name": (strip_gov_name(character.name or "")[:14] or "Unknown"),
                 "level": calculate_gov_level(character.gov_employee_contributions),

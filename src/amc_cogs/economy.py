@@ -1,3 +1,4 @@
+import asyncio
 import re
 import logging
 from io import BytesIO
@@ -50,7 +51,12 @@ from amc_finance.loans import (
 from amc_finance.treasury_summary import get_treasury_summary, save_treasury_snapshot
 from amc.subsidies import DEFAULT_SAVING_RATE
 from amc.save_file import decrypt, encrypt
+from amc.gov_employee import GOV_BOARD_LIMIT, strip_gov_name
+from amc_cogs.avatars import get_avatar_rgba, placeholder_rgba
+from amc_cogs.leaderboard import _draw_panel
 
+
+GOV_DAILY_FILE = "gov_daily_report.png"
 
 DONATION_EXPECTATION_BRACKETS = [
     {"threshold": 3_000_000, "rate": Decimal("0.00")},
@@ -97,6 +103,42 @@ def get_progressive_donation_case(brackets_config):
     return Case(*when_clauses, default=default_expression, output_field=DecimalField())
 
 
+
+def _render_daily_gov_png(rows, date_label) -> BytesIO:
+    """Render the daily gov report's top contributors as a dark PNG card.
+
+    Same row-dict contract as the leaderboard card renderer: name, level,
+    value (int), avatar_rgba (HxWx4 float array, or None for the neutral
+    placeholder disc). Pure rendering — safe for asyncio.to_thread.
+    """
+    from matplotlib.backends.backend_agg import FigureCanvasAgg
+    from matplotlib.figure import Figure
+
+    bg = "#23272A"
+    text = "#FFFFFF"
+    dim = "#99AAB5"
+    green = "#57F287"
+    rank_colors = ["#FFD700", "#E5E7EB", "#E39774"]
+    accent = "#00B0F4"
+
+    placeholder = placeholder_rgba()
+    for row in rows:
+        if row["avatar_rgba"] is None:
+            row["avatar_rgba"] = placeholder
+
+    fig = Figure(figsize=(4.8, 4.8), dpi=150, facecolor=bg)
+    FigureCanvasAgg(fig)
+    ax = fig.add_axes([0.05, 0.07, 0.90, 0.86])
+    _draw_panel(
+        ax, f"TOP CIVIL SERVANTS — {date_label}", rows,
+        accent, rank_colors, dim, text, green,
+    )
+    buf = BytesIO()
+    fig.savefig(buf, format="png", facecolor=bg)
+    buf.seek(0)
+    return buf
+
+
 class EconomyCog(commands.Cog):
     def __init__(self, bot, general_channel_id=settings.DISCORD_GENERAL_CHANNEL_ID):
         self.bot = bot
@@ -106,6 +148,7 @@ class EconomyCog(commands.Cog):
         )
         self.player_autocomplete = create_player_autocomplete(self.bot.http_client_game)
         self.character_autocomplete = create_character_autocomplete()
+        self._avatar_cache: dict[int, tuple[float, bytes]] = {}
 
     async def cog_load(self):
         self.daily_top_haulers_task.start()
@@ -125,13 +168,16 @@ class EconomyCog(commands.Cog):
 
     @tasks.loop(time=dt_time(hour=2, minute=0, tzinfo=dt_timezone.utc))
     async def daily_gov_employee_summary_task(self):
-        embed = await self.build_daily_gov_employee_embed()
+        embed, gov_file = await self.build_daily_gov_employee_embed()
         treasury_channel_id = getattr(
             settings, "DISCORD_TREASURY_CHANNEL_ID", 1402660537619320872
         )
         treasury_channel = self.bot.get_channel(treasury_channel_id)
         if treasury_channel:
-            sent_message = await treasury_channel.send(embed=embed)
+            if gov_file is not None:
+                sent_message = await treasury_channel.send(embed=embed, file=gov_file)
+            else:
+                sent_message = await treasury_channel.send(embed=embed)
             # Forward to #general
             general_channel = self.bot.get_channel(self.general_channel_id)
             if general_channel:
@@ -165,7 +211,10 @@ class EconomyCog(commands.Cog):
                 journal_entry__description__startswith="Government Service",
             )
             .select_related("journal_entry", "journal_entry__creator")
-            .values("journal_entry__creator")
+            .values(
+                "journal_entry__creator",
+                "journal_entry__creator__player__discord_user_id",
+            )
             .annotate(
                 total=Sum("credit"),
                 name=F("journal_entry__creator__name"),
@@ -176,6 +225,7 @@ class EconomyCog(commands.Cog):
         )
 
         contributors_list = []
+        card_rows = []
         total_raised = Decimal(0)
         num_employees = 0
 
@@ -188,6 +238,7 @@ class EconomyCog(commands.Cog):
             contributors_list.append(
                 f"**{level_str}{row['name']}:** `{row['total']:,}`"
             )
+            card_rows.append(row)
 
         contributors_str = (
             "\n".join(contributors_list)
@@ -211,7 +262,33 @@ class EconomyCog(commands.Cog):
             value=contributors_str,
             inline=False,
         )
-        return embed
+
+        # Avatar card for the top contributors (embed text can't carry
+        # per-row images; same rendered-card approach as #leaderboard).
+        gov_file = None
+        if card_rows:
+            avatar_rows = []
+            for row in card_rows[:GOV_BOARD_LIMIT]:
+                discord_id = row["journal_entry__creator__player__discord_user_id"]
+                avatar_rows.append(
+                    {
+                        "name": strip_gov_name(row["name"] or "Unknown")[:14]
+                        or "Unknown",
+                        "level": row["level"],
+                        "value": int(row["total"]),
+                        "avatar_rgba": await get_avatar_rgba(
+                            self.bot, discord_id, self._avatar_cache
+                        ),
+                    }
+                )
+            buf = await asyncio.to_thread(
+                _render_daily_gov_png,
+                avatar_rows,
+                yesterday.strftime("%-d %b").upper(),
+            )
+            gov_file = discord.File(buf, filename=GOV_DAILY_FILE)
+            embed.set_image(url=f"attachment://{GOV_DAILY_FILE}")
+        return embed, gov_file
 
     @tasks.loop(time=dt_time(hour=8, minute=0, tzinfo=dt_timezone.utc))
     async def weekly_donations_task(self):

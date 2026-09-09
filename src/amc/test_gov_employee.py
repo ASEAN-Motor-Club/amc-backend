@@ -539,10 +539,13 @@ class DailyGovEmployeeSummaryTaskTests(TestCase):
         # Build the embed
         bot_mock = MagicMock()
         cog = EconomyCog(bot=bot_mock)
-        embed = await cog.build_daily_gov_employee_embed()
+        embed, gov_file = await cog.build_daily_gov_employee_embed()
 
         # Assertions
         self.assertEqual(embed.title, "🏛️ Daily Government Employee Report")
+        self.assertIsNotNone(gov_file)
+        self.assertEqual(gov_file.filename, "gov_daily_report.png")
+        self.assertEqual(embed.image.url, "attachment://gov_daily_report.png")
 
         # Total amount treasury raised (15k + 5k + 8k = 28k) -> Charlie's 100k shouldn't be here
         first_field = embed.fields[0]
@@ -555,6 +558,17 @@ class DailyGovEmployeeSummaryTaskTests(TestCase):
         self.assertIn("**[GOV3] Alice:** `20,000.00`", second_field.value)
         self.assertIn("**[GOV1] Bob:** `8,000.00`", second_field.value)
         self.assertNotIn("Charlie", second_field.value)
+
+
+    def test_render_daily_gov_png_smoke(self):
+        from amc_cogs.economy import _render_daily_gov_png
+
+        rows = [
+            {"name": "Alice", "level": 3, "value": 20000, "avatar_rgba": None},
+            {"name": "Bob", "level": 1, "value": 8000, "avatar_rgba": None},
+        ]
+        buf = _render_daily_gov_png(rows, "9 SEP")
+        self.assertTrue(buf.getvalue().startswith(b"\x89PNG"))
 
 
 class ContributionLogTests(TestCase):
