@@ -4,6 +4,7 @@ from django.test import TestCase
 from django.utils import timezone
 from asgiref.sync import sync_to_async
 from amc.factories import PlayerFactory, CharacterFactory
+from amc.models import GovContributionLog
 from amc.gov_employee import (
     calculate_gov_level,
     make_gov_name,
@@ -12,6 +13,8 @@ from amc.gov_employee import (
     deactivate_gov_role,
     redirect_income_to_treasury,
     expire_gov_employees,
+    top_gov_all_time,
+    top_gov_monthly,
     GOV_LEVEL_STEP,
 )
 from amc.command_framework import CommandContext
@@ -551,3 +554,130 @@ class DailyGovEmployeeSummaryTaskTests(TestCase):
         self.assertIn("**[GOV3] Alice:** `20,000.00`", second_field.value)
         self.assertIn("**[GOV1] Bob:** `8,000.00`", second_field.value)
         self.assertNotIn("Charlie", second_field.value)
+
+
+class ContributionLogTests(TestCase):
+    @patch("amc.gov_employee.player_donation", new_callable=AsyncMock)
+    async def test_redirect_writes_contribution_log(self, mock_donation):
+        player = await sync_to_async(PlayerFactory)()
+        character = await sync_to_async(CharacterFactory)(
+            player=player,
+            gov_employee_contributions=0,
+            gov_employee_level=1,
+        )
+
+        await redirect_income_to_treasury(100_000, character, "Test Redirect")
+
+        logs = [
+            row
+            async for row in GovContributionLog.objects.filter(
+                character=character
+            )
+        ]
+        self.assertEqual(len(logs), 1)
+        self.assertEqual(logs[0].contribution, 100_000)
+
+    @patch("amc.gov_employee.player_donation", new_callable=AsyncMock)
+    async def test_redirect_zero_contribution_skips_log(self, mock_donation):
+        player = await sync_to_async(PlayerFactory)()
+        character = await sync_to_async(CharacterFactory)(
+            player=player,
+            gov_employee_contributions=0,
+            gov_employee_level=1,
+        )
+
+        # Subsidy-only job bonus: no real money and no contribution value
+        await redirect_income_to_treasury(0, character, "Subsidy only", contribution=0)
+
+        self.assertFalse(
+            await GovContributionLog.objects.filter(character=character).aexists()
+        )
+
+    @patch("amc.gov_employee.player_donation", new_callable=AsyncMock)
+    async def test_redirect_subsidy_inclusive_contribution_logged_in_full(
+        self, mock_donation
+    ):
+        player = await sync_to_async(PlayerFactory)()
+        character = await sync_to_async(CharacterFactory)(
+            player=player,
+            gov_employee_contributions=0,
+            gov_employee_level=1,
+        )
+
+        # Real money moved is 0, but the contribution carries subsidy credit
+        await redirect_income_to_treasury(0, character, "Job bonus", contribution=15_000)
+
+        logs = [
+            row
+            async for row in GovContributionLog.objects.filter(
+                character=character
+            )
+        ]
+        self.assertEqual(len(logs), 1)
+        self.assertEqual(logs[0].contribution, 15_000)
+
+
+class GovLeaderboardQueryTests(TestCase):
+    async def test_top_gov_all_time_orders_by_contributions(self):
+        player = await sync_to_async(PlayerFactory)()
+        low = await sync_to_async(CharacterFactory)(
+            player=player, name="LowGov", gov_employee_contributions=100
+        )
+        high = await sync_to_async(CharacterFactory)(
+            player=player, name="HighGov", gov_employee_contributions=900
+        )
+        await sync_to_async(CharacterFactory)(
+            player=player, name="NoGov", gov_employee_contributions=0
+        )
+
+        top = await top_gov_all_time(5)
+
+        self.assertEqual([row.id for row in top], [high.id, low.id])
+
+    async def test_top_gov_monthly_sums_and_orders(self):
+        player = await sync_to_async(PlayerFactory)()
+        alice = await sync_to_async(CharacterFactory)(
+            player=player, name="AliceGov"
+        )
+        bob = await sync_to_async(CharacterFactory)(player=player, name="BobGov")
+
+        await GovContributionLog.objects.acreate(character=alice, contribution=5_000)
+        await GovContributionLog.objects.acreate(character=alice, contribution=15_000)
+        await GovContributionLog.objects.acreate(character=bob, contribution=30_000)
+
+        monthly = await top_gov_monthly(5)
+
+        self.assertEqual(
+            [(row.id, total) for row, total in monthly],
+            [(bob.id, 30_000), (alice.id, 20_000)],
+        )
+
+    async def test_top_gov_monthly_excludes_last_month(self):
+        player = await sync_to_async(PlayerFactory)()
+        alice = await sync_to_async(CharacterFactory)(
+            player=player, name="AliceGov"
+        )
+
+        month_start = timezone.localtime().replace(
+            day=1, hour=0, minute=0, second=0, microsecond=0
+        )
+        # Last month's contribution (just before the month boundary)
+        await GovContributionLog.objects.acreate(
+            character=alice,
+            contribution=999_999,
+            timestamp=month_start - timedelta(seconds=1),
+        )
+        # This month's contribution
+        await GovContributionLog.objects.acreate(character=alice, contribution=1_000)
+
+        monthly = await top_gov_monthly(5)
+
+        self.assertEqual(
+            [(row.id, total) for row, total in monthly],
+            [(alice.id, 1_000)],
+        )
+
+
+    async def test_top_gov_monthly_empty(self):
+        self.assertEqual(await top_gov_monthly(5), [])
+

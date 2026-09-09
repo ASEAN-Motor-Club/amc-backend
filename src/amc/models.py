@@ -3470,3 +3470,25 @@ class NewsItem(models.Model):
     @override
     def __str__(self):
         return self.title
+
+
+@final
+class GovContributionLog(models.Model):
+    """Per-event government-employee contribution record.
+
+    Written by redirect_income_to_treasury so calendar-month totals ("Top
+    Employees of the Month") can be aggregated. The cumulative all-time
+    total stays on Character.gov_employee_contributions; this table is
+    additive history only and is never mutated.
+    """
+
+    character = models.ForeignKey(
+        Character,
+        on_delete=models.CASCADE,
+        related_name="gov_contribution_logs",
+    )
+    contribution = models.PositiveBigIntegerField()
+    timestamp = models.DateTimeField(default=timezone.now, db_index=True)
+
+    def __str__(self):
+        return f"{self.character_id} +{self.contribution}"
