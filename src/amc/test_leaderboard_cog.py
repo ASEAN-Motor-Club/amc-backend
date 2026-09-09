@@ -107,7 +107,10 @@ class LeaderboardCogTestCase(TestCase):
 
     async def test_create_leaderboard_embeds(self):
         """Test that create_leaderboard_embeds doesn't crash"""
-        embed = await self.cog.create_leaderboard_embeds()
+        embed, gov_file = await self.cog.create_leaderboard_embeds()
         self.assertIsInstance(embed, discord.Embed)
         self.assertIsInstance(embed.title, str)
         self.assertIn("🏆 ASEAN Motor Club Leaderboards", embed.title)
+        # Gov card: None when there is no contribution data, a File otherwise
+        # (avatar fetch fails on the mock bot and falls back to placeholders).
+        self.assertTrue(gov_file is None or isinstance(gov_file, discord.File))
