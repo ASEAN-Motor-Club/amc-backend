@@ -1135,7 +1135,13 @@ async def _resolve_player_for_force_rename(mod_session, target_player_name):
     )
     if character is not None:
         return character.player, character
-    return await _resolve_offline_player_by_name(target_player_name)
+    # Offline: resolve the account from the DB but return NO character —
+    # callers only push name updates to online characters; an offline lock
+    # is applied on next login instead.
+    player, _offline_character = await _resolve_offline_player_by_name(
+        target_player_name
+    )
+    return player, None
 
 
 @registry.register(
