@@ -52,7 +52,9 @@ class LapReconstructionTests(TestCase):
         if num_laps is not None:
             event_data["RaceSetup"] = {**RACE_SETUP_RAW, "NumLaps": num_laps}
         game_event, _ = await _upsert_game_event(event_data)
-        gec = await _upsert_game_event_character(game_event, event_data["Players"][0])
+        gec, _created = await _upsert_game_event_character(
+            game_event, event_data["Players"][0]
+        )
         self._gec_pk = gec.pk
         return player, character
 
