@@ -25,7 +25,9 @@ def _make_db(tmp_path):
         CREATE TABLE vehicle_weights (
             vehicle_id INTEGER, chassis_mass_kg REAL, blueprint_path TEXT);
         CREATE TABLE vehicle_parts (
-            name TEXT, part_type TEXT, mass_kg REAL);
+            id TEXT, name TEXT, part_type TEXT, mass_kg REAL);
+        CREATE TABLE blueprint_variants (
+            base_name TEXT, variant_name TEXT, asset_type TEXT);
         """
     )
     conn.executemany(
@@ -37,13 +39,22 @@ def _make_db(tmp_path):
         ],
     )
     conn.executemany(
-        "INSERT INTO vehicle_parts VALUES (?,?,?)",
+        "INSERT INTO vehicle_parts VALUES (?,?,?,?)",
         [
-            ("201", "Intake", 12.0),
-            ("Damper200", "Suspension_Damper", 8.0),
-            ("WheelSpacer50", "WheelSpacer", 1.2),
-            ("Turbocharger_Stage1", "Turbocharger", 15.0),
+            # name = internal hash/asset label — must NOT be the join key
+            ("201", "38A0EDDD425EB71B36C13587752411BF", "Intake", 12.0),
+            ("Damper200", None, "Suspension_Damper", 8.0),
+            ("WheelSpacer50", None, "WheelSpacer", 1.2),
+            # name = short label, NOT the payload Key (regression pin)
+            ("Turbocharger_Stage1", "Stage1", "Turbocharger", 15.0),
+            # vanilla EV motors carry mass in the parts table
+            ("Electric_130HP", None, "Engine", 60.0),
+            ("PerformanceTire", None, "Tire", 10.0),
         ],
+    )
+    conn.executemany(
+        "INSERT INTO blueprint_variants VALUES (?,?,?)",
+        [("PerformanceTire", "PerformanceTire_15", "TirePhysics")],
     )
     conn.commit()
     conn.close()
@@ -105,8 +116,16 @@ class TestChassisMass:
 
 
 class TestPartMass:
-    def test_exact_row(self, weight_db):
+    def test_exact_row_joins_on_id_not_name(self, weight_db):
+        # The fixture's 201 row carries a GUID-hash `name` — resolution must
+        # go through the id column (the payload Key space), regression pin.
         assert vw.part_mass("201") == 12.0
+
+    def test_name_label_column_is_not_a_join_key(self, weight_db):
+        # Turbocharger_Stage1's name column holds "Stage1"; the payload Key
+        # is the id. Looking up the label must NOT resolve.
+        assert vw.part_mass("Stage1") is None
+        assert vw.part_mass("Turbocharger_Stage1") == 15.0
 
     def test_tuning_family_base_fallback(self, weight_db):
         # Damper200_200 -> base row Damper200 (Suspension_Damper is a family)
@@ -118,15 +137,30 @@ class TestPartMass:
         # not in the tuning families; only slot 2 may fall through to engines.
         assert vw.part_mass("201_50") is None
 
+    def test_blueprint_variant_resolves_to_base_mass(self, weight_db):
+        # TirePhysics variants have no vehicle_parts id row; the
+        # blueprint_variants pair is the authoritative base link.
+        assert vw.part_mass("PerformanceTire_15") == 10.0
+        assert vw.part_mass("performancetire_15") == 10.0  # case-insensitive
+
     def test_engine_slot_uses_powercalc_snapshot(self, weight_db):
+        # fixture has no combustion engine rows -> powercalc fallback fires
         assert vw.part_mass("SmallBlock_240HP", slot=2) == 250.0
 
     def test_engine_key_ignored_outside_engine_slot(self, weight_db):
         # engine rows are not VehicleParts rows; without slot=2 no engine probe
         assert vw.part_mass("SmallBlock_240HP") is None
 
-    def test_ev_motor_has_no_mass(self, weight_db):
-        assert vw.part_mass("Electric_130HP", slot=2) is None
+    def test_ev_motor_mass_from_parts_table(self, weight_db):
+        # Vanilla EV motors carry mass_kg in vehicle_parts (verified live:
+        # Electric_130/300/670HP = 60/130/150 kg) — the old "EV has no mass"
+        # claim was a bug caused by the name-column join hiding these rows.
+        assert vw.part_mass("Electric_130HP", slot=2) == 60.0
+        assert vw.part_mass("electric_130hp", slot=2) == 60.0
+
+    def test_unknown_ev_motor_stays_uncounted(self, weight_db):
+        # not in parts table, not in the combustion-only powercalc snapshot
+        assert vw.part_mass("Electric_999HP", slot=2) is None
 
     def test_unknown_key(self, weight_db):
         assert vw.part_mass("ModPart_Whatever") is None
