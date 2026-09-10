@@ -473,5 +473,50 @@
       "VolvoI5"
     ],
     "prefixes": []
+  },
+  "amc-tires": {
+    "label": "AMC Tires",
+    "source": "AMC tire pack (community pak by GATE, catbox m1iss0.pak, sha256 e177059da3af44a7689438f52cd7570d13c74a31d6ce8b8464624c8bcb50f374, 2026-09-10) - 21 VehicleParts0 rows (10 part keys) + 25 tire physics DataAssets at Cars/Parts/Tire/AMC_* (full inventory registered; all 45 vanilla rows kept). DESIGN: registry-only integration (Yuuka 2026-09-10) - not gated on the pak being an installed server mod; /check_parts labels club tires [AMC Tires] purely from this registry. Prefix amc_ covers pressure-tuned installs (AMC_Bike_65) and future AMC-branded keys",
+    "updated": "2026-09-10",
+    "keys": [
+      "AMC_Bike",
+      "AMC_Bike16Front",
+      "AMC_Bike16Rear",
+      "AMC_Bike17Front",
+      "AMC_Bike17Rear",
+      "AMC_Bike18Front",
+      "AMC_Bike18Rear",
+      "AMC_Bike19Front",
+      "AMC_Bike19Rear",
+      "AMC_Drift",
+      "AMC_Drift36",
+      "AMC_Drift37",
+      "AMC_Rally",
+      "AMC_Rally46",
+      "AMC_Rally47",
+      "AMC_Rally48",
+      "AMC_Sport",
+      "AMC_Sport66",
+      "AMC_Sport68",
+      "AMC_Sport69",
+      "AMC_Stupid",
+      "AMC_Stupid67",
+      "AMC_Truck",
+      "AMC_Truck86",
+      "AMC_Truck86DRW",
+      "AMC_Truck87",
+      "AMC_Truck87DRW",
+      "AMC_Truck88",
+      "AMC_Truck88DRW",
+      "AMC_Truck89",
+      "AMC_Truck89DRW",
+      "AMC_Truck_86-DRW",
+      "AMC_Truck_87-DRW",
+      "AMC_Truck_88-DRW",
+      "AMC_Truck_89-DRW"
+    ],
+    "prefixes": [
+      "AMC_"
+    ]
   }
 }

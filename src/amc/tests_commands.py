@@ -2394,6 +2394,52 @@ class CommandsTestCase(TestCase):
         self.assertEqual(labels.get("20TFSI"), "More Tuning")
         self.assertNotIn("SmallBlock_240HP", labels)
 
+    def test_load_known_mod_parts_amc_tires(self):
+        """The AMC tire pack ships its own registry entry covering its FULL
+        inventory: 10 part keys (VehicleParts0 rows) + 25 tire physics
+        assets, so /check_parts labels club tires [AMC Tires] purely from
+        the registry (design: not gated on the pak being an installed
+        server mod)."""
+        registry = load_known_mod_parts()
+        self.assertIn("amc-tires", registry)
+        amc = registry["amc-tires"]
+        self.assertEqual(amc["label"], "AMC Tires")
+        self.assertEqual(len(amc["keys"]), 35)
+        for key in (
+            "amc_bike",
+            "amc_sport",
+            "amc_stupid",
+            "amc_rally",
+            "amc_truck",
+            "amc_drift",
+            "amc_truck_86-drw",
+            "amc_truck_89-drw",
+            # per-variant tire physics DataAssets (bikes split front/rear)
+            "amc_bike16front",
+            "amc_bike19rear",
+            "amc_truck88drw",
+            "amc_sport66",
+        ):
+            self.assertIn(key, amc["keys"])
+        self.assertEqual(amc["prefixes"], ("amc_",))
+
+    def test_match_known_mod_parts_amc_tires(self):
+        """An AMC tire (exact key) and a pressure-tuned variant (AMC_<x>_NN,
+        caught by the amc_ prefix because the stock catalogue can't strip the
+        suffix on mod keys) label as [AMC Tires]; stock keys stay unlabeled."""
+        parts = [
+            {"key": "AMC_Sport", "slot": "Wheel0Front", "slot_value": 14},
+            {"key": "AMC_Bike_65", "slot": "Wheel0Front", "slot_value": 14},
+            {"key": "BasicTire_65", "slot": "Wheel0Front", "slot_value": 14},
+            {"key": "AMC_Truck_88-DRW", "slot": "Wheel0Rear", "slot_value": 15},
+        ]
+        matched = match_known_mod_parts(parts)
+        labels = {p["key"]: label for p, label in matched}
+        self.assertEqual(labels.get("AMC_Sport"), "AMC Tires")
+        self.assertEqual(labels.get("AMC_Bike_65"), "AMC Tires")
+        self.assertEqual(labels.get("AMC_Truck_88-DRW"), "AMC Tires")
+        self.assertNotIn("BasicTire_65", labels)
+
     def test_match_known_mod_parts_case_insensitive(self):
         """Matching lowercases both sides; non-registry unknowns stay out."""
         parts = [
