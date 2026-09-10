@@ -2036,8 +2036,6 @@ class SubsidyIntegrationTests(TestCase):
         # So "sender_point" on the Application Log will be resolved essentially?
         # YES. If resolved, then SubsidyRule uses `cargo.sender_point` (which is the DB object).
         # So if webhook resolves it, SubsidyRule sees the DB object.
-        # (Distinct payment per event: identical money within 60s would be
-        # deduped as a re-emission burst, not a new delivery.)
 
         event_near = {
             "hook": "ServerCargoArrived",
@@ -2047,7 +2045,7 @@ class SubsidyIntegrationTests(TestCase):
                 "Cargos": [
                     {
                         "Net_CargoKey": "coal",
-                        "Net_Payment": 110,
+                        "Net_Payment": 100,
                         "Net_Weight": 10.0,
                         "Net_Damage": 0.0,
                         "Net_SenderAbsoluteLocation": {"X": 0.9, "Y": 0, "Z": 0},
@@ -2060,7 +2058,7 @@ class SubsidyIntegrationTests(TestCase):
         d2 = await Delivery.objects.filter(character=character).order_by("-id").afirst()
         self.assertIsNotNone(d2)
         self.assertEqual(
-            d2.subsidy, 110, "0.9 distance should resolve point and get subsidy"
+            d2.subsidy, 100, "0.9 distance should resolve point and get subsidy"
         )
 
         # 3. Test Outside Tolerance (2.1) -> Should NOT Match
@@ -2079,7 +2077,7 @@ class SubsidyIntegrationTests(TestCase):
                 "Cargos": [
                     {
                         "Net_CargoKey": "coal",
-                        "Net_Payment": 120,
+                        "Net_Payment": 100,
                         "Net_Weight": 10.0,
                         "Net_Damage": 0.0,
                         "Net_SenderAbsoluteLocation": {"X": 2.1, "Y": 0, "Z": 0},
