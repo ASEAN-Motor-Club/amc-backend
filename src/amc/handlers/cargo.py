@@ -519,10 +519,31 @@ async def process_cargo_log(cargo, player, character, timestamp):
         payment=cargo["Net_Payment"],
         weight=cargo.get("Net_Weight", 0),
         damage=cargo["Net_Damage"],
+        delivery_id=_extract_delivery_id(cargo),
         sender_point=sender,
         destination_point=destination,
         data=cargo,
     )
+
+
+def _extract_delivery_id(cargo) -> int | None:
+    """Net_DeliveryId as a positive int, or None when absent/zero/negative.
+
+    0 means 'non-job delivery'; -1 (observed on free-roam loops and when a
+    player reconnects mid-job, losing the delivery id — freeman, 2026-09-10)
+    means 'no id'. Kept as payload provenance only: a multi-unit delivery
+    emits N webhook cargo entries that all share ONE id and the per-unit
+    payment (N rows = N delivered units), so this column must never be used
+    as a duplicate-suppression key by itself.
+    """
+    raw = cargo.get("Net_DeliveryId")
+    if raw in (None, 0, "0"):
+        return None
+    try:
+        value = int(raw)
+    except (TypeError, ValueError):
+        return None
+    return value if value > 0 else None
 
 
 def _parse_timestamp(event):

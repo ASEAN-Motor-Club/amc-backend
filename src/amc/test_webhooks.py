@@ -1816,6 +1816,129 @@ class ExtraWebhookTests(TestCase):
 @patch("amc.webhook.get_treasury_fund_balance", new_callable=AsyncMock)
 @patch("amc.game_server.announce", new_callable=AsyncMock)
 @patch("amc.mod_server.show_popup", new_callable=AsyncMock)
+class MultiUnitDeliveryRegressionTests(TestCase):
+    """Multi-unit deliveries share ONE Net_DeliveryId across all units.
+
+    A multi-unit delivery emits N webhook cargo entries that all carry the
+    same Net_DeliveryId and the per-unit payment — one entry per delivered
+    unit (verified against the live game board: a 38-unit SunflowerSeed
+    delivery produced exactly 38 same-id log rows at the per-unit price).
+    Any suppression keyed on (character, delivery_id, cargo_key) therefore
+    zeroes genuine units 2..N — PR #115 did exactly that and every multi-unit
+    delivery booked as quantity=1 (prod incident 2026-09-10: a 30-unit Fuel
+    run booked as 1 unit / $587 instead of 30 / $17,610). These tests pin the
+    correct behavior: every same-id entry pays and counts.
+    """
+
+    def setUp(self):
+        cache.clear()
+
+    async def _make_scenario(self, guid):
+        player = await sync_to_async(PlayerFactory)()
+        character = await sync_to_async(CharacterFactory)(player=player, guid=guid)
+        from amc.models import PlayerStatusLog
+
+        await PlayerStatusLog.objects.acreate(
+            character=character,
+            timespan=(timezone.now() - timedelta(minutes=5), timezone.now()),
+        )
+        await CharacterLocation.objects.acreate(
+            character=character, location=Point(0, 0, 0), vehicle_key="TestVehicle"
+        )
+        await DeliveryPoint.objects.acreate(guid="s1", name="S1", coord=Point(0, 0, 0))
+        await DeliveryPoint.objects.acreate(
+            guid="d1", name="D1", coord=Point(100, 100, 0)
+        )
+        return character
+
+    @staticmethod
+    def _event(character, delivery_id, payments, ts):
+        return {
+            "hook": "ServerCargoArrived",
+            "timestamp": ts,
+            "data": {
+                "CharacterGuid": str(character.guid),
+                "Cargos": [
+                    {
+                        "Net_CargoKey": "Fuel",
+                        "Net_Payment": pay,
+                        "Net_Weight": 800.0,
+                        "Net_Damage": 0.0,
+                        "Net_DeliveryId": delivery_id,
+                        "Net_SenderAbsoluteLocation": {"X": 0, "Y": 0, "Z": 0},
+                        "Net_DestinationLocation": {"X": 100, "Y": 100, "Z": 0},
+                    }
+                    for pay in payments
+                ],
+            },
+        }
+
+    async def test_same_id_entries_in_one_event_all_pay(
+        self, mock_show_popup, mock_announce, mock_get_treasury, mock_get_rp_mode
+    ):
+        """30 same-id cargo entries in one event = 30 genuine units."""
+        mock_get_rp_mode.return_value = False
+        mock_get_treasury.return_value = 100_000
+
+        character = await self._make_scenario("test-char-multiunit-1")
+        events = [self._event(character, 65885, [587] * 30, int(time.time()))]
+
+        await process_events(events)
+
+        logs = [
+            log
+            async for log in ServerCargoArrivedLog.objects.filter(character=character)
+        ]
+        self.assertEqual(len(logs), 30)
+        for log in logs:
+            self.assertEqual(log.payment, 587, "every unit pays — none suppressed")
+            self.assertEqual(log.delivery_id, 65885)
+
+        deliveries = [
+            d async for d in Delivery.objects.filter(character=character)
+        ]
+        self.assertEqual(len(deliveries), 1)
+        self.assertEqual(deliveries[0].quantity, 30)
+        self.assertEqual(deliveries[0].payment, 30 * 587)
+
+    async def test_same_id_second_batch_books_separately(
+        self, mock_show_popup, mock_announce, mock_get_treasury, mock_get_rp_mode
+    ):
+        """Two unload batches of one delivery (same id, two events) each book
+        their own Delivery row at full quantity — no cross-event suppression."""
+        mock_get_rp_mode.return_value = False
+        mock_get_treasury.return_value = 100_000
+
+        character = await self._make_scenario("test-char-multiunit-2")
+        ts = int(time.time())
+
+        await process_events([self._event(character, 146702, [811] * 20, ts)])
+        await process_events([self._event(character, 146702, [811] * 28, ts + 6)])
+
+        logs = [
+            log
+            async for log in ServerCargoArrivedLog.objects.filter(character=character)
+        ]
+        self.assertEqual(len(logs), 48)
+        for log in logs:
+            self.assertEqual(log.payment, 811, "re-emission guard must not zero units")
+            self.assertEqual(log.delivery_id, 146702)
+
+        deliveries = [
+            d async for d in Delivery.objects.filter(character=character)
+        ]
+        self.assertEqual(len(deliveries), 2)
+        quantities = sorted(d.quantity for d in deliveries)
+        self.assertEqual(quantities, [20, 28])
+        self.assertEqual(
+            sorted(d.payment for d in deliveries), [20 * 811, 28 * 811]
+        )
+
+
+@patch("amc.webhook.get_rp_mode", new_callable=AsyncMock)
+@patch("amc.webhook.get_treasury_fund_balance", new_callable=AsyncMock)
+@patch("amc.game_server.announce", new_callable=AsyncMock)
+@patch("amc.mod_server.show_popup", new_callable=AsyncMock)
 class SubsidyIntegrationTests(TestCase):
     def setUp(self):
         cache.clear()
