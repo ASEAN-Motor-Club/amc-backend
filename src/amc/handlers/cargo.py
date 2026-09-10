@@ -89,6 +89,16 @@ async def handle_cargo_dumped(event, player, character, ctx):
 # this window pay once; later emissions are booked with payment=0.
 DUPLICATE_DELIVERY_WINDOW = timedelta(hours=24)
 
+# Id-less logs (DeliveryId 0/-1/absent) have no stable delivery identity:
+# non-job cargo shares the sentinel across unrelated deliveries, and job
+# cargo loses its id when the player reconnects (freeman, 2026-09-10).
+# Those dedupe on a money fingerprint instead: a re-emission burst is
+# payment+weight identical (damage, coords and Net_TimeLeftSeconds jitter
+# between re-emissions), while genuinely different cargo differs in
+# payment or weight. The window stays short — legit repeat deliveries are
+# minutes apart, so 60s cannot swallow them.
+IDLESS_DELIVERY_WINDOW = timedelta(seconds=60)
+
 
 @register("ServerCargoArrived")
 async def handle_cargo_arrived(event, player, character, ctx):
@@ -110,10 +120,13 @@ async def handle_cargo_arrived(event, player, character, ctx):
     )
 
     # --- 2b. Duplicate-delivery suppression ---
-    # The game/mod re-emits arrivals for one delivery (same Net_DeliveryId).
-    # Only the first emission per (character, delivery_id, cargo_key) per
-    # window pays; duplicates are logged with payment=0 and excluded from
-    # every downstream step (bonus, clawback, subsidy, job, payment).
+    # The game/mod re-emits arrivals for one delivery. With a delivery id,
+    # the first emission per (character, delivery_id, cargo_key) per window
+    # pays; id-less emissions (DeliveryId 0/-1/absent — non-job cargo, or
+    # job cargo after a reconnect) dedupe on the money fingerprint within
+    # a short window instead. Duplicates are logged with payment=0 and
+    # excluded from every downstream step (bonus, clawback, subsidy, job,
+    # payment).
     fresh_logs, duplicate_logs = await _split_duplicate_deliveries(
         logs, character, timestamp
     )
@@ -434,30 +447,47 @@ def _parse_cargos(event):
 
 
 def _extract_delivery_id(cargo) -> int | None:
-    """Net_DeliveryId as an int, or None when absent/zero/non-numeric.
+    """Net_DeliveryId as a positive int, or None when absent/zero/negative.
 
-    DeliveryId 0 means 'non-job delivery' and is never used as a dedupe
-    key (it repeats across unrelated deliveries).
+    0 means 'non-job delivery'; -1 (observed on free-roam loops and when a
+    player reconnects mid-job, losing the delivery id — freeman, 2026-09-10)
+    means 'no id'. Id-less logs never key on delivery_id — they dedupe by
+    money fingerprint instead (see _split_duplicate_deliveries).
     """
     raw = cargo.get("Net_DeliveryId")
     if raw in (None, 0, "0"):
         return None
     try:
-        return int(raw)
+        value = int(raw)
     except (TypeError, ValueError):
         return None
+    return value if value > 0 else None
 
 
 async def _split_duplicate_deliveries(logs, character, timestamp):
     """Split cargo logs into (fresh, duplicates) by prior emission.
 
-    A log is a duplicate when the same (character, delivery_id, cargo_key)
-    was already logged within DUPLICATE_DELIVERY_WINDOW. Logs without a
-    delivery id (DeliveryId 0/absent) are always fresh.
+    Two lanes:
+
+    - Logs with a delivery id duplicate on (character, delivery_id,
+      cargo_key) within DUPLICATE_DELIVERY_WINDOW — both across events
+      and within one batch.
+    - Id-less logs (DeliveryId 0/-1/absent: non-job cargo, or job cargo
+      whose id was lost on reconnect) duplicate on the money fingerprint
+      (character, cargo_key, payment, weight) across events within
+      IDLESS_DELIVERY_WINDOW. Identical id-less items inside ONE event
+      are genuine multi-item cargo and all pay (the re-emission bursts
+      arrive as separate events). Distinct physical deliveries of the
+      same cargo differ in payment or weight, so only money-identical
+      re-emissions are suppressed.
+
+    ServerCargoDumped rows (delivery_id=None) share the id-less lane; a
+    dump of the same money within the window suppressing a matching
+    arrival is an accepted, negligible edge case.
     """
     if character is None:
         return list(logs), []
-    pending = {log.delivery_id for log in logs if log.delivery_id}
+    pending = {log.delivery_id for log in logs if log.delivery_id is not None}
     prior: set[tuple[int, str]] = set()
     if pending:
         prior = {
@@ -468,17 +498,38 @@ async def _split_duplicate_deliveries(logs, character, timestamp):
                 timestamp__gte=timestamp - DUPLICATE_DELIVERY_WINDOW,
             ).values_list("delivery_id", "cargo_key")
         }
+    idless = {
+        (log.cargo_key, log.payment, log.weight)
+        for log in logs
+        if log.delivery_id is None
+    }
+    idless_prior: set[tuple[str, int, float]] = set()
+    if idless:
+        idless_prior = {
+            (cargo_key, payment, weight)
+            async for cargo_key, payment, weight in ServerCargoArrivedLog.objects.filter(
+                character=character,
+                delivery_id__isnull=True,
+                cargo_key__in={fp[0] for fp in idless},
+                timestamp__gte=timestamp - IDLESS_DELIVERY_WINDOW,
+            ).values_list("cargo_key", "payment", "weight")
+        }
     fresh, duplicates = [], []
-    seen: set[tuple[int, str]] = set()
+    seen_ids: set[tuple[int, str]] = set()
     for log in logs:
         if log.delivery_id is None:
-            fresh.append(log)
+            # No within-batch suppression: identical id-less items in one
+            # event are genuine multi-item cargo (webhook contract).
+            if (log.cargo_key, log.payment, log.weight) in idless_prior:
+                duplicates.append(log)
+            else:
+                fresh.append(log)
             continue
         pair = (log.delivery_id, log.cargo_key)
-        if pair in prior or pair in seen:
+        if pair in prior or pair in seen_ids:
             duplicates.append(log)
             continue
-        seen.add(pair)
+        seen_ids.add(pair)
         fresh.append(log)
     return fresh, duplicates
 

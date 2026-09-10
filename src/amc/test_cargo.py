@@ -106,6 +106,11 @@ class ExtractDeliveryIdTests(TestCase):
         """DeliveryId 0 = non-job delivery, never a dedupe key."""
         self.assertIsNone(_extract_delivery_id({"Net_DeliveryId": 0}))
 
+    def test_negative_is_none(self):
+        """DeliveryId -1 = no id (free-roam loops, reconnect-lost jobs)."""
+        self.assertIsNone(_extract_delivery_id({"Net_DeliveryId": -1}))
+        self.assertIsNone(_extract_delivery_id({"Net_DeliveryId": "-1"}))
+
     def test_absent_is_none(self):
         self.assertIsNone(_extract_delivery_id({}))
 
@@ -138,9 +143,13 @@ class DuplicateDeliverySuppressionTests(TestCase):
         return player, character
 
     async def _seed_prior(self, now, player, character, delivery_id,
-                          cargo_key="Coal", hours_ago=1.0):
+                          cargo_key="Coal", hours_ago=1.0, seconds_ago=None):
         await ServerCargoArrivedLog.objects.acreate(
-            timestamp=now - timedelta(hours=hours_ago),
+            timestamp=(
+                now - timedelta(seconds=seconds_ago)
+                if seconds_ago is not None
+                else now - timedelta(hours=hours_ago)
+            ),
             player=player,
             character=character,
             cargo_key=cargo_key,
@@ -280,14 +289,17 @@ class DuplicateDeliverySuppressionTests(TestCase):
         self.assertEqual(len(fresh), 1)
         self.assertEqual(dups, [])
 
-    def test_none_delivery_id_always_fresh(self):
-        """Non-job deliveries (no id) are never suppressed."""
+    def test_idless_identical_items_in_one_event_are_fresh(self):
+        """Identical id-less items inside ONE event are genuine multi-item
+        cargo (webhook aggregation contract) — all pay. Re-emission bursts
+        arrive as separate events and are caught by the DB-prior lane."""
         async def scenario():
             player, character = await self._make_actor(990008)
             now = timezone.now()
             try:
                 return await _split_duplicate_deliveries(
                     [self._log(now, player, character, None),
+                     self._log(now, player, character, None),
                      self._log(now, player, character, None)],
                     character, now,
                 )
@@ -295,7 +307,94 @@ class DuplicateDeliverySuppressionTests(TestCase):
                 await self._cleanup(character)
 
         fresh, dups = asyncio.run(scenario())
+        self.assertEqual(len(fresh), 3)
+        self.assertEqual(dups, [])
+
+    def test_idless_different_money_is_fresh(self):
+        """Id-less cargo with different payment/weight = different physical
+        cargo (multi-item event); every item pays."""
+        async def scenario():
+            player, character = await self._make_actor(990009)
+            now = timezone.now()
+            try:
+                log_zero = self._log(now, player, character, None,
+                                     cargo_key="TrashBag")
+                log_zero.payment = 0
+                log_zero.weight = -1
+                log_pay = self._log(now, player, character, None,
+                                    cargo_key="TrashBag")
+                log_pay.payment = 2000
+                return await _split_duplicate_deliveries(
+                    [log_zero, log_pay], character, now,
+                )
+            finally:
+                await self._cleanup(character)
+
+        fresh, dups = asyncio.run(scenario())
         self.assertEqual(len(fresh), 2)
+        self.assertEqual(dups, [])
+
+    def test_idless_reemission_after_prior_row_is_duplicate(self):
+        """Prior id-less row 10s ago with the same money fingerprint is a
+        duplicate (the reconnect burst after a first paid emission)."""
+        async def scenario():
+            player, character = await self._make_actor(990010)
+            now = timezone.now()
+            try:
+                await self._seed_prior(
+                    now, player, character, None, seconds_ago=10
+                )
+                return await _split_duplicate_deliveries(
+                    [self._log(now, player, character, None)],
+                    character, now,
+                )
+            finally:
+                await self._cleanup(character)
+
+        fresh, dups = asyncio.run(scenario())
+        self.assertEqual(len(fresh), 0)
+        self.assertEqual(len(dups), 1)
+
+    def test_idless_window_expiry_is_fresh(self):
+        """Legit repeat delivery: same cargo, same money, >60s later."""
+        async def scenario():
+            player, character = await self._make_actor(990011)
+            now = timezone.now()
+            try:
+                await self._seed_prior(
+                    now, player, character, None, seconds_ago=90
+                )
+                return await _split_duplicate_deliveries(
+                    [self._log(now, player, character, None)],
+                    character, now,
+                )
+            finally:
+                await self._cleanup(character)
+
+        fresh, dups = asyncio.run(scenario())
+        self.assertEqual(len(fresh), 1)
+        self.assertEqual(dups, [])
+
+    def test_idless_other_character_is_fresh(self):
+        """Money fingerprints are per-character."""
+        async def scenario():
+            player_a, character_a = await self._make_actor(990012)
+            player_b, character_b = await self._make_actor(990013)
+            now = timezone.now()
+            try:
+                await self._seed_prior(
+                    now, player_a, character_a, None, seconds_ago=5
+                )
+                return await _split_duplicate_deliveries(
+                    [self._log(now, player_b, character_b, None)],
+                    character_b, now,
+                )
+            finally:
+                await self._cleanup(character_a)
+                await self._cleanup(character_b)
+
+        fresh, dups = asyncio.run(scenario())
+        self.assertEqual(len(fresh), 1)
         self.assertEqual(dups, [])
 
     def test_null_character_skips_dedupe(self):
