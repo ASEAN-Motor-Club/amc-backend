@@ -2395,13 +2395,16 @@ class CommandsTestCase(TestCase):
         self.assertNotIn("SmallBlock_240HP", labels)
 
     def test_load_known_mod_parts_amc_tires(self):
-        """The AMC tire pack ships its own registry entry: the 10 distinct
-        row keys label as [AMC Tires] instead of [unknown]."""
+        """The AMC tire pack ships its own registry entry covering its FULL
+        inventory: 10 part keys (VehicleParts0 rows) + 25 tire physics
+        assets, so /check_parts labels club tires [AMC Tires] purely from
+        the registry (design: not gated on the pak being an installed
+        server mod)."""
         registry = load_known_mod_parts()
         self.assertIn("amc-tires", registry)
         amc = registry["amc-tires"]
         self.assertEqual(amc["label"], "AMC Tires")
-        self.assertEqual(len(amc["keys"]), 10)
+        self.assertEqual(len(amc["keys"]), 35)
         for key in (
             "amc_bike",
             "amc_sport",
@@ -2411,6 +2414,11 @@ class CommandsTestCase(TestCase):
             "amc_drift",
             "amc_truck_86-drw",
             "amc_truck_89-drw",
+            # per-variant tire physics DataAssets (bikes split front/rear)
+            "amc_bike16front",
+            "amc_bike19rear",
+            "amc_truck88drw",
+            "amc_sport66",
         ):
             self.assertIn(key, amc["keys"])
         self.assertEqual(amc["prefixes"], ("amc_",))
