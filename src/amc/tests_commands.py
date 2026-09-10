@@ -1819,7 +1819,7 @@ class CommandsTestCase(TestCase):
             self.assertIn("Power: 293.2 hp @ 6,216 rpm", output)
             self.assertIn("413.0 Nm @ 4,355 rpm", output)
             self.assertIn("Intake 201 · Turbo Turbocharger_Stage1", output)
-            self.assertIn("model 1.0.0 · data 2026.09.2", output)
+            self.assertIn("model 1.0.0 · data 2026.09.3", output)
             # drivetrain line removed — DriveInfo is not server-populated
             # final-drive ratio enrichment: opaque preset id + resolved ratio
             self.assertIn("FinalDriveRatio: 107 (4.78)", output)
@@ -2148,6 +2148,31 @@ class CommandsTestCase(TestCase):
             self.assertIn(key, mt["keys"])
         # full extracted catalogue (2026-09 MT pak), not just the observed few
         self.assertGreater(len(mt["keys"]), 400)
+
+    def test_load_known_mod_parts_teh_engine_pack(self):
+        """teh's engine pack ships its own registry entry: the 16 new engine
+        keys label as [Teh Engine Pack] instead of [unknown]."""
+        registry = load_known_mod_parts()
+        self.assertIn("teh-engine-pack", registry)
+        teh = registry["teh-engine-pack"]
+        self.assertEqual(teh["label"], "Teh Engine Pack")
+        self.assertEqual(len(teh["keys"]), 16)
+        for key in ("bigblock_v8", "ferrariv12", "scaniav8", "volvoi5"):
+            self.assertIn(key, teh["keys"])
+
+    def test_match_known_mod_parts_teh_engine_pack(self):
+        """A teh pack engine + an MT part label with their own mods; a stock
+        key stays unlabeled."""
+        parts = [
+            {"key": "Bigblock_V8", "slot": "Engine", "slot_value": 2},
+            {"key": "20TFSI", "slot": "Engine", "slot_value": 2},
+            {"key": "SmallBlock_240HP", "slot": "Engine", "slot_value": 2},
+        ]
+        matched = match_known_mod_parts(parts)
+        labels = {p["key"]: label for p, label in matched}
+        self.assertEqual(labels.get("Bigblock_V8"), "Teh Engine Pack")
+        self.assertEqual(labels.get("20TFSI"), "More Tuning")
+        self.assertNotIn("SmallBlock_240HP", labels)
 
     def test_match_known_mod_parts_case_insensitive(self):
         """Matching lowercases both sides; non-registry unknowns stay out."""

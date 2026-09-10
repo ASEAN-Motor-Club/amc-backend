@@ -449,5 +449,29 @@
       "zzr1400tuned270HP"
     ],
     "prefixes": []
+  },
+  "teh-engine-pack": {
+    "label": "Teh Engine Pack",
+    "source": "teh's engine pack (community pak, catbox udk46l.pak, sha256 b4cfdaa0..., 2026-09-10) - 16 new engine rows in a superset Engines DataTable that also carries 36 vanilla + 152 More Tuning rows unmodified",
+    "updated": "2026-09-10",
+    "keys": [
+      "Bigblock_V8",
+      "Boxer4",
+      "Daf",
+      "FerrariV12",
+      "Flat6",
+      "Hellcatv8",
+      "I4Miata",
+      "Integrai4",
+      "Iveco",
+      "MercedesV8",
+      "NissanV6",
+      "PontiacV8",
+      "ScaniaV8",
+      "Suprai6",
+      "V10",
+      "VolvoI5"
+    ],
+    "prefixes": []
   }
 }
