@@ -9,15 +9,25 @@ powercalc snapshot — no fabrication, explicit degradation everywhere:
   ``blueprint_path`` ships in two shapes (``Default__X_C`` and bare ``X_C``);
   both normalise to the same key. ~138 of 168 vehicles carry a weight —
   police/taxi/hidden variants mostly don't and degrade to ``Unknown``.
-* ``vehicle_parts.mass_kg`` — per-part mass for non-engine parts. Stock
-  default parts are authored at 0 kg; aftermarket parts carry real masses.
-  Tuned variant keys (``Damper200_200``) fall back to their base row — but
-  ONLY for the tuning-suffix families in ``mod_detection.SUFFIX_RULES``; a
-  blind strip would mis-resolve e.g. tire ``201_50`` onto intake ``201``.
-* Engine masses come from the committed powercalc snapshot
-  (``engine_parts[key]["mass_kg"]``) — engines are DataAssets, not
-  VehicleParts rows, so they never appear in the parts table. EV motors have
-  no mass in the model data and count as uncounted.
+* ``vehicle_parts.mass_kg`` — per-part mass for ALL part types (engine rows
+  included: the 33 vanilla combustion engines AND the vanilla EV motors
+  Electric_130/300/670HP carry ``mass_kg`` there). Joined on the **``id``
+  column** — the column the mod payload's ``Key`` matches; the ``name``
+  column is an internal hash/asset label (e.g. intake ``201`` has name
+  ``38A0EDDD…``, ``Turbocharger_Stage1`` has name ``Stage1``) and must NOT
+  be used as the join key. Stock default parts are authored at 0 kg;
+  aftermarket parts carry real masses. Tuned variant keys
+  (``Damper200_200``) fall back to their base row — but ONLY for the
+  tuning-suffix families in ``mod_detection.SUFFIX_RULES``; a blind strip
+  would mis-resolve e.g. tire ``201_50`` onto intake ``201``.
+  ``blueprint_variants`` pairs (TirePhysics variants like
+  ``PerformanceTire_15``) resolve to their base row data-driven — no
+  suffix guessing.
+* Engine masses fall back to the committed powercalc snapshot
+  (``engine_parts[key]["mass_kg"]``) for engines ABSENT from the parts
+  table (mod engine packs). Vanilla engines — combustion and EV — resolve
+  from ``vehicle_parts`` directly; the snapshot's 201 ``engine_parts`` rows
+  are combustion-only and carry no EV entries.
 
 The total is COMPUTED (chassis + sum of installed part masses), not measured
 in-game. Whether the game's simulated mass composes exactly this way is
@@ -57,7 +67,7 @@ class WeightSummary:
     chassis_kg: float | None = None
     parts_kg: float = 0.0  # sum of RESOLVED part masses (0 legitimately = all stock-0)
     resolved: int = 0
-    uncounted: int = 0  # installed parts whose mass is unknown (mod parts, EV motor)
+    uncounted: int = 0  # installed parts whose mass is unknown (mod parts)
     total_kg: float | None = None  # chassis + parts, only when chassis is known
 
 
@@ -66,14 +76,16 @@ class WeightSummary:
 _chassis_by_key: dict[str, float] | None = None
 _part_masses: dict[str, float] | None = None
 _part_mass_bases: dict[str, float] | None = None
+_part_variants: dict[str, str] | None = None
 
 
 def reset_caches() -> None:
     """Drop cached loaders (tests, or after a gamedata regen)."""
-    global _chassis_by_key, _part_masses, _part_mass_bases
+    global _chassis_by_key, _part_masses, _part_mass_bases, _part_variants
     _chassis_by_key = None
     _part_masses = None
     _part_mass_bases = None
+    _part_variants = None
 
 
 def blueprint_key(vehicle_full_name: str) -> str:
@@ -107,7 +119,12 @@ def _load_chassis_masses() -> dict[str, float]:
 
 
 def _load_part_masses() -> tuple[dict[str, float], dict[str, float]]:
-    """(all part masses, tuning-family base-row masses), cached, lowercased."""
+    """(all part masses, tuning-family base-row masses), cached, lowercased.
+
+    Joined on the ``id`` column — the same id space as the mod payload's
+    ``Key`` and the powercalc snapshot. The ``name`` column is an internal
+    hash/asset label and resolves almost nothing the game can install.
+    """
     global _part_masses, _part_mass_bases
     if _part_masses is not None and _part_mass_bases is not None:
         return _part_masses, _part_mass_bases
@@ -116,13 +133,13 @@ def _load_part_masses() -> tuple[dict[str, float], dict[str, float]]:
     try:
         conn = sqlite3.connect(f"file:{GAME_DB_PATH}?mode=ro", uri=True, timeout=5)
         try:
-            for name, ptype, mass in conn.execute(
-                "SELECT name, part_type, mass_kg FROM vehicle_parts "
-                "WHERE name IS NOT NULL AND mass_kg IS NOT NULL"
+            for pid, ptype, mass in conn.execute(
+                "SELECT id, part_type, mass_kg FROM vehicle_parts "
+                "WHERE id IS NOT NULL AND mass_kg IS NOT NULL"
             ):
-                exact[str(name).lower()] = float(mass)
+                exact[str(pid).lower()] = float(mass)
                 if ptype in _TUNING_FAMILIES:
-                    bases[str(name).lower()] = float(mass)
+                    bases[str(pid).lower()] = float(mass)
         finally:
             conn.close()
     except Exception as e:  # noqa: BLE001 — degrade to empty
@@ -130,6 +147,33 @@ def _load_part_masses() -> tuple[dict[str, float], dict[str, float]]:
     _part_masses = exact
     _part_mass_bases = bases
     return _part_masses, _part_mass_bases
+
+
+def _load_part_variants() -> dict[str, str]:
+    """``blueprint_variants`` pairs (variant_name -> base_name), cached, lowercased.
+
+    The game derives installed variant keys from these authoritative pairs
+    (today: the TirePhysics variants ``PerformanceTire_15/25/30/46``);
+    resolving through the table is data-driven — no suffix guessing.
+    """
+    global _part_variants
+    if _part_variants is not None:
+        return _part_variants
+    out: dict[str, str] = {}
+    try:
+        conn = sqlite3.connect(f"file:{GAME_DB_PATH}?mode=ro", uri=True, timeout=5)
+        try:
+            for base, variant in conn.execute(
+                "SELECT base_name, variant_name FROM blueprint_variants "
+                "WHERE base_name IS NOT NULL AND variant_name IS NOT NULL"
+            ):
+                out[str(variant).lower()] = str(base).lower()
+        finally:
+            conn.close()
+    except Exception as e:  # noqa: BLE001 — degrade to empty
+        log.error("Failed to load blueprint variants: %s", e)
+    _part_variants = out
+    return out
 
 
 def _engine_mass(key: str) -> float | None:
@@ -145,9 +189,9 @@ def _engine_mass(key: str) -> float | None:
 def part_mass(key: str | None, slot: int | None = None) -> float | None:
     """Mass (kg) of one installed part, or None when unknown.
 
-    Order: exact VehicleParts row -> tuning-family base row -> powercalc
-    engine part (engine slot only; engine rows are not in the VehicleParts
-    table).
+    Order: exact VehicleParts row (by ``id``) -> blueprint-variant base row
+    -> tuning-family base row -> powercalc engine part (engine slot only,
+    for engines absent from the parts table — mod engine packs).
     """
     if not key:
         return None
@@ -155,6 +199,9 @@ def part_mass(key: str | None, slot: int | None = None) -> float | None:
     k = key.lower()
     if k in exact:
         return exact[k]
+    variant_base = _load_part_variants().get(k)
+    if variant_base is not None and variant_base in exact:
+        return exact[variant_base]
     base = k.rsplit("_", 1)[0]
     if base != k and base in bases:
         return bases[base]
