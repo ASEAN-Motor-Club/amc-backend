@@ -1,5 +1,7 @@
 """Tests for the silent parts audit (amc/parts_audit.py + join reconcile)."""
 
+import asyncio
+import threading
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -65,6 +67,7 @@ class TestAuditCharacter:
     async def test_posts_embed_to_configured_channel(self):
         client = MagicMock()
         client.is_ready.return_value = True
+        client.loop = asyncio.get_running_loop()
         channel = MagicMock()
         channel.send = AsyncMock()
         client.get_channel.return_value = channel
@@ -140,6 +143,7 @@ class TestAuditCharacter:
         """Private channel the bot can't see: NOT delivered, not counted."""
         client = MagicMock()
         client.is_ready.return_value = True
+        client.loop = asyncio.get_running_loop()
         client.get_channel.return_value = None  # bot lacks View Channel
 
         async def fake_vehicle(session, guid):
@@ -158,6 +162,89 @@ class TestAuditCharacter:
 
         assert result is None
         client.get_channel.assert_called_once_with(12345)
+
+    async def test_delivers_when_called_from_a_foreign_loop(self):
+        """Worker regression (prod 2026-09-10): hook/crosscheck callers run on
+        the worker (arq) loop while the bot's HTTP session lives on the bot
+        thread's own loop — a direct ``await channel.send`` there fails
+        aiohttp's timer check ("Timeout context manager should be used
+        inside a task") and nothing is posted.  The delivery must bridge
+        onto the client's loop and succeed."""
+        channel = MagicMock()
+        seen_loops: list[asyncio.AbstractEventLoop] = []
+
+        async def fake_send(embed=None, **kwargs):
+            seen_loops.append(asyncio.get_running_loop())
+
+        channel.send = AsyncMock(side_effect=fake_send)
+        client = MagicMock()
+        client.is_ready.return_value = True
+        client.get_channel.return_value = channel
+
+        async def fake_vehicle(session, guid):
+            return {"vehicle": {"fullName": "Elisa2"}}
+
+        async def fake_parts(session, guid, complete=False):
+            return {"parts": _installed_parts()}
+
+        with _bot_thread_loop() as bot_loop:
+            client.loop = bot_loop
+            with (
+                patch("amc.parts_audit.get_player_last_vehicle", fake_vehicle),
+                patch("amc.parts_audit.get_player_last_vehicle_parts", fake_parts),
+                patch("amc.parts_audit.settings") as mock_settings,
+            ):
+                mock_settings.DISCORD_PARTS_LOG_CHANNEL_ID = 12345
+                embed = await _audit(client, "guid-1", "tester")
+
+        assert embed is not None
+        channel.send.assert_awaited_once()
+        sent = channel.send.await_args.kwargs["embed"]
+        assert sent.title == "Parts Audit — tester"
+        # The send must have EXECUTED on the client's loop — that is the
+        # whole point of the bridge (the bot's aiohttp session is bound to
+        # it; a direct await from the caller loop raises).
+        assert seen_loops == [bot_loop]
+
+    async def test_missing_client_loop_returns_none_without_crash(self):
+        """Bot not running / mid-shutdown (client.loop unavailable): report
+        NOT delivered, the audit never raises."""
+        client = MagicMock()
+        client.is_ready.return_value = True
+        client.loop = None
+
+        async def fake_vehicle(session, guid):
+            return {"vehicle": {"fullName": "Elisa2"}}
+
+        async def fake_parts(session, guid, complete=False):
+            return {"parts": _installed_parts()}
+
+        with (
+            patch("amc.parts_audit.get_player_last_vehicle", fake_vehicle),
+            patch("amc.parts_audit.get_player_last_vehicle_parts", fake_parts),
+            patch("amc.parts_audit.settings") as mock_settings,
+        ):
+            mock_settings.DISCORD_PARTS_LOG_CHANNEL_ID = 12345
+            result = await _audit(client, "guid-1", "tester")
+
+        assert result is None
+
+
+class _bot_thread_loop:
+    """A real second event loop running in a thread — the worker's
+    bot-thread stand-in for cross-loop delivery tests."""
+
+    def __enter__(self):
+        self._loop = asyncio.new_event_loop()
+        self._thread = threading.Thread(target=self._loop.run_forever, daemon=True)
+        self._thread.start()
+        return self._loop
+
+    def __exit__(self, *exc):
+        self._loop.call_soon_threadsafe(self._loop.stop)
+        self._thread.join(timeout=5)
+        self._loop.close()
+        return False
 
 
 async def _audit(client, guid, name):

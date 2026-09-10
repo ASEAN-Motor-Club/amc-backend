@@ -80,26 +80,64 @@ def _audit_embed(player_name: str, vehicle: dict, parts: list[dict], source: str
     return embed
 
 
-async def _resolve_audit_channel(client):
-    """Resolve the audit channel; never hangs (bounded ready-wait).
+# Delivery statuses reported by _post_audit_embed.
+_DELIVERED = "delivered"
+_CLIENT_NOT_READY = "client-not-ready"
+_CHANNEL_UNRESOLVABLE = "channel-unresolvable"
 
-    Returns ``(channel, disabled)`` — ``disabled`` is True when the feature
-    is OFF (channel id 0 or no client): callers treat that as "embed built,
-    delivery intentionally skipped" rather than a failure.  A configured
-    channel the bot cannot resolve (``get_channel`` None — private channel
-    the bot has no View-Channel access to) is NOT "disabled": it's a
-    misconfiguration the caller must surface.
+
+async def _post_audit_embed(client, channel_id: int, embed: discord.Embed) -> str:
+    """Deliver the embed on the Discord client's OWN event loop.
+
+    Returns one of _DELIVERED / _CLIENT_NOT_READY / _CHANNEL_UNRESOLVABLE;
+    raises on transport failure.  The "disabled" case (channel id 0 / no
+    client) never reaches here — audit_character treats it as
+    "embed built, delivery intentionally skipped".
+
+    WHY THE BRIDGE: the worker runs the bot on a dedicated thread
+    (worker.run_discord → client.run), so the client's HTTP session and
+    every awaitable it owns belong to that thread's loop.  Awaiting
+    ``channel.send`` directly from the worker (arq) loop makes aiohttp's
+    timer check (``current_task(bot_loop)``) fail with "Timeout context
+    manager should be used inside a task" — every automatic parts-audit
+    post failed this way since #106 shipped (prod 2026-09-10), while
+    /check_all_players kept working because cogs run on the bot loop.
+    Bridge with ``run_coroutine_threadsafe`` — the same pattern the
+    event-embed editor (handlers/events.py) and the forward queue
+    (amc/tasks.py) already use.  Bounded: the inner ready-wait is capped
+    at 10s, the whole bridged send at 30s, so a dead bot thread delays
+    the hook pipeline by at most 30s per audit and never hangs it.
     """
-    channel_id = int(settings.DISCORD_PARTS_LOG_CHANNEL_ID or 0)
-    if not channel_id or client is None:
-        return None, True
-    if not client.is_ready():
-        try:
-            await asyncio.wait_for(client.wait_until_ready(), timeout=10)
-        except asyncio.TimeoutError:
-            logger.warning("Parts audit skipped — Discord client not ready")
-            return None, False
-    return client.get_channel(channel_id), False
+    async def _post() -> str:
+        if not client.is_ready():
+            try:
+                await asyncio.wait_for(client.wait_until_ready(), timeout=10)
+            except asyncio.TimeoutError:
+                return _CLIENT_NOT_READY
+        channel = client.get_channel(channel_id)
+        if channel is None:
+            # Private channel the bot can't see, deleted channel, stale
+            # ID — a misconfiguration the caller must surface.
+            return _CHANNEL_UNRESOLVABLE
+        await channel.send(embed=embed)
+        return _DELIVERED
+
+    try:
+        client_loop = client.loop
+    except Exception:  # noqa: BLE001 — any client-state failure means "no loop"
+        client_loop = None
+    if client_loop is None:
+        raise RuntimeError("Discord client has no event loop (bot not running)")
+    try:
+        running = asyncio.get_running_loop()
+    except RuntimeError:
+        running = None
+    if client_loop is running:
+        return await _post()
+    return await asyncio.wait_for(
+        asyncio.wrap_future(asyncio.run_coroutine_threadsafe(_post(), client_loop)),
+        timeout=30,
+    )
 
 
 async def audit_character(
@@ -142,28 +180,34 @@ async def audit_character(
 
     embed = _audit_embed(player_name, vehicle, parts, source)
 
-    channel, disabled = await _resolve_audit_channel(discord_client)
-    if channel is None:
-        if disabled:
-            # Feature wired but channel unset/off: log the summary so it's
-            # still observable in the worker journal.
-            logger.info("Parts audit (%s) %s: %s", source, player_name, " | ".join(summarize_parts(parts)))
-            return embed
-        # Configured but unresolvable: private channel the bot can't see,
-        # deleted channel, stale ID. Loud — this must not pass silently.
-        logger.warning(
-            "Parts audit channel %s not found (bot lacks View Channel access "
-            "or channel is gone) — report for %s NOT delivered",
-            settings.DISCORD_PARTS_LOG_CHANNEL_ID, player_name,
-        )
-        return None
+    channel_id = int(settings.DISCORD_PARTS_LOG_CHANNEL_ID or 0)
+    if not channel_id or discord_client is None:
+        # Feature wired but channel unset/off: log the summary so it's
+        # still observable in the worker journal.
+        logger.info("Parts audit (%s) %s: %s", source, player_name, " | ".join(summarize_parts(parts)))
+        return embed
+
     try:
-        await channel.send(embed=embed)
+        status = await _post_audit_embed(discord_client, channel_id, embed)
     except Exception:
         logger.warning("Parts audit Discord post failed for %s", player_name, exc_info=True)
         return None
-    logger.info("Parts audit delivered for %s (source: %s)", player_name, source)
-    return embed
+    if status == _DELIVERED:
+        logger.info("Parts audit delivered for %s (source: %s)", player_name, source)
+        return embed
+    if status == _CLIENT_NOT_READY:
+        logger.warning(
+            "Parts audit skipped — Discord client not ready (report for %s NOT delivered)",
+            player_name,
+        )
+        return None
+    # _CHANNEL_UNRESOLVABLE: loud — this must not pass silently.
+    logger.warning(
+        "Parts audit channel %s not found (bot lacks View Channel access "
+        "or channel is gone) — report for %s NOT delivered",
+        channel_id, player_name,
+    )
+    return None
 
 
 async def audit_event_join(
