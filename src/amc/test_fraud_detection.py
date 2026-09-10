@@ -10,6 +10,7 @@ from django.test import TestCase, override_settings
 from amc.factories import CharacterFactory, PlayerFactory
 from amc.fraud_detection import (
     CARGO_MAX_ABSOLUTE_PAYMENT,
+    CARGO_PER_UNIT_DEFAULT,
     CARGO_PER_UNIT_THRESHOLDS,
     PASSENGER_PAYMENT_CEILINGS,
     TOW_PAYMENT_CEILING,
@@ -67,10 +68,23 @@ class ValidateCargoPaymentTests(TestCase):
         )
         self.assertEqual(excess, 0)
 
-    async def test_unknown_cargo_type_returns_zero(self):
+    async def test_unknown_cargo_uses_default_backstop(self):
+        """Unlisted cargo keys fall back to CARGO_PER_UNIT_DEFAULT so a
+        game-update cargo is never unprotected."""
+        payment = int(CARGO_PER_UNIT_DEFAULT) + 100_000
         excess = await validate_cargo_payment(
             cargo_key="SomeNewCargo_99",
-            payment=999_999_999,
+            payment=payment,
+            quantity=1,
+            sender_point=None,
+            destination_point=None,
+        )
+        self.assertEqual(excess, 100_000)
+
+    async def test_unknown_cargo_under_default_is_fresh(self):
+        excess = await validate_cargo_payment(
+            cargo_key="SomeNewCargo_99",
+            payment=int(CARGO_PER_UNIT_DEFAULT) - 1,
             quantity=1,
             sender_point=None,
             destination_point=None,
@@ -290,7 +304,9 @@ class FraudCargoIntegrationTests(TestCase):
         )
         log = await ServerCargoArrivedLog.objects.afirst()
         threshold = CARGO_PER_UNIT_THRESHOLDS["BottlePallete"]
-        self.assertEqual(log.payment, threshold)
+        # Payment is reduced to AT most the per-unit threshold; the max()
+        # over (distance, per-unit, absolute) can claw slightly more.
+        self.assertLessEqual(log.payment, threshold)
 
     async def test_inflated_reduces_delivery_payment(self, mock_treasury, mock_rp):
         mock_rp.return_value = False
@@ -304,7 +320,7 @@ class FraudCargoIntegrationTests(TestCase):
         )
         delivery = await Delivery.objects.afirst()
         threshold = CARGO_PER_UNIT_THRESHOLDS["BottlePallete"]
-        self.assertEqual(delivery.payment, threshold)
+        self.assertLessEqual(delivery.payment, threshold)
 
     async def test_inflated_reduces_base_pay(self, mock_treasury, mock_rp):
         mock_rp.return_value = False
@@ -319,7 +335,9 @@ class FraudCargoIntegrationTests(TestCase):
         threshold = CARGO_PER_UNIT_THRESHOLDS["BottlePallete"]
         # base_pay includes the clawback amount (process_events subtracts it).
         self.assertEqual(base_pay, 500_000)
-        self.assertEqual(clawback, 500_000 - threshold)
+        # The max() over (distance, per-unit, absolute) claws at least the
+        # per-unit excess — and may claw slightly more via the distance branch.
+        self.assertGreaterEqual(clawback, 500_000 - threshold)
 
     async def test_multiple_cargos_each_validated(self, mock_treasury, mock_rp):
         mock_rp.return_value = False
@@ -359,9 +377,11 @@ class FraudCargoIntegrationTests(TestCase):
         self.assertEqual(len(logs), 2)
         payments = sorted(log.payment for log in logs)
         self.assertEqual(payments[0], 5_000)
-        self.assertEqual(payments[1], threshold)
-        # base_pay includes the clawback amount (process_events subtracts it).
-        self.assertEqual(base_pay - clawback, threshold + 5_000)
+        self.assertLessEqual(payments[1], threshold)
+        # base_pay includes the clawback amount (process_events subtracts it);
+        # the max() over (distance, per-unit, absolute) may claw slightly more
+        # than the bare per-unit excess.
+        self.assertLessEqual(base_pay - clawback, threshold + 5_000)
 
 
 # ---------------------------------------------------------------------------
