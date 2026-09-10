@@ -251,6 +251,60 @@ async def cmd_spawn_garage_single(ctx: CommandContext, name: str):
         )
 
 
+async def _remove_nearby_tagged(
+    ctx: CommandContext, rows, get_loc, *, noun: str, radius_m: int = 10
+):
+    """Despawn (by tag) and delete every row within radius_m meters of the caller.
+
+    `get_loc` maps a row to its {X, Y, Z} location dict, or a falsy value to
+    skip the row (e.g. a garage with no saved config). Distances compare raw
+    game units: 1m = 100 units.
+    """
+    player_loc = ctx.player_info["Location"]
+    px, py, pz = player_loc["X"], player_loc["Y"], player_loc["Z"]
+
+    radius = radius_m * 100
+
+    removed_count = 0
+    failed_despawn_count = 0
+
+    async for row in rows:
+        loc = get_loc(row)
+        if not loc:
+            continue
+
+        distance = (
+            (px - loc["X"]) ** 2 + (py - loc["Y"]) ** 2 + (pz - loc["Z"]) ** 2
+        ) ** 0.5
+        if distance > radius:
+            continue
+
+        if row.tag:
+            try:
+                await despawn_by_tag(ctx.http_client_mod, row.tag)
+            except Exception:
+                failed_despawn_count += 1
+
+        await row.adelete()
+        removed_count += 1
+
+    if removed_count > 0:
+        msg = _(
+            "<Title>{noun} Removed</>\n\nRemoved {count} {noun_lower}(s) near your location."
+        ).format(noun=noun, noun_lower=noun.lower(), count=removed_count)
+        if failed_despawn_count > 0:
+            msg += _(
+                "\n\n<Warning>Failed to despawn {count} {noun_lower}(s) from the game world. They were removed from the database only.</>"
+            ).format(noun_lower=noun.lower(), count=failed_despawn_count)
+        await ctx.reply(msg)
+    else:
+        await ctx.reply(
+            _(
+                "<Title>No {noun}s Found</>\n\nNo {noun_lower}s within {radius_m}m of your location."
+            ).format(noun=noun, noun_lower=noun.lower(), radius_m=radius_m)
+        )
+
+
 @registry.register(
     "/remove_garage",
     description=gettext_lazy("Remove nearby garages (within 10m)"),
@@ -260,52 +314,74 @@ async def cmd_remove_garage(ctx: CommandContext):
     if not ctx.player_info or not ctx.player_info.get("bIsAdmin"):
         return
 
-    player_loc = ctx.player_info["Location"]
-    player_x, player_y, player_z = player_loc["X"], player_loc["Y"], player_loc["Z"]
-
-    RADIUS = 1000
-
-    removed_count = 0
-    failed_despawn_count = 0
-
-    async for garage in Garage.objects.all():
+    def garage_loc(garage):
         if garage.config is None:
-            continue
-        garage_loc = garage.config.get("Location")
-        if not garage_loc:
-            continue
+            return None
+        return garage.config.get("Location")
 
-        gx, gy, gz = garage_loc["X"], garage_loc["Y"], garage_loc["Z"]
-        distance = (
-            (player_x - gx) ** 2 + (player_y - gy) ** 2 + (player_z - gz) ** 2
-        ) ** 0.5
-        if distance > RADIUS:
-            continue
+    await _remove_nearby_tagged(
+        ctx, Garage.objects.all(), garage_loc, noun="Garage"
+    )
 
-        if garage.tag:
-            try:
-                await despawn_by_tag(ctx.http_client_mod, garage.tag)
-            except Exception:
-                failed_despawn_count += 1
 
-        await garage.adelete()
-        removed_count += 1
+FUEL_PUMP_ASSET_PATH = "/Game/Objects/Fuel/FuelPump_02.FuelPump_02_C"
 
-    if removed_count > 0:
-        msg = _(
-            "<Title>Garage Removed</>\n\nRemoved {count} garage(s) near your location."
-        ).format(count=removed_count)
-        if failed_despawn_count > 0:
-            msg += _(
-                "\n\n<Warning>Failed to despawn {count} garage(s) from the game world. They were removed from the database only.</>"
-            ).format(count=failed_despawn_count)
-        await ctx.reply(msg)
-    else:
-        await ctx.reply(
-            _(
-                "<Title>No Garages Found</>\n\nNo garages within 10m of your location."
-            )
+
+@registry.register(
+    "/spawn_fuel_pump",
+    description=gettext_lazy("Spawn a fuel pump at your location"),
+    category="Admin",
+)
+async def cmd_spawn_fuel_pump(ctx: CommandContext, name: str):
+    if not ctx.player_info or not ctx.player_info.get("bIsAdmin"):
+        return
+
+    loc = {**ctx.player_info["Location"]}
+    loc["Z"] -= 90
+    player_data = await get_player(
+        ctx.http_client_mod, str(ctx.player.unique_id), force_refresh=True
+    )
+    rot = player_data.get("Rotation", {}) if player_data else {}
+
+    wo = await WorldObject.objects.acreate(
+        asset_path=FUEL_PUMP_ASSET_PATH,
+        location_x=loc["X"],
+        location_y=loc["Y"],
+        location_z=loc["Z"],
+        yaw=rot.get("Yaw", 0),
+        notes=name.strip(),
+    )
+    # Deterministic tag so /remove_fuel_pump can despawn it, including after
+    # restart respawns via /spawn_assets.
+    wo.tag = f"fuel_pump_{wo.pk}"
+    await wo.asave()
+
+    await spawn_assets(ctx.http_client_mod, [wo.generate_asset_data()])
+    await ctx.reply(
+        _("<Title>Fuel Pump Spawned</>\n\n'{}' spawned at your location.").format(
+            name.strip()
         )
+    )
+
+
+@registry.register(
+    "/remove_fuel_pump",
+    description=gettext_lazy("Remove nearby fuel pumps (within 10m)"),
+    category="Admin",
+)
+async def cmd_remove_fuel_pump(ctx: CommandContext):
+    if not ctx.player_info or not ctx.player_info.get("bIsAdmin"):
+        return
+
+    def pump_loc(wo):
+        return {"X": wo.location_x, "Y": wo.location_y, "Z": wo.location_z}
+
+    await _remove_nearby_tagged(
+        ctx,
+        WorldObject.objects.filter(asset_path=FUEL_PUMP_ASSET_PATH),
+        pump_loc,
+        noun="Fuel Pump",
+    )
 
 
 @registry.register(

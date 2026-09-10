@@ -1158,7 +1158,7 @@ class WorldTextAdmin(admin.ModelAdmin):
 
 @admin.register(WorldObject)
 class WorldObjectAdmin(admin.ModelAdmin):
-    list_display = ["id", "asset_path"]
+    list_display = ["id", "asset_path", "notes"]
 
 
 @admin.register(VehicleDecal)
