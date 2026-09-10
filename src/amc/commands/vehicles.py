@@ -15,7 +15,7 @@ from amc.vehicles import (
 )
 from amc.enums import VehiclePartSlot
 from collections import Counter
-from powercalc.vehicle_setup import compute_popup_lines
+from powercalc.vehicle_setup import compute_peak_hp, compute_popup_lines
 from amc.mod_detection import (
     detect_custom_parts,
     detect_incompatible_parts,
@@ -27,6 +27,7 @@ from amc.mod_detection import (
 from amc.models import CharacterVehicle, PoliceSession
 from amc.player_tags import refresh_player_name
 from amc.utils import fuzzy_find_player
+from amc.vehicle_weight import weight_popup_lines
 from django.utils.translation import gettext as _, gettext_lazy
 
 
@@ -255,9 +256,14 @@ async def cmd_check_parts(ctx: CommandContext, target_player_name: Optional[str]
             has_custom_parts=bool(custom or incompatible),
         )
 
-    # Power block from the installed engine/intake/turbo — the compute sweep
-    # runs in a thread so it never blocks the shared event loop
-    power_lines = await asyncio.to_thread(compute_popup_lines, parts)
+    # Power + weight blocks from the installed parts — the compute sweep and
+    # gamedata loads run in a thread so they never block the shared loop
+    def _compute_power_weight():
+        return compute_popup_lines(parts), weight_popup_lines(
+            vehicle["fullName"], parts, compute_peak_hp(parts)
+        )
+
+    power_lines, weight_lines = await asyncio.to_thread(_compute_power_weight)
 
     custom_keys = {p["key"].lower() for p in unknown_parts}
     incompat_keys = {p["key"].lower() for p in incompatible}
@@ -298,6 +304,8 @@ async def cmd_check_parts(ctx: CommandContext, target_player_name: Optional[str]
     ).format(name=target_player_name, vehicle=vehicle_name)
     if power_lines:
         msg += "\n\n" + "\n".join(power_lines)
+    if weight_lines:
+        msg += "\n\n" + "\n".join(weight_lines)
     msg += "\n\n" + parts_lines + flags_line
     await ctx.reply(msg)
 

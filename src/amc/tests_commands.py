@@ -1832,6 +1832,58 @@ class CommandsTestCase(TestCase):
                 self.ctx.character, self.ctx.http_client_mod, has_custom_parts=True
             )
 
+    async def test_cmd_check_parts_weight_block_after_power(self):
+        """The weight block (amc.vehicle_weight) renders after the power
+        block and before the parts lines — wiring asserted via a stubbed
+        weight_popup_lines so the test is independent of the gamedata DB."""
+        mock_last_vehicle = {
+            "vehicle": {
+                "vehicleId": 1001,
+                "fullName": "Elisa2_C Default__Elisa2",
+                "classFullName": "Class /Game/Cars/Models/Elisa2",
+            }
+        }
+        mock_parts = {
+            "vehicleId": 1001,
+            "parts": [{"Key": "SmallBlock_240HP", "Slot": 2}],
+        }
+
+        with (
+            patch(
+                "amc.commands.vehicles.get_player_last_vehicle",
+                new=AsyncMock(return_value=mock_last_vehicle),
+            ),
+            patch(
+                "amc.commands.vehicles.get_player_last_vehicle_parts",
+                new=AsyncMock(return_value=mock_parts),
+            ),
+            patch(
+                "amc.commands.vehicles.detect_custom_parts",
+                return_value=[],
+            ),
+            patch(
+                "amc.commands.vehicles.detect_incompatible_parts",
+                return_value=[],
+            ),
+            patch(
+                "amc.commands.vehicles.refresh_player_name", new=AsyncMock()
+            ),
+            patch(
+                "amc.commands.vehicles.weight_popup_lines",
+                return_value=["Weight: 1,234 kg", "PWR: 99 hp/t"],
+            ) as mock_weight,
+        ):
+            await cmd_check_parts(self.ctx)
+
+            output = self.ctx.reply.call_args[0][0]
+            self.assertIn("Weight: 1,234 kg", output)
+            self.assertIn("PWR: 99 hp/t", output)
+            # weight block renders after the power block
+            self.assertLess(output.index("Power:"), output.index("Weight: 1,234 kg"))
+            mock_weight.assert_called_once()
+            # first positional arg is the vehicle fullName
+            self.assertEqual(mock_weight.call_args[0][0], "Elisa2_C Default__Elisa2")
+
     async def test_cmd_check_parts_known_mod_marker(self):
         """Known client-mod parts get a [More Tuning] label instead of
         [unknown]; genuinely unknown parts keep [unknown]; both still count

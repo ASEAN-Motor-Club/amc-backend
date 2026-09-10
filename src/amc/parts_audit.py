@@ -10,6 +10,10 @@ Report lines per player (the operator-requested subset):
 
 * ``Power:`` — powercalc output (same ``Power: Unknown`` / no-fabrication
   degradation rules as the popup; omitted when the vehicle has no engine slot)
+* ``Weight:`` / ``PWR:`` — computed from pak-derived gamedata (chassis +
+  installed part masses; lower-bound when mod parts are uncounted) and the
+  powercalc peak HP — one combined lean line, omitted when there is no data
+  at all
 * ``Engine:`` / ``Intake:`` / ``Turbocharger:`` — the *installed* part keys
   (raw payload ids, not the model-resolved names), ``None`` when the slot is
   empty — that's the signal, not a fabrication
@@ -23,8 +27,9 @@ import discord
 from django.conf import settings
 
 from amc.mod_server import get_player_last_vehicle, get_player_last_vehicle_parts
+from amc.vehicle_weight import audit_weight_line
 from amc.vehicles import format_vehicle_name
-from powercalc.vehicle_setup import compute_popup_lines
+from powercalc.vehicle_setup import compute_peak_hp, compute_popup_lines
 
 logger = logging.getLogger(__name__)
 
@@ -36,12 +41,15 @@ TIRE_SLOT_MAX = 38
 _SLOT_LABELS = {2: "Engine", 5: "Intake", 7: "Turbocharger"}
 
 
-def summarize_parts(parts: list[dict]) -> list[str]:
+def summarize_parts(
+    parts: list[dict], vehicle_full_name: str | None = None
+) -> list[str]:
     """Build the compact audit lines from a minimal parts payload.
 
     Never raises and never fabricates: an unresolvable engine yields exactly
     ``Power: Unknown`` (popup rule); an empty engine slot omits the Power
-    line and reports ``Engine: None``.
+    line and reports ``Engine: None``. With ``vehicle_full_name`` a single
+    ``Weight: … · PWR: …`` line is inserted after the Power line.
     """
     by_slot: dict[int, str] = {}
     for part in parts:
@@ -58,6 +66,17 @@ def summarize_parts(parts: list[dict]) -> list[str]:
         # noise in a log channel.
         lines.append(power_lines[0])
 
+    if vehicle_full_name:
+        try:
+            weight_line = audit_weight_line(
+                vehicle_full_name, parts, compute_peak_hp(parts)
+            )
+        except Exception:  # noqa: BLE001 — the audit must never break
+            logger.warning("Parts audit weight line failed", exc_info=True)
+            weight_line = None
+        if weight_line:
+            lines.append(weight_line)
+
     for slot in (2, 5, 7):
         label = _SLOT_LABELS[slot]
         lines.append(f"{label}: {by_slot.get(slot) or 'None'}")
@@ -68,7 +87,7 @@ def summarize_parts(parts: list[dict]) -> list[str]:
 
 
 def _audit_embed(player_name: str, vehicle: dict, parts: list[dict], source: str) -> discord.Embed:
-    lines = summarize_parts(parts)
+    lines = summarize_parts(parts, vehicle.get("fullName"))
     embed = discord.Embed(
         title=f"Parts Audit — {player_name}",
         description="\n".join(
@@ -184,7 +203,7 @@ async def audit_character(
     if not channel_id or discord_client is None:
         # Feature wired but channel unset/off: log the summary so it's
         # still observable in the worker journal.
-        logger.info("Parts audit (%s) %s: %s", source, player_name, " | ".join(summarize_parts(parts)))
+        logger.info("Parts audit (%s) %s: %s", source, player_name, " | ".join(summarize_parts(parts, vehicle.get("fullName"))))
         return embed
 
     try:
