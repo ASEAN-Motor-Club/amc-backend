@@ -473,5 +473,25 @@
       "VolvoI5"
     ],
     "prefixes": []
+  },
+  "amc-tires": {
+    "label": "AMC Tires",
+    "source": "AMC tire pack (community pak by GATE, catbox m1iss0.pak, sha256 e177059da3af44a7689438f52cd7570d13c74a31d6ce8b8464624c8bcb50f374, 2026-09-10) - 21 rows (10 distinct keys, 25 tire physics DataAssets at Cars/Parts/Tire/AMC_*) in a superset VehicleParts0 (all 45 vanilla rows kept). NOT installed on any AMC server - registry-only so /check_parts labels club tires instead of [unknown]; prefix covers pressure-tuned installs (AMC_Bike_65) and future AMC-branded parts",
+    "updated": "2026-09-10",
+    "keys": [
+      "AMC_Bike",
+      "AMC_Sport",
+      "AMC_Stupid",
+      "AMC_Rally",
+      "AMC_Truck",
+      "AMC_Truck_86-DRW",
+      "AMC_Truck_87-DRW",
+      "AMC_Truck_88-DRW",
+      "AMC_Truck_89-DRW",
+      "AMC_Drift"
+    ],
+    "prefixes": [
+      "AMC_"
+    ]
   }
 }
