@@ -295,3 +295,20 @@ def test_spawnable_objects_data_integrity():
     # every category bucket is non-empty and ordered first-to-last
     seen = {obj.category for obj in SPAWNABLE_OBJECTS.values()}
     assert seen == set(SPAWNABLE_OBJECT_CATEGORIES)
+
+
+def test_mesh_paths_use_package_slash_form():
+    # Regression (prod 2026-09-10): mesh paths were built as
+    # "/Game/.../Props.SM_Prop_X.SM_Prop_X" — a dot before the package's mesh
+    # name addresses a package that does not exist, so the mod's LoadAsset +
+    # re-find fails and every mesh alias 500'd with "Failed to spawn asset".
+    # Each workshop mesh is its own cooked package, so the package part of
+    # the path must end with "/<MeshName>"; blueprint classes keep the
+    # "<Pkg>.<Pkg>_C" form.
+    for obj in SPAWNABLE_OBJECTS.values():
+        pkg, sep, obj_name = obj.asset_path.rpartition(".")
+        assert sep and pkg and obj_name and "." not in obj_name, obj
+        if obj_name.endswith("_C"):
+            assert pkg.rsplit("/", 1)[-1] + "_C" == obj_name, obj
+        else:
+            assert pkg.endswith("/" + obj_name), obj
