@@ -267,6 +267,360 @@
     0,
     0
    ]
+  ],
+  "Flat6": [
+   [
+    0,
+    0.6,
+    "RCIM_Cubic",
+    1.7592765,
+    1.7592765
+   ],
+   [
+    0.1,
+    0.8,
+    "RCIM_Cubic",
+    0.99999994,
+    0.99999994
+   ],
+   [
+    0.4,
+    1,
+    "RCIM_Cubic",
+    0.020145819,
+    0.020145819
+   ],
+   [
+    1,
+    0.7,
+    "RCIM_Cubic",
+    -0.88066864,
+    -0.88066864
+   ],
+   [
+    6,
+    0.17500001,
+    "RCIM_Linear",
+    0.0,
+    0.0
+   ]
+  ],
+  "boxer4": [
+   [
+    0,
+    0.6,
+    "RCIM_Cubic",
+    1.7592765,
+    1.7592765
+   ],
+   [
+    0.1,
+    0.8,
+    "RCIM_Cubic",
+    0.99999994,
+    0.99999994
+   ],
+   [
+    0.4,
+    1,
+    "RCIM_Cubic",
+    0.020145819,
+    0.020145819
+   ],
+   [
+    1,
+    0.7,
+    "RCIM_Cubic",
+    -0.88066864,
+    -0.88066864
+   ],
+   [
+    4.5,
+    0.17500001,
+    "RCIM_Linear",
+    0.0,
+    0.0
+   ]
+  ],
+  "hellcatv8": [
+   [
+    0,
+    0.6,
+    "RCIM_Cubic",
+    1.7592765,
+    1.7592765
+   ],
+   [
+    0.1,
+    0.8,
+    "RCIM_Cubic",
+    0.99999994,
+    0.99999994
+   ],
+   [
+    0.4,
+    1,
+    "RCIM_Cubic",
+    0.020145819,
+    0.020145819
+   ],
+   [
+    1.5,
+    0.7,
+    "RCIM_Linear",
+    0.0,
+    0.0
+   ],
+   [
+    3.5,
+    0.17500001,
+    "RCIM_Linear",
+    0.0,
+    0.0
+   ],
+   [
+    5,
+    0.17500001,
+    "RCIM_Linear",
+    0.0,
+    0.0
+   ]
+  ],
+  "integra": [
+   [
+    0,
+    0.6,
+    "RCIM_Cubic",
+    1.7592765,
+    1.7592765
+   ],
+   [
+    0.1,
+    0.8,
+    "RCIM_Cubic",
+    0.99999994,
+    0.99999994
+   ],
+   [
+    0.75,
+    1,
+    "RCIM_Cubic",
+    0.020145819,
+    0.020145819
+   ],
+   [
+    1.5,
+    0.7,
+    "RCIM_Linear",
+    0.0,
+    0.0
+   ],
+   [
+    3.5,
+    0.17500001,
+    "RCIM_Linear",
+    0.0,
+    0.0
+   ],
+   [
+    5,
+    0.17500001,
+    "RCIM_Linear",
+    0.0,
+    0.0
+   ]
+  ],
+  "nissanv6": [
+   [
+    0,
+    0.6,
+    "RCIM_Cubic",
+    1.7592765,
+    1.7592765
+   ],
+   [
+    0.1,
+    0.8,
+    "RCIM_Cubic",
+    0.99999994,
+    0.99999994
+   ],
+   [
+    0.4,
+    1,
+    "RCIM_Cubic",
+    0.020145819,
+    0.020145819
+   ],
+   [
+    1,
+    0.81,
+    "RCIM_Cubic",
+    -0.88066864,
+    -0.88066864
+   ],
+   [
+    6.5,
+    0.17500001,
+    "RCIM_Linear",
+    0.0,
+    0.0
+   ]
+  ],
+  "pontiacv8": [
+   [
+    0,
+    0.6,
+    "RCIM_Cubic",
+    1.7592765,
+    1.7592765
+   ],
+   [
+    0.1,
+    0.8,
+    "RCIM_Cubic",
+    0.99999994,
+    0.99999994
+   ],
+   [
+    0.4,
+    1,
+    "RCIM_Cubic",
+    0.020145819,
+    0.020145819
+   ],
+   [
+    1,
+    0.88,
+    "RCIM_Cubic",
+    -0.88066864,
+    -0.88066864
+   ],
+   [
+    6,
+    0.17500001,
+    "RCIM_Linear",
+    0.0,
+    0.0
+   ]
+  ],
+  "suprai6": [
+   [
+    0,
+    0.6,
+    "RCIM_Cubic",
+    1.7592765,
+    1.7592765
+   ],
+   [
+    0.1,
+    0.8,
+    "RCIM_Cubic",
+    0.99999994,
+    0.99999994
+   ],
+   [
+    0.4,
+    1,
+    "RCIM_Cubic",
+    0.020145819,
+    0.020145819
+   ],
+   [
+    1,
+    0.88,
+    "RCIM_Cubic",
+    -0.88066864,
+    -0.88066864
+   ],
+   [
+    6,
+    0.17500001,
+    "RCIM_Linear",
+    0.0,
+    0.0
+   ]
+  ],
+  "v10": [
+   [
+    0,
+    0.6,
+    "RCIM_Cubic",
+    1.7592765,
+    1.7592765
+   ],
+   [
+    0.1,
+    0.8,
+    "RCIM_Cubic",
+    0.99999994,
+    0.99999994
+   ],
+   [
+    0.4,
+    1,
+    "RCIM_Cubic",
+    0.020145819,
+    0.020145819
+   ],
+   [
+    1,
+    0.7,
+    "RCIM_Cubic",
+    -0.88066864,
+    -0.88066864
+   ],
+   [
+    6.5,
+    0.17500001,
+    "RCIM_Linear",
+    0.0,
+    0.0
+   ]
+  ],
+  "v8mercedes": [
+   [
+    0,
+    0.6,
+    "RCIM_Cubic",
+    1.7592765,
+    1.7592765
+   ],
+   [
+    0.1,
+    0.8,
+    "RCIM_Cubic",
+    0.99999994,
+    0.99999994
+   ],
+   [
+    0.4,
+    1,
+    "RCIM_Cubic",
+    0.020145819,
+    0.020145819
+   ],
+   [
+    1.5,
+    0.7,
+    "RCIM_Linear",
+    0.0,
+    0.0
+   ],
+   [
+    3.5,
+    0.17500001,
+    "RCIM_Linear",
+    0.0,
+    0.0
+   ],
+   [
+    5,
+    0.17500001,
+    "RCIM_Linear",
+    0.0,
+    0.0
+   ]
   ]
  },
  "engine_parts": {
@@ -5264,6 +5618,454 @@
    },
    "type": "Engine",
    "vehicle_types": []
+  },
+  "Bigblock_V8": {
+   "category": "car",
+   "cost": 32000,
+   "engine_asset": "Bigblock_V8",
+   "engine_asset_raw": "Bigblock_V8",
+   "intake": {
+    "BaseRPMRatio": 0.5,
+    "IntakeSpeedEfficencyMultiplier": 1,
+    "Slope": 0,
+    "_StructType": "MTVehiclePartIntake"
+   },
+   "mass_kg": 300,
+   "name": null,
+   "truck_classes": [],
+   "turbocharger": {
+    "BaseTorqueMultiplier": 1,
+    "FuelConsumptionMultiplier": 1,
+    "HeatingMultiplier": 1,
+    "IntakePressureMultiplier": 1,
+    "TorqueMultiplier": 1,
+    "TurbineAspectRatio": 1,
+    "TurbineWeight": 1,
+    "bIsValid": false,
+    "_StructType": "MTVehiclePartTurbocharger"
+   },
+   "type": "Engine",
+   "vehicle_types": []
+  },
+  "Boxer4": {
+   "category": "car",
+   "cost": 32000,
+   "engine_asset": "Boxer4",
+   "engine_asset_raw": "Boxer4",
+   "intake": {
+    "BaseRPMRatio": 0.5,
+    "IntakeSpeedEfficencyMultiplier": 1,
+    "Slope": 0,
+    "_StructType": "MTVehiclePartIntake"
+   },
+   "mass_kg": 150,
+   "name": null,
+   "truck_classes": [],
+   "turbocharger": {
+    "BaseTorqueMultiplier": 1,
+    "FuelConsumptionMultiplier": 1,
+    "HeatingMultiplier": 1,
+    "IntakePressureMultiplier": 1,
+    "TorqueMultiplier": 1,
+    "TurbineAspectRatio": 1,
+    "TurbineWeight": 1,
+    "bIsValid": false,
+    "_StructType": "MTVehiclePartTurbocharger"
+   },
+   "type": "Engine",
+   "vehicle_types": []
+  },
+  "Daf": {
+   "category": "truck",
+   "cost": 60000,
+   "engine_asset": "Daf",
+   "engine_asset_raw": "Daf",
+   "intake": {
+    "BaseRPMRatio": 0.5,
+    "IntakeSpeedEfficencyMultiplier": 1,
+    "Slope": 0,
+    "_StructType": "MTVehiclePartIntake"
+   },
+   "mass_kg": 450,
+   "name": null,
+   "truck_classes": [],
+   "turbocharger": {
+    "BaseTorqueMultiplier": 1,
+    "FuelConsumptionMultiplier": 1,
+    "HeatingMultiplier": 1,
+    "IntakePressureMultiplier": 1,
+    "TorqueMultiplier": 1,
+    "TurbineAspectRatio": 1,
+    "TurbineWeight": 1,
+    "bIsValid": false,
+    "_StructType": "MTVehiclePartTurbocharger"
+   },
+   "type": "Engine",
+   "vehicle_types": []
+  },
+  "FerrariV12": {
+   "category": "car",
+   "cost": 80000,
+   "engine_asset": "FerrariV12",
+   "engine_asset_raw": "FerrariV12",
+   "intake": {
+    "BaseRPMRatio": 0.5,
+    "IntakeSpeedEfficencyMultiplier": 1,
+    "Slope": 0,
+    "_StructType": "MTVehiclePartIntake"
+   },
+   "mass_kg": 270,
+   "name": null,
+   "truck_classes": [],
+   "turbocharger": {
+    "BaseTorqueMultiplier": 1,
+    "FuelConsumptionMultiplier": 1,
+    "HeatingMultiplier": 1,
+    "IntakePressureMultiplier": 1,
+    "TorqueMultiplier": 1,
+    "TurbineAspectRatio": 1,
+    "TurbineWeight": 1,
+    "bIsValid": false,
+    "_StructType": "MTVehiclePartTurbocharger"
+   },
+   "type": "Engine",
+   "vehicle_types": []
+  },
+  "Flat6": {
+   "category": "car",
+   "cost": 45000,
+   "engine_asset": "Flat6",
+   "engine_asset_raw": "Flat6",
+   "intake": {
+    "BaseRPMRatio": 0.5,
+    "IntakeSpeedEfficencyMultiplier": 1,
+    "Slope": 0,
+    "_StructType": "MTVehiclePartIntake"
+   },
+   "mass_kg": 220,
+   "name": null,
+   "truck_classes": [],
+   "turbocharger": {
+    "BaseTorqueMultiplier": 1,
+    "FuelConsumptionMultiplier": 1,
+    "HeatingMultiplier": 1,
+    "IntakePressureMultiplier": 1,
+    "TorqueMultiplier": 1,
+    "TurbineAspectRatio": 1,
+    "TurbineWeight": 1,
+    "bIsValid": false,
+    "_StructType": "MTVehiclePartTurbocharger"
+   },
+   "type": "Engine",
+   "vehicle_types": []
+  },
+  "Hellcatv8": {
+   "category": "car",
+   "cost": 45000,
+   "engine_asset": "Hellcatv8",
+   "engine_asset_raw": "Hellcatv8",
+   "intake": {
+    "BaseRPMRatio": 0.5,
+    "IntakeSpeedEfficencyMultiplier": 1,
+    "Slope": 0,
+    "_StructType": "MTVehiclePartIntake"
+   },
+   "mass_kg": 350,
+   "name": null,
+   "truck_classes": [],
+   "turbocharger": {
+    "BaseTorqueMultiplier": 1,
+    "FuelConsumptionMultiplier": 1,
+    "HeatingMultiplier": 1,
+    "IntakePressureMultiplier": 1,
+    "TorqueMultiplier": 1,
+    "TurbineAspectRatio": 1,
+    "TurbineWeight": 1,
+    "bIsValid": false,
+    "_StructType": "MTVehiclePartTurbocharger"
+   },
+   "type": "Engine",
+   "vehicle_types": []
+  },
+  "I4Miata": {
+   "category": "car",
+   "cost": 10000,
+   "engine_asset": "I4Miata",
+   "engine_asset_raw": "I4Miata",
+   "intake": {
+    "BaseRPMRatio": 0.5,
+    "IntakeSpeedEfficencyMultiplier": 1,
+    "Slope": 0,
+    "_StructType": "MTVehiclePartIntake"
+   },
+   "mass_kg": 120,
+   "name": null,
+   "truck_classes": [],
+   "turbocharger": {
+    "BaseTorqueMultiplier": 1,
+    "FuelConsumptionMultiplier": 1,
+    "HeatingMultiplier": 1,
+    "IntakePressureMultiplier": 1,
+    "TorqueMultiplier": 1,
+    "TurbineAspectRatio": 1,
+    "TurbineWeight": 1,
+    "bIsValid": false,
+    "_StructType": "MTVehiclePartTurbocharger"
+   },
+   "type": "Engine",
+   "vehicle_types": []
+  },
+  "Integrai4": {
+   "category": "car",
+   "cost": 25000,
+   "engine_asset": "Integrai4",
+   "engine_asset_raw": "Integrai4",
+   "intake": {
+    "BaseRPMRatio": 0.5,
+    "IntakeSpeedEfficencyMultiplier": 1,
+    "Slope": 0,
+    "_StructType": "MTVehiclePartIntake"
+   },
+   "mass_kg": 125,
+   "name": null,
+   "truck_classes": [],
+   "turbocharger": {
+    "BaseTorqueMultiplier": 1,
+    "FuelConsumptionMultiplier": 1,
+    "HeatingMultiplier": 1,
+    "IntakePressureMultiplier": 1,
+    "TorqueMultiplier": 1,
+    "TurbineAspectRatio": 1,
+    "TurbineWeight": 1,
+    "bIsValid": false,
+    "_StructType": "MTVehiclePartTurbocharger"
+   },
+   "type": "Engine",
+   "vehicle_types": []
+  },
+  "Iveco": {
+   "category": "truck",
+   "cost": 50000,
+   "engine_asset": "Iveco",
+   "engine_asset_raw": "Iveco",
+   "intake": {
+    "BaseRPMRatio": 0.5,
+    "IntakeSpeedEfficencyMultiplier": 1,
+    "Slope": 0,
+    "_StructType": "MTVehiclePartIntake"
+   },
+   "mass_kg": 350,
+   "name": null,
+   "truck_classes": [],
+   "turbocharger": {
+    "BaseTorqueMultiplier": 1,
+    "FuelConsumptionMultiplier": 1,
+    "HeatingMultiplier": 1,
+    "IntakePressureMultiplier": 1,
+    "TorqueMultiplier": 1,
+    "TurbineAspectRatio": 1,
+    "TurbineWeight": 1,
+    "bIsValid": false,
+    "_StructType": "MTVehiclePartTurbocharger"
+   },
+   "type": "Engine",
+   "vehicle_types": []
+  },
+  "MercedesV8": {
+   "category": "car",
+   "cost": 50000,
+   "engine_asset": "MercedesV8",
+   "engine_asset_raw": "MercedesV8",
+   "intake": {
+    "BaseRPMRatio": 0.5,
+    "IntakeSpeedEfficencyMultiplier": 1,
+    "Slope": 0,
+    "_StructType": "MTVehiclePartIntake"
+   },
+   "mass_kg": 250,
+   "name": null,
+   "truck_classes": [],
+   "turbocharger": {
+    "BaseTorqueMultiplier": 1,
+    "FuelConsumptionMultiplier": 1,
+    "HeatingMultiplier": 1,
+    "IntakePressureMultiplier": 1,
+    "TorqueMultiplier": 1,
+    "TurbineAspectRatio": 1,
+    "TurbineWeight": 1,
+    "bIsValid": false,
+    "_StructType": "MTVehiclePartTurbocharger"
+   },
+   "type": "Engine",
+   "vehicle_types": []
+  },
+  "NissanV6": {
+   "category": "car",
+   "cost": 32000,
+   "engine_asset": "NissanV6",
+   "engine_asset_raw": "NissanV6",
+   "intake": {
+    "BaseRPMRatio": 0.5,
+    "IntakeSpeedEfficencyMultiplier": 1,
+    "Slope": 0,
+    "_StructType": "MTVehiclePartIntake"
+   },
+   "mass_kg": 155,
+   "name": null,
+   "truck_classes": [],
+   "turbocharger": {
+    "BaseTorqueMultiplier": 1,
+    "FuelConsumptionMultiplier": 1,
+    "HeatingMultiplier": 1,
+    "IntakePressureMultiplier": 1,
+    "TorqueMultiplier": 1,
+    "TurbineAspectRatio": 1,
+    "TurbineWeight": 1,
+    "bIsValid": false,
+    "_StructType": "MTVehiclePartTurbocharger"
+   },
+   "type": "Engine",
+   "vehicle_types": []
+  },
+  "PontiacV8": {
+   "category": "car",
+   "cost": 35000,
+   "engine_asset": "PontiacV8",
+   "engine_asset_raw": "PontiacV8",
+   "intake": {
+    "BaseRPMRatio": 0.5,
+    "IntakeSpeedEfficencyMultiplier": 1,
+    "Slope": 0,
+    "_StructType": "MTVehiclePartIntake"
+   },
+   "mass_kg": 210,
+   "name": null,
+   "truck_classes": [],
+   "turbocharger": {
+    "BaseTorqueMultiplier": 1,
+    "FuelConsumptionMultiplier": 1,
+    "HeatingMultiplier": 1,
+    "IntakePressureMultiplier": 1,
+    "TorqueMultiplier": 1,
+    "TurbineAspectRatio": 1,
+    "TurbineWeight": 1,
+    "bIsValid": false,
+    "_StructType": "MTVehiclePartTurbocharger"
+   },
+   "type": "Engine",
+   "vehicle_types": []
+  },
+  "ScaniaV8": {
+   "category": "truck",
+   "cost": 120000,
+   "engine_asset": "ScaniaV8",
+   "engine_asset_raw": "ScaniaV8",
+   "intake": {
+    "BaseRPMRatio": 0.5,
+    "IntakeSpeedEfficencyMultiplier": 1,
+    "Slope": 0,
+    "_StructType": "MTVehiclePartIntake"
+   },
+   "mass_kg": 800,
+   "name": null,
+   "truck_classes": [],
+   "turbocharger": {
+    "BaseTorqueMultiplier": 1,
+    "FuelConsumptionMultiplier": 1,
+    "HeatingMultiplier": 1,
+    "IntakePressureMultiplier": 1,
+    "TorqueMultiplier": 1,
+    "TurbineAspectRatio": 1,
+    "TurbineWeight": 1,
+    "bIsValid": false,
+    "_StructType": "MTVehiclePartTurbocharger"
+   },
+   "type": "Engine",
+   "vehicle_types": []
+  },
+  "Suprai6": {
+   "category": "car",
+   "cost": 32000,
+   "engine_asset": "Suprai6",
+   "engine_asset_raw": "Suprai6",
+   "intake": {
+    "BaseRPMRatio": 0.5,
+    "IntakeSpeedEfficencyMultiplier": 1,
+    "Slope": 0,
+    "_StructType": "MTVehiclePartIntake"
+   },
+   "mass_kg": 230,
+   "name": null,
+   "truck_classes": [],
+   "turbocharger": {
+    "BaseTorqueMultiplier": 1,
+    "FuelConsumptionMultiplier": 1,
+    "HeatingMultiplier": 1,
+    "IntakePressureMultiplier": 1,
+    "TorqueMultiplier": 1,
+    "TurbineAspectRatio": 1,
+    "TurbineWeight": 1,
+    "bIsValid": false,
+    "_StructType": "MTVehiclePartTurbocharger"
+   },
+   "type": "Engine",
+   "vehicle_types": []
+  },
+  "V10": {
+   "category": "car",
+   "cost": 65000,
+   "engine_asset": "V10",
+   "engine_asset_raw": "V10",
+   "intake": {
+    "BaseRPMRatio": 0.5,
+    "IntakeSpeedEfficencyMultiplier": 1,
+    "Slope": 0,
+    "_StructType": "MTVehiclePartIntake"
+   },
+   "mass_kg": 210,
+   "name": null,
+   "truck_classes": [],
+   "turbocharger": {
+    "BaseTorqueMultiplier": 1,
+    "FuelConsumptionMultiplier": 1,
+    "HeatingMultiplier": 1,
+    "IntakePressureMultiplier": 1,
+    "TorqueMultiplier": 1,
+    "TurbineAspectRatio": 1,
+    "TurbineWeight": 1,
+    "bIsValid": false,
+    "_StructType": "MTVehiclePartTurbocharger"
+   },
+   "type": "Engine",
+   "vehicle_types": []
+  },
+  "VolvoI5": {
+   "category": "car",
+   "cost": 30000,
+   "engine_asset": "VolvoI5",
+   "engine_asset_raw": "VolvoI5",
+   "intake": {
+    "BaseRPMRatio": 0.5,
+    "IntakeSpeedEfficencyMultiplier": 1,
+    "Slope": 0,
+    "_StructType": "MTVehiclePartIntake"
+   },
+   "mass_kg": 150,
+   "name": null,
+   "truck_classes": [],
+   "turbocharger": {
+    "BaseTorqueMultiplier": 1,
+    "FuelConsumptionMultiplier": 1,
+    "HeatingMultiplier": 1,
+    "IntakePressureMultiplier": 1,
+    "TorqueMultiplier": 1,
+    "TurbineAspectRatio": 1,
+    "TurbineWeight": 1,
+    "bIsValid": false,
+    "_StructType": "MTVehiclePartTurbocharger"
+   },
+   "type": "Engine",
+   "vehicle_types": []
   }
  },
  "engines": {
@@ -8274,6 +9076,262 @@
    "StarterTorque": 200000,
    "curve": "SOHC",
    "name": "V6Sport_DOHC_200HP"
+  },
+  "Bigblock_V8": {
+   "FrictionCoulombCoeff": 500000,
+   "FrictionViscosityCoeff": 1000,
+   "FuelConsumption": 220,
+   "FuelType": null,
+   "IdleThrottle": 0.0017,
+   "Inertia": 5000,
+   "MaxRPM": 6000,
+   "MaxRegenTorqueRatio": null,
+   "MaxTorque": 7000000,
+   "MotorMaxPower": null,
+   "MotorMaxVoltage": null,
+   "StarterTorque": 200000,
+   "curve": "SmallBlock",
+   "name": "Bigblock_V8"
+  },
+  "Boxer4": {
+   "FrictionCoulombCoeff": 500000,
+   "FrictionViscosityCoeff": 1000,
+   "FuelConsumption": 170,
+   "FuelType": null,
+   "IdleThrottle": 0.0009,
+   "Inertia": 4000,
+   "MaxRPM": 7000,
+   "MaxRegenTorqueRatio": null,
+   "MaxTorque": 4100000,
+   "MotorMaxPower": null,
+   "MotorMaxVoltage": null,
+   "StarterTorque": 200000,
+   "curve": "boxer4",
+   "name": "Boxer4"
+  },
+  "Daf": {
+   "FrictionCoulombCoeff": 3000000,
+   "FrictionViscosityCoeff": 8000,
+   "FuelConsumption": 350,
+   "FuelType": "Diesel",
+   "IdleThrottle": 0.017,
+   "Inertia": 75000,
+   "MaxRPM": 2500,
+   "MaxRegenTorqueRatio": null,
+   "MaxTorque": 26510000,
+   "MotorMaxPower": null,
+   "MotorMaxVoltage": null,
+   "StarterTorque": 3000000,
+   "curve": "DieselTruck",
+   "name": "Daf"
+  },
+  "FerrariV12": {
+   "FrictionCoulombCoeff": 500000,
+   "FrictionViscosityCoeff": 1000,
+   "FuelConsumption": 200,
+   "FuelType": null,
+   "IdleThrottle": 0.0002,
+   "Inertia": 4500,
+   "MaxRPM": 8000,
+   "MaxRegenTorqueRatio": null,
+   "MaxTorque": 10000000,
+   "MotorMaxPower": null,
+   "MotorMaxVoltage": null,
+   "StarterTorque": 200000,
+   "curve": "V12",
+   "name": "FerrariV12"
+  },
+  "Flat6": {
+   "FrictionCoulombCoeff": 500000,
+   "FrictionViscosityCoeff": 1000,
+   "FuelConsumption": 170,
+   "FuelType": null,
+   "IdleThrottle": 0.0002,
+   "Inertia": 5000,
+   "MaxRPM": 7000,
+   "MaxRegenTorqueRatio": null,
+   "MaxTorque": 9500000,
+   "MotorMaxPower": null,
+   "MotorMaxVoltage": null,
+   "StarterTorque": 200000,
+   "curve": "Flat6",
+   "name": "Flat6"
+  },
+  "Hellcatv8": {
+   "FrictionCoulombCoeff": 500000,
+   "FrictionViscosityCoeff": 1000,
+   "FuelConsumption": 250,
+   "FuelType": null,
+   "IdleThrottle": 0.0008,
+   "Inertia": 4700,
+   "MaxRPM": 6000,
+   "MaxRegenTorqueRatio": null,
+   "MaxTorque": 8180000,
+   "MotorMaxPower": null,
+   "MotorMaxVoltage": null,
+   "StarterTorque": 200000,
+   "curve": "hellcatv8",
+   "name": "Hellcatv8"
+  },
+  "I4Miata": {
+   "FrictionCoulombCoeff": 500000,
+   "FrictionViscosityCoeff": 1000,
+   "FuelConsumption": 100,
+   "FuelType": null,
+   "IdleThrottle": 0.01,
+   "Inertia": 4000,
+   "MaxRPM": 7000,
+   "MaxRegenTorqueRatio": null,
+   "MaxTorque": 2600000,
+   "MotorMaxPower": null,
+   "MotorMaxVoltage": null,
+   "StarterTorque": 200000,
+   "curve": "SOHC",
+   "name": "I4Miata"
+  },
+  "Integrai4": {
+   "FrictionCoulombCoeff": 500000,
+   "FrictionViscosityCoeff": 1000,
+   "FuelConsumption": 150,
+   "FuelType": null,
+   "IdleThrottle": 0.0002,
+   "Inertia": 2500,
+   "MaxRPM": 9000,
+   "MaxRegenTorqueRatio": null,
+   "MaxTorque": 2200000,
+   "MotorMaxPower": null,
+   "MotorMaxVoltage": null,
+   "StarterTorque": 200000,
+   "curve": "integra",
+   "name": "Integrai4"
+  },
+  "Iveco": {
+   "FrictionCoulombCoeff": 3000000,
+   "FrictionViscosityCoeff": 8000,
+   "FuelConsumption": 350,
+   "FuelType": "Diesel",
+   "IdleThrottle": 0.017,
+   "Inertia": 67000,
+   "MaxRPM": 2500,
+   "MaxRegenTorqueRatio": null,
+   "MaxTorque": 27550000,
+   "MotorMaxPower": null,
+   "MotorMaxVoltage": null,
+   "StarterTorque": 3000000,
+   "curve": "DieselTruck",
+   "name": "Iveco"
+  },
+  "MercedesV8": {
+   "FrictionCoulombCoeff": 500000,
+   "FrictionViscosityCoeff": 1000,
+   "FuelConsumption": 170,
+   "FuelType": null,
+   "IdleThrottle": 0.0003,
+   "Inertia": 5700,
+   "MaxRPM": 7000,
+   "MaxRegenTorqueRatio": null,
+   "MaxTorque": 7300000,
+   "MotorMaxPower": null,
+   "MotorMaxVoltage": null,
+   "StarterTorque": 200000,
+   "curve": "v8mercedes",
+   "name": "MercedesV8"
+  },
+  "NissanV6": {
+   "FrictionCoulombCoeff": 500000,
+   "FrictionViscosityCoeff": 1000,
+   "FuelConsumption": 180,
+   "FuelType": null,
+   "IdleThrottle": 0.0002,
+   "Inertia": 4000,
+   "MaxRPM": 7000,
+   "MaxRegenTorqueRatio": null,
+   "MaxTorque": 3800000,
+   "MotorMaxPower": null,
+   "MotorMaxVoltage": null,
+   "StarterTorque": 200000,
+   "curve": "nissanv6",
+   "name": "NissanV6"
+  },
+  "PontiacV8": {
+   "FrictionCoulombCoeff": 500000,
+   "FrictionViscosityCoeff": 1000,
+   "FuelConsumption": 200,
+   "FuelType": null,
+   "IdleThrottle": 0.0002,
+   "Inertia": 5000,
+   "MaxRPM": 7000,
+   "MaxRegenTorqueRatio": null,
+   "MaxTorque": 5300000,
+   "MotorMaxPower": null,
+   "MotorMaxVoltage": null,
+   "StarterTorque": 200000,
+   "curve": "pontiacv8",
+   "name": "PontiacV8"
+  },
+  "ScaniaV8": {
+   "FrictionCoulombCoeff": 3000000,
+   "FrictionViscosityCoeff": 8000,
+   "FuelConsumption": 580,
+   "FuelType": "Diesel",
+   "IdleThrottle": 0.017,
+   "Inertia": 77000,
+   "MaxRPM": 2500,
+   "MaxRegenTorqueRatio": null,
+   "MaxTorque": 37110000,
+   "MotorMaxPower": null,
+   "MotorMaxVoltage": null,
+   "StarterTorque": 3000000,
+   "curve": "DieselTruck",
+   "name": "ScaniaV8"
+  },
+  "Suprai6": {
+   "FrictionCoulombCoeff": 500000,
+   "FrictionViscosityCoeff": 1000,
+   "FuelConsumption": 170,
+   "FuelType": null,
+   "IdleThrottle": 0.0002,
+   "Inertia": 4000,
+   "MaxRPM": 8000,
+   "MaxRegenTorqueRatio": null,
+   "MaxTorque": 4900000,
+   "MotorMaxPower": null,
+   "MotorMaxVoltage": null,
+   "StarterTorque": 200000,
+   "curve": "suprai6",
+   "name": "Suprai6"
+  },
+  "V10": {
+   "FrictionCoulombCoeff": 500000,
+   "FrictionViscosityCoeff": 1000,
+   "FuelConsumption": 170,
+   "FuelType": null,
+   "IdleThrottle": 0.0002,
+   "Inertia": 5500,
+   "MaxRPM": 8000,
+   "MaxRegenTorqueRatio": null,
+   "MaxTorque": 8000000,
+   "MotorMaxPower": null,
+   "MotorMaxVoltage": null,
+   "StarterTorque": 200000,
+   "curve": "v10",
+   "name": "V10"
+  },
+  "VolvoI5": {
+   "FrictionCoulombCoeff": 500000,
+   "FrictionViscosityCoeff": 1000,
+   "FuelConsumption": 150,
+   "FuelType": null,
+   "IdleThrottle": 0.0002,
+   "Inertia": 4000,
+   "MaxRPM": 7000,
+   "MaxRegenTorqueRatio": null,
+   "MaxTorque": 3900000,
+   "MotorMaxPower": null,
+   "MotorMaxVoltage": null,
+   "StarterTorque": 200000,
+   "curve": "v8mercedes",
+   "name": "VolvoI5"
   }
  },
  "parts": {

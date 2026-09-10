@@ -1,8 +1,8 @@
 {
   "schema": "powercalc-provenance/1",
   "model_version": "1.0.0",
-  "data_version": "2026.09.2",
-  "generated": "2026-09-02",
+  "data_version": "2026.09.3",
+  "generated": "2026-09-10",
   "validation": {
     "method": "in-game dyno comparison (Yuuka, 2026-09-01)",
     "case": "FordSmalBlock302_V8_5L_240HP + Intake 201 + Turbocharger_Stage1",
@@ -35,6 +35,15 @@
       "sha256": "39b0aa1b739e635800808bf7c06b781ca0ab089ff9e0fb8a8864030be84b02ca",
       "bytes": 1508101360,
       "gamedata": "gamedata.db 0.7.19 (vehicle_default_engine, vanilla engines)"
+    },
+    "teh_engine_pack": {
+      "mod": "teh's engine pack (More Tuning compatible)",
+      "workshop_file": "catbox udk46l.pak (2026-09-10)",
+      "sha256": "b4cfdaa020ec79e8687d28f2a6e5e6a8464f5f76210f9c1e4127300d967351e3",
+      "bytes": 50447333,
+      "pak_version": "V3",
+      "files": 243,
+      "adds": "16 engine DataAssets + 9 torque curves + superset Engines DataTable (36 vanilla + 152 MoreTuning rows byte-equal + 16 new); vanilla rows keep stock physics but lose VehicleTypes/tag-query gating (universal fitment is the pack design)"
     }
   },
   "engine_categories": "heuristic from part-row name patterns (bike/truck/pickup/car) + raw MassKg/VehicleTypes/TruckClasses from the Engines DataTable; categories are advisory, mass and tags are authoritative",
@@ -43,7 +52,8 @@
     "intake ramp unclamped at min(r,1.0); turbo spool E_sat=TurbineWeight/160 calibrated on Stage1",
     "flat-profile turbos (BaseTorqueMultiplier==TorqueMultiplier) bypass the spool model entirely",
     "EV peak power = MotorMaxPower/10 watts (game unit quirk)",
-    "intake/turbo ISEM field appears display-only; effect comes from Slope/BaseRPMRatio"
+    "intake/turbo ISEM field appears display-only; effect comes from Slope/BaseRPMRatio",
+    "teh-engine-pack addition (2026-09-10): 16 engines baked from community pak; 7 reuse vanilla curves (SmallBlock/DieselTruck/V12/SOHC), 9 custom curves parsed with the RichCurveKeyPropertyData extractor case (mt-pak-extract wt-0719). Intake/turbo structs are stock-neutral (Slope 0, mult 1) - MT tuning multiplies on top."
   ],
   "regen_pipeline": "mt-pak-extract worktree (skill: motortown-pak-mod-build) -> UAssetTool parse -> bake per references/engine-power-torque-model.md"
 }

@@ -21,7 +21,7 @@ DYNO = provenance()["validation"]
 
 def test_versions_present():
     assert model_version() == "1.0.0"
-    assert data_version() == "2026.09.2"
+    assert data_version() == "2026.09.3"
 
 
 def test_golden_dyno_case():
@@ -233,3 +233,95 @@ def test_vehicle_setup_resolve_flags():
     assert not vs.is_ev
     ev = resolve([{"Slot": 2, "Key": "Electric_300HP"}])
     assert ev.is_ev and ev.engine_known
+
+
+# --- teh's engine pack (2026-09-10): 16 community engines + 9 curves baked ---
+
+TEH_ENGINES = [
+    "Bigblock_V8", "Boxer4", "Daf", "FerrariV12", "Flat6", "Hellcatv8",
+    "I4Miata", "Integrai4", "Iveco", "MercedesV8", "NissanV6", "PontiacV8",
+    "ScaniaV8", "Suprai6", "V10", "VolvoI5",
+]
+TEH_TRUCKS = {"Daf", "Iveco", "ScaniaV8"}
+TEH_CURVES = {
+    "Flat6", "boxer4", "hellcatv8", "integra", "nissanv6",
+    "pontiacv8", "suprai6", "v10", "v8mercedes",
+}
+
+
+def test_teh_engine_pack_curves_baked():
+    """The 9 custom curves parsed from the pack are committed with real keys
+    (RichCurveKey extraction) and follow the vanilla convention: peak near
+    r=0.4-0.75, overspeed tail below peak."""
+    curves = pdata._snapshot()["curves"]
+    for name in TEH_CURVES:
+        keys = curves[name]
+        assert len(keys) >= 5, name
+        peak = max(k[1] for k in keys)
+        assert peak == 1.0, name  # normalized torque peak
+        # overspeed tail (r > 1) must drop well below peak
+        tail = [k[1] for k in keys if k[0] > 1.0]
+        assert tail and tail[-1] < 0.5, name
+
+
+def test_teh_engine_pack_engines_resolve_and_rate():
+    """All 16 engines resolve through the real pipeline with plausible HP and
+    correct fuel/category gating."""
+    for e in TEH_ENGINES:
+        row, eng = pdata.resolve_engine(e)
+        assert eng["curve"], e
+        assert "curve_keys" in eng, e
+        assert row["mass_kg"] and row["mass_kg"] > 0, e
+        expected_cat = "truck" if e in TEH_TRUCKS else "car"
+        assert row["category"] == expected_cat, e
+        if e in TEH_TRUCKS:
+            assert eng["FuelType"] == "Diesel", e
+        res = compute_setup(e)
+        assert res.peak_power_hp > 100, (e, res.peak_power_hp)
+        assert not res.is_ev, e
+
+
+def test_teh_engine_pack_ratings():
+    """Spot-pin a few computed ratings from the pack's own curves/stats."""
+    cases = {
+        "FerrariV12": 800.0,   # 1000 Nm * V12 curve @ 8000 rpm
+        "ScaniaV8": 724.0,     # 3711 Nm diesel truck curve @ 2500 rpm
+        "I4Miata": 180.8,      # vanilla SOHC curve @ 7000 rpm
+        "Hellcatv8": 638.0,
+    }
+    for engine, hp in cases.items():
+        res = compute_setup(engine)
+        assert res.peak_power_hp == pytest.approx(hp, abs=2.0), engine
+
+
+def test_teh_engine_pack_mt_rows_untouched():
+    """The pack's superset table carries the More Tuning rows byte-equal: the
+    bake must not have shifted any pre-existing entry."""
+    part = pdata.engine_part("20tfsi")
+    assert part["cost"] == 39375 and part["mass_kg"] == 132
+    assert part["engine_asset"] == "MT_20tfsi"
+    vanilla = pdata.engine_part("SmallBlock_240HP")
+    assert vanilla["cost"] == 15000  # stock row intact
+    # total counts: 188 pre-existing engines + 16 new = 204
+    snap = pdata._snapshot()
+    assert len(snap["engines"]) == 204
+    assert len(snap["engine_parts"]) == 201
+
+
+def test_teh_engine_pack_popup_lines():
+    """A teh engine in the engine slot renders the real Power line with the
+    bumped data footer (what /check_parts shows in-game)."""
+    lines = compute_popup_lines([{"Slot": 2, "Key": "Bigblock_V8"}])
+    assert lines[0].startswith("Power: 416.6 hp @ 5,572 rpm")
+    assert lines[1] == "Intake stock · Turbo none · engine 300 kg"
+    assert lines[2] == f"model {model_version()} · data {data_version()}"
+
+
+def test_teh_engine_pack_intake_turbo_neutral():
+    """Pack rows ship stock-neutral intake/turbo structs, so MT tuning
+    multiplies on top exactly like a vanilla engine."""
+    na201 = compute_setup("FerrariV12", intake_part="201")
+    t1 = compute_setup("FerrariV12", intake_part="201", turbo_part="Turbocharger_Stage1")
+    # turbo Stage1 is a flat x1.2 at the power peak; intake 201 is a ramp
+    # (partial at FerrariV12's peak r) — so assert against the same build NA
+    assert t1.peak_power_hp == pytest.approx(na201.peak_power_hp * 1.2, rel=0.01)
