@@ -103,6 +103,31 @@ def _part_known(key: str, ptype: str) -> bool:
     return key.lower() in lower
 
 
+def compute_peak_hp(parts: list[dict]) -> float | None:
+    """Peak crank HP for the installed setup, or ``None`` when unresolvable.
+
+    Same resolution rules as :func:`compute_popup_lines` (EV = fixed motor
+    rating, unmodelled intake/turbo = explicit baseline) but returns the raw
+    number instead of rendered text — consumers that combine it with other
+    data (e.g. the weight / power-to-weight lines) use this.
+    """
+    vs = resolve(parts)
+    if not vs.engine_key or not vs.engine_known:
+        return None
+    try:
+        if vs.is_ev:
+            asset = pdata.engine_asset(vs.engine_key)
+            watts = (asset.get("MotorMaxPower") or 0.0) / 10.0
+            return (watts / W_PER_HP) or None
+        return compute_setup(
+            vs.engine_key,
+            vs.intake_key if vs.intake_known else None,
+            vs.turbo_key if vs.turbo_known else None,
+        ).peak_power_hp
+    except PartNotFound:
+        return None
+
+
 def compute_popup_lines(parts: list[dict]) -> list[str]:
     """Power-block lines for the /check_parts popup.
 
