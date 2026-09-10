@@ -66,33 +66,88 @@ CARGO_PER_KM_THRESHOLDS: dict[str, float] = {
     "Moonshine": 1000,
 }
 
+# Per-cargo per-UNIT payment ceilings (recalibrated 2026-09-10, PR #117).
+#
+# Calibration basis: RAW pre-clawback Net_Payment from 90d of prod data,
+# threshold ~= max(2 x p99, 1.2 x observed max) rounded up to 5k. The old
+# table was fitted on the POST-clawback payment column, which pinned most
+# thresholds at exactly the clawed maximum (zero headroom) and clawed
+# ~$61M/90d from legitimate heavy hauls (multi-character routes paying
+# 60-255k/unit on SteelCoil, containers, PlasticPipes, Moonshine...).
+#
+# Cheat clusters are deliberately NOT accommodated: single-day spikes
+# (Jun 19 / Jul 10-18 / Aug 4 2026) where one character pays 6-30x the
+# multi-character route consensus (Coal 63.7k on a 9.5k route, Fuel
+# 92-125k on an 8k route, SteelCoil 66-434k on a 23.5k route). Those
+# belong to moderation, not threshold headroom — the recalibrated
+# ceilings catch them.
 CARGO_PER_UNIT_THRESHOLDS: dict[str, float] = {
-    "BottlePallete": 15_000,
-    "IronOre": 12_000,
-    "Log_Oak_12ft": 15_000,
-    "GiftBox_01": 15_000,
-    "Concrete": 18_000,
-    "CheeseBox": 5_000,
-    "CheesePallet": 10_000,
-    "CornPallet": 15_000,
-    "Container_20ft_01": 25_000,
-    "Fuel": 8_000,
-    "Coal": 10_000,
-    "Container_40ft_01": 30_000,
-    "MeatBox": 20_000,
-    "ToyBoxes": 20_000,
-    "Log_20ft": 12_000,
-    "WoodPlank_14ft_5t": 10_000,
-    "SteelCoil_10t": 15_000,
-    "Limestone": 10_000,
-    "SunflowerSeed": 12_000,
-    "PlasticPipes_6m": 10_000,
-    "CabbagePallet": 10_000,
-    "BeanPallet": 10_000,
+    "Acetone": 10_000,
+    "BeanPallet": 20_000,
+    "Bed_01": 15_000,
+    "Bed_02": 15_000,
+    "Bed_03": 10_000,
+    "BottlePallete": 20_000,
     "BreadBox": 12_000,
+    "BreadPallet": 10_000,
+    "CabbagePallet": 25_000,
+    "CheeseBox": 10_000,
+    "CheesePallet": 18_000,
+    "Coal": 20_000,
+    "CocaPaste": 35_000,
+    "Concrete": 25_000,
+    "Container_20ft_01": 60_000,
+    "Container_40ft_01": 90_000,
+    "CopperConcentrate": 12_000,
+    "CopperOre": 5_000,
+    "CopperRodCoil_2t": 100_000,
+    "CornPallet": 35_000,
+    "CrudeOil": 15_000,
+    "Fuel": 20_000,
+    "GiftBox_01": 15_000,
+    "HempPallet": 35_000,
+    "HydrochloricAcid": 12_000,
+    "IronOre": 15_000,
+    "lHBeam_6m": 100_000,
+    "Limestone": 12_000,
+    "LiveFish_01": 5_000,
+    "Log_20ft": 16_000,
+    "Log_Oak_12ft": 15_000,
+    "MeatBox": 20_000,
     "MilitarySupplyBox_01": 15_000,
-    "Moonshine": 20_000,
+    # "Money" deliberately UNLISTED: it is the laundering/criminal-level
+    # cargo whose design anchors (50k/110k laundering totals) sit far above
+    # its observed payment median — a per-unit ceiling here would claw
+    # legitimate laundering deliveries. It stays covered by
+    # CARGO_PER_UNIT_DEFAULT below.
+    "MoneyPallet": 80_000,
+    "Moonshine": 55_000,
+    "Oil": 5_000,
+    "OrangeBoxes": 50_000,
+    "PlasticPipes_6m": 35_000,
+    "PowerBox": 25_000,
+    "PumpkinBox": 8_000,
+    "PumpkinPallet": 25_000,
+    "QuicklimePallet": 6_000,
+    "Rice": 5_000,
+    "RicePallet": 30_000,
+    "Sand": 10_000,
+    "FineSand": 8_000,
+    "Sofa_01": 10_000,
+    "Sofa_02": 8_000,
+    "Sofa_03": 12_000,
+    "Sofa_04": 8_000,
+    "SteelCoil_10t": 35_000,
+    "SunflowerSeed": 3_000,
+    "TrashBag": 5_000,
+    "Trash_Big": 4_000,
+    "ToyBoxes": 45_000,
+    "WoodPlank_14ft_5t": 15_000,
 }
+
+# Backstop for cargo keys not listed above (new game-update cargo is
+# otherwise unprotected): any per-unit payment beyond this is excess.
+CARGO_PER_UNIT_DEFAULT = 250_000
 
 # Absolute per-delivery ceiling — catches anything absurd regardless of distance.
 # Set to ~50x the highest legitimate per-unit avg across all cargo types.
@@ -177,13 +232,9 @@ async def validate_cargo_payment(
         return 0
 
     per_unit = payment / quantity
-    per_unit_threshold = CARGO_PER_UNIT_THRESHOLDS.get(cargo_key)
+    per_unit_threshold = CARGO_PER_UNIT_THRESHOLDS.get(cargo_key, CARGO_PER_UNIT_DEFAULT)
     per_km_threshold = CARGO_PER_KM_THRESHOLDS.get(cargo_key)
     max_absolute = CARGO_MAX_ABSOLUTE_PAYMENT.get(cargo_key)
-
-    # If no thresholds configured for this cargo type, only check absolute.
-    if per_unit_threshold is None and per_km_threshold is None and max_absolute is None:
-        return 0
 
     # --- Distance-based check ---
     distance_m: float | None = None
