@@ -35,8 +35,10 @@ class ShortcutZoneWarningTests(TestCase):
     def _make_ctx(self, mock_session):
         return {"http_client_mod": mock_session}
 
+    @patch("amc.locations.cache.aget", new_callable=AsyncMock, return_value=None)
+    @patch("amc.locations.cache.aset", new_callable=AsyncMock)
     @patch("amc.locations.show_popup", new_callable=AsyncMock)
-    async def test_warning_on_approach(self, mock_show_popup):
+    async def test_warning_on_approach(self, mock_show_popup, mock_aset, mock_aget):
         """Player moves from outside 2000 units to within 2000 units → popup fires."""
         await self._create_zone()
         character = await sync_to_async(CharacterFactory)()
@@ -52,6 +54,34 @@ class ShortcutZoneWarningTests(TestCase):
             SHORTCUT_ZONE_WARNING_MESSAGE,
             player_id=character.player.unique_id,
         )
+
+    @patch("amc.locations.cache.aget", new_callable=AsyncMock, return_value=None)
+    @patch("amc.locations.cache.aset", new_callable=AsyncMock)
+    @patch("amc.locations.show_popup", new_callable=AsyncMock)
+    async def test_warning_debounced_per_player(self, mock_show_popup, mock_aset, mock_aget):
+        """Re-crossing the warning boundary within the debounce window → no popup.
+
+        The warning popup is debounced via a Redis cache key per character, so
+        a player oscillating across the 20m boundary line isn't spammed.
+        """
+        await self._create_zone()
+        character = await sync_to_async(CharacterFactory)()
+        ctx = self._make_ctx(AsyncMock())
+
+        # First crossing → popup fires, debounce key set
+        await _check_shortcut_zones(
+            character, Point(-2000, 1000, 0, srid=0), Point(-1000, 1000, 0, srid=0), ctx
+        )
+        mock_show_popup.assert_called_once()
+        mock_aset.assert_called_once()
+
+        # Second crossing within the window → cache hit → suppressed
+        mock_show_popup.reset_mock()
+        mock_aget.return_value = True
+        await _check_shortcut_zones(
+            character, Point(-2000, 1000, 0, srid=0), Point(-1000, 1000, 0, srid=0), ctx
+        )
+        mock_show_popup.assert_not_called()
 
     @patch("amc.locations.show_popup", new_callable=AsyncMock)
     async def test_no_warning_when_far(self, mock_show_popup):

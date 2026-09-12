@@ -78,6 +78,12 @@ SHORTCUT_ZONE_WARNING_RADIUS = 2000  # game units (~20m)
 # don't spam the popup on every touch.
 SHORTCUT_ZONE_ENTRY_POPUP_WINDOW = timedelta(minutes=2)
 
+# Debounce for the proximity WARNING popup, keyed per player via Redis cache.
+# Without this the warning re-fires on every re-crossing of the 20m boundary
+# line — a player idling/drifting along the zone edge oscillates across it
+# between SSE ticks and gets spammed.
+SHORTCUT_ZONE_WARNING_DEBOUNCE_SECONDS = 300
+
 SHORTCUT_ZONE_WARNING_MESSAGE = """\
 <Title>⚠️ Shortcut Zone Ahead</>
 <Warning>You are near a shortcut zone!</>
@@ -122,12 +128,17 @@ async def _check_shortcut_zones(character, old_location, new_location, ctx):
         )
 
         if was_outside_warning and is_inside_warning:
-            await show_popup(
-                http_client_mod,
-                SHORTCUT_ZONE_WARNING_MESSAGE,
-                player_id=player.unique_id,
-            )
-            await asyncio.sleep(0.1)
+            warn_key = f"shortcut_warn:{character.guid}"
+            if not await cache.aget(warn_key):
+                await show_popup(
+                    http_client_mod,
+                    SHORTCUT_ZONE_WARNING_MESSAGE,
+                    player_id=player.unique_id,
+                )
+                await cache.aset(
+                    warn_key, True, timeout=SHORTCUT_ZONE_WARNING_DEBOUNCE_SECONDS
+                )
+                await asyncio.sleep(0.1)
 
         # Actual ENTRY (inside the polygon)
         was_outside_polygon = distance_old > 0
