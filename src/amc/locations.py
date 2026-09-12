@@ -97,6 +97,11 @@ SHORTCUT_ZONE_ENTRY_MESSAGE = """\
 Any delivery completed while having passed through this area will <Highlight>NOT be subsidised</> and will <Highlight>NOT count towards job completion</>.
 """
 
+# Chat variant of the entry notice (system message — no popup markup).
+SHORTCUT_ZONE_ENTRY_CHAT_MESSAGE = """\
+⛔ Entered Shortcut Zone: you are inside a shortcut zone! Deliveries made through this area will NOT be subsidised and will NOT count towards job completion.
+"""
+
 # Chat variant of the violation notice (system message — no popup markup).
 SHORTCUT_ZONE_VIOLATION_CHAT_MESSAGE = """\
 ⛔ Shortcut Zone Violation: you are deep inside a shortcut zone (beyond the 20m allowance)! Deliveries made through this area will NOT be subsidised and will NOT count towards job completion.
@@ -174,13 +179,13 @@ async def _check_shortcut_zones(character, old_location, new_location, ctx):
         if is_violation_depth:
             warn_key = f"shortcut_warn:{character.guid}"
             if not await cache.aget(warn_key):
-                # Escalation ladder (like RP-mode anti-autopilot): the
-                # violation notice is a chat system message — the popup is
-                # reserved for escalation elsewhere.
-                await send_system_message(
+                # Escalation tier (RP-mode anti-autopilot ladder): the entry
+                # notice was the chat system message; penetrating beyond the
+                # allowance escalates to the POPUP — the penalty warning.
+                await show_popup(
                     http_client_mod,
-                    SHORTCUT_ZONE_VIOLATION_CHAT_MESSAGE,
-                    character_guid=character.guid,
+                    SHORTCUT_ZONE_ENTRY_MESSAGE,
+                    player_id=player.unique_id,
                 )
                 await cache.aset(
                     warn_key, True, timeout=SHORTCUT_ZONE_VIOLATION_DEBOUNCE_SECONDS
@@ -193,7 +198,7 @@ async def _check_shortcut_zones(character, old_location, new_location, ctx):
 
         if is_inside_polygon:
             # Capture the prior timestamp before refreshing below, so the
-            # entry popup can be debounced against it.
+            # entry notice can be debounced against it.
             prev_entered_at = character.shortcut_zone_entered_at
 
             # Refresh the "last time inside a shortcut zone" timestamp on
@@ -211,14 +216,17 @@ async def _check_shortcut_zones(character, old_location, new_location, ctx):
                 and prev_entered_at > now - SHORTCUT_ZONE_ENTRY_POPUP_WINDOW
             )
 
-            # Only show the entry popup on a real (re)entry — suppress it if
-            # the player was already inside a shortcut zone very recently, so a
-            # player drifting across the boundary doesn't get spammed.
+            # Entry notice: a chat system message on a real (re)entry —
+            # suppress if the player was already inside a shortcut zone very
+            # recently, so a player drifting across the boundary isn't
+            # spammed. The POPUP is the escalation tier: it fires only when
+            # the player then penetrates beyond the allowance (violation
+            # above) — matching the RP-mode anti-autopilot ladder.
             if was_outside_polygon and not recently_inside:
-                await show_popup(
+                await send_system_message(
                     http_client_mod,
-                    SHORTCUT_ZONE_ENTRY_MESSAGE,
-                    player_id=player.unique_id,
+                    SHORTCUT_ZONE_ENTRY_CHAT_MESSAGE,
+                    character_guid=character.guid,
                 )
                 await asyncio.sleep(0.1)
 

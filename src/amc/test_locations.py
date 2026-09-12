@@ -8,8 +8,8 @@ from amc.models import ShortcutZone
 from amc.factories import CharacterFactory
 from amc.locations import (
     _check_shortcut_zones,
-    SHORTCUT_ZONE_VIOLATION_CHAT_MESSAGE,
     SHORTCUT_ZONE_ENTRY_MESSAGE,
+    SHORTCUT_ZONE_ENTRY_CHAT_MESSAGE,
 )
 
 
@@ -45,25 +45,34 @@ class ShortcutZoneWarningTests(TestCase):
 
     @patch("amc.locations.cache.aget", new_callable=AsyncMock, return_value=None)
     @patch("amc.locations.cache.aset", new_callable=AsyncMock)
+    @patch("amc.locations.show_popup", new_callable=AsyncMock)
     @patch("amc.locations.send_system_message", new_callable=AsyncMock)
-    async def test_violation_beyond_allowance_fires(
-        self, mock_send_msg, mock_aset, mock_aget
+    async def test_violation_beyond_allowance_escalates_to_popup(
+        self, mock_send_msg, mock_show_popup, mock_aset, mock_aget
     ):
-        """Penetrating deeper than the 20m allowance inside the zone → chat violation fires."""
+        """Deep entry (>20m allowance) → escalation POPUP fires (penalty tier).
+
+        Entry itself is a chat system message; the popup is the escalation.
+        """
         await self._create_zone()
         character = await sync_to_async(CharacterFactory)()
 
-        # 200x200 polygon centered (1000,1000). Center is ~100 units (>20m)
-        # from every edge → beyond the 200-unit allowance.
         old_loc = Point(-12000, 1000, 0, srid=0)  # far outside
         new_loc = Point(1000, 1000, 0, srid=0)  # deep inside (3000 from every edge)
 
         ctx = self._make_ctx(AsyncMock())
         await _check_shortcut_zones(character, old_loc, new_loc, ctx)
 
+        # Escalation popup fired
+        mock_show_popup.assert_called_once_with(
+            ctx["http_client_mod"],
+            SHORTCUT_ZONE_ENTRY_MESSAGE,
+            player_id=character.player.unique_id,
+        )
+        # Entry chat notice also fired (same tick: outside→deep entry)
         mock_send_msg.assert_called_once_with(
             ctx["http_client_mod"],
-            SHORTCUT_ZONE_VIOLATION_CHAT_MESSAGE,
+            SHORTCUT_ZONE_ENTRY_CHAT_MESSAGE,
             character_guid=character.guid,
         )
 
@@ -74,10 +83,10 @@ class ShortcutZoneWarningTests(TestCase):
     async def test_edge_touch_within_allowance_tolerated(
         self, mock_show_popup, mock_send_msg, mock_aset, mock_aget
     ):
-        """Shallow edge-touch (within the 20m allowance) → NO violation message.
+        """Shallow edge-touch (within the 20m allowance) → entry chat notice only.
 
-        The entry popup still fires (taint bookkeeping), but the chat
-        violation is suppressed for allowance-band penetration.
+        No escalation popup — the penalty tier requires penetrating beyond
+        the allowance. Occupancy (taint) is still recorded.
         """
         await self._create_zone()
         character = await sync_to_async(CharacterFactory)()
@@ -89,42 +98,48 @@ class ShortcutZoneWarningTests(TestCase):
         ctx = self._make_ctx(AsyncMock())
         await _check_shortcut_zones(character, old_loc, new_loc, ctx)
 
-        mock_send_msg.assert_not_called()
-        # Entry popup still fired — occupancy is still recorded
-        mock_show_popup.assert_called_once()
+        # Entry chat notice fired
+        mock_send_msg.assert_called_once_with(
+            ctx["http_client_mod"],
+            SHORTCUT_ZONE_ENTRY_CHAT_MESSAGE,
+            character_guid=character.guid,
+        )
+        # No escalation popup — violation tier not reached
+        mock_show_popup.assert_not_called()
 
     @patch("amc.locations.cache.aget", new_callable=AsyncMock, return_value=None)
     @patch("amc.locations.cache.aset", new_callable=AsyncMock)
+    @patch("amc.locations.show_popup", new_callable=AsyncMock)
     @patch("amc.locations.send_system_message", new_callable=AsyncMock)
-    async def test_violation_debounced_per_player(
-        self, mock_send_msg, mock_aset, mock_aget
+    async def test_violation_popup_debounced_per_player(
+        self, mock_send_msg, mock_show_popup, mock_aset, mock_aget
     ):
-        """Re-entering the violation depth within the debounce window → no message.
+        """Re-entering the violation depth within the debounce window → no popup.
 
-        The violation notice is debounced via a Redis cache key per character,
+        The escalation popup is debounced via a Redis cache key per character,
         so a player oscillating at the allowance edge isn't spammed.
         """
         await self._create_zone()
         character = await sync_to_async(CharacterFactory)()
         ctx = self._make_ctx(AsyncMock())
 
-        # First deep entry → violation fires, debounce key set
+        # First deep entry → escalation popup fires, debounce key set
         await _check_shortcut_zones(
-            character, Point(-2000, 1000, 0, srid=0), Point(1000, 1000, 0, srid=0), ctx
+            character, Point(-12000, 1000, 0, srid=0), Point(1000, 1000, 0, srid=0), ctx
         )
-        mock_send_msg.assert_called_once()
+        mock_show_popup.assert_called_once()
         mock_aset.assert_called_once()
 
-        # Leave, re-enter deep within the window → cache hit → suppressed
-        mock_send_msg.reset_mock()
+        # Leave, re-enter deep within the window → cache hit → popup suppressed
+        mock_show_popup.reset_mock()
         mock_aget.return_value = True
         await _check_shortcut_zones(
-            character, Point(1000, 1000, 0, srid=0), Point(-2000, 1000, 0, srid=0), ctx
+            character, Point(1000, 1000, 0, srid=0), Point(-12000, 1000, 0, srid=0), ctx
         )
         await _check_shortcut_zones(
-            character, Point(-2000, 1000, 0, srid=0), Point(1000, 1000, 0, srid=0), ctx
+            character, Point(-12000, 1000, 0, srid=0), Point(1000, 1000, 0, srid=0), ctx
         )
-        mock_send_msg.assert_not_called()
+        mock_show_popup.assert_not_called()
 
     @patch("amc.locations.show_popup", new_callable=AsyncMock)
     async def test_no_warning_when_far(self, mock_show_popup):
@@ -154,24 +169,30 @@ class ShortcutZoneWarningTests(TestCase):
 
         mock_show_popup.assert_not_called()
 
+    @patch("amc.locations.send_system_message", new_callable=AsyncMock)
     @patch("amc.locations.show_popup", new_callable=AsyncMock)
-    async def test_entry_notification(self, mock_show_popup):
-        """Crossing from outside to inside the polygon → entry popup fires."""
+    async def test_entry_notification(self, mock_show_popup, mock_send_msg):
+        """Crossing from outside to inside the polygon → entry chat notice fires (no popup).
+
+        Shallow entry (within the 20m allowance) — the escalation popup
+        requires penetrating beyond the allowance.
+        """
         await self._create_zone()
         character = await sync_to_async(CharacterFactory)()
 
         old_loc = Point(-12000, 1000, 0, srid=0)  # far outside
-        new_loc = Point(1000, 1000, 0, srid=0)  # Inside the polygon
+        new_loc = Point(-1200, 1000, 0, srid=0)  # shallow: 800 units < 2000 allowance
 
         ctx = self._make_ctx(AsyncMock())
         await _check_shortcut_zones(character, old_loc, new_loc, ctx)
 
-        # Should show entry notification
-        mock_show_popup.assert_called_once_with(
+        # Entry = chat system message tier
+        mock_send_msg.assert_called_once_with(
             ctx["http_client_mod"],
-            SHORTCUT_ZONE_ENTRY_MESSAGE,
-            player_id=character.player.unique_id,
+            SHORTCUT_ZONE_ENTRY_CHAT_MESSAGE,
+            character_guid=character.guid,
         )
+        mock_show_popup.assert_not_called()
 
     @patch("amc.locations.show_popup", new_callable=AsyncMock)
     async def test_inactive_zone_ignored(self, mock_show_popup):
@@ -239,9 +260,10 @@ class ShortcutZoneWarningTests(TestCase):
         stale = timezone.now() - timedelta(hours=3)
         self.assertGreater(character.shortcut_zone_entered_at, stale)
 
+    @patch("amc.locations.send_system_message", new_callable=AsyncMock)
     @patch("amc.locations.show_popup", new_callable=AsyncMock)
-    async def test_entry_popup_debounced_by_shortcut_zone_entered_at(
-        self, mock_show_popup
+    async def test_entry_notice_debounced_by_shortcut_zone_entered_at(
+        self, mock_show_popup, mock_send_msg
     ):
         """Re-entering a shortcut zone shortly after leaving doesn't re-popup.
 
@@ -253,45 +275,48 @@ class ShortcutZoneWarningTests(TestCase):
         character = await sync_to_async(CharacterFactory)()
         ctx = self._make_ctx(AsyncMock())
 
-        # First entry — popup fires (no prior taint)
+        # First entry — chat notice fires (no prior taint)
         await _check_shortcut_zones(
             character, Point(-12000, 1000, 0, srid=0), Point(1000, 1000, 0, srid=0), ctx
         )
-        mock_show_popup.assert_called_once()
+        mock_send_msg.assert_called_once()
 
-        # Leave, then re-enter almost immediately — taint is recent, no popup
-        mock_show_popup.reset_mock()
+        # Leave, then re-enter almost immediately — taint is recent, no notice
+        mock_send_msg.reset_mock()
         await _check_shortcut_zones(
             character, Point(1000, 1000, 0, srid=0), Point(-12000, 1000, 0, srid=0), ctx
         )
         await _check_shortcut_zones(
             character, Point(-12000, 1000, 0, srid=0), Point(1000, 1000, 0, srid=0), ctx
         )
-        mock_show_popup.assert_not_called()
+        mock_send_msg.assert_not_called()
 
+    @patch("amc.locations.send_system_message", new_callable=AsyncMock)
     @patch("amc.locations.show_popup", new_callable=AsyncMock)
-    async def test_entry_popup_fires_after_window_elapses(self, mock_show_popup):
-        """Re-entering after the popup window has elapsed triggers the popup again."""
+    async def test_entry_notice_fires_after_window_elapses(
+        self, mock_show_popup, mock_send_msg
+    ):
+        """Re-entering after the entry window has elapsed fires the notice again."""
         await self._create_zone()
         character = await sync_to_async(CharacterFactory)()
         ctx = self._make_ctx(AsyncMock())
 
-        # First entry → popup
+        # First entry → notice
         await _check_shortcut_zones(
             character, Point(-12000, 1000, 0, srid=0), Point(1000, 1000, 0, srid=0), ctx
         )
-        mock_show_popup.assert_called_once()
+        mock_send_msg.assert_called_once()
 
-        # Make the taint go stale (older than the popup window)
+        # Make the taint go stale (older than the entry window)
         character.shortcut_zone_entered_at = timezone.now() - timedelta(minutes=10)
         await character.asave()
 
-        # Leave then re-enter → popup fires again
-        mock_show_popup.reset_mock()
+        # Leave then re-enter → notice fires again
+        mock_send_msg.reset_mock()
         await _check_shortcut_zones(
             character, Point(1000, 1000, 0, srid=0), Point(-12000, 1000, 0, srid=0), ctx
         )
         await _check_shortcut_zones(
             character, Point(-12000, 1000, 0, srid=0), Point(1000, 1000, 0, srid=0), ctx
         )
-        mock_show_popup.assert_called_once()
+        mock_send_msg.assert_called_once()
