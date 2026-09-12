@@ -84,8 +84,11 @@ SHORTCUT_ZONE_ENTRY_POPUP_WINDOW = timedelta(minutes=2)
 # oscillates and drivers legitimately hug zone edges.
 SHORTCUT_ZONE_ALLOWANCE_RADIUS = 2_000  # game units = 20 m (100 units = 1 m)
 
-# VIOLATION notice (popup escalation tier) debounce key has NO TTL: once
-# penalised, the popup is never re-sent for that character.
+# Popup escalation tier debounce TTL — matches the delivery taint window in
+# webhook.py (`shortcut_zone_entered_at > now - 1h`): while the player's
+# deliveries are still tainted they already know; once the taint ages out a
+# fresh violation informs them again.
+SHORTCUT_ZONE_TAINT_WINDOW_SECONDS = 3600
 
 SHORTCUT_ZONE_ENTRY_MESSAGE = """\
 <Title>⛔ Entered Shortcut Zone</>
@@ -178,15 +181,18 @@ async def _check_shortcut_zones(character, old_location, new_location, ctx):
                 # Escalation tier (RP-mode anti-autopilot ladder): the entry
                 # notice was the chat system message; penetrating beyond the
                 # allowance escalates to the POPUP — the penalty warning.
-                # No TTL on the debounce key: once a player has been popped
-                # up for this character, they have been penalised — the
-                # popup is never re-sent (this session or any future one).
+                # TTL = 1h, matching the delivery taint window in webhook.py
+                # (shortcut_zone_entered_at > now - 1h): while deliveries are
+                # still tainted the player already knows; once the taint ages
+                # out, a fresh violation informs them again.
                 await show_popup(
                     http_client_mod,
                     SHORTCUT_ZONE_ENTRY_MESSAGE,
                     player_id=player.unique_id,
                 )
-                await cache.aset(warn_key, True, timeout=None)
+                await cache.aset(
+                    warn_key, True, timeout=SHORTCUT_ZONE_TAINT_WINDOW_SECONDS
+                )
                 await asyncio.sleep(0.1)
 
         # Actual ENTRY (inside the polygon)

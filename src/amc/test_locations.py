@@ -114,11 +114,11 @@ class ShortcutZoneWarningTests(TestCase):
     async def test_violation_popup_debounced_per_player(
         self, mock_send_msg, mock_show_popup, mock_aset, mock_aget
     ):
-        """Once the escalation popup has fired, it is NEVER re-sent.
+        """Re-entering the violation depth while still tainted → no popup.
 
-        The popup debounce key has no TTL — a player who has been penalised
-        (popped up) once never gets the popup again, this session or any
-        future one.
+        The escalation popup's debounce TTL matches the 1h delivery taint
+        window in webhook.py: while deliveries are still tainted the player
+        already knows; after the taint ages out a fresh violation pops again.
         """
         await self._create_zone()
         character = await sync_to_async(CharacterFactory)()
