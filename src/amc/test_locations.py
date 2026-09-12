@@ -76,6 +76,10 @@ class ShortcutZoneWarningTests(TestCase):
             character_guid=character.guid,
         )
 
+        # Violation depth ⇒ taint set (1h delivery penalty window).
+        # (In-memory attribute — prod persists via _flush_locations_to_db.)
+        self.assertIsNotNone(character.shortcut_zone_entered_at)
+
     @patch("amc.locations.cache.aget", new_callable=AsyncMock, return_value=None)
     @patch("amc.locations.cache.aset", new_callable=AsyncMock)
     @patch("amc.locations.send_system_message", new_callable=AsyncMock)
@@ -106,6 +110,11 @@ class ShortcutZoneWarningTests(TestCase):
         )
         # No escalation popup — violation tier not reached
         mock_show_popup.assert_not_called()
+
+        # NO taint — the 20m buffer is the grace band; turning back is safe.
+        # (In-memory attribute: the prod flush is _flush_locations_to_db,
+        # which this direct call doesn't run.)
+        self.assertIsNone(character.shortcut_zone_entered_at)
 
     @patch("amc.locations.cache.aget", new_callable=AsyncMock, return_value=None)
     @patch("amc.locations.cache.aset", new_callable=AsyncMock)

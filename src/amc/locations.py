@@ -98,7 +98,7 @@ Any delivery completed while having passed through this area will <Highlight>NOT
 
 # Chat variant of the entry notice (system message — no popup markup).
 SHORTCUT_ZONE_ENTRY_CHAT_MESSAGE = """\
-⛔ Entered Shortcut Zone: you are inside a shortcut zone! Deliveries made through this area will NOT be subsidised and will NOT count towards job completion.
+⚠️ Shortcut Zone: you have entered a shortcut zone! Turn back within 20m to avoid the penalty — deliveries made through this area beyond this point will NOT be subsidised and will NOT count towards job completion.
 """
 
 # Chat variant of the violation notice (system message — no popup markup).
@@ -135,20 +135,19 @@ async def _is_beyond_allowance(point, zone_geom, allowance):
 
 
 async def _check_shortcut_zones(character, old_location, new_location, ctx):
-    """Flag players who penetrate a ShortcutZone beyond the 20 m allowance.
+    """Enforce shortcut zones with a 20m grace buffer.
 
-    A shallow edge-touch is tolerated (allowance); only being deeper than
-    ``SHORTCUT_ZONE_ALLOWANCE_RADIUS`` into the polygon is a violation, which
-    fires a debounced chat system message.
+    Entering the polygon is NOT the penalty — the 20m buffer gives players a
+    chance to turn back. Entry fires a chat "turn back" notice; penetrating
+    deeper than ``SHORTCUT_ZONE_ALLOWANCE_RADIUS`` into the polygon is the
+    violation: it escalates to the popup AND taints the character's
+    deliveries for 1 hour (via ``shortcut_zone_entered_at``).
 
-    Also maintains ``character.shortcut_zone_entered_at`` — the last time the
-    player was inside a shortcut zone (ANY depth inside the polygon — the
-    entry timestamp drives the popup and the 1-hour taint window, while the
-    ALLOWANCE only governs whether the chat warning fires). It is refreshed
-    on every inside tick and **never cleared on exit**: webhook processing
-    uses this as a rolling 1-hour taint window (a delivery within 1h of a
-    shortcut-zone pass gets no subsidy / job credit). The timestamp ages out
-    on its own once stale.
+    Also maintains ``character.shortcut_zone_entered_at`` — set/refreshed on
+    every VIOLATING tick (beyond-buffer depth), never cleared on exit:
+    webhook processing uses this as a rolling 1-hour taint window (a
+    delivery within 1h of a violation gets no subsidy / job credit). The
+    timestamp ages out on its own once stale.
     """
     player = character.player
     http_client_mod = ctx.get("http_client_mod")
@@ -200,31 +199,18 @@ async def _check_shortcut_zones(character, old_location, new_location, ctx):
         is_inside_polygon = distance_new == 0
 
         if is_inside_polygon:
-            # Capture the prior timestamp before refreshing below, so the
-            # entry notice can be debounced against it.
-            prev_entered_at = character.shortcut_zone_entered_at
-
-            # Refresh the "last time inside a shortcut zone" timestamp on
-            # every inside tick (not just the entry crossing) so the 1-hour
-            # taint window tracks actual occupancy. This also covers cases
-            # (spawn-in, teleport-in) where no boundary-crossing transition
-            # ever fires. Never cleared on exit — webhook.py ages it out via
-            # the `> now - 1h` check, giving the lingering taint the popup
-            # text promises.
-            character.shortcut_zone_entered_at = timezone.now()
-
             now = timezone.now()
+            prev_entered_at = character.shortcut_zone_entered_at
             recently_inside = (
                 prev_entered_at is not None
                 and prev_entered_at > now - SHORTCUT_ZONE_ENTRY_POPUP_WINDOW
             )
 
             # Entry notice: a chat system message on a real (re)entry —
-            # suppress if the player was already inside a shortcut zone very
-            # recently, so a player drifting across the boundary isn't
-            # spammed. The POPUP is the escalation tier: it fires only when
-            # the player then penetrates beyond the allowance (violation
-            # above) — matching the RP-mode anti-autopilot ladder.
+            # suppress if the player was already inside very recently, so a
+            # player drifting across the boundary isn't spammed. The 20m
+            # buffer is the GRACE BAND: entering is not the penalty — the
+            # message tells them to turn back.
             if was_outside_polygon and not recently_inside:
                 await send_system_message(
                     http_client_mod,
@@ -232,6 +218,16 @@ async def _check_shortcut_zones(character, old_location, new_location, ctx):
                     character_guid=character.guid,
                 )
                 await asyncio.sleep(0.1)
+
+            # PENALTY (violation depth): penetrating beyond the 20m buffer is
+            # what incurs the 1-hour delivery taint. Shallow edge-touches
+            # within the buffer are explicitly NOT penalised — the buffer
+            # exists so players have a chance to leave without incurring it.
+            # Refreshed on every violating tick (covers spawn-in /
+            # teleport-in); never cleared on exit — webhook.py ages it out
+            # via the `> now - 1h` check.
+            if is_violation_depth:
+                character.shortcut_zone_entered_at = timezone.now()
 
 
 async def _check_jail_boundary(character, new_location, ctx):
