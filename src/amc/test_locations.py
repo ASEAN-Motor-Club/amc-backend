@@ -114,10 +114,11 @@ class ShortcutZoneWarningTests(TestCase):
     async def test_violation_popup_debounced_per_player(
         self, mock_send_msg, mock_show_popup, mock_aset, mock_aget
     ):
-        """Re-entering the violation depth within the debounce window → no popup.
+        """Once the escalation popup has fired, it is NEVER re-sent.
 
-        The escalation popup is debounced via a Redis cache key per character,
-        so a player oscillating at the allowance edge isn't spammed.
+        The popup debounce key has no TTL — a player who has been penalised
+        (popped up) once never gets the popup again, this session or any
+        future one.
         """
         await self._create_zone()
         character = await sync_to_async(CharacterFactory)()
