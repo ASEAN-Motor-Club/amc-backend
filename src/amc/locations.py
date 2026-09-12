@@ -78,24 +78,18 @@ SHORTCUT_ZONE_WARNING_RADIUS = 2000  # game units (~20m)
 # don't spam the popup on every touch.
 SHORTCUT_ZONE_ENTRY_POPUP_WINDOW = timedelta(minutes=2)
 
-# Proximity warning is delivered as a CHAT system message (not a popup) —
+# Shortcuts have a 20 m ALLOWANCE inside the zone: distance-to-polygon
+# (100 units = 1 m) beyond this depth counts as a real violation. Skimming
+# the boundary or an edge-touch (distance 0) is tolerated — telemetry
+# oscillates and drivers legitimately hug zone edges.
+SHORTCUT_ZONE_ALLOWANCE_RADIUS = 2_000  # game units = 20 m (100 units = 1 m)
+
+# Violation notice is delivered as a CHAT system message (not a popup) —
 # mirrors the RP-mode anti-autopilot ladder: warn unobtrusively first, pop up
-# only on escalation. Keyed per player via Redis cache; without this the
-# warning re-fires on every re-crossing of the 20m boundary line — a player
-# idling/drifting along the zone edge oscillates across it between SSE ticks
-# and gets spammed.
-SHORTCUT_ZONE_WARNING_DEBOUNCE_SECONDS = 300
-
-SHORTCUT_ZONE_WARNING_MESSAGE = """\
-<Title>⚠️ Shortcut Zone Ahead</>
-<Warning>You are near a shortcut zone!</>
-Deliveries made through this area will <Highlight>NOT receive any subsidy bonus</> and will <Highlight>NOT count towards job completion</>.
-"""
-
-# Chat variant of the warning (system message — no popup markup support).
-SHORTCUT_ZONE_WARNING_CHAT_MESSAGE = """\
-⚠️ Shortcut Zone Ahead: you are near a shortcut zone! Deliveries made through this area will NOT receive any subsidy bonus and will NOT count towards job completion.
-"""
+# only on escalation. Keyed per player via Redis cache so a player idling at
+# the allowance edge (oscillating between depths across SSE ticks) isn't
+# spammed.
+SHORTCUT_ZONE_VIOLATION_DEBOUNCE_SECONDS = 300
 
 SHORTCUT_ZONE_ENTRY_MESSAGE = """\
 <Title>⛔ Entered Shortcut Zone</>
@@ -103,15 +97,54 @@ SHORTCUT_ZONE_ENTRY_MESSAGE = """\
 Any delivery completed while having passed through this area will <Highlight>NOT be subsidised</> and will <Highlight>NOT count towards job completion</>.
 """
 
+# Chat variant of the violation notice (system message — no popup markup).
+SHORTCUT_ZONE_VIOLATION_CHAT_MESSAGE = """\
+⛔ Shortcut Zone Violation: you are deep inside a shortcut zone (beyond the 20m allowance)! Deliveries made through this area will NOT be subsidised and will NOT count towards job completion.
+"""
+
+
+async def _is_beyond_allowance(point, zone_geom, allowance):
+    """True when ``point`` lies deeper than ``allowance`` units inside the polygon.
+
+    ``ST_Distance(point, polygon)`` is 0 for any interior point, so raw
+    distance cannot express penetration depth. Erode the polygon by the
+    allowance (negative buffer); falling OUTSIDE the eroded polygon means the
+    point is within the allowance band (or on the boundary) — tolerated.
+    Falls back to False (no violation) if the geometry library refuses a
+    negative buffer on a small/narrow zone.
+    """
+    try:
+        eroded = zone_geom.buffer(-allowance)
+    except Exception:
+        logger.warning(
+            "Shortcut allowance buffer failed for zone geom — treating as no violation",
+            exc_info=True,
+        )
+        return False
+    if eroded.empty:
+        # Zone is thinner than the allowance everywhere — nothing is deep
+        # enough to violate.
+        return False
+    # Inside the eroded CORE ⇒ deeper than the allowance ⇒ violation.
+    # (The allowance band = polygon minus core; points there are tolerated.)
+    return point.within(eroded)
+
 
 async def _check_shortcut_zones(character, old_location, new_location, ctx):
-    """Warn players when they approach or enter a ShortcutZone.
+    """Flag players who penetrate a ShortcutZone beyond the 20 m allowance.
+
+    A shallow edge-touch is tolerated (allowance); only being deeper than
+    ``SHORTCUT_ZONE_ALLOWANCE_RADIUS`` into the polygon is a violation, which
+    fires a debounced chat system message.
 
     Also maintains ``character.shortcut_zone_entered_at`` — the last time the
-    player was inside a shortcut zone. It is refreshed on every inside tick and
-    **never cleared on exit**: webhook processing uses this as a rolling
-    1-hour taint window (a delivery within 1h of a shortcut-zone pass gets no
-    subsidy / job credit). The timestamp ages out on its own once stale.
+    player was inside a shortcut zone (ANY depth inside the polygon — the
+    entry timestamp drives the popup and the 1-hour taint window, while the
+    ALLOWANCE only governs whether the chat warning fires). It is refreshed
+    on every inside tick and **never cleared on exit**: webhook processing
+    uses this as a rolling 1-hour taint window (a delivery within 1h of a
+    shortcut-zone pass gets no subsidy / job credit). The timestamp ages out
+    on its own once stale.
     """
     player = character.player
     http_client_mod = ctx.get("http_client_mod")
@@ -128,25 +161,29 @@ async def _check_shortcut_zones(character, old_location, new_location, ctx):
         distance_old = old_2d.distance(zone_geom)
         distance_new = new_2d.distance(zone_geom)
 
-        # Proximity WARNING (e.g. 2000 units away)
-        was_outside_warning = distance_old > SHORTCUT_ZONE_WARNING_RADIUS
-        is_inside_warning = (
-            distance_new <= SHORTCUT_ZONE_WARNING_RADIUS and distance_new > 0
-        )
+        # VIOLATION: deeper than the allowance inside the polygon.
+        # distance == 0 means inside the polygon (ST_Distance to the
+        # polygon's boundary is 0 for interior points).
+        is_violation_depth = False
+        if distance_new == 0:
+            # Inside — measure true penetration depth by eroding the polygon
+            is_violation_depth = await _is_beyond_allowance(
+                new_2d, zone_geom, SHORTCUT_ZONE_ALLOWANCE_RADIUS
+            )
 
-        if was_outside_warning and is_inside_warning:
+        if is_violation_depth:
             warn_key = f"shortcut_warn:{character.guid}"
             if not await cache.aget(warn_key):
                 # Escalation ladder (like RP-mode anti-autopilot): the
-                # proximity warning is a chat system message — the popup is
-                # reserved for actually entering the zone.
+                # violation notice is a chat system message — the popup is
+                # reserved for escalation elsewhere.
                 await send_system_message(
                     http_client_mod,
-                    SHORTCUT_ZONE_WARNING_CHAT_MESSAGE,
+                    SHORTCUT_ZONE_VIOLATION_CHAT_MESSAGE,
                     character_guid=character.guid,
                 )
                 await cache.aset(
-                    warn_key, True, timeout=SHORTCUT_ZONE_WARNING_DEBOUNCE_SECONDS
+                    warn_key, True, timeout=SHORTCUT_ZONE_VIOLATION_DEBOUNCE_SECONDS
                 )
                 await asyncio.sleep(0.1)
 

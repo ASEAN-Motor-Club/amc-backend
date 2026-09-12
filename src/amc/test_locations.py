@@ -8,7 +8,7 @@ from amc.models import ShortcutZone
 from amc.factories import CharacterFactory
 from amc.locations import (
     _check_shortcut_zones,
-    SHORTCUT_ZONE_WARNING_CHAT_MESSAGE,
+    SHORTCUT_ZONE_VIOLATION_CHAT_MESSAGE,
     SHORTCUT_ZONE_ENTRY_MESSAGE,
 )
 
@@ -19,9 +19,17 @@ class ShortcutZoneWarningTests(TestCase):
     @classmethod
     def setUpClass(cls):
         super().setUpClass()
-        # A 200x200 square polygon centered at (1000, 1000)
+        # A 6000x6000 square polygon centered at (1000, 1000) — big enough
+        # that the 2000-unit (20m) allowance erosion leaves a core (real
+        # zones are 12k-20k units across; 200x200 erodes to nothing).
         cls.zone_polygon = Polygon(
-            ((900, 900), (1100, 900), (1100, 1100), (900, 1100), (900, 900)),
+            (
+                (-2000, -2000),
+                (4000, -2000),
+                (4000, 4000),
+                (-2000, 4000),
+                (-2000, -2000),
+            ),
             srid=3857,
         )
 
@@ -38,52 +46,83 @@ class ShortcutZoneWarningTests(TestCase):
     @patch("amc.locations.cache.aget", new_callable=AsyncMock, return_value=None)
     @patch("amc.locations.cache.aset", new_callable=AsyncMock)
     @patch("amc.locations.send_system_message", new_callable=AsyncMock)
-    async def test_warning_on_approach(
+    async def test_violation_beyond_allowance_fires(
         self, mock_send_msg, mock_aset, mock_aget
     ):
-        """Player moves from outside 2000 units to within 2000 units → chat warning fires (no popup)."""
+        """Penetrating deeper than the 20m allowance inside the zone → chat violation fires."""
         await self._create_zone()
         character = await sync_to_async(CharacterFactory)()
 
-        old_loc = Point(-2000, 1000, 0, srid=0)  # 2900 units from polygon edge
-        new_loc = Point(-1000, 1000, 0, srid=0)  # 1900 units from polygon edge
+        # 200x200 polygon centered (1000,1000). Center is ~100 units (>20m)
+        # from every edge → beyond the 200-unit allowance.
+        old_loc = Point(-12000, 1000, 0, srid=0)  # far outside
+        new_loc = Point(1000, 1000, 0, srid=0)  # deep inside (3000 from every edge)
 
         ctx = self._make_ctx(AsyncMock())
         await _check_shortcut_zones(character, old_loc, new_loc, ctx)
 
         mock_send_msg.assert_called_once_with(
             ctx["http_client_mod"],
-            SHORTCUT_ZONE_WARNING_CHAT_MESSAGE,
+            SHORTCUT_ZONE_VIOLATION_CHAT_MESSAGE,
             character_guid=character.guid,
         )
 
     @patch("amc.locations.cache.aget", new_callable=AsyncMock, return_value=None)
     @patch("amc.locations.cache.aset", new_callable=AsyncMock)
     @patch("amc.locations.send_system_message", new_callable=AsyncMock)
-    async def test_warning_debounced_per_player(
+    @patch("amc.locations.show_popup", new_callable=AsyncMock)
+    async def test_edge_touch_within_allowance_tolerated(
+        self, mock_show_popup, mock_send_msg, mock_aset, mock_aget
+    ):
+        """Shallow edge-touch (within the 20m allowance) → NO violation message.
+
+        The entry popup still fires (taint bookkeeping), but the chat
+        violation is suppressed for allowance-band penetration.
+        """
+        await self._create_zone()
+        character = await sync_to_async(CharacterFactory)()
+
+        # Just inside the west edge (x=-2000): depth 800 units < 2000 allowance
+        old_loc = Point(-12000, 1000, 0, srid=0)
+        new_loc = Point(-1200, 1000, 0, srid=0)
+
+        ctx = self._make_ctx(AsyncMock())
+        await _check_shortcut_zones(character, old_loc, new_loc, ctx)
+
+        mock_send_msg.assert_not_called()
+        # Entry popup still fired — occupancy is still recorded
+        mock_show_popup.assert_called_once()
+
+    @patch("amc.locations.cache.aget", new_callable=AsyncMock, return_value=None)
+    @patch("amc.locations.cache.aset", new_callable=AsyncMock)
+    @patch("amc.locations.send_system_message", new_callable=AsyncMock)
+    async def test_violation_debounced_per_player(
         self, mock_send_msg, mock_aset, mock_aget
     ):
-        """Re-crossing the warning boundary within the debounce window → no message.
+        """Re-entering the violation depth within the debounce window → no message.
 
-        The proximity warning is debounced via a Redis cache key per character, so
-        a player oscillating across the 20m boundary line isn't spammed.
+        The violation notice is debounced via a Redis cache key per character,
+        so a player oscillating at the allowance edge isn't spammed.
         """
         await self._create_zone()
         character = await sync_to_async(CharacterFactory)()
         ctx = self._make_ctx(AsyncMock())
 
-        # First crossing → warning fires, debounce key set
+        # First deep entry → violation fires, debounce key set
         await _check_shortcut_zones(
-            character, Point(-2000, 1000, 0, srid=0), Point(-1000, 1000, 0, srid=0), ctx
+            character, Point(-2000, 1000, 0, srid=0), Point(1000, 1000, 0, srid=0), ctx
         )
         mock_send_msg.assert_called_once()
         mock_aset.assert_called_once()
 
-        # Second crossing within the window → cache hit → suppressed
+        # Leave, re-enter deep within the window → cache hit → suppressed
         mock_send_msg.reset_mock()
         mock_aget.return_value = True
         await _check_shortcut_zones(
-            character, Point(-2000, 1000, 0, srid=0), Point(-1000, 1000, 0, srid=0), ctx
+            character, Point(1000, 1000, 0, srid=0), Point(-2000, 1000, 0, srid=0), ctx
+        )
+        await _check_shortcut_zones(
+            character, Point(-2000, 1000, 0, srid=0), Point(1000, 1000, 0, srid=0), ctx
         )
         mock_send_msg.assert_not_called()
 
@@ -93,8 +132,8 @@ class ShortcutZoneWarningTests(TestCase):
         await self._create_zone()
         character = await sync_to_async(CharacterFactory)()
 
-        old_loc = Point(-3000, 1000, 0, srid=0)  # 3900 units from edge
-        new_loc = Point(-2100, 1000, 0, srid=0)  # 3000 units from edge
+        old_loc = Point(-12000, 1000, 0, srid=0)  # 8000 units from edge
+        new_loc = Point(-6100, 1000, 0, srid=0)  # 2100 units from edge
 
         ctx = self._make_ctx(AsyncMock())
         await _check_shortcut_zones(character, old_loc, new_loc, ctx)
@@ -107,8 +146,8 @@ class ShortcutZoneWarningTests(TestCase):
         await self._create_zone()
         character = await sync_to_async(CharacterFactory)()
 
-        old_loc = Point(-1000, 1000, 0, srid=0)  # 1900 units from edge (already close)
-        new_loc = Point(-500, 1000, 0, srid=0)  # 1400 units from edge (still close)
+        old_loc = Point(-1000, 1000, 0, srid=0)  # 1000 units from edge (inside allowance band)
+        new_loc = Point(-500, 1000, 0, srid=0)  # 1500 units from edge (still in allowance band)
 
         ctx = self._make_ctx(AsyncMock())
         await _check_shortcut_zones(character, old_loc, new_loc, ctx)
@@ -121,7 +160,7 @@ class ShortcutZoneWarningTests(TestCase):
         await self._create_zone()
         character = await sync_to_async(CharacterFactory)()
 
-        old_loc = Point(-1000, 1000, 0, srid=0)  # 1900 units from edge
+        old_loc = Point(-12000, 1000, 0, srid=0)  # far outside
         new_loc = Point(1000, 1000, 0, srid=0)  # Inside the polygon
 
         ctx = self._make_ctx(AsyncMock())
@@ -160,7 +199,7 @@ class ShortcutZoneWarningTests(TestCase):
         character = await sync_to_async(CharacterFactory)()
 
         # Enter the zone → taint set
-        old_loc = Point(-1000, 1000, 0, srid=0)
+        old_loc = Point(-12000, 1000, 0, srid=0)
         new_loc = Point(1000, 1000, 0, srid=0)
         ctx = self._make_ctx(AsyncMock())
         await _check_shortcut_zones(character, old_loc, new_loc, ctx)
@@ -169,7 +208,7 @@ class ShortcutZoneWarningTests(TestCase):
 
         # Leave all zones → taint MUST persist (NOT cleared on exit)
         old_loc = Point(1000, 1000, 0, srid=0)
-        new_loc = Point(-1000, 1000, 0, srid=0)
+        new_loc = Point(-12000, 1000, 0, srid=0)
         await _check_shortcut_zones(character, old_loc, new_loc, ctx)
         await character.arefresh_from_db()
         self.assertIsNotNone(character.shortcut_zone_entered_at)
@@ -216,17 +255,17 @@ class ShortcutZoneWarningTests(TestCase):
 
         # First entry — popup fires (no prior taint)
         await _check_shortcut_zones(
-            character, Point(-1000, 1000, 0, srid=0), Point(1000, 1000, 0, srid=0), ctx
+            character, Point(-12000, 1000, 0, srid=0), Point(1000, 1000, 0, srid=0), ctx
         )
         mock_show_popup.assert_called_once()
 
         # Leave, then re-enter almost immediately — taint is recent, no popup
         mock_show_popup.reset_mock()
         await _check_shortcut_zones(
-            character, Point(1000, 1000, 0, srid=0), Point(-1000, 1000, 0, srid=0), ctx
+            character, Point(1000, 1000, 0, srid=0), Point(-12000, 1000, 0, srid=0), ctx
         )
         await _check_shortcut_zones(
-            character, Point(-1000, 1000, 0, srid=0), Point(1000, 1000, 0, srid=0), ctx
+            character, Point(-12000, 1000, 0, srid=0), Point(1000, 1000, 0, srid=0), ctx
         )
         mock_show_popup.assert_not_called()
 
@@ -239,7 +278,7 @@ class ShortcutZoneWarningTests(TestCase):
 
         # First entry → popup
         await _check_shortcut_zones(
-            character, Point(-1000, 1000, 0, srid=0), Point(1000, 1000, 0, srid=0), ctx
+            character, Point(-12000, 1000, 0, srid=0), Point(1000, 1000, 0, srid=0), ctx
         )
         mock_show_popup.assert_called_once()
 
@@ -250,9 +289,9 @@ class ShortcutZoneWarningTests(TestCase):
         # Leave then re-enter → popup fires again
         mock_show_popup.reset_mock()
         await _check_shortcut_zones(
-            character, Point(1000, 1000, 0, srid=0), Point(-1000, 1000, 0, srid=0), ctx
+            character, Point(1000, 1000, 0, srid=0), Point(-12000, 1000, 0, srid=0), ctx
         )
         await _check_shortcut_zones(
-            character, Point(-1000, 1000, 0, srid=0), Point(1000, 1000, 0, srid=0), ctx
+            character, Point(-12000, 1000, 0, srid=0), Point(1000, 1000, 0, srid=0), ctx
         )
         mock_show_popup.assert_called_once()
