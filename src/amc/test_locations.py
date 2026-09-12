@@ -8,7 +8,7 @@ from amc.models import ShortcutZone
 from amc.factories import CharacterFactory
 from amc.locations import (
     _check_shortcut_zones,
-    SHORTCUT_ZONE_WARNING_MESSAGE,
+    SHORTCUT_ZONE_WARNING_CHAT_MESSAGE,
     SHORTCUT_ZONE_ENTRY_MESSAGE,
 )
 
@@ -37,9 +37,11 @@ class ShortcutZoneWarningTests(TestCase):
 
     @patch("amc.locations.cache.aget", new_callable=AsyncMock, return_value=None)
     @patch("amc.locations.cache.aset", new_callable=AsyncMock)
-    @patch("amc.locations.show_popup", new_callable=AsyncMock)
-    async def test_warning_on_approach(self, mock_show_popup, mock_aset, mock_aget):
-        """Player moves from outside 2000 units to within 2000 units → popup fires."""
+    @patch("amc.locations.send_system_message", new_callable=AsyncMock)
+    async def test_warning_on_approach(
+        self, mock_send_msg, mock_aset, mock_aget
+    ):
+        """Player moves from outside 2000 units to within 2000 units → chat warning fires (no popup)."""
         await self._create_zone()
         character = await sync_to_async(CharacterFactory)()
 
@@ -49,39 +51,41 @@ class ShortcutZoneWarningTests(TestCase):
         ctx = self._make_ctx(AsyncMock())
         await _check_shortcut_zones(character, old_loc, new_loc, ctx)
 
-        mock_show_popup.assert_called_once_with(
+        mock_send_msg.assert_called_once_with(
             ctx["http_client_mod"],
-            SHORTCUT_ZONE_WARNING_MESSAGE,
-            player_id=character.player.unique_id,
+            SHORTCUT_ZONE_WARNING_CHAT_MESSAGE,
+            character_guid=character.guid,
         )
 
     @patch("amc.locations.cache.aget", new_callable=AsyncMock, return_value=None)
     @patch("amc.locations.cache.aset", new_callable=AsyncMock)
-    @patch("amc.locations.show_popup", new_callable=AsyncMock)
-    async def test_warning_debounced_per_player(self, mock_show_popup, mock_aset, mock_aget):
-        """Re-crossing the warning boundary within the debounce window → no popup.
+    @patch("amc.locations.send_system_message", new_callable=AsyncMock)
+    async def test_warning_debounced_per_player(
+        self, mock_send_msg, mock_aset, mock_aget
+    ):
+        """Re-crossing the warning boundary within the debounce window → no message.
 
-        The warning popup is debounced via a Redis cache key per character, so
+        The proximity warning is debounced via a Redis cache key per character, so
         a player oscillating across the 20m boundary line isn't spammed.
         """
         await self._create_zone()
         character = await sync_to_async(CharacterFactory)()
         ctx = self._make_ctx(AsyncMock())
 
-        # First crossing → popup fires, debounce key set
+        # First crossing → warning fires, debounce key set
         await _check_shortcut_zones(
             character, Point(-2000, 1000, 0, srid=0), Point(-1000, 1000, 0, srid=0), ctx
         )
-        mock_show_popup.assert_called_once()
+        mock_send_msg.assert_called_once()
         mock_aset.assert_called_once()
 
         # Second crossing within the window → cache hit → suppressed
-        mock_show_popup.reset_mock()
+        mock_send_msg.reset_mock()
         mock_aget.return_value = True
         await _check_shortcut_zones(
             character, Point(-2000, 1000, 0, srid=0), Point(-1000, 1000, 0, srid=0), ctx
         )
-        mock_show_popup.assert_not_called()
+        mock_send_msg.assert_not_called()
 
     @patch("amc.locations.show_popup", new_callable=AsyncMock)
     async def test_no_warning_when_far(self, mock_show_popup):

@@ -18,7 +18,7 @@ from amc.models import (
     TeleportPortal,
 )
 from amc.utils import skip_if_running
-from amc.mod_server import show_popup, teleport_player
+from amc.mod_server import send_system_message, show_popup, teleport_player
 from amc.game_server import get_players_with_location, get_players_locations
 
 logger = logging.getLogger("amc.locations")
@@ -78,16 +78,23 @@ SHORTCUT_ZONE_WARNING_RADIUS = 2000  # game units (~20m)
 # don't spam the popup on every touch.
 SHORTCUT_ZONE_ENTRY_POPUP_WINDOW = timedelta(minutes=2)
 
-# Debounce for the proximity WARNING popup, keyed per player via Redis cache.
-# Without this the warning re-fires on every re-crossing of the 20m boundary
-# line — a player idling/drifting along the zone edge oscillates across it
-# between SSE ticks and gets spammed.
+# Proximity warning is delivered as a CHAT system message (not a popup) —
+# mirrors the RP-mode anti-autopilot ladder: warn unobtrusively first, pop up
+# only on escalation. Keyed per player via Redis cache; without this the
+# warning re-fires on every re-crossing of the 20m boundary line — a player
+# idling/drifting along the zone edge oscillates across it between SSE ticks
+# and gets spammed.
 SHORTCUT_ZONE_WARNING_DEBOUNCE_SECONDS = 300
 
 SHORTCUT_ZONE_WARNING_MESSAGE = """\
 <Title>⚠️ Shortcut Zone Ahead</>
 <Warning>You are near a shortcut zone!</>
 Deliveries made through this area will <Highlight>NOT receive any subsidy bonus</> and will <Highlight>NOT count towards job completion</>.
+"""
+
+# Chat variant of the warning (system message — no popup markup support).
+SHORTCUT_ZONE_WARNING_CHAT_MESSAGE = """\
+⚠️ Shortcut Zone Ahead: you are near a shortcut zone! Deliveries made through this area will NOT receive any subsidy bonus and will NOT count towards job completion.
 """
 
 SHORTCUT_ZONE_ENTRY_MESSAGE = """\
@@ -130,10 +137,13 @@ async def _check_shortcut_zones(character, old_location, new_location, ctx):
         if was_outside_warning and is_inside_warning:
             warn_key = f"shortcut_warn:{character.guid}"
             if not await cache.aget(warn_key):
-                await show_popup(
+                # Escalation ladder (like RP-mode anti-autopilot): the
+                # proximity warning is a chat system message — the popup is
+                # reserved for actually entering the zone.
+                await send_system_message(
                     http_client_mod,
-                    SHORTCUT_ZONE_WARNING_MESSAGE,
-                    player_id=player.unique_id,
+                    SHORTCUT_ZONE_WARNING_CHAT_MESSAGE,
+                    character_guid=character.guid,
                 )
                 await cache.aset(
                     warn_key, True, timeout=SHORTCUT_ZONE_WARNING_DEBOUNCE_SECONDS
