@@ -85,11 +85,12 @@ SHORTCUT_ZONE_ALLOWANCE_RADIUS = 2_000  # game units = 20 m (100 units = 1 m)
 # fresh violation informs them again.
 SHORTCUT_ZONE_TAINT_WINDOW_SECONDS = 3600
 
-# Entry-notice: sent on every outside→inside crossing. No debounce — the
-# trigger is a state transition, not a condition, so it cannot repeat while
-# the player stays inside or outside. (It used to be a proximity band with a
-# 120 s Redis debounce; the band is gone, and with it the need to suppress
-# legitimate re-crossings.)
+# Entry-notice repeat interval: the chat message stays visible ~2 s, so a
+# single transition send is easily missed. While the player remains inside
+# the polygon (but not yet in violation depth) the notice re-sends at most
+# once per this interval. The violation tier replaces it (same-tick dedupe)
+# and has its own 1 h debounce.
+SHORTCUT_ZONE_ENTRY_NOTICE_REPEAT_SECONDS = 5
 
 SHORTCUT_ZONE_ENTRY_MESSAGE = """\
 <Title>⛔ Entered Shortcut Zone</>
@@ -195,8 +196,9 @@ async def _check_shortcut_zones(character, old_location, new_location, ctx):
         # VIOLATION: deeper than the allowance inside the polygon.
         # distance == 0 means inside the polygon (ST_Distance to the
         # polygon's boundary is 0 for interior points).
+        is_inside_polygon = distance_new == 0
         is_violation_depth = False
-        if distance_new == 0:
+        if is_inside_polygon:
             # Inside — measure true penetration depth by eroding the polygon
             is_violation_depth = await _is_beyond_allowance(
                 new_2d, zone_geom, SHORTCUT_ZONE_ALLOWANCE_RADIUS, zone.id
@@ -240,17 +242,24 @@ async def _check_shortcut_zones(character, old_location, new_location, ctx):
         # above IS the notice — an extra chat message here would double-notify
         # (observed live: a driver at speed clears the 20m allowance within a
         # single telemetry tick, so entry and violation land together).
-        entered_polygon = distance_old > 0 and distance_new == 0
-        if entered_polygon and not is_violation_depth:
-            # State-transition trigger: fires exactly when the player moves
-            # outside→inside. No debounce needed — it cannot repeat while the
-            # player stays on either side of the boundary.
-            await send_system_message(
-                http_client_mod,
-                SHORTCUT_ZONE_ENTRY_CHAT_MESSAGE,
-                character_guid=character.guid,
-            )
-            await asyncio.sleep(0.1)
+        if is_inside_polygon and not is_violation_depth:
+            # Repeat notice: the chat message is visible only ~2 s, so a
+            # single send is easily missed — re-send while the player stays
+            # inside (but not yet in violation), rate-limited to one per
+            # repeat interval per player.
+            notice_key = f"shortcut_notice:{character.guid}"
+            if not await cache.aget(notice_key):
+                await send_system_message(
+                    http_client_mod,
+                    SHORTCUT_ZONE_ENTRY_CHAT_MESSAGE,
+                    character_guid=character.guid,
+                )
+                await cache.aset(
+                    notice_key,
+                    True,
+                    timeout=SHORTCUT_ZONE_ENTRY_NOTICE_REPEAT_SECONDS,
+                )
+                await asyncio.sleep(0.1)
 
 
 async def _check_jail_boundary(character, new_location, ctx):
