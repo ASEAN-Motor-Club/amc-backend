@@ -1231,6 +1231,22 @@ class ExtraWebhookTests(TestCase):
             character=character, location=Point(0, 0, 0), vehicle_key="TestVehicle"
         )
 
+        # A subsidy rule must exist, else subsidy is 0 regardless of taint
+        # (the assertion would pass vacuously).
+        cargo_apple, _ = await Cargo.objects.aget_or_create(
+            key="apples", defaults={"label": "Apples"}
+        )
+        rule = await SubsidyRule.objects.acreate(
+            name="Apple Subsidy",
+            reward_type=SubsidyRule.RewardType.PERCENTAGE,
+            reward_value=Decimal("2.0"),
+            active=True,
+            priority=10,
+            allocation=Decimal("100000"),
+            spent=Decimal("0"),
+        )
+        await rule.cargos.aadd(cargo_apple)
+
         await DeliveryPoint.objects.acreate(guid="s1", name="S1", coord=Point(0, 0, 0))
         await DeliveryPoint.objects.acreate(
             guid="d1", name="D1", coord=Point(100, 100, 0)
@@ -1298,6 +1314,22 @@ class ExtraWebhookTests(TestCase):
         await CharacterLocation.objects.acreate(
             character=character, location=Point(0, 0, 0), vehicle_key="TestVehicle"
         )
+
+        # A subsidy rule must exist, else subsidy is 0 regardless of taint
+        # (the test would pass/fail vacuously).
+        cargo_apple, _ = await Cargo.objects.aget_or_create(
+            key="apples", defaults={"label": "Apples"}
+        )
+        rule = await SubsidyRule.objects.acreate(
+            name="Apple Subsidy",
+            reward_type=SubsidyRule.RewardType.PERCENTAGE,
+            reward_value=Decimal("2.0"),
+            active=True,
+            priority=10,
+            allocation=Decimal("100000"),
+            spent=Decimal("0"),
+        )
+        await rule.cargos.aadd(cargo_apple)
 
         await DeliveryPoint.objects.acreate(guid="s1", name="S1", coord=Point(0, 0, 0))
         await DeliveryPoint.objects.acreate(

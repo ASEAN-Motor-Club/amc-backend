@@ -4,10 +4,11 @@ from datetime import timedelta
 from django.contrib.gis.geos import Point, Polygon
 from django.test import TestCase
 from django.utils import timezone
-from amc.models import ShortcutZone
+from amc.models import Character, ShortcutZone
 from amc.factories import CharacterFactory
 from amc.locations import (
     _check_shortcut_zones,
+    _flush_locations_to_db,
     SHORTCUT_ZONE_ENTRY_MESSAGE,
     SHORTCUT_ZONE_ENTRY_CHAT_MESSAGE,
 )
@@ -234,13 +235,22 @@ class ShortcutZoneWarningTests(TestCase):
         new_loc = Point(1000, 1000, 0, srid=0)
         ctx = self._make_ctx(AsyncMock())
         await _check_shortcut_zones(character, old_loc, new_loc, ctx)
+        # Prod persists characters via _flush_locations_to_db (the direct
+        # call only mutates the in-memory instance).
+        await _flush_locations_to_db([], [character])
         await character.arefresh_from_db()
         self.assertIsNotNone(character.shortcut_zone_entered_at)
 
-        # Leave all zones → taint MUST persist (NOT cleared on exit)
+        # Leave all zones → taint MUST persist (NOT cleared on exit).
+        # NOTE: arefresh_from_db wipes the FK cache — re-fetch with
+        # select_related so `character.player` resolves in the async check.
+        character = await Character.objects.select_related("player").aget(
+            guid=character.guid
+        )
         old_loc = Point(1000, 1000, 0, srid=0)
         new_loc = Point(-12000, 1000, 0, srid=0)
         await _check_shortcut_zones(character, old_loc, new_loc, ctx)
+        await _flush_locations_to_db([], [character])
         await character.arefresh_from_db()
         self.assertIsNotNone(character.shortcut_zone_entered_at)
 
@@ -248,9 +258,10 @@ class ShortcutZoneWarningTests(TestCase):
     async def test_taint_refreshed_while_inside(self, mock_show_popup):
         """Remaining inside a zone keeps the taint within the 1h window.
 
-        The timestamp is refreshed on every inside tick, so a player camping
-        a shortcut zone for >1h stays tainted while physically inside (the
-        entry-only path would otherwise let the timestamp go stale).
+        The timestamp is refreshed on every VIOLATING inside tick, so a
+        player camping beyond the buffer for >1h stays tainted while
+        physically inside (the entry-only path would otherwise let the
+        timestamp go stale).
         """
         await self._create_zone()
         character = await sync_to_async(CharacterFactory)()
@@ -265,6 +276,7 @@ class ShortcutZoneWarningTests(TestCase):
 
         ctx = self._make_ctx(AsyncMock())
         await _check_shortcut_zones(character, old_loc, new_loc, ctx)
+        await _flush_locations_to_db([], [character])
         await character.arefresh_from_db()
 
         stale = timezone.now() - timedelta(hours=3)
