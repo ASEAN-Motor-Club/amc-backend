@@ -3,7 +3,7 @@ import json
 import logging
 import math
 import os
-from datetime import datetime, timezone as dt_timezone
+from datetime import datetime, timedelta, timezone as dt_timezone
 
 import aiohttp
 from django.contrib.gis.geos import Point
@@ -18,7 +18,7 @@ from amc.models import (
     TeleportPortal,
 )
 from amc.utils import skip_if_running
-from amc.mod_server import show_popup, teleport_player
+from amc.mod_server import send_system_message, show_popup, teleport_player
 from amc.game_server import get_players_with_location, get_players_locations
 
 logger = logging.getLogger("amc.locations")
@@ -72,11 +72,23 @@ For any other purposes, <Highlight>please contact the admins on the discord</>.
 
 SHORTCUT_ZONE_WARNING_RADIUS = 2000  # game units (~20m)
 
-SHORTCUT_ZONE_WARNING_MESSAGE = """\
-<Title>⚠️ Shortcut Zone Ahead</>
-<Warning>You are near a shortcut zone!</>
-Deliveries made through this area will <Highlight>NOT receive any subsidy bonus</> and will <Highlight>NOT count towards job completion</>.
-"""
+# How recently a player must have been inside a shortcut zone (via
+# shortcut_zone_entered_at) before we suppress the entry popup. Re-crossing
+# the boundary within this window means they already saw the warning, so we
+# don't spam the popup on every touch.
+SHORTCUT_ZONE_ENTRY_POPUP_WINDOW = timedelta(minutes=2)
+
+# Shortcuts have a 20 m ALLOWANCE inside the zone: distance-to-polygon
+# (100 units = 1 m) beyond this depth counts as a real violation. Skimming
+# the boundary or an edge-touch (distance 0) is tolerated — telemetry
+# oscillates and drivers legitimately hug zone edges.
+SHORTCUT_ZONE_ALLOWANCE_RADIUS = 2_000  # game units = 20 m (100 units = 1 m)
+
+# Popup escalation tier debounce TTL — matches the delivery taint window in
+# webhook.py (`shortcut_zone_entered_at > now - 1h`): while the player's
+# deliveries are still tainted they already know; once the taint ages out a
+# fresh violation informs them again.
+SHORTCUT_ZONE_TAINT_WINDOW_SECONDS = 3600
 
 SHORTCUT_ZONE_ENTRY_MESSAGE = """\
 <Title>⛔ Entered Shortcut Zone</>
@@ -84,13 +96,58 @@ SHORTCUT_ZONE_ENTRY_MESSAGE = """\
 Any delivery completed while having passed through this area will <Highlight>NOT be subsidised</> and will <Highlight>NOT count towards job completion</>.
 """
 
+# Chat variant of the entry notice (system message — no popup markup).
+SHORTCUT_ZONE_ENTRY_CHAT_MESSAGE = """\
+⚠️ Shortcut Zone: you have entered a shortcut zone! Turn back within 20m to avoid the penalty — deliveries made through this area beyond this point will NOT be subsidised and will NOT count towards job completion.
+"""
+
+# Chat variant of the violation notice (system message — no popup markup).
+SHORTCUT_ZONE_VIOLATION_CHAT_MESSAGE = """\
+⛔ Shortcut Zone Violation: you are deep inside a shortcut zone (beyond the 20m allowance)! Deliveries made through this area will NOT be subsidised and will NOT count towards job completion.
+"""
+
+
+async def _is_beyond_allowance(point, zone_geom, allowance):
+    """True when ``point`` lies deeper than ``allowance`` units inside the polygon.
+
+    ``ST_Distance(point, polygon)`` is 0 for any interior point, so raw
+    distance cannot express penetration depth. Erode the polygon by the
+    allowance (negative buffer); falling OUTSIDE the eroded polygon means the
+    point is within the allowance band (or on the boundary) — tolerated.
+    Falls back to False (no violation) if the geometry library refuses a
+    negative buffer on a small/narrow zone.
+    """
+    try:
+        eroded = zone_geom.buffer(-allowance)
+    except Exception:
+        logger.warning(
+            "Shortcut allowance buffer failed for zone geom — treating as no violation",
+            exc_info=True,
+        )
+        return False
+    if eroded.empty:
+        # Zone is thinner than the allowance everywhere — nothing is deep
+        # enough to violate.
+        return False
+    # Inside the eroded CORE ⇒ deeper than the allowance ⇒ violation.
+    # (The allowance band = polygon minus core; points there are tolerated.)
+    return point.within(eroded)
+
 
 async def _check_shortcut_zones(character, old_location, new_location, ctx):
-    """Warn players when they approach or enter a ShortcutZone.
+    """Enforce shortcut zones with a 20m grace buffer.
 
-    Also maintains ``character.shortcut_zone_entered_at`` — a timestamp set on
-    zone entry, used by webhook processing to deny subsidies.  The timestamp
-    auto-expires after 1 hour so the penalty doesn't stick forever.
+    Entering the polygon is NOT the penalty — the 20m buffer gives players a
+    chance to turn back. Entry fires a chat "turn back" notice; penetrating
+    deeper than ``SHORTCUT_ZONE_ALLOWANCE_RADIUS`` into the polygon is the
+    violation: it escalates to the popup AND taints the character's
+    deliveries for 1 hour (via ``shortcut_zone_entered_at``).
+
+    Also maintains ``character.shortcut_zone_entered_at`` — set/refreshed on
+    every VIOLATING tick (beyond-buffer depth), never cleared on exit:
+    webhook processing uses this as a rolling 1-hour taint window (a
+    delivery within 1h of a violation gets no subsidy / job credit). The
+    timestamp ages out on its own once stale.
     """
     player = character.player
     http_client_mod = ctx.get("http_client_mod")
@@ -100,8 +157,6 @@ async def _check_shortcut_zones(character, old_location, new_location, ctx):
     old_2d = Point(old_location.x, old_location.y, srid=0)
     new_2d = Point(new_location.x, new_location.y, srid=0)
 
-    currently_inside_any = False
-
     async for zone in ShortcutZone.objects.filter(active=True):
         zone_geom = zone.polygon.clone()
         zone_geom.srid = 0  # match the player point SRID for distance calc
@@ -109,39 +164,70 @@ async def _check_shortcut_zones(character, old_location, new_location, ctx):
         distance_old = old_2d.distance(zone_geom)
         distance_new = new_2d.distance(zone_geom)
 
-        # Proximity WARNING (e.g. 2000 units away)
-        was_outside_warning = distance_old > SHORTCUT_ZONE_WARNING_RADIUS
-        is_inside_warning = (
-            distance_new <= SHORTCUT_ZONE_WARNING_RADIUS and distance_new > 0
-        )
-
-        if was_outside_warning and is_inside_warning:
-            await show_popup(
-                http_client_mod,
-                SHORTCUT_ZONE_WARNING_MESSAGE,
-                player_id=player.unique_id,
+        # VIOLATION: deeper than the allowance inside the polygon.
+        # distance == 0 means inside the polygon (ST_Distance to the
+        # polygon's boundary is 0 for interior points).
+        is_violation_depth = False
+        if distance_new == 0:
+            # Inside — measure true penetration depth by eroding the polygon
+            is_violation_depth = await _is_beyond_allowance(
+                new_2d, zone_geom, SHORTCUT_ZONE_ALLOWANCE_RADIUS
             )
-            await asyncio.sleep(0.1)
+
+        if is_violation_depth:
+            warn_key = f"shortcut_warn:{character.guid}"
+            if not await cache.aget(warn_key):
+                # Escalation tier (RP-mode anti-autopilot ladder): the entry
+                # notice was the chat system message; penetrating beyond the
+                # allowance escalates to the POPUP — the penalty warning.
+                # TTL = 1h, matching the delivery taint window in webhook.py
+                # (shortcut_zone_entered_at > now - 1h): while deliveries are
+                # still tainted the player already knows; once the taint ages
+                # out, a fresh violation informs them again.
+                await show_popup(
+                    http_client_mod,
+                    SHORTCUT_ZONE_ENTRY_MESSAGE,
+                    player_id=player.unique_id,
+                )
+                await cache.aset(
+                    warn_key, True, timeout=SHORTCUT_ZONE_TAINT_WINDOW_SECONDS
+                )
+                await asyncio.sleep(0.1)
 
         # Actual ENTRY (inside the polygon)
         was_outside_polygon = distance_old > 0
         is_inside_polygon = distance_new == 0
 
         if is_inside_polygon:
-            currently_inside_any = True
-
-        if was_outside_polygon and is_inside_polygon:
-            character.shortcut_zone_entered_at = timezone.now()
-            await show_popup(
-                http_client_mod,
-                SHORTCUT_ZONE_ENTRY_MESSAGE,
-                player_id=player.unique_id,
+            now = timezone.now()
+            prev_entered_at = character.shortcut_zone_entered_at
+            recently_inside = (
+                prev_entered_at is not None
+                and prev_entered_at > now - SHORTCUT_ZONE_ENTRY_POPUP_WINDOW
             )
-            await asyncio.sleep(0.1)
 
-    # Clear the timestamp when the player is confirmed outside ALL zones
-    if character.shortcut_zone_entered_at and not currently_inside_any:
-        character.shortcut_zone_entered_at = None
+            # Entry notice: a chat system message on a real (re)entry —
+            # suppress if the player was already inside very recently, so a
+            # player drifting across the boundary isn't spammed. The 20m
+            # buffer is the GRACE BAND: entering is not the penalty — the
+            # message tells them to turn back.
+            if was_outside_polygon and not recently_inside:
+                await send_system_message(
+                    http_client_mod,
+                    SHORTCUT_ZONE_ENTRY_CHAT_MESSAGE,
+                    character_guid=character.guid,
+                )
+                await asyncio.sleep(0.1)
+
+            # PENALTY (violation depth): penetrating beyond the 20m buffer is
+            # what incurs the 1-hour delivery taint. Shallow edge-touches
+            # within the buffer are explicitly NOT penalised — the buffer
+            # exists so players have a chance to leave without incurring it.
+            # Refreshed on every violating tick (covers spawn-in /
+            # teleport-in); never cleared on exit — webhook.py ages it out
+            # via the `> now - 1h` check.
+            if is_violation_depth:
+                character.shortcut_zone_entered_at = timezone.now()
 
 
 async def _check_jail_boundary(character, new_location, ctx):
