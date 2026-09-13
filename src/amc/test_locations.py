@@ -9,8 +9,11 @@ from amc.factories import CharacterFactory
 from amc.locations import (
     _check_shortcut_zones,
     _flush_locations_to_db,
+    _shortcut_core_cache,
+    SHORTCUT_ZONE_ALLOWANCE_RADIUS,
     SHORTCUT_ZONE_ENTRY_MESSAGE,
     SHORTCUT_ZONE_ENTRY_CHAT_MESSAGE,
+    SHORTCUT_ZONE_ENTRY_NOTICE_DEBOUNCE_SECONDS,
 )
 
 
@@ -53,12 +56,16 @@ class ShortcutZoneWarningTests(TestCase):
     ):
         """Deep entry (>20m allowance) → escalation POPUP fires (penalty tier).
 
-        Entry itself is a chat system message; the popup is the escalation.
+        SAME-TICK DEDUPE: entering already beyond the allowance is the tick
+        where a driver at speed arrives (they clear the 20m band within one
+        tick), so the popup IS the notice — the chat message must NOT also
+        fire, or the player sees two near-identical notices at once (the
+        live 2026-09-13 report).
         """
         await self._create_zone()
         character = await sync_to_async(CharacterFactory)()
 
-        old_loc = Point(-12000, 1000, 0, srid=0)  # far outside
+        old_loc = Point(-30000, 1000, 0, srid=0)  # outside the warning band too
         new_loc = Point(1000, 1000, 0, srid=0)  # deep inside (3000 from every edge)
 
         ctx = self._make_ctx(AsyncMock())
@@ -70,12 +77,8 @@ class ShortcutZoneWarningTests(TestCase):
             SHORTCUT_ZONE_ENTRY_MESSAGE,
             player_id=character.player.unique_id,
         )
-        # Entry chat notice also fired (same tick: outside→deep entry)
-        mock_send_msg.assert_called_once_with(
-            ctx["http_client_mod"],
-            SHORTCUT_ZONE_ENTRY_CHAT_MESSAGE,
-            character_guid=character.guid,
-        )
+        # ... and NOT the chat notice (one notice per tick)
+        mock_send_msg.assert_not_called()
 
         # Violation depth ⇒ taint set (1h delivery penalty window).
         # (In-memory attribute — prod persists via _flush_locations_to_db.)
@@ -97,7 +100,8 @@ class ShortcutZoneWarningTests(TestCase):
         character = await sync_to_async(CharacterFactory)()
 
         # Just inside the west edge (x=-2000): depth 800 units < 2000 allowance
-        old_loc = Point(-12000, 1000, 0, srid=0)
+        # (approach from beyond the 200m warning band, as a real driver would)
+        old_loc = Point(-30000, 1000, 0, srid=0)
         new_loc = Point(-1200, 1000, 0, srid=0)
 
         ctx = self._make_ctx(AsyncMock())
@@ -152,9 +156,10 @@ class ShortcutZoneWarningTests(TestCase):
         )
         mock_show_popup.assert_not_called()
 
+    @patch("amc.locations.send_system_message", new_callable=AsyncMock)
     @patch("amc.locations.show_popup", new_callable=AsyncMock)
-    async def test_no_warning_when_far(self, mock_show_popup):
-        """Player stays beyond 2000 units → no popup."""
+    async def test_no_warning_when_far(self, mock_show_popup, mock_send_msg):
+        """Player stays beyond the zone → no popup and no notice."""
         await self._create_zone()
         character = await sync_to_async(CharacterFactory)()
 
@@ -165,6 +170,7 @@ class ShortcutZoneWarningTests(TestCase):
         await _check_shortcut_zones(character, old_loc, new_loc, ctx)
 
         mock_show_popup.assert_not_called()
+        mock_send_msg.assert_not_called()
 
     @patch("amc.locations.show_popup", new_callable=AsyncMock)
     async def test_no_warning_when_already_inside(self, mock_show_popup):
@@ -191,7 +197,7 @@ class ShortcutZoneWarningTests(TestCase):
         await self._create_zone()
         character = await sync_to_async(CharacterFactory)()
 
-        old_loc = Point(-12000, 1000, 0, srid=0)  # far outside
+        old_loc = Point(-30000, 1000, 0, srid=0)  # outside the 200m band
         new_loc = Point(-1200, 1000, 0, srid=0)  # shallow: 800 units < 2000 allowance
 
         ctx = self._make_ctx(AsyncMock())
@@ -282,63 +288,100 @@ class ShortcutZoneWarningTests(TestCase):
         stale = timezone.now() - timedelta(hours=3)
         self.assertGreater(character.shortcut_zone_entered_at, stale)
 
+    @patch("amc.locations.cache.aset", new_callable=AsyncMock)
+    @patch("amc.locations.cache.aget", new_callable=AsyncMock, return_value=None)
     @patch("amc.locations.send_system_message", new_callable=AsyncMock)
     @patch("amc.locations.show_popup", new_callable=AsyncMock)
-    async def test_entry_notice_debounced_by_shortcut_zone_entered_at(
-        self, mock_show_popup, mock_send_msg
+    async def test_entry_notice_uses_its_own_debounce_key(
+        self, mock_show_popup, mock_send_msg, mock_aget, mock_aset
     ):
-        """Re-entering a shortcut zone shortly after leaving doesn't re-popup.
+        """The notice debounces on `shortcut_entry_notice:<guid>`, not on taint.
 
-        The entry popup is suppressed while `shortcut_zone_entered_at` is
-        still within the popup window, so a player drifting across the
-        boundary isn't spammed.
+        Regression (2026-09-13): the suppression used to read
+        `shortcut_zone_entered_at`, but a shallow entry sets NO taint — so a
+        player skirting a zone edge got the notice on every re-crossing.
         """
         await self._create_zone()
         character = await sync_to_async(CharacterFactory)()
         ctx = self._make_ctx(AsyncMock())
 
-        # First entry — chat notice fires (no prior taint)
+        # Crossing into the band → notice + its own debounce key
         await _check_shortcut_zones(
-            character, Point(-12000, 1000, 0, srid=0), Point(1000, 1000, 0, srid=0), ctx
+            character, Point(-30000, 1000, 0, srid=0), Point(-1200, 1000, 0, srid=0), ctx
         )
         mock_send_msg.assert_called_once()
+        mock_aset.assert_called_once_with(
+            f"shortcut_entry_notice:{character.guid}",
+            True,
+            timeout=SHORTCUT_ZONE_ENTRY_NOTICE_DEBOUNCE_SECONDS,
+        )
+        # Shallow entry ⇒ no taint, so the notice cannot depend on taint
+        self.assertIsNone(character.shortcut_zone_entered_at)
+        mock_show_popup.assert_not_called()
 
-        # Leave, then re-enter almost immediately — taint is recent, no notice
+        # Leave the band, cross back in while the key is live → suppressed
         mock_send_msg.reset_mock()
+        mock_aget.return_value = True
         await _check_shortcut_zones(
-            character, Point(1000, 1000, 0, srid=0), Point(-12000, 1000, 0, srid=0), ctx
+            character, Point(-1200, 1000, 0, srid=0), Point(-30000, 1000, 0, srid=0), ctx
         )
         await _check_shortcut_zones(
-            character, Point(-12000, 1000, 0, srid=0), Point(1000, 1000, 0, srid=0), ctx
+            character, Point(-30000, 1000, 0, srid=0), Point(-1200, 1000, 0, srid=0), ctx
         )
         mock_send_msg.assert_not_called()
 
+    @patch("amc.locations.cache.aset", new_callable=AsyncMock)
+    @patch("amc.locations.cache.aget", new_callable=AsyncMock, return_value=None)
     @patch("amc.locations.send_system_message", new_callable=AsyncMock)
     @patch("amc.locations.show_popup", new_callable=AsyncMock)
-    async def test_entry_notice_fires_after_window_elapses(
-        self, mock_show_popup, mock_send_msg
+    async def test_violation_after_warning_still_escalates(
+        self, mock_show_popup, mock_send_msg, mock_aget, mock_aset
     ):
-        """Re-entering after the entry window has elapsed fires the notice again."""
+        """The ladder: warn on entering the band, popup only if they go deeper.
+
+        This is the behaviour the 200 m band exists for — the notice lands
+        ticks BEFORE the violation instead of alongside it.
+        """
         await self._create_zone()
         character = await sync_to_async(CharacterFactory)()
         ctx = self._make_ctx(AsyncMock())
 
-        # First entry → notice
+        # Tick 1: cross into the band, still outside the polygon → notice only
         await _check_shortcut_zones(
-            character, Point(-12000, 1000, 0, srid=0), Point(1000, 1000, 0, srid=0), ctx
+            character, Point(-30000, 1000, 0, srid=0), Point(-2500, 1000, 0, srid=0), ctx
         )
         mock_send_msg.assert_called_once()
+        mock_show_popup.assert_not_called()
+        self.assertIsNone(character.shortcut_zone_entered_at)
 
-        # Make the taint go stale (older than the entry window)
-        character.shortcut_zone_entered_at = timezone.now() - timedelta(minutes=10)
-        await character.asave()
-
-        # Leave then re-enter → notice fires again
+        # Tick 2: keep going, now well past the 20m allowance → popup + taint
+        # (the eroded core spans 0..2000, so x=500 is beyond the allowance)
         mock_send_msg.reset_mock()
         await _check_shortcut_zones(
-            character, Point(1000, 1000, 0, srid=0), Point(-12000, 1000, 0, srid=0), ctx
+            character, Point(-2500, 1000, 0, srid=0), Point(500, 1000, 0, srid=0), ctx
         )
+        mock_show_popup.assert_called_once()
+        mock_send_msg.assert_not_called()
+        self.assertIsNotNone(character.shortcut_zone_entered_at)
+
+    @patch("amc.locations.cache.aget", new_callable=AsyncMock, return_value=None)
+    @patch("amc.locations.cache.aset", new_callable=AsyncMock)
+    @patch("amc.locations.show_popup", new_callable=AsyncMock)
+    async def test_eroded_core_memoised_per_zone(
+        self, mock_show_popup, mock_aset, mock_aget
+    ):
+        """The zone's eroded core is built once per tick, keyed by zone id.
+
+        `buffer()` costs ~50 us and depends only on the zone, so the player
+        loop must not rebuild it per player (see _process_location_checks,
+        which clears this cache once per tick).
+        """
+        zone = await self._create_zone()
+        character = await sync_to_async(CharacterFactory)()
+        ctx = self._make_ctx(AsyncMock())
+
+        _shortcut_core_cache.clear()
         await _check_shortcut_zones(
-            character, Point(-12000, 1000, 0, srid=0), Point(1000, 1000, 0, srid=0), ctx
+            character, Point(1000, 1000, 0, srid=0), Point(1002, 1000, 0, srid=0), ctx
         )
-        mock_send_msg.assert_called_once()
+        self.assertIn((zone.id, SHORTCUT_ZONE_ALLOWANCE_RADIUS), _shortcut_core_cache)
