@@ -71,20 +71,12 @@ For any other purposes, <Highlight>please contact the admins on the discord</>.
 ]
 
 # Taint + allowance constants (100 game units = 1 m).
-
-# Approach band for the shortcut-zone WARNING tier (chat notice). The band has
-# to be wide enough that a driver actually crosses it across ticks: telemetry
-# arrives at ~1.8 Hz, so a 20 m band is never observed — at highway speed the
-# player jumps from outside to deep-inside in a single tick, which collapsed
-# the ladder into "chat + popup at once". 20 000 units = 200 m ≈ 3-7 s at
-# highway speed. This is a plain distance comparison (the loop already
-# computes the distance), so it adds no geometry work.
-SHORTCUT_ZONE_WARNING_BAND = 20_000
-
-# Shortcuts have a 20 m ALLOWANCE inside the zone: distance-to-polygon
-# (100 units = 1 m) beyond this depth counts as a real violation. Skimming
-# the boundary or an edge-touch (distance 0) is tolerated — telemetry
-# oscillates and drivers legitimately hug zone edges.
+# Shortcuts have a 20 m ALLOWANCE measured INSIDE the polygon: the penalty
+# starts only once the player is more than this depth past the zone edge
+# (100 units = 1 m). Outside the polygon nothing is ever penalised: the zone
+# boundary itself is not the trigger — only penetration past the allowance is.
+# Skimming the boundary or an edge-touch (distance 0) is tolerated, since
+# telemetry oscillates and drivers legitimately hug zone edges.
 SHORTCUT_ZONE_ALLOWANCE_RADIUS = 2_000  # game units = 20 m (100 units = 1 m)
 
 # Popup escalation tier debounce TTL — matches the delivery taint window in
@@ -169,8 +161,9 @@ async def _check_shortcut_zones(character, old_location, new_location, ctx):
 
     Ladder (RP-mode anti-autopilot pattern):
 
-    * WARNING — crossing into the ``SHORTCUT_ZONE_WARNING_BAND`` approach band
-      fires a chat system message ("turn back"), debounced per character.
+    * WARNING — crossing INTO the polygon fires a chat system message
+      ("turn back"), debounced per character. Proximity alone never warns:
+      outside the zone there is no message and no consequence.
     * PENALTY — penetrating deeper than ``SHORTCUT_ZONE_ALLOWANCE_RADIUS``
       (20 m) into the polygon sets ``character.shortcut_zone_entered_at``
       (the rolling 1-hour delivery taint read by webhook processing) and
@@ -238,19 +231,17 @@ async def _check_shortcut_zones(character, old_location, new_location, ctx):
             # via the `> now - 1h` check.
             character.shortcut_zone_entered_at = timezone.now()
 
-        # WARNING tier: chat notice when the player crosses into the approach
-        # band (outside the zone or within it — distance 0 also satisfies
-        # `<= band`). The band is what makes the ladder real: it fires ticks
-        # BEFORE the violation, so the popup only reaches players who kept
-        # going through the warning.
+        # WARNING tier: chat notice when the player crosses INTO the polygon.
+        # Triggered by an actual entry — proximity alone (however close) must
+        # never produce a message. Nothing outside the polygon carries any
+        # consequence: the penalty starts 20m PAST the edge, inside.
         #
         # Same-tick dedupe: when the tick is already a violation the popup
         # above IS the notice — an extra chat message here would double-notify
         # (observed live: a driver at speed clears the 20m allowance within a
         # single telemetry tick, so entry and violation land together).
-        was_outside_band = distance_old > SHORTCUT_ZONE_WARNING_BAND
-        in_band = distance_new <= SHORTCUT_ZONE_WARNING_BAND
-        if was_outside_band and in_band and not is_violation_depth:
+        entered_polygon = distance_old > 0 and distance_new == 0
+        if entered_polygon and not is_violation_depth:
             notice_key = f"shortcut_entry_notice:{character.guid}"
             if not await cache.aget(notice_key):
                 await send_system_message(
