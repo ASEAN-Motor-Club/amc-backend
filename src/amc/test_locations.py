@@ -11,6 +11,7 @@ from amc.locations import (
     _flush_locations_to_db,
     _shortcut_core_cache,
     SHORTCUT_ZONE_ALLOWANCE_RADIUS,
+    SHORTCUT_ZONE_ENTRY_NOTICE_REPEAT_SECONDS,
     SHORTCUT_ZONE_ENTRY_MESSAGE,
     SHORTCUT_ZONE_ENTRY_CHAT_MESSAGE,
 )
@@ -289,44 +290,50 @@ class ShortcutZoneWarningTests(TestCase):
         stale = timezone.now() - timedelta(hours=3)
         self.assertGreater(character.shortcut_zone_entered_at, stale)
 
+    @patch("amc.locations.cache.aget", new_callable=AsyncMock, return_value=None)
+    @patch("amc.locations.cache.aset", new_callable=AsyncMock)
     @patch("amc.locations.send_system_message", new_callable=AsyncMock)
     @patch("amc.locations.show_popup", new_callable=AsyncMock)
-    async def test_entry_notice_fires_on_every_crossing(
-        self, mock_show_popup, mock_send_msg
+    async def test_entry_notice_repeats_every_few_seconds(
+        self, mock_show_popup, mock_send_msg, mock_aset, mock_aget
     ):
-        """The notice is a state transition: once per outside→inside crossing.
+        """The notice re-sends while the player stays inside the polygon.
 
-        No debounce — it cannot repeat while the player stays on either side
-        of the boundary, so every genuine re-entry deserves the reminder.
-        (2026-09-13, freeman: removed the 120 s Redis debounce.)
+        The chat message is visible only ~2 s, so a single send is easily
+        missed (freeman, 2026-09-14). Rate-limited to one send per
+        SHORTCUT_ZONE_ENTRY_NOTICE_REPEAT_SECONDS per player; the violation
+        tier still replaces it on deep ticks (same-tick dedupe).
         """
         await self._create_zone()
         character = await sync_to_async(CharacterFactory)()
         ctx = self._make_ctx(AsyncMock())
 
-        # Crossing into the polygon → notice
+        # Enter the polygon → notice + rate-limit key set
         await _check_shortcut_zones(
             character, Point(-30000, 1000, 0, srid=0), Point(-1200, 1000, 0, srid=0), ctx
         )
         mock_send_msg.assert_called_once()
-        # Shallow entry ⇒ no taint
+        mock_aset.assert_called_once_with(
+            f"shortcut_notice:{character.guid}",
+            True,
+            timeout=SHORTCUT_ZONE_ENTRY_NOTICE_REPEAT_SECONDS,
+        )
+        # Shallow presence ⇒ no taint, no popup
         self.assertIsNone(character.shortcut_zone_entered_at)
         mock_show_popup.assert_not_called()
 
-        # Stay inside → no repeat
+        # Still inside within the interval → suppressed (rate limit)
         mock_send_msg.reset_mock()
+        mock_aget.return_value = True
         await _check_shortcut_zones(
             character, Point(-1200, 1000, 0, srid=0), Point(-1000, 1000, 0, srid=0), ctx
         )
         mock_send_msg.assert_not_called()
 
-        # Leave, cross back in → notice fires again
+        # Interval elapsed → notice re-sends without a new crossing
+        mock_aget.return_value = None
         await _check_shortcut_zones(
-            character, Point(-1200, 1000, 0, srid=0), Point(-30000, 1000, 0, srid=0), ctx
-        )
-        mock_send_msg.reset_mock()
-        await _check_shortcut_zones(
-            character, Point(-30000, 1000, 0, srid=0), Point(-1200, 1000, 0, srid=0), ctx
+            character, Point(-1000, 1000, 0, srid=0), Point(-1100, 1000, 0, srid=0), ctx
         )
         mock_send_msg.assert_called_once()
 
