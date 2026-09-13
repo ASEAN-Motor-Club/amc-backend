@@ -85,11 +85,11 @@ SHORTCUT_ZONE_ALLOWANCE_RADIUS = 2_000  # game units = 20 m (100 units = 1 m)
 # fresh violation informs them again.
 SHORTCUT_ZONE_TAINT_WINDOW_SECONDS = 3600
 
-# Entry-notice (chat) debounce, keyed per character. Deliberately NOT derived
-# from shortcut_zone_entered_at: a shallow entry sets no taint (entering is
-# not the penalty), so a player skirting a zone edge would otherwise get the
-# notice on every boundary re-crossing.
-SHORTCUT_ZONE_ENTRY_NOTICE_DEBOUNCE_SECONDS = 120
+# Entry-notice: sent on every outside→inside crossing. No debounce — the
+# trigger is a state transition, not a condition, so it cannot repeat while
+# the player stays inside or outside. (It used to be a proximity band with a
+# 120 s Redis debounce; the band is gone, and with it the need to suppress
+# legitimate re-crossings.)
 
 SHORTCUT_ZONE_ENTRY_MESSAGE = """\
 <Title>⛔ Entered Shortcut Zone</>
@@ -162,8 +162,8 @@ async def _check_shortcut_zones(character, old_location, new_location, ctx):
     Ladder (RP-mode anti-autopilot pattern):
 
     * WARNING — crossing INTO the polygon fires a chat system message
-      ("turn back"), debounced per character. Proximity alone never warns:
-      outside the zone there is no message and no consequence.
+      ("turn back"), once per actual outside→inside crossing. Proximity alone
+      never warns: outside the zone there is no message and no consequence.
     * PENALTY — penetrating deeper than ``SHORTCUT_ZONE_ALLOWANCE_RADIUS``
       (20 m) into the polygon sets ``character.shortcut_zone_entered_at``
       (the rolling 1-hour delivery taint read by webhook processing) and
@@ -242,19 +242,15 @@ async def _check_shortcut_zones(character, old_location, new_location, ctx):
         # single telemetry tick, so entry and violation land together).
         entered_polygon = distance_old > 0 and distance_new == 0
         if entered_polygon and not is_violation_depth:
-            notice_key = f"shortcut_entry_notice:{character.guid}"
-            if not await cache.aget(notice_key):
-                await send_system_message(
-                    http_client_mod,
-                    SHORTCUT_ZONE_ENTRY_CHAT_MESSAGE,
-                    character_guid=character.guid,
-                )
-                await cache.aset(
-                    notice_key,
-                    True,
-                    timeout=SHORTCUT_ZONE_ENTRY_NOTICE_DEBOUNCE_SECONDS,
-                )
-                await asyncio.sleep(0.1)
+            # State-transition trigger: fires exactly when the player moves
+            # outside→inside. No debounce needed — it cannot repeat while the
+            # player stays on either side of the boundary.
+            await send_system_message(
+                http_client_mod,
+                SHORTCUT_ZONE_ENTRY_CHAT_MESSAGE,
+                character_guid=character.guid,
+            )
+            await asyncio.sleep(0.1)
 
 
 async def _check_jail_boundary(character, new_location, ctx):

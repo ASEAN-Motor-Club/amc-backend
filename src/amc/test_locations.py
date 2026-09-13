@@ -13,7 +13,6 @@ from amc.locations import (
     SHORTCUT_ZONE_ALLOWANCE_RADIUS,
     SHORTCUT_ZONE_ENTRY_MESSAGE,
     SHORTCUT_ZONE_ENTRY_CHAT_MESSAGE,
-    SHORTCUT_ZONE_ENTRY_NOTICE_DEBOUNCE_SECONDS,
 )
 
 
@@ -47,12 +46,10 @@ class ShortcutZoneWarningTests(TestCase):
     def _make_ctx(self, mock_session):
         return {"http_client_mod": mock_session}
 
-    @patch("amc.locations.cache.aget", new_callable=AsyncMock, return_value=None)
-    @patch("amc.locations.cache.aset", new_callable=AsyncMock)
     @patch("amc.locations.show_popup", new_callable=AsyncMock)
     @patch("amc.locations.send_system_message", new_callable=AsyncMock)
     async def test_violation_beyond_allowance_escalates_to_popup(
-        self, mock_send_msg, mock_show_popup, mock_aset, mock_aget
+        self, mock_send_msg, mock_show_popup
     ):
         """Deep entry (>20m allowance) → escalation POPUP fires (penalty tier).
 
@@ -121,12 +118,10 @@ class ShortcutZoneWarningTests(TestCase):
         # which this direct call doesn't run.)
         self.assertIsNone(character.shortcut_zone_entered_at)
 
-    @patch("amc.locations.cache.aget", new_callable=AsyncMock, return_value=None)
-    @patch("amc.locations.cache.aset", new_callable=AsyncMock)
     @patch("amc.locations.show_popup", new_callable=AsyncMock)
     @patch("amc.locations.send_system_message", new_callable=AsyncMock)
     async def test_violation_popup_debounced_per_player(
-        self, mock_send_msg, mock_show_popup, mock_aset, mock_aget
+        self, mock_send_msg, mock_show_popup
     ):
         """Re-entering the violation depth while still tainted → no popup.
 
@@ -143,11 +138,9 @@ class ShortcutZoneWarningTests(TestCase):
             character, Point(-12000, 1000, 0, srid=0), Point(1000, 1000, 0, srid=0), ctx
         )
         mock_show_popup.assert_called_once()
-        mock_aset.assert_called_once()
 
-        # Leave, re-enter deep within the window → cache hit → popup suppressed
+        # Leave, re-enter deep within the window → popup suppressed
         mock_show_popup.reset_mock()
-        mock_aget.return_value = True
         await _check_shortcut_zones(
             character, Point(1000, 1000, 0, srid=0), Point(-12000, 1000, 0, srid=0), ctx
         )
@@ -156,11 +149,10 @@ class ShortcutZoneWarningTests(TestCase):
         )
         mock_show_popup.assert_not_called()
 
-    @patch("amc.locations.cache.aget", new_callable=AsyncMock, return_value=None)
     @patch("amc.locations.send_system_message", new_callable=AsyncMock)
     @patch("amc.locations.show_popup", new_callable=AsyncMock)
     async def test_no_warning_while_outside_polygon(
-        self, mock_show_popup, mock_send_msg, mock_aget
+        self, mock_show_popup, mock_send_msg
     ):
         """Regression: near the zone but OUTSIDE it → no notice, no popup.
 
@@ -297,54 +289,51 @@ class ShortcutZoneWarningTests(TestCase):
         stale = timezone.now() - timedelta(hours=3)
         self.assertGreater(character.shortcut_zone_entered_at, stale)
 
-    @patch("amc.locations.cache.aset", new_callable=AsyncMock)
-    @patch("amc.locations.cache.aget", new_callable=AsyncMock, return_value=None)
     @patch("amc.locations.send_system_message", new_callable=AsyncMock)
     @patch("amc.locations.show_popup", new_callable=AsyncMock)
-    async def test_entry_notice_uses_its_own_debounce_key(
-        self, mock_show_popup, mock_send_msg, mock_aget, mock_aset
+    async def test_entry_notice_fires_on_every_crossing(
+        self, mock_show_popup, mock_send_msg
     ):
-        """The notice debounces on `shortcut_entry_notice:<guid>`, not on taint.
+        """The notice is a state transition: once per outside→inside crossing.
 
-        Regression (2026-09-13): the suppression used to read
-        `shortcut_zone_entered_at`, but a shallow entry sets NO taint — so a
-        player skirting a zone edge got the notice on every re-crossing.
+        No debounce — it cannot repeat while the player stays on either side
+        of the boundary, so every genuine re-entry deserves the reminder.
+        (2026-09-13, freeman: removed the 120 s Redis debounce.)
         """
         await self._create_zone()
         character = await sync_to_async(CharacterFactory)()
         ctx = self._make_ctx(AsyncMock())
 
-        # Crossing into the polygon → notice + its own debounce key
+        # Crossing into the polygon → notice
         await _check_shortcut_zones(
             character, Point(-30000, 1000, 0, srid=0), Point(-1200, 1000, 0, srid=0), ctx
         )
         mock_send_msg.assert_called_once()
-        mock_aset.assert_called_once_with(
-            f"shortcut_entry_notice:{character.guid}",
-            True,
-            timeout=SHORTCUT_ZONE_ENTRY_NOTICE_DEBOUNCE_SECONDS,
-        )
-        # Shallow entry ⇒ no taint, so the notice cannot depend on taint
+        # Shallow entry ⇒ no taint
         self.assertIsNone(character.shortcut_zone_entered_at)
         mock_show_popup.assert_not_called()
 
-        # Leave the zone, cross back in while the key is live → suppressed
+        # Stay inside → no repeat
         mock_send_msg.reset_mock()
-        mock_aget.return_value = True
         await _check_shortcut_zones(
-            character, Point(-1200, 1000, 0, srid=0), Point(-30000, 1000, 0, srid=0), ctx
-        )
-        await _check_shortcut_zones(
-            character, Point(-30000, 1000, 0, srid=0), Point(-1200, 1000, 0, srid=0), ctx
+            character, Point(-1200, 1000, 0, srid=0), Point(-1000, 1000, 0, srid=0), ctx
         )
         mock_send_msg.assert_not_called()
 
-    @patch("amc.locations.cache.aset", new_callable=AsyncMock)
-    @patch("amc.locations.cache.aget", new_callable=AsyncMock, return_value=None)
+        # Leave, cross back in → notice fires again
+        await _check_shortcut_zones(
+            character, Point(-1200, 1000, 0, srid=0), Point(-30000, 1000, 0, srid=0), ctx
+        )
+        mock_send_msg.reset_mock()
+        await _check_shortcut_zones(
+            character, Point(-30000, 1000, 0, srid=0), Point(-1200, 1000, 0, srid=0), ctx
+        )
+        mock_send_msg.assert_called_once()
+
     @patch("amc.locations.send_system_message", new_callable=AsyncMock)
     @patch("amc.locations.show_popup", new_callable=AsyncMock)
     async def test_violation_after_warning_still_escalates(
-        self, mock_show_popup, mock_send_msg, mock_aget, mock_aset
+        self, mock_show_popup, mock_send_msg
     ):
         """The ladder: warn on entry, popup only if they keep going deeper.
 
@@ -375,11 +364,9 @@ class ShortcutZoneWarningTests(TestCase):
         mock_send_msg.assert_not_called()
         self.assertIsNotNone(character.shortcut_zone_entered_at)
 
-    @patch("amc.locations.cache.aget", new_callable=AsyncMock, return_value=None)
-    @patch("amc.locations.cache.aset", new_callable=AsyncMock)
     @patch("amc.locations.show_popup", new_callable=AsyncMock)
     async def test_eroded_core_memoised_per_zone(
-        self, mock_show_popup, mock_aset, mock_aget
+        self, mock_show_popup
     ):
         """The zone's eroded core is built once per tick, keyed by zone id.
 
