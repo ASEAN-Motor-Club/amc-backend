@@ -100,7 +100,7 @@ class ShortcutZoneWarningTests(TestCase):
         character = await sync_to_async(CharacterFactory)()
 
         # Just inside the west edge (x=-2000): depth 800 units < 2000 allowance
-        # (approach from beyond the 200m warning band, as a real driver would)
+        # (approach from far outside, as a real driver would)
         old_loc = Point(-30000, 1000, 0, srid=0)
         new_loc = Point(-1200, 1000, 0, srid=0)
 
@@ -156,21 +156,30 @@ class ShortcutZoneWarningTests(TestCase):
         )
         mock_show_popup.assert_not_called()
 
+    @patch("amc.locations.cache.aget", new_callable=AsyncMock, return_value=None)
     @patch("amc.locations.send_system_message", new_callable=AsyncMock)
     @patch("amc.locations.show_popup", new_callable=AsyncMock)
-    async def test_no_warning_when_far(self, mock_show_popup, mock_send_msg):
-        """Player stays beyond the zone → no popup and no notice."""
+    async def test_no_warning_while_outside_polygon(
+        self, mock_show_popup, mock_send_msg, mock_aget
+    ):
+        """Regression: near the zone but OUTSIDE it → no notice, no popup.
+
+        Proximity must never warn. A player 100 units from the edge but not
+        across it gets nothing — reports of "warning while outside the zone"
+        came from a proximity band that has been removed.
+        """
         await self._create_zone()
         character = await sync_to_async(CharacterFactory)()
 
-        old_loc = Point(-12000, 1000, 0, srid=0)  # 8000 units from edge
-        new_loc = Point(-6100, 1000, 0, srid=0)  # 2100 units from edge
+        old_loc = Point(-2500, 1000, 0, srid=0)  # outside the polygon
+        new_loc = Point(-2100, 1000, 0, srid=0)  # still outside, 100 units from the edge
 
         ctx = self._make_ctx(AsyncMock())
         await _check_shortcut_zones(character, old_loc, new_loc, ctx)
 
         mock_show_popup.assert_not_called()
         mock_send_msg.assert_not_called()
+        self.assertIsNone(character.shortcut_zone_entered_at)
 
     @patch("amc.locations.show_popup", new_callable=AsyncMock)
     async def test_no_warning_when_already_inside(self, mock_show_popup):
@@ -305,7 +314,7 @@ class ShortcutZoneWarningTests(TestCase):
         character = await sync_to_async(CharacterFactory)()
         ctx = self._make_ctx(AsyncMock())
 
-        # Crossing into the band → notice + its own debounce key
+        # Crossing into the polygon → notice + its own debounce key
         await _check_shortcut_zones(
             character, Point(-30000, 1000, 0, srid=0), Point(-1200, 1000, 0, srid=0), ctx
         )
@@ -319,7 +328,7 @@ class ShortcutZoneWarningTests(TestCase):
         self.assertIsNone(character.shortcut_zone_entered_at)
         mock_show_popup.assert_not_called()
 
-        # Leave the band, cross back in while the key is live → suppressed
+        # Leave the zone, cross back in while the key is live → suppressed
         mock_send_msg.reset_mock()
         mock_aget.return_value = True
         await _check_shortcut_zones(
@@ -337,28 +346,30 @@ class ShortcutZoneWarningTests(TestCase):
     async def test_violation_after_warning_still_escalates(
         self, mock_show_popup, mock_send_msg, mock_aget, mock_aset
     ):
-        """The ladder: warn on entering the band, popup only if they go deeper.
+        """The ladder: warn on entry, popup only if they keep going deeper.
 
-        This is the behaviour the 200 m band exists for — the notice lands
-        ticks BEFORE the violation instead of alongside it.
+        The notice lands on an earlier tick than the violation (shallow entry
+        first), so the popup only reaches players who kept going through it.
         """
         await self._create_zone()
         character = await sync_to_async(CharacterFactory)()
         ctx = self._make_ctx(AsyncMock())
 
-        # Tick 1: cross into the band, still outside the polygon → notice only
+        # Tick 1: cross INTO the polygon, still inside the 20m allowance
+        # (edge is x=-2000; x=-1500 is 500 units in) → notice only
         await _check_shortcut_zones(
-            character, Point(-30000, 1000, 0, srid=0), Point(-2500, 1000, 0, srid=0), ctx
+            character, Point(-30000, 1000, 0, srid=0), Point(-1500, 1000, 0, srid=0), ctx
         )
         mock_send_msg.assert_called_once()
         mock_show_popup.assert_not_called()
         self.assertIsNone(character.shortcut_zone_entered_at)
 
         # Tick 2: keep going, now well past the 20m allowance → popup + taint
-        # (the eroded core spans 0..2000, so x=500 is beyond the allowance)
+        # (the eroded core spans 0..2000, so x=500 is beyond the allowance).
+        # The popup replaces the chat on this tick (same-tick dedupe).
         mock_send_msg.reset_mock()
         await _check_shortcut_zones(
-            character, Point(-2500, 1000, 0, srid=0), Point(500, 1000, 0, srid=0), ctx
+            character, Point(-1500, 1000, 0, srid=0), Point(500, 1000, 0, srid=0), ctx
         )
         mock_show_popup.assert_called_once()
         mock_send_msg.assert_not_called()
