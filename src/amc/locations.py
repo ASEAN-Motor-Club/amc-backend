@@ -183,14 +183,12 @@ async def _check_shortcut_zones(character, old_location, new_location, ctx):
     if http_client_mod is None:
         return
 
-    old_2d = Point(old_location.x, old_location.y, srid=0)
     new_2d = Point(new_location.x, new_location.y, srid=0)
 
     async for zone in ShortcutZone.objects.filter(active=True):
         zone_geom = zone.polygon.clone()
         zone_geom.srid = 0  # match the player point SRID for distance calc
 
-        distance_old = old_2d.distance(zone_geom)
         distance_new = new_2d.distance(zone_geom)
 
         # VIOLATION: deeper than the allowance inside the polygon.
