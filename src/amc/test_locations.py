@@ -9,6 +9,8 @@ from amc.factories import CharacterFactory
 from amc.locations import (
     _check_shortcut_zones,
     _flush_locations_to_db,
+    _active_shortcut_zones,
+    _load_active_shortcut_zones,
     _shortcut_core_cache,
     SHORTCUT_ZONE_ALLOWANCE_RADIUS,
     SHORTCUT_ZONE_ENTRY_NOTICE_REPEAT_SECONDS,
@@ -47,6 +49,12 @@ class ShortcutZoneWarningTests(TestCase):
     def _make_ctx(self, mock_session):
         return {"http_client_mod": mock_session}
 
+    async def _refresh_zones(self):
+        """Production pre-loads zones per tick in _process_location_checks;
+        direct-call tests do it here."""
+        _active_shortcut_zones.clear()
+        await _load_active_shortcut_zones()
+
     @patch("amc.locations.show_popup", new_callable=AsyncMock)
     @patch("amc.locations.send_system_message", new_callable=AsyncMock)
     async def test_violation_beyond_allowance_escalates_to_popup(
@@ -66,6 +74,7 @@ class ShortcutZoneWarningTests(TestCase):
         old_loc = Point(-30000, 1000, 0, srid=0)  # outside the warning band too
         new_loc = Point(1000, 1000, 0, srid=0)  # deep inside (3000 from every edge)
 
+        await self._refresh_zones()
         ctx = self._make_ctx(AsyncMock())
         await _check_shortcut_zones(character, old_loc, new_loc, ctx)
 
@@ -102,6 +111,7 @@ class ShortcutZoneWarningTests(TestCase):
         old_loc = Point(-30000, 1000, 0, srid=0)
         new_loc = Point(-1200, 1000, 0, srid=0)
 
+        await self._refresh_zones()
         ctx = self._make_ctx(AsyncMock())
         await _check_shortcut_zones(character, old_loc, new_loc, ctx)
 
@@ -132,6 +142,7 @@ class ShortcutZoneWarningTests(TestCase):
         """
         await self._create_zone()
         character = await sync_to_async(CharacterFactory)()
+        await self._refresh_zones()
         ctx = self._make_ctx(AsyncMock())
 
         # First deep entry → escalation popup fires, debounce key set
@@ -167,6 +178,7 @@ class ShortcutZoneWarningTests(TestCase):
         old_loc = Point(-2500, 1000, 0, srid=0)  # outside the polygon
         new_loc = Point(-2100, 1000, 0, srid=0)  # still outside, 100 units from the edge
 
+        await self._refresh_zones()
         ctx = self._make_ctx(AsyncMock())
         await _check_shortcut_zones(character, old_loc, new_loc, ctx)
 
@@ -183,6 +195,7 @@ class ShortcutZoneWarningTests(TestCase):
         old_loc = Point(-1000, 1000, 0, srid=0)  # 1000 units from edge (inside allowance band)
         new_loc = Point(-500, 1000, 0, srid=0)  # 1500 units from edge (still in allowance band)
 
+        await self._refresh_zones()
         ctx = self._make_ctx(AsyncMock())
         await _check_shortcut_zones(character, old_loc, new_loc, ctx)
 
@@ -202,6 +215,7 @@ class ShortcutZoneWarningTests(TestCase):
         old_loc = Point(-30000, 1000, 0, srid=0)  # outside the 200m band
         new_loc = Point(-1200, 1000, 0, srid=0)  # shallow: 800 units < 2000 allowance
 
+        await self._refresh_zones()
         ctx = self._make_ctx(AsyncMock())
         await _check_shortcut_zones(character, old_loc, new_loc, ctx)
 
@@ -217,11 +231,13 @@ class ShortcutZoneWarningTests(TestCase):
     async def test_inactive_zone_ignored(self, mock_show_popup):
         """Inactive zone should not trigger a warning."""
         await self._create_zone(active=False)
+        _active_shortcut_zones.clear()  # fresh tick: re-snapshot zones
         character = await sync_to_async(CharacterFactory)()
 
         old_loc = Point(700, 1000, 0, srid=0)
         new_loc = Point(850, 1000, 0, srid=0)
 
+        await self._refresh_zones()
         ctx = self._make_ctx(AsyncMock())
         await _check_shortcut_zones(character, old_loc, new_loc, ctx)
 
@@ -241,6 +257,7 @@ class ShortcutZoneWarningTests(TestCase):
         # Enter the zone → taint set
         old_loc = Point(-12000, 1000, 0, srid=0)
         new_loc = Point(1000, 1000, 0, srid=0)
+        await self._refresh_zones()
         ctx = self._make_ctx(AsyncMock())
         await _check_shortcut_zones(character, old_loc, new_loc, ctx)
         # Prod persists characters via _flush_locations_to_db (the direct
@@ -282,6 +299,7 @@ class ShortcutZoneWarningTests(TestCase):
         character.shortcut_zone_entered_at = timezone.now() - timedelta(hours=3)
         await character.asave()
 
+        await self._refresh_zones()
         ctx = self._make_ctx(AsyncMock())
         await _check_shortcut_zones(character, old_loc, new_loc, ctx)
         await _flush_locations_to_db([], [character])
@@ -306,6 +324,7 @@ class ShortcutZoneWarningTests(TestCase):
         """
         await self._create_zone()
         character = await sync_to_async(CharacterFactory)()
+        await self._refresh_zones()
         ctx = self._make_ctx(AsyncMock())
 
         # Enter the polygon → notice + rate-limit key set
@@ -349,6 +368,7 @@ class ShortcutZoneWarningTests(TestCase):
         """
         await self._create_zone()
         character = await sync_to_async(CharacterFactory)()
+        await self._refresh_zones()
         ctx = self._make_ctx(AsyncMock())
 
         # Tick 1: cross INTO the polygon, still inside the 20m allowance
@@ -383,6 +403,7 @@ class ShortcutZoneWarningTests(TestCase):
         """
         zone = await self._create_zone()
         character = await sync_to_async(CharacterFactory)()
+        await self._refresh_zones()
         ctx = self._make_ctx(AsyncMock())
 
         _shortcut_core_cache.clear()

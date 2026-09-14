@@ -285,7 +285,9 @@ async def process_events(
         is_rp_mode = character.rp_mode
         used_shortcut = (
             character.shortcut_zone_entered_at is not None
-            and character.shortcut_zone_entered_at > timezone.now() - timedelta(hours=1)
+            and character.shortcut_zone_entered_at
+            > timezone.now()
+            - timedelta(seconds=Character.SHORTCUT_ZONE_TAINT_WINDOW_SECONDS)
         )
 
         for event in es:

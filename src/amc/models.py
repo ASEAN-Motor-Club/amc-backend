@@ -340,6 +340,12 @@ class Character(models.Model):
     # penetrates BEYOND the shortcut zone's 20m grace buffer (a shallow
     # entry is not penalised); read by webhook.process_events as a rolling
     # 1-hour taint window; never cleared — it ages out on its own.
+    # Rolling delivery-taint window for shortcut-zone pass-through: a
+    # delivery is penalised if shortcut_zone_entered_at is within this many
+    # seconds. Single source of truth — locations.py (popup debounce) and
+    # webhook.py (penalty check) both import this.
+    SHORTCUT_ZONE_TAINT_WINDOW_SECONDS = 3600
+
     shortcut_zone_entered_at = models.DateTimeField(null=True, blank=True)
 
     total_donations = models.PositiveBigIntegerField(default=0)
