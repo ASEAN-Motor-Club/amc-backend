@@ -83,7 +83,9 @@ SHORTCUT_ZONE_ALLOWANCE_RADIUS = 2_000  # game units = 20 m (100 units = 1 m)
 # webhook.py (`shortcut_zone_entered_at > now - 1h`): while the player's
 # deliveries are still tainted they already know; once the taint ages out a
 # fresh violation informs them again.
-SHORTCUT_ZONE_TAINT_WINDOW_SECONDS = 3600
+# Taint window lives on Character (models.py) as the single source of truth,
+# shared with webhook.py's penalty check.
+SHORTCUT_ZONE_TAINT_WINDOW_SECONDS = Character.SHORTCUT_ZONE_TAINT_WINDOW_SECONDS
 
 # Entry-notice repeat interval: the chat message stays visible ~2 s, so a
 # single transition send is easily missed. While the player remains inside
@@ -93,8 +95,8 @@ SHORTCUT_ZONE_TAINT_WINDOW_SECONDS = 3600
 SHORTCUT_ZONE_ENTRY_NOTICE_REPEAT_SECONDS = 5
 
 SHORTCUT_ZONE_ENTRY_MESSAGE = """\
-<Title>⛔ Entered Shortcut Zone</>
-<Warning>You are now INSIDE a shortcut zone!</>
+<Title>⛔ Shortcut Zone Penalty</>
+<Warning>You are more than 20m past the zone edge!</>
 Any delivery completed while having passed through this area will <Highlight>NOT be subsidised</> and will <Highlight>NOT count towards job completion</>.
 """
 
@@ -109,6 +111,20 @@ SHORTCUT_ZONE_ENTRY_CHAT_MESSAGE = """\
 # the start of every location tick (see ``_process_location_checks``), so an
 # edited polygon can never serve a stale core for longer than one tick.
 _shortcut_core_cache: dict = {}
+
+
+# Active shortcut zones + SRID-normalised geometries, refreshed once per
+# location tick. Shared by every player in the batch.
+_active_shortcut_zones: list = []
+
+
+async def _load_active_shortcut_zones():
+    """Refresh the per-tick active-zone snapshot (query + geometry clones)."""
+    _active_shortcut_zones.clear()
+    async for zone in ShortcutZone.objects.filter(active=True):
+        geom = zone.polygon.clone()
+        geom.srid = 0  # match the player point SRID for distance calc
+        _active_shortcut_zones.append((zone, geom))
 
 
 def _shortcut_core(zone_geom, allowance, zone_id):
@@ -185,13 +201,19 @@ async def _check_shortcut_zones(character, old_location, new_location, ctx):
 
     new_2d = Point(new_location.x, new_location.y, srid=0)
 
-    async for zone in ShortcutZone.objects.filter(active=True):
-        zone_geom = zone.polygon.clone()
-        zone_geom.srid = 0  # match the player point SRID for distance calc
+    # Active zones are loaded once per tick (see _load_active_shortcut_zones),
+    # not per player — the query and geometry clones are identical for every
+    # player in the batch. Direct callers that bypass the tick loop get a
+    # lazy load here.
+    # Active zones are loaded once per tick (see _load_active_shortcut_zones),
+    # not per player — the query and geometry clones are identical for every
+    # player in the batch. The snapshot is always populated by
+    # _process_location_checks before this runs; a direct caller (tests)
+    # must call _load_active_shortcut_zones() itself.
+    for zone, zone_geom in _active_shortcut_zones:
 
         distance_new = new_2d.distance(zone_geom)
 
-        # VIOLATION: deeper than the allowance inside the polygon.
         # distance == 0 means inside the polygon (ST_Distance to the
         # polygon's boundary is 0 for interior points).
         is_inside_polygon = distance_new == 0
@@ -202,16 +224,17 @@ async def _check_shortcut_zones(character, old_location, new_location, ctx):
                 new_2d, zone_geom, SHORTCUT_ZONE_ALLOWANCE_RADIUS, zone.id
             )
 
+        # The ladder as one explicit tier: OUTSIDE (nothing) < SHALLOW
+        # (chat notice) < VIOLATION (popup + taint). One tier runs per
+        # player per zone per tick — the structure mirrors the design.
         if is_violation_depth:
             warn_key = f"shortcut_warn:{character.guid}"
             if not await cache.aget(warn_key):
-                # Escalation tier (RP-mode anti-autopilot ladder): the entry
-                # notice was the chat system message; penetrating beyond the
-                # allowance escalates to the POPUP — the penalty warning.
-                # TTL = 1h, matching the delivery taint window in webhook.py
-                # (shortcut_zone_entered_at > now - 1h): while deliveries are
-                # still tainted the player already knows; once the taint ages
-                # out, a fresh violation informs them again.
+                # VIOLATION tier: the chat notices did not stop them, so
+                # escalate to the POPUP — the penalty warning. TTL = taint
+                # window: while deliveries are still tainted the player
+                # already knows; once the taint ages out, a fresh violation
+                # informs them again.
                 await show_popup(
                     http_client_mod,
                     SHORTCUT_ZONE_ENTRY_MESSAGE,
@@ -231,16 +254,14 @@ async def _check_shortcut_zones(character, old_location, new_location, ctx):
             # via the `> now - 1h` check.
             character.shortcut_zone_entered_at = timezone.now()
 
-        # WARNING tier: chat notice when the player crosses INTO the polygon.
-        # Triggered by an actual entry — proximity alone (however close) must
-        # never produce a message. Nothing outside the polygon carries any
-        # consequence: the penalty starts 20m PAST the edge, inside.
-        #
-        # Same-tick dedupe: when the tick is already a violation the popup
-        # above IS the notice — an extra chat message here would double-notify
-        # (observed live: a driver at speed clears the 20m allowance within a
-        # single telemetry tick, so entry and violation land together).
-        if is_inside_polygon and not is_violation_depth:
+        elif is_inside_polygon:
+            # SHALLOW tier: chat notice while inside but not yet in violation.
+            # Nothing outside the polygon carries any consequence: the penalty
+            # starts 20m PAST the edge, inside. This elif is also the
+            # same-tick dedupe: when the tick is a violation the popup above
+            # IS the notice — an extra chat would double-notify (observed
+            # live: a driver at speed clears the 20m allowance within a
+            # single telemetry tick, so entry and violation land together).
             # Repeat notice: the chat message is visible only ~2 s, so a
             # single send is easily missed — re-send while the player stays
             # inside (but not yet in violation), rate-limited to one per
@@ -400,6 +421,7 @@ async def _process_location_checks(ctx, players, has_telemetry):
     # only on the zone, so it must be built once per zone per tick, not once
     # per player. Bounded to this tick by clearing here.
     _shortcut_core_cache.clear()
+    await _load_active_shortcut_zones()
 
     guid_to_player_info = {
         p["CharacterGuid"]: p for p in players if p.get("CharacterGuid")
