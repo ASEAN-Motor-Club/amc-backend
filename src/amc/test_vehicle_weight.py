@@ -255,7 +255,9 @@ class TestPopupAndAuditWiring:
 
     def test_summarize_parts_without_vehicle_has_no_weight_line(self, weight_db):
         lines = summarize_parts(_golden_parts())
-        assert not any(l.startswith(("Weight", "PWR")) for l in lines)
+        assert not any(
+            line.startswith(("Weight", "PWR")) for line in lines
+        )
 
     def test_summarize_parts_weight_failure_never_breaks_audit(
         self, weight_db, monkeypatch
@@ -267,4 +269,4 @@ class TestPopupAndAuditWiring:
         lines = summarize_parts(_golden_parts(), "Elisa2_C Default__Elisa2")
         assert lines[0] == "Power: 293.2 hp @ 6,216 rpm · 413.0 Nm @ 4,355 rpm"
         assert lines[1] == "Engine: SmallBlock_240HP"
-        assert not any(l.startswith("Weight") for l in lines)
+        assert not any(line.startswith("Weight") for line in lines)
