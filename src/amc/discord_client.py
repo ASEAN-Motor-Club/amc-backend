@@ -25,6 +25,7 @@ from amc_cogs.parts_audit import PartsAuditCog
 from amc_cogs.beammp_status import BeamMPStatusCog
 from amc_cogs.name_review import NameReviewCog
 from amc_cogs.active_role import ActiveRoleCog
+from amc_cogs.questionnaire import QuestionnaireCog
 
 
 class AMCDiscordBot(commands.Bot):
@@ -72,6 +73,7 @@ class AMCDiscordBot(commands.Bot):
         await self.add_cog(BeamMPStatusCog(self), guild=guild)
         await self.add_cog(NameReviewCog(self), guild=guild)
         await self.add_cog(ActiveRoleCog(self), guild=guild)
+        await self.add_cog(QuestionnaireCog(self), guild=guild)
         await self.tree.sync(guild=guild)
 
 

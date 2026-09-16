@@ -3511,5 +3511,55 @@ class GovContributionLog(models.Model):
     contribution = models.PositiveBigIntegerField()
     timestamp = models.DateTimeField(default=timezone.now, db_index=True)
 
+    @override
     def __str__(self):
         return f"{self.character_id} +{self.contribution}"
+
+
+@final
+class Questionnaire(models.Model):
+    """A Discord questionnaire created via /questionnaire create.
+
+    questions is a JSON list of
+    ``{"text": str, "type": "single"|"multi", "options": list[str]}``.
+    """
+
+    class ResponseMode(models.TextChoices):
+        SINGLE = "single", "One response per user"
+        MULTIPLE = "multiple", "Multiple responses allowed"
+
+    title = models.CharField(max_length=200)
+    description = models.TextField(blank=True)
+    questions = models.JSONField()
+    response_mode = models.CharField(
+        max_length=16, choices=ResponseMode.choices, default=ResponseMode.SINGLE
+    )
+    created_by_discord_id = models.CharField(max_length=32)
+    created_at = models.DateTimeField(auto_now_add=True, db_index=True)
+    closed = models.BooleanField(default=False)
+    channel_id = models.CharField(max_length=32, blank=True)
+    message_id = models.CharField(max_length=32, blank=True)
+
+    class Meta:
+        ordering = ["-created_at"]
+
+    @override
+    def __str__(self):
+        return self.title
+
+
+@final
+class QuestionnaireResponse(models.Model):
+    """One set of answers to a questionnaire, keyed by Discord user."""
+
+    questionnaire = models.ForeignKey(
+        Questionnaire, on_delete=models.CASCADE, related_name="responses"
+    )
+    discord_user_id = models.CharField(max_length=32)
+    discord_username = models.CharField(max_length=100)
+    answers = models.JSONField(help_text="List of chosen option strings, per question.")
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    @override
+    def __str__(self):
+        return f"{self.questionnaire_id} - {self.discord_username}"
