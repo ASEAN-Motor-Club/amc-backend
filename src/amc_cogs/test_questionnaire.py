@@ -332,11 +332,13 @@ def test_submit_requires_required_questions():
 # ------------------------------------------------------------------ wiring
 
 
-def test_cog_group_has_four_commands():
+def test_cog_group_has_five_commands():
     bot = MagicMock()
     cog = QuestionnaireCog(bot)
     commands_list = cog.questionnaire_group.commands
-    assert {c.name for c in commands_list} == {"create", "results", "export", "close"}
+    assert {c.name for c in commands_list} == {
+        "create", "schema", "results", "export", "close"
+    }
 
 
 def test_role_check_rejects_missing_role():

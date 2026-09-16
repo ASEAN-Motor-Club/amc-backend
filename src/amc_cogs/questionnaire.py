@@ -47,9 +47,77 @@ from amc.models import Questionnaire, QuestionnaireResponse
 QUESTIONS_JSON_DOC = (
     "Schema: {\"title\": str, \"description\": str (optional), "
     "\"response_mode\": \"single\"|\"multiple\" (optional, default single), "
-    "\"questions\": [{\"text\": str, \"type\": \"single\"|\"multi\", "
-    "\"options\": [str, ...]}]} — max 25 options per question, max 10 questions."
+    "\"questions\": [{\"text\": str (≤45 chars, the field label), "
+    "\"type\": \"single\"|\"multi\"|\"text\"|\"radio\"|\"check\"|\"boolean\"|\"file\", "
+    "\"description\": str (optional, ≤100 chars, shown under the label), "
+    "\"required\": bool (optional, default true), "
+    "\"options\": [str, ...] (single/multi: 1-25; radio/check: 2-10), "
+    "// text only: \"style\": \"short\"|\"paragraph\", \"placeholder\": str, "
+    "\"min_length\": 0-4000, \"max_length\": 1-4000; "
+    "// multi: \"min_values\": 0-25, \"max_values\": 1-25; "
+    "// boolean: \"default\": bool; file: \"min_values\"/\"max_values\": 1-10"
+    "]}]} — max 10 questions. Use /questionnaire schema for examples."
 )
+
+
+SCHEMA_EXAMPLES = """\
+**Questionnaire JSON — question types & customization**
+
+Top level: `title` (str), `description` (str, optional),
+`response_mode` (`single` = one per user, `multiple` = many; default single),
+`questions` (1-10).
+
+Common per-question fields:
+• `text` — the question label (≤45 chars, required)
+• `description` — helper text under the label (≤100 chars, optional)
+• `required` — whether it must be answered (default true)
+
+**`text`** — free text box
+```json
+{"text": "Feedback?", "type": "text", "style": "paragraph",
+ "placeholder": "Tell us everything", "min_length": 0, "max_length": 4000,
+ "required": false}
+```
+`style`: `short` (200 chars) or `paragraph` (4000).
+
+**`single`** — pick one from a dropdown
+```json
+{"text": "Favourite colour?", "type": "single",
+ "options": ["Red", "Green", "Blue"]}
+```
+
+**`multi`** — pick several
+```json
+{"text": "Toppings?", "type": "multi", "options": ["Ham", "Corn", "Pineapple"],
+ "min_values": 1, "max_values": 3}
+```
+
+**`radio`** — pick one, big buttons
+```json
+{"text": "Rate the event", "type": "radio",
+ "options": ["Bad", "Ok", "Good", "Great"]}
+```
+
+**`check`** — toggle each option (like multi, checkbox style)
+```json
+{"text": "Which days can you attend?", "type": "check",
+ "options": ["Fri", "Sat", "Sun"]}
+```
+
+**`boolean`** — yes/no checkbox
+```json
+{"text": "Subscribe to announcements?", "type": "boolean", "default": false}
+```
+
+**`file`** — upload files
+```json
+{"text": "Attach your screenshot", "type": "file",
+ "min_values": 1, "max_values": 3, "required": true}
+```
+
+Tip: ask me (Yumemi) in chat to generate this JSON from a plain-English
+description — I validate it against the bot's own parser before handing
+it over."""
 
 
 # ---------------------------------------------------------------- pure helpers
@@ -691,6 +759,13 @@ class QuestionnaireCog(commands.Cog):
             f"Use `/questionnaire results id:{questionnaire.id}` for tallies.",
             ephemeral=True,
         )
+
+    @questionnaire_group.command(
+        name="schema",
+        description="How to customize questionnaire questions (JSON schema + examples)",
+    )
+    async def schema(self, interaction: discord.Interaction):
+        await interaction.response.send_message(SCHEMA_EXAMPLES, ephemeral=True)
 
     @questionnaire_group.command(
         name="results", description="Quick view of response tallies"
