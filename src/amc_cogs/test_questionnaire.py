@@ -361,3 +361,133 @@ def test_role_check_rejects_missing_role():
 
     with pytest.raises(app_commands.CheckFailure):
         asyncio.run(run())
+
+# ---------- check/boolean labels + pagination invariants ----------
+
+def test_check_question_labels_include_question_text():
+    raw = json.dumps({
+        "title": "t",
+        "questions": [{
+            "text": "Which merch would you buy?",
+            "type": "check",
+            "options": ["Acrylic stand", "Voice pack"],
+        }],
+    })
+    data = validate_questions_payload(raw)
+    pages = _paginate_rows(list(enumerate(data["questions"])))
+    labels = [lbl for _i, _q, rs in pages[0] for lbl in rs]
+    texts = [lbl.text for lbl in labels]
+    assert texts == [
+        "Which merch would you buy?: Acrylic stand",
+        "Which merch would you buy?: Voice pack",
+    ]
+
+
+def test_check_long_option_falls_back_to_option_label_with_question_description():
+    raw = json.dumps({
+        "title": "t",
+        "questions": [{
+            "text": "Which merch would you buy?",
+            "type": "check",
+            "options": [
+                "Signed photo of Yuuka in her Streamy Awards outfit 2026",
+                "Acrylic stand",
+            ],
+        }],
+    })
+    data = validate_questions_payload(raw)
+    rows = _paginate_rows(list(enumerate(data["questions"])))
+    first = rows[0][0][2][0]
+    second = rows[0][0][2][1]
+    assert len(first.text) <= 45
+    assert first.description == "Which merch would you buy?"
+    assert second.text == "Which merch would you buy?: Acrylic stand"
+
+
+def test_boolean_question_label_is_question_text():
+    raw = json.dumps({
+        "title": "t",
+        "questions": [{"text": "OK to tag you?", "type": "boolean", "default": False}],
+    })
+    data = validate_questions_payload(raw)
+    rows = _paginate_rows(list(enumerate(data["questions"])))
+    label = rows[0][0][2][0]
+    assert label.text == "OK to tag you?"
+    assert isinstance(label.component, discord.ui.Checkbox)
+    assert label.component.default is False
+
+
+def test_pagination_never_exceeds_five_rows_per_page():
+    raw = json.dumps({
+        "title": "t",
+        "questions": [
+            {"text": f"Q{i} text", "type": "check",
+             "options": ["opt a", "opt b", "opt c"]}
+            for i in range(4)
+        ],
+    })
+    data = validate_questions_payload(raw)
+    pages = _paginate_rows(list(enumerate(data["questions"])))
+    for page in pages:
+        assert sum(len(rows) for _i, _q, rows in page) <= 5
+
+
+def test_pagination_never_splits_a_question_across_pages():
+    raw = json.dumps({
+        "title": "t",
+        "questions": [
+            {"text": "Pick some", "type": "check",
+             "options": ["a", "b", "c", "d", "e", "f"]},
+            {"text": "Text q", "type": "text"},
+            {"text": "Bool q", "type": "boolean"},
+        ],
+    })
+    data = validate_questions_payload(raw)
+    pages = _paginate_rows(list(enumerate(data["questions"])))
+    seen_pages_per_q: dict[int, int] = {}
+    for page in pages:
+        for index, _q, _rows in page:
+            seen_pages_per_q[index] = seen_pages_per_q.get(index, 0) + 1
+    assert all(v == 1 for v in seen_pages_per_q.values())
+    # The 6-option check (6 rows) forces it onto its own page; text+bool share the next.
+    assert len(pages) == 2
+
+
+def test_validator_accepts_more_than_ten_questions():
+    raw = json.dumps({
+        "title": "t",
+        "questions": [
+            {"text": f"Q{i}", "type": "text"} for i in range(15)
+        ],
+    })
+    data = validate_questions_payload(raw)
+    assert len(data["questions"]) == 15
+
+
+def test_yuuka_survey_pages_split_by_rows_not_questions():
+    """Regression: 7-question Yuuka survey splits into 3 pages by label rows."""
+    raw = json.dumps({
+        "title": "Yuuka Fan Survey",
+        "questions": [
+            {"text": "Message for Yuuka", "type": "text", "style": "paragraph"},
+            {"text": "Favorite stream type?", "type": "single",
+             "options": ["Gaming", "Karaoke"]},
+            {"text": "Which snacks?", "type": "multi", "max_values": 3,
+             "options": ["Bubble tea", "Instant noodles", "Chips"]},
+            {"text": "Rate last stream", "type": "radio",
+             "options": ["Decent", "PEAK FICTION"]},
+            {"text": "Which merch would you buy?", "type": "check",
+             "options": ["Acrylic stand", "Voice pack", "Oshi mark hoodie",
+                          "Signed photo"]},
+            {"text": "OK to tag you?", "type": "boolean"},
+            {"text": "Fan art submission", "type": "file"},
+        ],
+    })
+    data = validate_questions_payload(raw)
+    pages = _paginate_rows(list(enumerate(data["questions"])))
+    row_counts = [sum(len(rows) for _i, _q, rows in page) for page in pages]
+    # text(1)+single(1)+multi(1)+radio(1) = 4 rows; check(4) can't fit in the
+    # single remaining row so it moves to page 2 with boolean(1) = 5 rows;
+    # file(1) lands on page 3.
+    assert len(pages) == 3
+    assert row_counts == [4, 5, 1]

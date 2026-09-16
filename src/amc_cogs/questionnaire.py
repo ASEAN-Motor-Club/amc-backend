@@ -172,8 +172,6 @@ def validate_questions_payload(raw: str) -> dict:
     questions = data.get("questions")
     if not isinstance(questions, list) or not questions:
         raise ValueError("\"questions\" must be a non-empty list.")
-    if len(questions) > 10:
-        raise ValueError("Maximum 10 questions per questionnaire.")
     normalized: list[dict] = []
     for i, q in enumerate(questions, 1):
         if not isinstance(q, dict):
@@ -387,11 +385,16 @@ def _build_form_row(index: int, q: dict) -> list[discord.ui.Label]:
     if q["type"] == "check":
         labels = []
         for j, o in enumerate(q["options"]):
+            combined = f'{q["text"]}: {o}'
+            if len(combined) <= 45:
+                text, desc = combined, q.get("description") if j == 0 else None
+            else:
+                text, desc = o, q["text"] if j == 0 else None
             labels.append(
                 discord.ui.Label(
-                    text=o[:45],
+                    text=text[:45],
                     component=discord.ui.Checkbox(custom_id=f"q{index}o{j}", default=False),
-                    description=q.get("description") if j == 0 and q.get("description") else None,
+                    description=(desc or None),
                 )
             )
         return labels
