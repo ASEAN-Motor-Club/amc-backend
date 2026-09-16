@@ -454,7 +454,7 @@ class QuestionnaireFormModal(discord.ui.Modal):
         total_pages: int = 1,
         next_pages: list | None = None,
     ):
-        super().__init__(title=f"{parent_view.form_title} ({page}/{total_pages})"[:45])
+        super().__init__(title=f"[{page}/{total_pages}] {parent_view.form_title}"[:45])
         self.parent_view = parent_view
         self.next_pages = next_pages or []
         self.page_questions = page_questions
