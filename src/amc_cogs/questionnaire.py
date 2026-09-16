@@ -10,9 +10,18 @@ Questions JSON schema (accepted inline or as a .json attachment):
       "description": str (optional),
       "response_mode": "single"|"multiple" (optional, default "single"),
       "questions": [
-        {"text": str, "type": "single"|"multi", "options": [str, ...]}
+        {"text": str, "type": "single"|"multi", "options": [str, ...]},
+        {"text": str, "type": "text", "style": "short"|"paragraph" (optional,
+         default "short"), "placeholder": str (optional), "required": bool
+         (optional, default true)}
       ]
     }
+
+``text`` questions are answered in a Discord Modal (popup text inputs)
+opened via the "Answer" button on the embed; ``single``/``multi`` questions
+use dropdowns on the embed itself. Both kinds may be mixed freely; the
+button is only rendered when the questionnaire has at least one text
+question.
 """
 
 import asyncio
@@ -63,8 +72,32 @@ def validate_questions_payload(raw: str) -> dict:
         if not isinstance(text, str) or not text.strip():
             raise ValueError(f"Question {i}: \"text\" must be a non-empty string.")
         qtype = q.get("type", "single")
-        if qtype not in ("single", "multi"):
-            raise ValueError(f"Question {i}: \"type\" must be \"single\" or \"multi\".")
+        if qtype not in ("single", "multi", "text"):
+            raise ValueError(
+                f"Question {i}: \"type\" must be \"single\", \"multi\" or \"text\"."
+            )
+        if qtype == "text":
+            style = q.get("style", "short")
+            if style not in ("short", "paragraph"):
+                raise ValueError(
+                    f"Question {i}: \"style\" must be \"short\" or \"paragraph\"."
+                )
+            placeholder = q.get("placeholder", "")
+            if not isinstance(placeholder, str):
+                raise ValueError(f"Question {i}: \"placeholder\" must be a string.")
+            required = q.get("required", True)
+            if not isinstance(required, bool):
+                raise ValueError(f"Question {i}: \"required\" must be a boolean.")
+            normalized.append(
+                {
+                    "text": text.strip(),
+                    "type": "text",
+                    "style": style,
+                    "placeholder": placeholder.strip()[:100],
+                    "required": required,
+                }
+            )
+            continue
         options = q.get("options")
         if not isinstance(options, list) or not (1 <= len(options) <= 25):
             raise ValueError(
@@ -116,6 +149,19 @@ def build_results_embed(questionnaire: Questionnaire) -> discord.Embed:
         color=discord.Color.gold(),
     )
     for i, q in enumerate(questionnaire.questions):
+        if q["type"] == "text":
+            given = [
+                str(r.answers[i])
+                for r in responses
+                if i < len(r.answers) and r.answers[i]
+            ]
+            lines = [f"> {a[:200]}" for a in given] or ["No answers"]
+            embed.add_field(
+                name=f"Q{i + 1}. {q['text']} (text)",
+                value="\n".join(lines)[:1024],
+                inline=False,
+            )
+            continue
         counts: Counter = Counter()
         for r in responses:
             answers = r.answers
@@ -157,7 +203,12 @@ def build_results_csv(questionnaire: Questionnaire) -> io.StringIO:
 
 
 class QuestionnaireAnswerView(discord.ui.View):
-    """Dropdowns (one per question) + Submit. Attached to the public embed."""
+    """Dropdowns (one per question) + Submit. Attached to the public embed.
+
+    Questionnaires containing ``text``-type questions get an additional
+    "Answer" button that opens a :class:`QuestionnaireTextModal` with one
+    text input per text question (Discord caps modals at 5 inputs).
+    """
 
     def __init__(self, questionnaire_id: int, questions: list[dict]):
         super().__init__(timeout=None)  # persistent across restarts
@@ -165,18 +216,92 @@ class QuestionnaireAnswerView(discord.ui.View):
         self.questions = questions
         self.selections: dict[int, str | list[str]] = {}
         for i, q in enumerate(questions):
+            if q["type"] == "text":
+                continue
             self.add_item(_QuestionSelect(self, i, q))
+        if any(q["type"] == "text" for q in questions):
+            self.add_item(_OpenTextModalButton(self))
 
     @discord.ui.button(label="Submit", style=discord.ButtonStyle.success)
     async def submit(self, interaction: discord.Interaction, _button: discord.ui.Button):
-        missing = [i + 1 for i in range(len(self.questions)) if i not in self.selections]
+        missing = [
+            i + 1
+            for i, q in enumerate(self.questions)
+            if q["type"] != "text" and i not in self.selections
+        ]
         if missing:
             await interaction.response.send_message(
                 f"Please answer question(s): {', '.join(map(str, missing))}.",
                 ephemeral=True,
             )
             return
-        await _save_response(interaction, self.questionnaire_id, self.selections)
+        await _save_response(
+            interaction, self.questionnaire_id, self.selections, self.text_answers
+        )
+    # Text answers collected by the modal live here between the modal submit
+    # and the Submit press. Populated via `store_text_answers` on the view.
+    @property
+    def text_answers(self) -> dict[int, str]:
+        return getattr(self, "_text_answers", {})
+
+    def store_text_answers(self, answers: dict[int, str]) -> None:
+        self._text_answers = {**self.text_answers, **answers}
+
+
+class QuestionnaireTextModal(discord.ui.Modal):
+    """One TextInput per text question (Discord allows max 5 per modal)."""
+
+    def __init__(self, parent_view: QuestionnaireAnswerView, text_qs: list[tuple[int, dict]]):
+        super().__init__(title="Text questions")
+        self.parent_view = parent_view
+        self.text_qs = text_qs
+        self.inputs: list[discord.ui.TextInput] = []
+        for i, q in text_qs[:5]:
+            inp = discord.ui.TextInput(
+                label=f"Q{i + 1}: {q['text'][:40]}",
+                style=(
+                    discord.TextStyle.paragraph
+                    if q.get("style") == "paragraph"
+                    else discord.TextStyle.short
+                ),
+                required=q.get("required", True),
+                max_length=1000 if q.get("style") == "paragraph" else 200,
+                placeholder=(q.get("placeholder") or None),
+            )
+            self.inputs.append(inp)
+            self.add_item(inp)
+
+    async def on_submit(self, interaction: discord.Interaction):
+        answers = {
+            self.text_qs[i][0]: child.value.strip()
+            for i, child in enumerate(self.inputs)
+        }
+        self.parent_view.store_text_answers(answers)
+        await interaction.response.send_message(
+            "Text answers saved — now press **Submit** on the embed to send "
+            "your full response.",
+            ephemeral=True,
+        )
+
+
+class _OpenTextModalButton(discord.ui.Button):
+    """Opens the text-questions Modal. Only added when text questions exist."""
+
+    def __init__(self, parent_view: "QuestionnaireAnswerView"):
+        super().__init__(
+            label="Answer text questions", style=discord.ButtonStyle.primary
+        )
+        self.parent_view = parent_view
+
+    async def callback(self, interaction: discord.Interaction):
+        text_qs = [
+            (i, q)
+            for i, q in self.parent_view.questions
+            if q["type"] == "text"
+        ]
+        await interaction.response.send_modal(
+            QuestionnaireTextModal(self.parent_view, text_qs)
+        )
 
 
 class _QuestionSelect(discord.ui.Select):
@@ -203,8 +328,13 @@ class _QuestionSelect(discord.ui.Select):
 
 
 async def _save_response(
-    interaction: discord.Interaction, questionnaire_id: int, selections: dict
+    interaction: discord.Interaction,
+    questionnaire_id: int,
+    selections: dict,
+    text_answers: dict | None = None,
 ) -> None:
+    text_answers = text_answers or {}
+
     def _db() -> tuple[str, bool]:
         try:
             q = Questionnaire.objects.get(pk=questionnaire_id)
@@ -212,7 +342,12 @@ async def _save_response(
             return "This questionnaire no longer exists.", False
         if q.closed:
             return "This questionnaire is closed.", False
-        answers = [selections[i] for i in range(len(q.questions))]
+        answers: list = []
+        for i in range(len(q.questions)):
+            if i in selections:
+                answers.append(selections[i])
+            else:
+                answers.append(text_answers.get(i, ""))
         if q.response_mode == "single":
             QuestionnaireResponse.objects.update_or_create(
                 questionnaire=q,

@@ -14,6 +14,7 @@ from amc.models import Questionnaire, QuestionnaireResponse
 from amc_cogs.questionnaire import (
     QuestionnaireAnswerView,
     QuestionnaireCog,
+    QuestionnaireTextModal,
     build_questionnaire_embed,
     build_results_csv,
     build_results_embed,
@@ -158,9 +159,82 @@ def test_answer_view_has_one_select_per_question(questionnaire):
     selects = [c for c in view.children if isinstance(c, discord.ui.Select)]
     buttons = [c for c in view.children if isinstance(c, discord.ui.Button)]
     assert len(selects) == 2
-    assert len(buttons) == 1
+    # No text questions in this fixture → only the Submit button renders.
+    assert {b.label for b in buttons} == {"Submit"}
     assert selects[0].max_values == 1  # single
     assert selects[1].max_values == 2  # multi
+
+
+def test_answer_view_text_questions_render_modal_button():
+    questions = [
+        {"text": "Pick one", "type": "single", "options": ["A", "B"]},
+        {"text": "Tell us more", "type": "text", "style": "paragraph"},
+    ]
+
+    async def run():
+        return QuestionnaireAnswerView(1, questions)
+
+    view = asyncio.run(run())
+    selects = [c for c in view.children if isinstance(c, discord.ui.Select)]
+    buttons = [c for c in view.children if isinstance(c, discord.ui.Button)]
+    assert len(selects) == 1  # dropdown questions only
+    assert {b.label for b in buttons} == {"Answer text questions", "Submit"}
+
+
+def test_validate_text_question():
+    data = validate_questions_payload(
+        json.dumps(
+            {
+                "title": "x",
+                "questions": [
+                    {"text": "Say something", "type": "text",
+                     "style": "paragraph", "placeholder": "hi", "required": False}
+                ],
+            }
+        )
+    )
+    q = data["questions"][0]
+    assert q["type"] == "text"
+    assert q["style"] == "paragraph"
+    assert q["placeholder"] == "hi"
+    assert q["required"] is False
+
+
+def test_validate_text_question_defaults():
+    data = validate_questions_payload(
+        json.dumps({"title": "x", "questions": [{"text": "q", "type": "text"}]})
+    )
+    q = data["questions"][0]
+    assert q["style"] == "short"
+    assert q["placeholder"] == ""
+    assert q["required"] is True
+
+
+def test_validate_rejects_bad_text_style():
+    with pytest.raises(ValueError, match="style"):
+        validate_questions_payload(
+            json.dumps(
+                {"title": "x", "questions": [{"text": "q", "type": "text", "style": "huge"}]}
+            )
+        )
+
+
+def test_modal_collects_text_answers():
+    questions = [{"text": "Tell us", "type": "text"}]
+
+    async def run():
+        view = QuestionnaireAnswerView(1, questions)
+        text_qs = [(i, q) for i, q in enumerate(questions) if q["type"] == "text"]
+        modal = QuestionnaireTextModal(view, text_qs)
+        # simulate a filled input (value is backed by _value)
+        modal.inputs[0]._value = "  hello world  "
+        interaction = AsyncMock()
+        await modal.on_submit(interaction)
+        return view, interaction
+
+    view, interaction = asyncio.run(run())
+    assert view.text_answers == {0: "hello world"}
+    assert interaction.response.send_message.called
 
 
 def test_answer_view_submit_missing_answers(questionnaire):
