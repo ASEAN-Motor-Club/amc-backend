@@ -470,8 +470,8 @@ class QuestionnaireFormModal(discord.ui.Modal):
             )
         else:
             await interaction.response.send_message(
-                "All answers collected — now press **Submit** on the embed to "
-                "send your full response.",
+                "All questions answered — press **Submit** to send your response.",
+                view=_SubmitFollowupView(self.parent_view),
                 ephemeral=True,
             )
 
@@ -577,7 +577,7 @@ class _NextPageButton(discord.ui.Button):
 
 
 class QuestionnaireAnswerView(discord.ui.View):
-    """The public embed view: a single "Open form" button + Submit."""
+    """The public embed view: one "Open form" button (class-based)."""
 
     def __init__(self, questionnaire_id: int, questions: list[dict], form_title: str = "Form"):
         super().__init__(timeout=None)  # persistent across restarts
@@ -598,15 +598,7 @@ class QuestionnaireAnswerView(discord.ui.View):
     def store_text_answers(self, answers: dict[int, str]) -> None:
         self.store_answers(answers)
 
-    @discord.ui.button(label="Open form", style=discord.ButtonStyle.primary)
-    async def open_form(self, interaction: discord.Interaction, _button):
-        pages = _paginate_rows(list(enumerate(self.questions)))
-        await interaction.response.send_modal(
-            QuestionnaireFormModal(self, pages[0], 1, len(pages), next_pages=pages[1:])
-        )
-
-    @discord.ui.button(label="Submit", style=discord.ButtonStyle.success)
-    async def submit(self, interaction: discord.Interaction, _button):
+    async def do_submit(self, interaction: discord.Interaction) -> None:
         missing = [
             i + 1
             for i, q in enumerate(self.questions)
@@ -621,6 +613,23 @@ class QuestionnaireAnswerView(discord.ui.View):
         await _save_response(
             interaction, self.questionnaire_id, self.selections
         )
+
+
+class _SubmitButton(discord.ui.Button):
+    def __init__(self, parent_view: "QuestionnaireAnswerView"):
+        super().__init__(label="Submit", style=discord.ButtonStyle.success)
+        self.parent_view = parent_view
+
+    async def callback(self, interaction: discord.Interaction):
+        await self.parent_view.do_submit(interaction)
+
+
+class _SubmitFollowupView(discord.ui.View):
+    """Ephemeral view shown after the last modal page: the Submit button."""
+
+    def __init__(self, parent_view: "QuestionnaireAnswerView"):
+        super().__init__(timeout=600)
+        self.add_item(_SubmitButton(parent_view))
 
 
 class _OpenFormButton(discord.ui.Button):

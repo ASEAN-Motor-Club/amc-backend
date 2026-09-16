@@ -232,7 +232,7 @@ def test_answer_view_is_form_button_only():
     view = asyncio.run(run())
     # No selects ever — everything lives in modals
     assert not [c for c in view.children if isinstance(c, discord.ui.Select)]
-    assert {b.label for b in view.children} == {"Open form", "Submit"}
+    assert {b.label for b in view.children} == {"Open form"}
 
 
 def test_open_form_builds_first_page():
@@ -241,7 +241,8 @@ def test_open_form_builds_first_page():
     async def run():
         view = QuestionnaireAnswerView(1, questions, form_title="Test Survey")
         interaction = AsyncMock()
-        await view.open_form.callback(interaction)
+        open_btn = next(b for b in view.children if b.label == "Open form")
+        await open_btn.callback(interaction)
         modal = interaction.response.send_modal.call_args.args[0]
         return modal
 
@@ -320,7 +321,7 @@ def test_submit_requires_required_questions():
         # Q3 (radio) unanswered but required
         view.selections = {2: "why"}  # only text (not required) answered
         interaction = AsyncMock()
-        await view.submit.callback(interaction)
+        await view.do_submit(interaction)
         return interaction
 
     interaction = asyncio.run(run())
