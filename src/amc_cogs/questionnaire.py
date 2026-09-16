@@ -719,12 +719,14 @@ class QuestionnaireCog(commands.Cog):
     @app_commands.describe(
         json_string="Questions JSON inline (small surveys), OR attach a .json file",
         questions_file="A .json file with the questions (overrides json_string)",
+        channel="Channel to post in (defaults to the current channel)",
     )
     async def create(
         self,
         interaction: discord.Interaction,
         json_string: str | None = None,
         questions_file: discord.Attachment | None = None,
+        channel: discord.TextChannel | None = None,
     ):
         if questions_file is not None:
             raw = (await questions_file.read()).decode("utf-8")
@@ -760,14 +762,25 @@ class QuestionnaireCog(commands.Cog):
         view = QuestionnaireAnswerView(
             questionnaire.id, data["questions"], form_title=data["title"]
         )
-        message = await interaction.channel.send(embed=embed, view=view)
+        target = channel or interaction.channel
+        try:
+            message = await target.send(embed=embed, view=view)
+        except discord.Forbidden:
+            await interaction.followup.send(
+                f"I lack **Send Messages / Embed Links** permission in "
+                f"{target.mention} — the questionnaire was created but NOT posted. "
+                f"Fix the channel permissions or re-run `/questionnaire create` "
+                f"with a `channel` I can post in.",
+                ephemeral=True,
+            )
+            return
         await asyncio.to_thread(
             Questionnaire.objects.filter(pk=questionnaire.id).update,
-            channel_id=str(interaction.channel_id),
+            channel_id=str(target.id),
             message_id=str(message.id),
         )
         await interaction.followup.send(
-            f"Questionnaire #{questionnaire.id} posted. "
+            f"Questionnaire #{questionnaire.id} posted in {target.mention}. "
             f"Use `/questionnaire results id:{questionnaire.id}` for tallies.",
             ephemeral=True,
         )
@@ -868,6 +881,16 @@ class QuestionnaireCog(commands.Cog):
         if isinstance(error, app_commands.CheckFailure):
             await interaction.response.send_message(
                 "You need the Kimaki or Admin role to use questionnaire commands.",
+                ephemeral=True,
+            )
+            return
+        if isinstance(error, app_commands.CommandInvokeError) and isinstance(
+            error.original, discord.Forbidden
+        ):
+            await interaction.followup.send(
+                "Discord said **403 Missing Permissions** — I can't post there. "
+                "Give the bot Send Messages + Embed Links in this channel, or "
+                "re-run `/questionnaire create` with a `channel` I can post in.",
                 ephemeral=True,
             )
             return
