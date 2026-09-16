@@ -295,6 +295,31 @@ def test_open_form_builds_first_page():
     assert labels[3].component.options[0].label == "Bad"
 
 
+
+def test_modal_title_has_page_prefix():
+    """Modal title is "[page/total] survey title", truncated to 45 chars."""
+
+    async def run(form_title):
+        questions = [
+            {"text": f"q{i}", "type": "single", "options": ["a", "b"]}
+            for i in range(12)
+        ]
+        view = QuestionnaireAnswerView(1, questions, form_title=form_title)
+        interaction = AsyncMock()
+        open_btn = next(b for b in view.children if b.label == "Open form")
+        await open_btn.callback(interaction)
+        return interaction.response.send_modal.call_args.args[0]
+
+    modal = asyncio.run(run("Test Survey"))
+    # 12 questions -> 3 pages
+    assert modal.total_pages == 3
+    assert modal.title == "[1/3] Test Survey"
+
+    # long titles truncate but keep the prefix
+    long_modal = asyncio.run(run("X" * 60))
+    assert long_modal.title.startswith("[1/3] ")
+    assert len(long_modal.title) <= 45
+
 def test_modal_collect_and_chain():
     questions = json.loads(VALID_JSON)["questions"]
 
