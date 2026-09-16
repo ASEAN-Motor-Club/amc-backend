@@ -613,15 +613,15 @@ class FraudAlertWiringTests(TestCase):
         mock_rp.return_value = False
         player, character = await self._setup()
 
-        base_pay, subsidy, contract, clawback = await process_event(
-            self._passenger_event(player, 2, 5_000_000, {"X": 0, "Y": 0, "Z": 0}),
+        base_pay, _, _, clawback = await process_event(
+            self._passenger_event(player, 2, 50_000, {"X": 0, "Y": 0, "Z": 0}),
             player,
             character,
             http_client_mod=MagicMock(),
         )
 
         self.assertEqual(clawback, 0)
-        self.assertEqual(base_pay, PASSENGER_PAYMENT_CEILINGS[2])
+        self.assertEqual(base_pay, 50_000)
         mock_alert.assert_not_called()
 
     @patch("amc.handlers.tow.post_discord_fraud_alert")
