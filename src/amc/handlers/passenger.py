@@ -30,15 +30,6 @@ async def handle_passenger_arrived(event, player, character, ctx):
     if base_payment < 0:
         raise ValueError(f"Negative payment for passenger: {passenger_data}")
 
-    # Exploit detection: passengers picked up on a modded server have
-    # Net_StartLocation at the world origin (0,0,0).
-    start_loc = passenger_data.get("Net_StartLocation", {})
-    is_exploit = (
-        start_loc.get("X", 1) == 0
-        and start_loc.get("Y", 1) == 0
-        and start_loc.get("Z", 1) == 0
-    )
-
     log = ServerPassengerArrivedLog(
         timestamp=timestamp,
         player=player,
@@ -54,37 +45,6 @@ async def handle_passenger_arrived(event, player, character, ctx):
         urgent_rating=passenger_data.get("Net_TimeLimitPoint"),
         data=passenger_data,
     )
-
-    if is_exploit:
-        log.payment = 0
-        await log.asave()
-        if base_payment > 0 and character and ctx.http_client_mod:
-            asyncio.create_task(
-                show_popup(
-                    ctx.http_client_mod,
-                    "Passenger delivery rejected: invalid origin.",
-                    character_guid=character.guid,
-                    player_id=str(character.player.unique_id),
-                )
-            )
-            post_discord_fraud_alert(
-                ctx.discord_client,
-                kind="passenger_zero_origin",
-                character_name=character.name,
-                player_id=str(character.player.unique_id),
-                original_payment=base_payment,
-                clawed_back=base_payment,
-                final_payment=0,
-                detail="Passenger event rejected: start location at world origin (0,0,0).",
-            )
-        logger.warning(
-            "Exploit detected: passenger with zero start location for player %s (payment=%s)",
-            player.unique_id,
-            base_payment,
-        )
-        # Contract: base_pay includes the clawback amount so the batch
-        # subtraction in process_events nets this event to zero.
-        return base_payment, 0, 0, base_payment
 
     # Fraud detection: validate payment against type ceiling
     passenger_type_int = int(log.passenger_type) if log.passenger_type else 0

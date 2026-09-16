@@ -604,11 +604,12 @@ class FraudAlertWiringTests(TestCase):
 
         mock_alert.assert_not_called()
 
-    @patch("amc.handlers.passenger.show_popup", new_callable=AsyncMock)
     @patch("amc.handlers.passenger.post_discord_fraud_alert")
-    async def test_zero_origin_passenger_posts_alert(
-        self, mock_alert, mock_popup, mock_treasury, mock_rp
+    async def test_zero_origin_passenger_pays_normally(
+        self, mock_alert, mock_treasury, mock_rp
     ):
+        # Zero-origin rejection was removed: a passenger with
+        # Net_StartLocation (0,0,0) is processed like any other delivery.
         mock_rp.return_value = False
         player, character = await self._setup()
 
@@ -619,17 +620,9 @@ class FraudAlertWiringTests(TestCase):
             http_client_mod=MagicMock(),
         )
 
-        # Contract: base_pay includes the clawback so the batch nets to zero.
-        self.assertEqual(
-            (base_pay, subsidy, contract, clawback),
-            (5_000_000, 0, 0, 5_000_000),
-        )
-        mock_alert.assert_called_once()
-        kwargs = mock_alert.call_args.kwargs
-        self.assertEqual(kwargs["kind"], "passenger_zero_origin")
-        self.assertEqual(kwargs["original_payment"], 5_000_000)
-        self.assertEqual(kwargs["clawed_back"], 5_000_000)
-        self.assertEqual(kwargs["final_payment"], 0)
+        self.assertEqual(clawback, 0)
+        self.assertEqual(base_pay, PASSENGER_PAYMENT_CEILINGS[2])
+        mock_alert.assert_not_called()
 
     @patch("amc.handlers.tow.post_discord_fraud_alert")
     async def test_inflated_tow_posts_alert(self, mock_alert, mock_treasury, mock_rp):
