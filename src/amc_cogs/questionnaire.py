@@ -248,15 +248,33 @@ class QuestionnaireAnswerView(discord.ui.View):
         self._text_answers = {**self.text_answers, **answers}
 
 
-class QuestionnaireTextModal(discord.ui.Modal):
-    """One TextInput per text question (Discord allows max 5 per modal)."""
+MODAL_PAGE_SIZE = 5  # Discord hard cap on TextInputs per modal
 
-    def __init__(self, parent_view: QuestionnaireAnswerView, text_qs: list[tuple[int, dict]]):
-        super().__init__(title="Text questions")
+
+class QuestionnaireTextModal(discord.ui.Modal):
+    """One page of text questions (max 5 TextInputs — Discord hard cap).
+
+    ``text_qs`` is a slice of ``(index, question)`` pairs; when more text
+    questions remain after this page, ``on_submit`` follows up with an
+    ephemeral "Next page" button that opens the next modal, chaining until
+    every text question is answered. All answers accumulate on the shared
+    parent view.
+    """
+
+    def __init__(
+        self,
+        parent_view: QuestionnaireAnswerView,
+        text_qs: list[tuple[int, dict]],
+        page: int = 1,
+        total_pages: int = 1,
+    ):
+        super().__init__(title=f"Text questions ({page}/{total_pages})")
         self.parent_view = parent_view
         self.text_qs = text_qs
+        self.page = page
+        self.total_pages = total_pages
         self.inputs: list[discord.ui.TextInput] = []
-        for i, q in text_qs[:5]:
+        for i, q in text_qs[:MODAL_PAGE_SIZE]:
             inp = discord.ui.TextInput(
                 label=f"Q{i + 1}: {q['text'][:40]}",
                 style=(
@@ -277,10 +295,60 @@ class QuestionnaireTextModal(discord.ui.Modal):
             for i, child in enumerate(self.inputs)
         }
         self.parent_view.store_text_answers(answers)
-        await interaction.response.send_message(
-            "Text answers saved — now press **Submit** on the embed to send "
-            "your full response.",
-            ephemeral=True,
+        remaining = self.text_qs[MODAL_PAGE_SIZE:]
+        if remaining:
+            next_page = self.page + 1
+            await interaction.response.send_message(
+                f"Page {self.page}/{self.total_pages} saved.",
+                view=_NextTextPageView(
+                    self.parent_view, remaining, next_page, self.total_pages
+                ),
+                ephemeral=True,
+            )
+        else:
+            await interaction.response.send_message(
+                "Text answers saved — now press **Submit** on the embed to "
+                "send your full response.",
+                ephemeral=True,
+            )
+
+
+class _NextTextPageView(discord.ui.View):
+    """Ephemeral button that opens the next modal page (modals can't nest)."""
+
+    def __init__(
+        self,
+        parent_view: QuestionnaireAnswerView,
+        text_qs: list[tuple[int, dict]],
+        page: int,
+        total_pages: int,
+    ):
+        super().__init__(timeout=300)
+        self.add_item(_NextTextPageButton(parent_view, text_qs, page, total_pages))
+
+
+class _NextTextPageButton(discord.ui.Button):
+    def __init__(
+        self,
+        parent_view: QuestionnaireAnswerView,
+        text_qs: list[tuple[int, dict]],
+        page: int,
+        total_pages: int,
+    ):
+        super().__init__(
+            label=f"Open page {page} of {total_pages}",
+            style=discord.ButtonStyle.primary,
+        )
+        self.parent_view = parent_view
+        self.text_qs = text_qs
+        self.page = page
+        self.total_pages = total_pages
+
+    async def callback(self, interaction: discord.Interaction):
+        await interaction.response.send_modal(
+            QuestionnaireTextModal(
+                self.parent_view, self.text_qs, self.page, self.total_pages
+            )
         )
 
 
@@ -299,8 +367,9 @@ class _OpenTextModalButton(discord.ui.Button):
             for i, q in self.parent_view.questions
             if q["type"] == "text"
         ]
+        total_pages = -(-len(text_qs) // MODAL_PAGE_SIZE)  # ceil div
         await interaction.response.send_modal(
-            QuestionnaireTextModal(self.parent_view, text_qs)
+            QuestionnaireTextModal(self.parent_view, text_qs, 1, total_pages)
         )
 
 

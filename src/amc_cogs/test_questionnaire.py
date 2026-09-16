@@ -219,6 +219,47 @@ def test_validate_rejects_bad_text_style():
         )
 
 
+def test_modal_pagination_chains_pages():
+    # 7 text questions -> 2 pages (5 + 2)
+    questions = [
+        {"text": f"T{i}", "type": "text"} for i in range(7)
+    ]
+
+    async def run():
+        view = QuestionnaireAnswerView(1, questions)
+        text_qs = [(i, q) for i, q in enumerate(questions) if q["type"] == "text"]
+        page1 = QuestionnaireTextModal(view, text_qs, 1, 2)
+        # fill page 1
+        for j, inp in enumerate(page1.inputs):
+            inp._value = f"ans{j}"
+        interaction = AsyncMock()
+        await page1.on_submit(interaction)
+        return view, interaction, page1
+
+    view, interaction, page1 = asyncio.run(run())
+    assert len(page1.inputs) == 5
+    assert view.text_answers == {i: f"ans{i}" for i in range(5)}
+    # a followup with a Next-page button was sent
+    kwargs = interaction.response.send_message.call_args.kwargs
+    next_view = kwargs["view"]
+    btn = next_view.children[0]
+    assert btn.label == "Open page 2 of 2"
+
+    async def run2():
+        page2 = QuestionnaireTextModal(view, btn.text_qs, 2, 2)
+        assert len(page2.inputs) == 2
+        for j, inp in enumerate(page2.inputs):
+            inp._value = f"ans{5 + j}"
+        interaction2 = AsyncMock()
+        await page2.on_submit(interaction2)
+        return interaction2
+
+    interaction2 = asyncio.run(run2())
+    assert view.text_answers == {i: f"ans{i}" for i in range(7)}
+    # final page: no further chaining, plain message
+    assert "Submit" in interaction2.response.send_message.call_args.args[0]
+
+
 def test_modal_collects_text_answers():
     questions = [{"text": "Tell us", "type": "text"}]
 
