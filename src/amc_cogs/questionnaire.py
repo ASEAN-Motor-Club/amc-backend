@@ -10,18 +10,25 @@ Questions JSON schema (accepted inline or as a .json attachment):
       "description": str (optional),
       "response_mode": "single"|"multiple" (optional, default "single"),
       "questions": [
-        {"text": str, "type": "single"|"multi", "options": [str, ...]},
-        {"text": str, "type": "text", "style": "short"|"paragraph" (optional,
-         default "short"), "placeholder": str (optional), "required": bool
-         (optional, default true)}
+        {"text": str,                      # Label text (max 45 chars)
+         "type": "text"|"single"|"multi"|"radio"|"check"|"boolean"|"file",
+         "description": str (optional, Label description, max 100 chars),
+         # text:    style "short"|"paragraph", placeholder, required,
+         #          min_length (0-4000), max_length (1-4000)
+         # single:  options [str, ...] (1-25) -> String Select
+         # multi:   options [str, ...], min_values (default 0), max_values
+         # radio:   options [str, ...] (2-10) -> Radio Group
+         # check:   options [str, ...] (2-10) -> Checkbox Group (multi)
+         # boolean: default bool -> Checkbox
+         # file:    required, min_values, max_values -> File Upload
+         "required": bool (optional, default true)
+        }
       ]
     }
 
-``text`` questions are answered in a Discord Modal (popup text inputs)
-opened via the "Answer" button on the embed; ``single``/``multi`` questions
-use dropdowns on the embed itself. Both kinds may be mixed freely; the
-button is only rendered when the questionnaire has at least one text
-question.
+Answering is FULLY modal-based: the embed carries a single "Open form"
+button; the modal shows 5 questions per page (Discord hard cap) and pages
+chain via ephemeral "Next page" buttons when needed.
 """
 
 import asyncio
@@ -48,6 +55,41 @@ QUESTIONS_JSON_DOC = (
 # ---------------------------------------------------------------- pure helpers
 
 
+def _validate_common(q: dict, i: int) -> tuple[str, str, bool]:
+    text = q.get("text")
+    if not isinstance(text, str) or not text.strip():
+        raise ValueError(f"Question {i}: \"text\" must be a non-empty string.")
+    description = q.get("description", "")
+    if not isinstance(description, str):
+        raise ValueError(f"Question {i}: \"description\" must be a string.")  # noqa: TRY004
+    required = q.get("required", True)
+    if not isinstance(required, bool):
+        raise ValueError(f"Question {i}: \"required\" must be a boolean.")  # noqa: TRY004
+    return text.strip()[:45], description.strip()[:100], required
+
+
+def _validate_options(q: dict, i: int, lo: int, hi: int) -> list[str]:
+    options = q.get("options")
+    if not isinstance(options, list) or not (lo <= len(options) <= hi):
+        raise ValueError(
+            f"Question {i}: \"options\" must be a list of {lo}-{hi} strings."
+        )
+    if any(not isinstance(o, str) or not o.strip() for o in options):
+        raise ValueError(f"Question {i}: every option must be a non-empty string.")
+    return [o.strip()[:100] for o in options]
+
+
+def _int_field(q: dict, i: int, key: str, default, lo: int, hi: int):
+    value = q.get(key, default)
+    if value is None:
+        return None
+    if not isinstance(value, int) or not (lo <= value <= hi):
+        raise ValueError(
+            f"Question {i}: \"{key}\" must be an integer between {lo} and {hi}."
+        )
+    return value
+
+
 def validate_questions_payload(raw: str) -> dict:
     """Parse and validate the questionnaire JSON. Raises ValueError."""
     try:
@@ -68,46 +110,42 @@ def validate_questions_payload(raw: str) -> dict:
     for i, q in enumerate(questions, 1):
         if not isinstance(q, dict):
             raise ValueError(f"Question {i} must be an object.")  # noqa: TRY004
-        text = q.get("text")
-        if not isinstance(text, str) or not text.strip():
-            raise ValueError(f"Question {i}: \"text\" must be a non-empty string.")
+        text, description, required = _validate_common(q, i)
         qtype = q.get("type", "single")
-        if qtype not in ("single", "multi", "text"):
-            raise ValueError(
-                f"Question {i}: \"type\" must be \"single\", \"multi\" or \"text\"."
-            )
+        entry: dict = {"text": text, "type": qtype, "required": required}
+        if description:
+            entry["description"] = description
         if qtype == "text":
-            style = q.get("style", "short")
-            if style not in ("short", "paragraph"):
+            entry["style"] = q.get("style", "short")
+            if entry["style"] not in ("short", "paragraph"):
                 raise ValueError(
                     f"Question {i}: \"style\" must be \"short\" or \"paragraph\"."
                 )
-            placeholder = q.get("placeholder", "")
-            if not isinstance(placeholder, str):
-                raise ValueError(f"Question {i}: \"placeholder\" must be a string.")
-            required = q.get("required", True)
-            if not isinstance(required, bool):
-                raise ValueError(f"Question {i}: \"required\" must be a boolean.")
-            normalized.append(
-                {
-                    "text": text.strip(),
-                    "type": "text",
-                    "style": style,
-                    "placeholder": placeholder.strip()[:100],
-                    "required": required,
-                }
-            )
-            continue
-        options = q.get("options")
-        if not isinstance(options, list) or not (1 <= len(options) <= 25):
+            entry["placeholder"] = str(q.get("placeholder", "")).strip()[:100]
+            default_max = 1000 if entry["style"] == "paragraph" else 200
+            entry["min_length"] = _int_field(q, i, "min_length", 0, 0, 4000)
+            entry["max_length"] = _int_field(q, i, "max_length", default_max, 1, 4000)
+        elif qtype in ("single", "multi"):
+            entry["options"] = _validate_options(q, i, 1, 25)
+            if qtype == "multi":
+                entry["min_values"] = _int_field(q, i, "min_values", 0, 0, 25)
+                entry["max_values"] = _int_field(q, i, "max_values", 25, 1, 25)
+        elif qtype in ("radio", "check"):
+            entry["options"] = _validate_options(q, i, 2, 10)
+        elif qtype == "boolean":
+            default = q.get("default", False)
+            if not isinstance(default, bool):
+                raise ValueError(f"Question {i}: \"default\" must be a boolean.")
+            entry["default"] = default
+        elif qtype == "file":
+            entry["min_values"] = _int_field(q, i, "min_values", 1, 1, 10)
+            entry["max_values"] = _int_field(q, i, "max_values", 1, 1, 10)
+        else:
             raise ValueError(
-                f"Question {i}: \"options\" must be a list of 1-25 strings."
+                f"Question {i}: \"type\" must be one of text, single, multi, "
+                "radio, check, boolean, file."
             )
-        if any(not isinstance(o, str) or not o.strip() for o in options):
-            raise ValueError(f"Question {i}: every option must be a non-empty string.")
-        normalized.append(
-            {"text": text.strip(), "type": qtype, "options": [o.strip() for o in options]}
-        )
+        normalized.append(entry)
     response_mode = data.get("response_mode", "single")
     if response_mode not in ("single", "multiple"):
         raise ValueError("\"response_mode\" must be \"single\" or \"multiple\".")
@@ -135,6 +173,19 @@ def build_questionnaire_embed(questionnaire: Questionnaire) -> discord.Embed:
     ) else "one response per user"
     embed.set_footer(text=f"Questionnaire #{questionnaire.id} • {mode}")
     return embed
+
+
+def _format_value(value) -> str:
+    """Human-readable single answer for results/CSV."""
+    if isinstance(value, list):
+        return ", ".join(str(v) for v in value)
+    if value is None or value == "":
+        return ""
+    if value is True:
+        return "yes"
+    if value is False:
+        return "no"
+    return str(value)
 
 
 def build_results_embed(questionnaire: Questionnaire) -> discord.Embed:
@@ -167,13 +218,18 @@ def build_results_embed(questionnaire: Questionnaire) -> discord.Embed:
             answers = r.answers
             value = answers[i] if i < len(answers) else None
             if isinstance(value, list):
-                counts.update(value)
-            elif value is not None:
-                counts[value] += 1
-        lines = [f"`{counts.get(o, 0):>3}` {o}" for o in q["options"]]
+                counts.update(_format_value(v) for v in value)
+            elif value is not None and value != "":
+                counts[_format_value(value)] += 1
+        if q["type"] in ("radio", "check"):
+            lines = [f"`{counts.get(o, 0):>3}` {o}" for o in q["options"]]
+        else:
+            lines = [f"`{c:>3}` {v}" for v, c in counts.most_common()] or [
+                "No answers"
+            ]
         embed.add_field(
             name=f"Q{i + 1}. {q['text']} ({q['type']})",
-            value="\n".join(lines)[:1024] or "No options",
+            value="\n".join(lines)[:1024],
             inline=False,
         )
     embed.set_footer(text=f"Questionnaire #{questionnaire.id}")
@@ -193,7 +249,7 @@ def build_results_csv(questionnaire: Questionnaire) -> io.StringIO:
                r.created_at.isoformat()]
         for i, _q in enumerate(questionnaire.questions):
             value = r.answers[i] if i < len(r.answers) else None
-            row.append(", ".join(value) if isinstance(value, list) else (value or ""))
+            row.append(_format_value(value))
         writer.writerow(row)
     buf.seek(0)
     return buf
@@ -201,137 +257,233 @@ def build_results_csv(questionnaire: Questionnaire) -> io.StringIO:
 
 # --------------------------------------------------------------- answer UI
 
+MODAL_PAGE_SIZE = 5  # Discord hard cap: 5 Label rows per modal
 
-class QuestionnaireAnswerView(discord.ui.View):
-    """Dropdowns (one per question) + Submit. Attached to the public embed.
 
-    Questionnaires containing ``text``-type questions get an additional
-    "Answer" button that opens a :class:`QuestionnaireTextModal` with one
-    text input per text question (Discord caps modals at 5 inputs).
-    """
-
-    def __init__(self, questionnaire_id: int, questions: list[dict]):
-        super().__init__(timeout=None)  # persistent across restarts
-        self.questionnaire_id = questionnaire_id
-        self.questions = questions
-        self.selections: dict[int, str | list[str]] = {}
-        for i, q in enumerate(questions):
-            if q["type"] == "text":
-                continue
-            self.add_item(_QuestionSelect(self, i, q))
-        if any(q["type"] == "text" for q in questions):
-            self.add_item(_OpenTextModalButton(self))
-
-    @discord.ui.button(label="Submit", style=discord.ButtonStyle.success)
-    async def submit(self, interaction: discord.Interaction, _button: discord.ui.Button):
-        missing = [
-            i + 1
-            for i, q in enumerate(self.questions)
-            if q["type"] != "text" and i not in self.selections
-        ]
-        if missing:
-            await interaction.response.send_message(
-                f"Please answer question(s): {', '.join(map(str, missing))}.",
-                ephemeral=True,
-            )
-            return
-        await _save_response(
-            interaction, self.questionnaire_id, self.selections, self.text_answers
+def _build_form_item(index: int, q: dict) -> discord.ui.Item:
+    """Build the interactive component for one question (inside a Label)."""
+    cid = f"q{index}"
+    qtype = q["type"]
+    if qtype == "text":
+        return discord.ui.TextInput(
+            custom_id=cid,
+            style=(
+                discord.TextStyle.paragraph
+                if q.get("style") == "paragraph"
+                else discord.TextStyle.short
+            ),
+            required=q.get("required", True),
+            min_length=q.get("min_length") or 0,
+            max_length=q.get("max_length") or 4000,
+            placeholder=q.get("placeholder") or None,
         )
-    # Text answers collected by the modal live here between the modal submit
-    # and the Submit press. Populated via `store_text_answers` on the view.
-    @property
-    def text_answers(self) -> dict[int, str]:
-        return getattr(self, "_text_answers", {})
+    if qtype == "single":
+        return discord.ui.Select(
+            custom_id=cid,
+            options=[discord.SelectOption(label=o, value=o) for o in q["options"]],
+            required=q.get("required", True),
+            placeholder=q.get("placeholder") or None,
+        )
+    if qtype == "multi":
+        return discord.ui.Select(
+            custom_id=cid,
+            options=[discord.SelectOption(label=o, value=o) for o in q["options"]],
+            min_values=q.get("min_values") or 0,
+            max_values=q.get("max_values") or len(q["options"]),
+            required=q.get("required", True),
+            placeholder=q.get("placeholder") or None,
+        )
+    if qtype == "radio":
+        rg = discord.ui.RadioGroup(custom_id=cid, required=q.get("required", True))
+        for j, o in enumerate(q["options"]):
+            rg.add_option(label=o, value=o, default=False)
+        return rg
+    if qtype == "check":
+        # Checkbox group = several checkboxes sharing one custom_id; model as
+        # independent checkboxes with prefixed ids merged on submit.
+        return None  # handled by _build_form_row
+    if qtype == "boolean":
+        return discord.ui.Checkbox(custom_id=cid, default=q.get("default", False))
+    if qtype == "file":
+        return discord.ui.FileUpload(
+            custom_id=cid,
+            required=q.get("required", True),
+            min_values=q.get("min_values") or 1,
+            max_values=q.get("max_values") or 1,
+        )
+    raise ValueError(f"unknown question type {qtype!r}")
 
-    def store_text_answers(self, answers: dict[int, str]) -> None:
-        self._text_answers = {**self.text_answers, **answers}
+
+def _build_form_row(index: int, q: dict) -> list[discord.ui.Label]:
+    """Return the Label row(s) for one question (checkbox groups expand)."""
+    if q["type"] == "check":
+        labels = []
+        for j, o in enumerate(q["options"]):
+            labels.append(
+                discord.ui.Label(
+                    text=o[:45],
+                    component=discord.ui.Checkbox(custom_id=f"q{index}o{j}", default=False),
+                    description=q.get("description") if j == 0 and q.get("description") else None,
+                )
+            )
+        return labels
+    item = _build_form_item(index, q)
+    return [
+        discord.ui.Label(
+            text=q["text"],
+            component=item,
+            description=q.get("description") or None,
+        )
+    ]
 
 
-MODAL_PAGE_SIZE = 5  # Discord hard cap on TextInputs per modal
+def _paginate_rows(
+    questions: list[tuple[int, dict]],
+) -> list[list[tuple[int, dict, list[discord.ui.Label]]]]:
+    """Chunk questions into modal pages of at most MODAL_PAGE_SIZE label rows.
+
+    Each page holds whole questions only; a question's rows never split
+    across pages.
+    """
+    pages: list[list[tuple[int, dict, list[discord.ui.Label]]]] = []
+    current: list[tuple[int, dict, list[discord.ui.Label]]] = []
+    count = 0
+    for index, q in questions:
+        rows = _build_form_row(index, q)
+        if count + len(rows) > MODAL_PAGE_SIZE and current:
+            pages.append(current)
+            current = []
+            count = 0
+        current.append((index, q, rows))
+        count += len(rows)
+    if current:
+        pages.append(current)
+    return pages
 
 
-class QuestionnaireTextModal(discord.ui.Modal):
-    """One page of text questions (max 5 TextInputs — Discord hard cap).
+class QuestionnaireFormModal(discord.ui.Modal):
+    """One page of the questionnaire form (max 5 Label rows per modal).
 
-    ``text_qs`` is a slice of ``(index, question)`` pairs; when more text
-    questions remain after this page, ``on_submit`` follows up with an
-    ephemeral "Next page" button that opens the next modal, chaining until
-    every text question is answered. All answers accumulate on the shared
-    parent view.
+    ``page_questions`` is a list of ``(index, question, rows)`` triples for
+    this page (rows pre-built by :func:`_paginate_rows`). Answers accumulate
+    on the shared parent view; later pages chain via an ephemeral
+    "Next page" button.
     """
 
     def __init__(
         self,
-        parent_view: QuestionnaireAnswerView,
-        text_qs: list[tuple[int, dict]],
+        parent_view: "QuestionnaireAnswerView",
+        page_questions: list,
         page: int = 1,
         total_pages: int = 1,
+        next_pages: list | None = None,
     ):
-        super().__init__(title=f"Text questions ({page}/{total_pages})")
+        super().__init__(title=f"{parent_view.form_title} ({page}/{total_pages})"[:45])
         self.parent_view = parent_view
-        self.text_qs = text_qs
+        self.next_pages = next_pages or []
+        self.page_questions = page_questions
         self.page = page
         self.total_pages = total_pages
-        self.inputs: list[discord.ui.TextInput] = []
-        for i, q in text_qs[:MODAL_PAGE_SIZE]:
-            inp = discord.ui.TextInput(
-                label=f"Q{i + 1}: {q['text'][:40]}",
-                style=(
-                    discord.TextStyle.paragraph
-                    if q.get("style") == "paragraph"
-                    else discord.TextStyle.short
-                ),
-                required=q.get("required", True),
-                max_length=1000 if q.get("style") == "paragraph" else 200,
-                placeholder=(q.get("placeholder") or None),
-            )
-            self.inputs.append(inp)
-            self.add_item(inp)
+        for _index, _q, rows in page_questions:
+            for label in rows:
+                self.add_item(label)
 
     async def on_submit(self, interaction: discord.Interaction):
-        answers = {
-            self.text_qs[i][0]: child.value.strip()
-            for i, child in enumerate(self.inputs)
-        }
-        self.parent_view.store_text_answers(answers)
-        remaining = self.text_qs[MODAL_PAGE_SIZE:]
-        if remaining:
+        collected = self._collect_answers()
+        self.parent_view.store_answers(collected)
+        if self.next_pages:
             next_page = self.page + 1
             await interaction.response.send_message(
                 f"Page {self.page}/{self.total_pages} saved.",
-                view=_NextTextPageView(
-                    self.parent_view, remaining, next_page, self.total_pages
+                view=_NextPageView(
+                    self.parent_view, self.next_pages, next_page, self.total_pages
                 ),
                 ephemeral=True,
             )
         else:
             await interaction.response.send_message(
-                "Text answers saved — now press **Submit** on the embed to "
+                "All answers collected — now press **Submit** on the embed to "
                 "send your full response.",
                 ephemeral=True,
             )
 
+    def find_item(self, custom_id: str) -> discord.ui.Item | None:
+        """Locate an item by custom_id, unwrapping Label components."""
+        for child in self.walk_children():
+            if isinstance(child, discord.ui.Label):
+                comp = child.component
+                if getattr(comp, "custom_id", None) == custom_id:
+                    return comp
+            elif getattr(child, "custom_id", None) == custom_id:
+                return child
+        return None
 
-class _NextTextPageView(discord.ui.View):
+    def _collect_answers(self) -> dict[int, object]:
+        answers: dict[int, object] = {}
+        check_buf: dict[int, list] = {}
+        for index, q, _rows in self.page_questions:
+            if q["type"] == "check":
+                continue
+            item = self.find_item(f"q{index}")
+            answers[index] = self._read_value(item, q)
+        for child in self.walk_children():
+            if isinstance(child, discord.ui.Label) and isinstance(
+                child.component, discord.ui.Checkbox
+            ):
+                cid = child.component.custom_id or ""
+                if cid.startswith("q") and "o" in cid:
+                    try:
+                        qi, oi = cid[1:].split("o")
+                        q_index, o_index = int(qi), int(oi)
+                    except ValueError:
+                        continue
+                    if child.component.value:
+                        check_buf.setdefault(q_index, []).append(
+                            self.parent_view.questions[q_index]["options"][o_index]
+                        )
+        for q_index, opts in check_buf.items():
+            answers[q_index] = opts
+        return answers
+
+    @staticmethod
+    def _read_value(item: discord.ui.Item, q: dict) -> object:
+        if isinstance(item, discord.ui.Label):
+            item = item.component
+        if isinstance(item, discord.ui.TextInput):
+            return (item.value or "").strip()
+        if isinstance(item, discord.ui.Select):
+            values = list(item.values or [])
+            if q["type"] == "single":
+                return values[0] if values else None
+            return values
+        if isinstance(item, discord.ui.RadioGroup):
+            return item.value
+        if isinstance(item, discord.ui.Checkbox):
+            return bool(item.value)
+        if isinstance(item, discord.ui.FileUpload):
+            return [str(a.id) for a in (item.values or [])]
+        return None
+
+
+class _NextPageView(discord.ui.View):
     """Ephemeral button that opens the next modal page (modals can't nest)."""
 
     def __init__(
         self,
-        parent_view: QuestionnaireAnswerView,
-        text_qs: list[tuple[int, dict]],
+        parent_view: "QuestionnaireAnswerView",
+        next_pages: list,
         page: int,
         total_pages: int,
     ):
         super().__init__(timeout=300)
-        self.add_item(_NextTextPageButton(parent_view, text_qs, page, total_pages))
+        self.add_item(_NextPageButton(parent_view, next_pages, page, total_pages))
 
 
-class _NextTextPageButton(discord.ui.Button):
+class _NextPageButton(discord.ui.Button):
     def __init__(
         self,
-        parent_view: QuestionnaireAnswerView,
-        text_qs: list[tuple[int, dict]],
+        parent_view: "QuestionnaireAnswerView",
+        next_pages: list,
         page: int,
         total_pages: int,
     ):
@@ -340,70 +492,86 @@ class _NextTextPageButton(discord.ui.Button):
             style=discord.ButtonStyle.primary,
         )
         self.parent_view = parent_view
-        self.text_qs = text_qs
+        self.next_pages = next_pages
         self.page = page
         self.total_pages = total_pages
 
     async def callback(self, interaction: discord.Interaction):
         await interaction.response.send_modal(
-            QuestionnaireTextModal(
-                self.parent_view, self.text_qs, self.page, self.total_pages
+            QuestionnaireFormModal(
+                self.parent_view,
+                self.next_pages[0],
+                self.page,
+                self.total_pages,
+                next_pages=self.next_pages[1:],
             )
         )
 
 
-class _OpenTextModalButton(discord.ui.Button):
-    """Opens the text-questions Modal. Only added when text questions exist."""
+class QuestionnaireAnswerView(discord.ui.View):
+    """The public embed view: a single "Open form" button + Submit."""
 
-    def __init__(self, parent_view: "QuestionnaireAnswerView"):
-        super().__init__(
-            label="Answer text questions", style=discord.ButtonStyle.primary
+    def __init__(self, questionnaire_id: int, questions: list[dict], form_title: str = "Form"):
+        super().__init__(timeout=None)  # persistent across restarts
+        self.questionnaire_id = questionnaire_id
+        self.questions = questions
+        self.form_title = form_title
+        self.selections: dict[int, object] = {}
+        self.add_item(_OpenFormButton(self))
+
+    @property
+    def text_answers(self) -> dict[int, object]:
+        return self.selections
+
+    def store_answers(self, answers: dict[int, object]) -> None:
+        self.selections = {**self.selections, **answers}
+
+    # backwards-compatible alias used by tests
+    def store_text_answers(self, answers: dict[int, str]) -> None:
+        self.store_answers(answers)
+
+    @discord.ui.button(label="Open form", style=discord.ButtonStyle.primary)
+    async def open_form(self, interaction: discord.Interaction, _button):
+        pages = _paginate_rows(list(enumerate(self.questions)))
+        await interaction.response.send_modal(
+            QuestionnaireFormModal(self, pages[0], 1, len(pages), next_pages=pages[1:])
         )
+
+    @discord.ui.button(label="Submit", style=discord.ButtonStyle.success)
+    async def submit(self, interaction: discord.Interaction, _button):
+        missing = [
+            i + 1
+            for i, q in enumerate(self.questions)
+            if q.get("required", True) and i not in self.selections
+        ]
+        if missing:
+            await interaction.response.send_message(
+                f"Please answer question(s): {', '.join(map(str, missing))}.",
+                ephemeral=True,
+            )
+            return
+        await _save_response(
+            interaction, self.questionnaire_id, self.selections
+        )
+
+
+class _OpenFormButton(discord.ui.Button):
+    def __init__(self, parent_view: "QuestionnaireAnswerView"):
+        super().__init__(label="Open form", style=discord.ButtonStyle.primary)
         self.parent_view = parent_view
 
     async def callback(self, interaction: discord.Interaction):
-        text_qs = [
-            (i, q)
-            for i, q in self.parent_view.questions
-            if q["type"] == "text"
-        ]
-        total_pages = -(-len(text_qs) // MODAL_PAGE_SIZE)  # ceil div
+        pages = _paginate_rows(list(enumerate(self.parent_view.questions)))
         await interaction.response.send_modal(
-            QuestionnaireTextModal(self.parent_view, text_qs, 1, total_pages)
+            QuestionnaireFormModal(
+                self.parent_view, pages[0], 1, len(pages), next_pages=pages[1:]
+            )
         )
-
-
-class _QuestionSelect(discord.ui.Select):
-    def __init__(self, view: "QuestionnaireAnswerView", index: int, question: dict):
-        self.parent_view: QuestionnaireAnswerView = view
-        self._index = index
-        options = [
-            discord.SelectOption(label=o[:100], value=o[:100])
-            for o in question["options"][:25]
-        ]
-        self._multi = question["type"] == "multi"
-        super().__init__(
-            placeholder=f"Q{index + 1}: {question['text'][:90]}",
-            options=options,
-            min_values=1,
-            max_values=1 if not self._multi else min(len(options), 25),
-        )
-
-    async def callback(self, interaction: discord.Interaction):
-        self.parent_view.selections[self._index] = (
-            list(self.values) if self._multi else self.values[0]
-        )
-        await interaction.response.defer(ephemeral=True)
 
 
 async def _save_response(
-    interaction: discord.Interaction,
-    questionnaire_id: int,
-    selections: dict,
-    text_answers: dict | None = None,
+    interaction: discord.Interaction, questionnaire_id: int, selections: dict
 ) -> None:
-    text_answers = text_answers or {}
-
     def _db() -> tuple[str, bool]:
         try:
             q = Questionnaire.objects.get(pk=questionnaire_id)
@@ -411,12 +579,7 @@ async def _save_response(
             return "This questionnaire no longer exists.", False
         if q.closed:
             return "This questionnaire is closed.", False
-        answers: list = []
-        for i in range(len(q.questions)):
-            if i in selections:
-                answers.append(selections[i])
-            else:
-                answers.append(text_answers.get(i, ""))
+        answers = [selections.get(i) for i in range(len(q.questions))]
         if q.response_mode == "single":
             QuestionnaireResponse.objects.update_or_create(
                 questionnaire=q,
@@ -435,10 +598,8 @@ async def _save_response(
             )
         return "Your response has been recorded. Thank you!", True
 
-    message, ok = await asyncio.to_thread(_db)
+    message, _ok = await asyncio.to_thread(_db)
     await interaction.response.send_message(message, ephemeral=True)
-    if not ok:
-        return
 
 
 # -------------------------------------------------------------------- the cog
@@ -516,7 +677,9 @@ class QuestionnaireCog(commands.Cog):
         questionnaire = await asyncio.to_thread(_db)
 
         embed = build_questionnaire_embed(questionnaire)
-        view = QuestionnaireAnswerView(questionnaire.id, data["questions"])
+        view = QuestionnaireAnswerView(
+            questionnaire.id, data["questions"], form_title=data["title"]
+        )
         message = await interaction.channel.send(embed=embed, view=view)
         await asyncio.to_thread(
             Questionnaire.objects.filter(pk=questionnaire.id).update,
