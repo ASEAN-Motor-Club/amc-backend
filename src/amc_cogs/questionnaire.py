@@ -878,6 +878,59 @@ class QuestionnaireCog(commands.Cog):
             f"Questionnaire #{id} closed.", ephemeral=True
         )
 
+    @questionnaire_group.command(
+        name="repost",
+        description="Repost a questionnaire post (same embed + Open form button)",
+    )
+    @_require_role()
+    @app_commands.describe(
+        id="Questionnaire id (from the posted embed footer)",
+        channel="Channel to repost in (defaults to this channel)",
+    )
+    async def repost(
+        self,
+        interaction: discord.Interaction,
+        id: int,
+        channel: discord.TextChannel | None = None,
+    ):
+        await interaction.response.defer(ephemeral=True)
+
+        def _db() -> tuple[Questionnaire | None, str | None]:
+            try:
+                return Questionnaire.objects.get(pk=id), None
+            except Questionnaire.DoesNotExist:
+                return None, f"No questionnaire with id {id}."
+
+        questionnaire, err = await asyncio.to_thread(_db)
+        if err:
+            await interaction.followup.send(err, ephemeral=True)
+            return
+
+        embed = build_questionnaire_embed(questionnaire)
+        view = QuestionnaireAnswerView(
+            questionnaire.id, questionnaire.questions, form_title=questionnaire.title
+        )
+        target = channel or interaction.channel
+        try:
+            message = await target.send(embed=embed, view=view)
+        except discord.Forbidden:
+            await interaction.followup.send(
+                f"I lack **Send Messages / Embed Links** permission in "
+                f"{target.mention} — nothing was posted.",
+                ephemeral=True,
+            )
+            return
+        await asyncio.to_thread(
+            Questionnaire.objects.filter(pk=id).update,
+            channel_id=str(target.id),
+            message_id=str(message.id),
+        )
+        await interaction.followup.send(
+            f"Questionnaire #{id} reposted in {target.mention} — the old post's "
+            f"Open form button still works, but new results now track this post.",
+            ephemeral=True,
+        )
+
     # ------------------------------------------------------------- errors
 
     async def cog_app_command_error(

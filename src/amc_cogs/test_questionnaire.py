@@ -382,12 +382,12 @@ def test_submit_requires_required_questions():
 # ------------------------------------------------------------------ wiring
 
 
-def test_cog_group_has_five_commands():
+def test_cog_group_has_six_commands():
     bot = MagicMock()
     cog = QuestionnaireCog(bot)
     commands_list = cog.questionnaire_group.commands
     assert {c.name for c in commands_list} == {
-        "create", "schema", "results", "export", "close"
+        "create", "schema", "results", "export", "close", "repost"
     }
 
 
@@ -410,6 +410,113 @@ def test_role_check_rejects_missing_role():
 
     with pytest.raises(app_commands.CheckFailure):
         asyncio.run(run())
+
+# ---------- repost ----------
+
+def test_repost_posts_identical_embed_and_updates_location():
+    from unittest.mock import patch
+
+    saved = {}
+
+    class FakeQ:
+        id = 7
+        title = "Yuuka Survey"
+        description = "d"
+        questions = json.loads(VALID_JSON)["questions"]
+        response_mode = "multi"
+        channel_id = "999"
+        message_id = "888"
+        closed = False
+
+    q = FakeQ()
+
+    def fake_update(**kw):
+        saved.update(kw)
+
+    bot = MagicMock()
+    cog = QuestionnaireCog(bot)
+    interaction = AsyncMock(spec=discord.Interaction)
+    interaction.user.id = 555
+    interaction.response = AsyncMock()
+    interaction.followup.send = AsyncMock()
+    new_post = AsyncMock()
+    new_post.id = 555001
+
+    async def fake_send(embed=None, view=None):
+        new_post.embed = embed
+        new_post.view = view
+        return new_post
+
+    target_channel = MagicMock()
+    target_channel.id = 42
+    target_channel.send = fake_send
+    interaction.channel = target_channel
+
+    with patch(
+        "amc_cogs.questionnaire.build_questionnaire_embed", return_value="EMBED"
+    ), patch(
+        "amc_cogs.questionnaire.Questionnaire.objects.get", return_value=q
+    ), patch(
+        "amc_cogs.questionnaire.Questionnaire.objects.filter"
+    ) as fake_filter:
+        fake_filter.return_value.update = fake_update
+        asyncio.run(cog.repost.callback(cog, interaction, q.id))
+
+    # embed identical to what the original post builder produced
+    assert new_post.embed == "EMBED"
+    # view is an answer view for the same questionnaire with same questions
+    view = new_post.view
+    assert isinstance(view, QuestionnaireAnswerView)
+    assert view.questionnaire_id == q.id
+    assert view.questions == q.questions
+    # DB location updated to the new post
+    assert saved == {"channel_id": "42", "message_id": str(new_post.id)}
+    interaction.followup.send.assert_called_once()
+
+
+@pytest.mark.django_db
+def test_repost_target_channel_option():
+    from unittest.mock import patch
+
+    class FakeQ:
+        id = 7
+        title = "s"
+        questions = json.loads(VALID_JSON)["questions"]
+        response_mode = "multi"
+        channel_id = ""
+        message_id = ""
+        closed = False
+
+    q = FakeQ()
+
+    bot = MagicMock()
+    cog = QuestionnaireCog(bot)
+    interaction = AsyncMock(spec=discord.Interaction)
+    interaction.user.id = 555
+    interaction.response = AsyncMock()
+    interaction.followup.send = AsyncMock()
+
+    other = AsyncMock()
+    other.id = 777
+    other.send = AsyncMock(return_value=MagicMock(id=555001))
+    interaction.channel = MagicMock()
+    interaction.channel.id = 42
+
+    with patch(
+        "amc_cogs.questionnaire.build_questionnaire_embed", return_value="E"
+    ), patch(
+        "amc_cogs.questionnaire.Questionnaire.objects.get", return_value=q
+    ), patch(
+        "amc_cogs.questionnaire.Questionnaire.objects.filter"
+    ) as fake_filter:
+        fake_filter.return_value.update.return_value = None
+        asyncio.run(cog.repost.callback(cog, interaction, q.id, channel=other))
+
+    other.send.assert_awaited_once()
+    assert other.send.await_args.kwargs["view"].questionnaire_id == q.id
+
+
+@pytest.mark.django_db
 
 # ---------- check (Checkbox Group) + pagination invariants ----------
 
