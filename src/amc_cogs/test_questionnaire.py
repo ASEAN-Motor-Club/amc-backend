@@ -119,11 +119,37 @@ def test_validate_file_question():
 
 
 def test_validate_label_text_truncated():
-    data = validate_questions_payload(json.dumps({
-        "title": "x",
-        "questions": [{"text": "x" * 100, "type": "text"}],
-    }))
-    assert len(data["questions"][0]["text"]) == 45
+    with pytest.raises(ValueError, match="max is 45"):
+        validate_questions_payload(json.dumps({
+            "title": "x",
+            "questions": [{"text": "x" * 46, "type": "text"}],
+        }))
+
+
+def test_validate_rejects_overlong_description():
+    with pytest.raises(ValueError, match="max is 100"):
+        validate_questions_payload(json.dumps({
+            "title": "x",
+            "questions": [{"text": "ok", "type": "text",
+                           "description": "d" * 101}],
+        }))
+
+
+def test_validate_rejects_overlong_option():
+    with pytest.raises(ValueError, match="over 100 chars"):
+        validate_questions_payload(json.dumps({
+            "title": "x",
+            "questions": [{"text": "ok", "type": "single",
+                           "options": ["good", "o" * 101]}],
+        }))
+
+
+def test_validate_rejects_overlong_title():
+    with pytest.raises(ValueError, match="max is 200"):
+        validate_questions_payload(json.dumps({
+            "title": "T" * 201,
+            "questions": [{"text": "ok", "type": "text"}],
+        }))
 
 
 def test_validate_defaults_response_mode():

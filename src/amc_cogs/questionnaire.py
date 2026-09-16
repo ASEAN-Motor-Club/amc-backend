@@ -123,13 +123,24 @@ def _validate_common(q: dict, i: int) -> tuple[str, str, bool]:
     text = q.get("text")
     if not isinstance(text, str) or not text.strip():
         raise ValueError(f"Question {i}: \"text\" must be a non-empty string.")
+    if len(text) > 45:
+        raise ValueError(
+            f"Question {i}: \"text\" is {len(text)} chars; max is 45. "
+            "Move long question text into the question's \"description\" "
+            "(max 100 chars)."
+        )
     description = q.get("description", "")
     if not isinstance(description, str):
         raise ValueError(f"Question {i}: \"description\" must be a string.")  # noqa: TRY004
+    if len(description.strip()) > 100:
+        raise ValueError(
+            f"Question {i}: \"description\" is {len(description.strip())} chars; "
+            "max is 100."
+        )
     required = q.get("required", True)
     if not isinstance(required, bool):
         raise ValueError(f"Question {i}: \"required\" must be a boolean.")  # noqa: TRY004
-    return text.strip()[:45], description.strip()[:100], required
+    return text.strip(), description.strip(), required
 
 
 def _validate_options(q: dict, i: int, lo: int, hi: int) -> list[str]:
@@ -140,7 +151,14 @@ def _validate_options(q: dict, i: int, lo: int, hi: int) -> list[str]:
         )
     if any(not isinstance(o, str) or not o.strip() for o in options):
         raise ValueError(f"Question {i}: every option must be a non-empty string.")
-    return [o.strip()[:100] for o in options]
+    stripped = [o.strip() for o in options]
+    too_long = [o for o in stripped if len(o) > 100]
+    if too_long:
+        raise ValueError(
+            f"Question {i}: option(s) over 100 chars: {too_long[0]!r} "
+            f"({len(too_long[0])} chars). Shorten the option."
+        )
+    return stripped
 
 
 def _int_field(q: dict, i: int, key: str, default, lo: int, hi: int):
@@ -165,6 +183,8 @@ def validate_questions_payload(raw: str) -> dict:
     title = data.get("title")
     if not isinstance(title, str) or not title.strip():
         raise ValueError("\"title\" must be a non-empty string.")
+    if len(title.strip()) > 200:
+        raise ValueError(f"\"title\" is {len(title.strip())} chars; max is 200.")
     questions = data.get("questions")
     if not isinstance(questions, list) or not questions:
         raise ValueError("\"questions\" must be a non-empty list.")
