@@ -195,8 +195,10 @@ def validate_questions_payload(raw: str) -> dict:
         elif qtype in ("radio", "check"):
             entry["options"] = _validate_options(q, i, 1, 10)
             if qtype == "check":
-                entry["min_values"] = _int_field(q, i, "min_values", 0, 0, 10)
-                entry["max_values"] = _int_field(q, i, "max_values", 10, 1, 10)
+                if "min_values" in q and q["min_values"] is not None:
+                    entry["min_values"] = _int_field(q, i, "min_values", 0, 0, 10)
+                if "max_values" in q and q["max_values"] is not None:
+                    entry["max_values"] = _int_field(q, i, "max_values", 1, 1, 10)
         elif qtype == "file":
             entry["min_values"] = _int_field(q, i, "min_values", 1, 1, 10)
             entry["max_values"] = _int_field(q, i, "max_values", 1, 1, 10)
@@ -377,11 +379,20 @@ def _build_form_row(index: int, q: dict) -> list[discord.ui.Label]:
         if min_vals is None:
             # Discord requires min_values >= 1 when the group is required.
             min_vals = 1 if required else 0
+        n_opts = len(q["options"])
+        max_vals = q.get("max_values")
+        if max_vals is None or max_vals > n_opts:
+            max_vals = n_opts
+        if required and (min_vals is None or min_vals < 1):
+            min_vals = 1
+        if min_vals is None:
+            min_vals = 0
+        min_vals = min(min_vals, max_vals)
         cg = discord.ui.CheckboxGroup(
             custom_id=cid,
             required=required,
             min_values=min_vals,
-            max_values=q.get("max_values") or len(q["options"]),
+            max_values=max_vals,
         )
         for j, o in enumerate(q["options"]):
             cg.add_option(label=o[:100], value=o[:100])
