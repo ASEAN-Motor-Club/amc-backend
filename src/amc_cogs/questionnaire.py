@@ -11,7 +11,7 @@ Questions JSON schema (accepted inline or as a .json attachment):
       "response_mode": "single"|"multiple" (optional, default "single"),
       "questions": [
         {"text": str,                      # Label text (max 45 chars)
-         "type": "text"|"single"|"multi"|"radio"|"check"|"boolean"|"file",
+         "type": "text"|"single"|"multi"|"radio"|"check"|"file",
          "description": str (optional, Label description, max 100 chars),
          # text:    style "short"|"paragraph", placeholder, required,
          #          min_length (0-4000), max_length (1-4000)
@@ -19,7 +19,6 @@ Questions JSON schema (accepted inline or as a .json attachment):
          # multi:   options [str, ...], min_values (default 0), max_values
          # radio:   options [str, ...] (2-10) -> Radio Group
          # check:   options [str, ...] (2-10) -> Checkbox Group (multi)
-         # boolean: default bool -> Checkbox
          # file:    required, min_values, max_values -> File Upload
          "required": bool (optional, default true)
         }
@@ -48,15 +47,16 @@ QUESTIONS_JSON_DOC = (
     "Schema: {\"title\": str, \"description\": str (optional), "
     "\"response_mode\": \"single\"|\"multiple\" (optional, default single), "
     "\"questions\": [{\"text\": str (≤45 chars, the field label), "
-    "\"type\": \"single\"|\"multi\"|\"text\"|\"radio\"|\"check\"|\"boolean\"|\"file\", "
+    "\"type\": \"single\"|\"multi\"|\"text\"|\"radio\"|\"check\"|\"file\", "
     "\"description\": str (optional, ≤100 chars, shown under the label), "
     "\"required\": bool (optional, default true), "
     "\"options\": [str, ...] (single/multi: 1-25; radio/check: 2-10), "
     "// text only: \"style\": \"short\"|\"paragraph\", \"placeholder\": str, "
     "\"min_length\": 0-4000, \"max_length\": 1-4000; "
     "// multi: \"min_values\": 0-25, \"max_values\": 1-25; "
-    "// boolean: \"default\": bool; file: \"min_values\"/\"max_values\": 1-10"
-    "]}]} — max 10 questions. Use /questionnaire schema for examples."
+    "// check: \"min_values\"/\"max_values\": 0-10; "
+    "file: \"min_values\"/\"max_values\": 1-10"
+    "]}]} Use /questionnaire schema for examples."
 )
 
 
@@ -98,16 +98,12 @@ Common per-question fields:
  "options": ["Bad", "Ok", "Good", "Great"]}
 ```
 
-**`check`** — toggle each option (like multi, checkbox style)
+**`check`** — checkbox group, tick any of the options
 ```json
 {"text": "Which days can you attend?", "type": "check",
- "options": ["Fri", "Sat", "Sun"]}
+ "options": ["Fri", "Sat", "Sun"], "min_values": 1, "max_values": 3}
 ```
 
-**`boolean`** — yes/no checkbox
-```json
-{"text": "Subscribe to announcements?", "type": "boolean", "default": false}
-```
 
 **`file`** — upload files
 ```json
@@ -197,19 +193,17 @@ def validate_questions_payload(raw: str) -> dict:
                 entry["min_values"] = _int_field(q, i, "min_values", 0, 0, 25)
                 entry["max_values"] = _int_field(q, i, "max_values", 25, 1, 25)
         elif qtype in ("radio", "check"):
-            entry["options"] = _validate_options(q, i, 2, 10)
-        elif qtype == "boolean":
-            default = q.get("default", False)
-            if not isinstance(default, bool):
-                raise ValueError(f"Question {i}: \"default\" must be a boolean.")
-            entry["default"] = default
+            entry["options"] = _validate_options(q, i, 1, 10)
+            if qtype == "check":
+                entry["min_values"] = _int_field(q, i, "min_values", 0, 0, 10)
+                entry["max_values"] = _int_field(q, i, "max_values", 10, 1, 10)
         elif qtype == "file":
             entry["min_values"] = _int_field(q, i, "min_values", 1, 1, 10)
             entry["max_values"] = _int_field(q, i, "max_values", 1, 1, 10)
         else:
             raise ValueError(
                 f"Question {i}: \"type\" must be one of text, single, multi, "
-                "radio, check, boolean, file."
+                "radio, check, file."
             )
         normalized.append(entry)
     response_mode = data.get("response_mode", "single")
@@ -364,12 +358,6 @@ def _build_form_item(index: int, q: dict) -> discord.ui.Item:
         for j, o in enumerate(q["options"]):
             rg.add_option(label=o, value=o, default=False)
         return rg
-    if qtype == "check":
-        # Checkbox group = several checkboxes sharing one custom_id; model as
-        # independent checkboxes with prefixed ids merged on submit.
-        return None  # handled by _build_form_row
-    if qtype == "boolean":
-        return discord.ui.Checkbox(custom_id=cid, default=q.get("default", False))
     if qtype == "file":
         return discord.ui.FileUpload(
             custom_id=cid,
@@ -381,23 +369,29 @@ def _build_form_item(index: int, q: dict) -> discord.ui.Item:
 
 
 def _build_form_row(index: int, q: dict) -> list[discord.ui.Label]:
-    """Return the Label row(s) for one question (checkbox groups expand)."""
+    """Return the Label row(s) for one question."""
+    cid = f"q{index}"
     if q["type"] == "check":
-        labels = []
+        required = q.get("required", True)
+        min_vals = q.get("min_values")
+        if min_vals is None:
+            # Discord requires min_values >= 1 when the group is required.
+            min_vals = 1 if required else 0
+        cg = discord.ui.CheckboxGroup(
+            custom_id=cid,
+            required=required,
+            min_values=min_vals,
+            max_values=q.get("max_values") or len(q["options"]),
+        )
         for j, o in enumerate(q["options"]):
-            combined = f'{q["text"]}: {o}'
-            if len(combined) <= 45:
-                text, desc = combined, q.get("description") if j == 0 else None
-            else:
-                text, desc = o, q["text"] if j == 0 else None
-            labels.append(
-                discord.ui.Label(
-                    text=text[:45],
-                    component=discord.ui.Checkbox(custom_id=f"q{index}o{j}", default=False),
-                    description=(desc or None),
-                )
+            cg.add_option(label=o[:100], value=o[:100])
+        return [
+            discord.ui.Label(
+                text=q["text"],
+                component=cg,
+                description=q.get("description") or None,
             )
-        return labels
+        ]
     item = _build_form_item(index, q)
     return [
         discord.ui.Label(
@@ -491,29 +485,9 @@ class QuestionnaireFormModal(discord.ui.Modal):
 
     def _collect_answers(self) -> dict[int, object]:
         answers: dict[int, object] = {}
-        check_buf: dict[int, list] = {}
         for index, q, _rows in self.page_questions:
-            if q["type"] == "check":
-                continue
             item = self.find_item(f"q{index}")
             answers[index] = self._read_value(item, q)
-        for child in self.walk_children():
-            if isinstance(child, discord.ui.Label) and isinstance(
-                child.component, discord.ui.Checkbox
-            ):
-                cid = child.component.custom_id or ""
-                if cid.startswith("q") and "o" in cid:
-                    try:
-                        qi, oi = cid[1:].split("o")
-                        q_index, o_index = int(qi), int(oi)
-                    except ValueError:
-                        continue
-                    if child.component.value:
-                        check_buf.setdefault(q_index, []).append(
-                            self.parent_view.questions[q_index]["options"][o_index]
-                        )
-        for q_index, opts in check_buf.items():
-            answers[q_index] = opts
         return answers
 
     @staticmethod
@@ -522,6 +496,8 @@ class QuestionnaireFormModal(discord.ui.Modal):
             item = item.component
         if isinstance(item, discord.ui.TextInput):
             return (item.value or "").strip()
+        if isinstance(item, discord.ui.CheckboxGroup):
+            return list(item.values or [])
         if isinstance(item, discord.ui.Select):
             values = list(item.values or [])
             if q["type"] == "single":
@@ -529,8 +505,6 @@ class QuestionnaireFormModal(discord.ui.Modal):
             return values
         if isinstance(item, discord.ui.RadioGroup):
             return item.value
-        if isinstance(item, discord.ui.Checkbox):
-            return bool(item.value)
         if isinstance(item, discord.ui.FileUpload):
             return [str(a.id) for a in (item.values or [])]
         return None

@@ -35,7 +35,7 @@ VALID_JSON = json.dumps(
              "placeholder": "tell us", "required": False},
             {"text": "Rank it", "type": "radio", "options": ["Bad", "Ok", "Good"]},
             {"text": "Toppings", "type": "check", "options": ["Ham", "Corn"]},
-            {"text": "Subscribe?", "type": "boolean", "default": False},
+            {"text": "Anything else?", "type": "text", "required": False},
         ],
     }
 )
@@ -101,18 +101,11 @@ def test_validate_rejects_bad_length_bounds():
         }))
 
 
-def test_validate_radio_needs_two_options():
-    with pytest.raises(ValueError, match="2-10"):
+def test_validate_radio_rejects_zero_options():
+    with pytest.raises(ValueError, match="options"):
         validate_questions_payload(json.dumps({
-            "title": "x", "questions": [{"text": "q", "type": "radio", "options": ["a"]}],
+            "title": "x", "questions": [{"text": "q", "type": "radio", "options": []}],
         }))
-
-
-def test_validate_boolean_default():
-    data = validate_questions_payload(json.dumps({
-        "title": "x", "questions": [{"text": "q", "type": "boolean", "default": True}],
-    }))
-    assert data["questions"][0]["default"] is True
 
 
 def test_validate_file_question():
@@ -128,7 +121,7 @@ def test_validate_file_question():
 def test_validate_label_text_truncated():
     data = validate_questions_payload(json.dumps({
         "title": "x",
-        "questions": [{"text": "x" * 100, "type": "boolean"}],
+        "questions": [{"text": "x" * 100, "type": "text"}],
     }))
     assert len(data["questions"][0]["text"]) == 45
 
@@ -174,13 +167,13 @@ def test_build_results_embed_tallies(questionnaire):
         questionnaire=questionnaire,
         discord_user_id="1",
         discord_username="alice",
-        answers=["Red", ["Apple"], "because", "Good", ["Ham"], True],
+        answers=["Red", ["Apple"], "because", "Good", ["Ham"], "extra text"],
     )
     QuestionnaireResponse.objects.create(
         questionnaire=questionnaire,
         discord_user_id="2",
         discord_username="bob",
-        answers=["Blue", ["Apple", "Banana"], None, "Ok", [], False],
+        answers=["Blue", ["Apple", "Banana"], None, "Ok", [], None],
     )
     embed = build_results_embed(questionnaire)
     assert "2 response(s)" in embed.description
@@ -196,8 +189,8 @@ def test_build_results_embed_tallies(questionnaire):
     q5 = embed.fields[4]
     assert "`  1` Ham" in q5.value
     q6 = embed.fields[5]
-    assert "`  1` yes" in q6.value
-    assert "`  1` no" in q6.value
+    assert "> extra text" in q6.value
+    assert "No answers" not in q6.value
 
 
 def test_build_results_csv(questionnaire):
@@ -247,8 +240,8 @@ def test_open_form_builds_first_page():
         return modal
 
     modal = asyncio.run(run())
-    # rows: q1(1)+q2(1)+q3(1)+q4(1)=4; q5 expands to 2 rows -> would overflow, so page 2
-    assert len(modal.children) == 4
+    # 6 single-row questions -> page 1 holds 5, page 2 the last
+    assert len(modal.children) == 5
     assert modal.total_pages == 2
     labels = [c for c in modal.children]
     assert all(isinstance(c, discord.ui.Label) for c in labels)
@@ -262,7 +255,13 @@ def test_open_form_builds_first_page():
     assert isinstance(ti, discord.ui.TextInput)
     assert ti.style == discord.TextStyle.paragraph
     assert ti.required is False
-    assert ti.placeholder == "tell us"
+    assert ti.placeholder
+    # radio -> RadioGroup
+    assert isinstance(labels[3].component, discord.ui.RadioGroup)
+    # check -> CheckboxGroup in ONE Label row with the question text
+    cg = labels[4].component
+    assert isinstance(cg, discord.ui.CheckboxGroup)
+    assert [o.label for o in cg.options] == ["Ham", "Corn"]
     # radio -> RadioGroup
     assert isinstance(labels[3].component, discord.ui.RadioGroup)
     assert len(labels[3].component.options) == 3
@@ -282,6 +281,7 @@ def test_modal_collect_and_chain():
         page1.find_item("q1")._values = ["Apple", "Banana"]
         page1.find_item("q2")._value = "  because reasons  "
         page1.find_item("q3")._value = "Good"
+        page1.find_item("q4")._values = ["Ham"]
         interaction = AsyncMock()
         await page1.on_submit(interaction)
         return view, interaction
@@ -300,16 +300,14 @@ def test_modal_collect_and_chain():
         page2 = QuestionnaireFormModal(
             view, btn.next_pages[0], 2, 2, next_pages=btn.next_pages[1:]
         )
-        page2.find_item("q4o0")._value = True
-        page2.find_item("q4o1")._value = False
-        page2.find_item("q5")._value = False
+        page2.find_item("q5")._value = "  nah  "
         interaction2 = AsyncMock()
         await page2.on_submit(interaction2)
         return interaction2
 
     interaction2 = asyncio.run(run2())
     assert view.selections[4] == ["Ham"]
-    assert view.selections[5] is False
+    assert view.selections[5] == "nah"
     assert "Submit" in interaction2.response.send_message.call_args.args[0]
 
 
@@ -318,16 +316,16 @@ def test_submit_requires_required_questions():
 
     async def run():
         view = QuestionnaireAnswerView(1, questions, form_title="T")
-        # Q3 (radio) unanswered but required
-        view.selections = {2: "why"}  # only text (not required) answered
+        # only the optional text (index 2) answered
+        view.selections = {2: "why"}
         interaction = AsyncMock()
         await view.do_submit(interaction)
         return interaction
 
     interaction = asyncio.run(run())
     msg = interaction.response.send_message.call_args.args[0]
-    assert all(str(n) in msg for n in (1, 2, 4, 5, 6))
-    assert "3" not in msg.replace("question(s):", "")
+    assert all(str(n) in msg for n in (1, 2, 4, 5))
+    assert " 3 " not in msg or "3." not in msg
 
 
 # ------------------------------------------------------------------ wiring
@@ -362,9 +360,9 @@ def test_role_check_rejects_missing_role():
     with pytest.raises(app_commands.CheckFailure):
         asyncio.run(run())
 
-# ---------- check/boolean labels + pagination invariants ----------
+# ---------- check (Checkbox Group) + pagination invariants ----------
 
-def test_check_question_labels_include_question_text():
+def test_check_question_is_one_label_row_with_question_text():
     raw = json.dumps({
         "title": "t",
         "questions": [{
@@ -375,46 +373,28 @@ def test_check_question_labels_include_question_text():
     })
     data = validate_questions_payload(raw)
     pages = _paginate_rows(list(enumerate(data["questions"])))
-    labels = [lbl for _i, _q, rs in pages[0] for lbl in rs]
-    texts = [lbl.text for lbl in labels]
-    assert texts == [
-        "Which merch would you buy?: Acrylic stand",
-        "Which merch would you buy?: Voice pack",
-    ]
+    rows = [lbl for _i, _q, rs in pages[0] for lbl in rs]
+    assert len(rows) == 1
+    label = rows[0]
+    assert label.text == "Which merch would you buy?"
+    cg = label.component
+    assert isinstance(cg, discord.ui.CheckboxGroup)
+    assert [o.label for o in cg.options] == ["Acrylic stand", "Voice pack"]
 
 
-def test_check_long_option_falls_back_to_option_label_with_question_description():
+def test_check_group_respects_min_max_values():
     raw = json.dumps({
         "title": "t",
         "questions": [{
-            "text": "Which merch would you buy?",
-            "type": "check",
-            "options": [
-                "Signed photo of Yuuka in her Streamy Awards outfit 2026",
-                "Acrylic stand",
-            ],
+            "text": "Pick snacks", "type": "check", "min_values": 1, "max_values": 2,
+            "options": ["A", "B", "C"],
         }],
     })
     data = validate_questions_payload(raw)
-    rows = _paginate_rows(list(enumerate(data["questions"])))
-    first = rows[0][0][2][0]
-    second = rows[0][0][2][1]
-    assert len(first.text) <= 45
-    assert first.description == "Which merch would you buy?"
-    assert second.text == "Which merch would you buy?: Acrylic stand"
-
-
-def test_boolean_question_label_is_question_text():
-    raw = json.dumps({
-        "title": "t",
-        "questions": [{"text": "OK to tag you?", "type": "boolean", "default": False}],
-    })
-    data = validate_questions_payload(raw)
-    rows = _paginate_rows(list(enumerate(data["questions"])))
-    label = rows[0][0][2][0]
-    assert label.text == "OK to tag you?"
-    assert isinstance(label.component, discord.ui.Checkbox)
-    assert label.component.default is False
+    pages = _paginate_rows(list(enumerate(data["questions"])))
+    cg = pages[0][0][2][0].component
+    assert cg.min_values == 1
+    assert cg.max_values == 2
 
 
 def test_pagination_never_exceeds_five_rows_per_page():
@@ -423,34 +403,13 @@ def test_pagination_never_exceeds_five_rows_per_page():
         "questions": [
             {"text": f"Q{i} text", "type": "check",
              "options": ["opt a", "opt b", "opt c"]}
-            for i in range(4)
+            for i in range(9)
         ],
     })
     data = validate_questions_payload(raw)
     pages = _paginate_rows(list(enumerate(data["questions"])))
     for page in pages:
         assert sum(len(rows) for _i, _q, rows in page) <= 5
-
-
-def test_pagination_never_splits_a_question_across_pages():
-    raw = json.dumps({
-        "title": "t",
-        "questions": [
-            {"text": "Pick some", "type": "check",
-             "options": ["a", "b", "c", "d", "e", "f"]},
-            {"text": "Text q", "type": "text"},
-            {"text": "Bool q", "type": "boolean"},
-        ],
-    })
-    data = validate_questions_payload(raw)
-    pages = _paginate_rows(list(enumerate(data["questions"])))
-    seen_pages_per_q: dict[int, int] = {}
-    for page in pages:
-        for index, _q, _rows in page:
-            seen_pages_per_q[index] = seen_pages_per_q.get(index, 0) + 1
-    assert all(v == 1 for v in seen_pages_per_q.values())
-    # The 6-option check (6 rows) forces it onto its own page; text+bool share the next.
-    assert len(pages) == 2
 
 
 def test_validator_accepts_more_than_ten_questions():
@@ -464,8 +423,17 @@ def test_validator_accepts_more_than_ten_questions():
     assert len(data["questions"]) == 15
 
 
-def test_yuuka_survey_pages_split_by_rows_not_questions():
-    """Regression: 7-question Yuuka survey splits into 3 pages by label rows."""
+def test_boolean_type_is_rejected():
+    raw = json.dumps({
+        "title": "t",
+        "questions": [{"text": "OK?", "type": "boolean"}],
+    })
+    with pytest.raises(ValueError, match="type"):
+        validate_questions_payload(raw)
+
+
+def test_yuuka_survey_fits_two_pages():
+    """check is now a single row — 7 questions = 7 rows = 2 pages (5+2)."""
     raw = json.dumps({
         "title": "Yuuka Fan Survey",
         "questions": [
@@ -479,15 +447,11 @@ def test_yuuka_survey_pages_split_by_rows_not_questions():
             {"text": "Which merch would you buy?", "type": "check",
              "options": ["Acrylic stand", "Voice pack", "Oshi mark hoodie",
                           "Signed photo"]},
-            {"text": "OK to tag you?", "type": "boolean"},
             {"text": "Fan art submission", "type": "file"},
         ],
     })
     data = validate_questions_payload(raw)
     pages = _paginate_rows(list(enumerate(data["questions"])))
     row_counts = [sum(len(rows) for _i, _q, rows in page) for page in pages]
-    # text(1)+single(1)+multi(1)+radio(1) = 4 rows; check(4) can't fit in the
-    # single remaining row so it moves to page 2 with boolean(1) = 5 rows;
-    # file(1) lands on page 3.
-    assert len(pages) == 3
-    assert row_counts == [4, 5, 1]
+    assert len(pages) == 2
+    assert row_counts == [5, 1]
