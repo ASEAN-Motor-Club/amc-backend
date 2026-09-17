@@ -819,8 +819,26 @@ class QuestionnaireCog(commands.Cog):
         # Placeholder dynamic view: matches ONLY unknown/deterministic ids not
         # covered by per-questionnaire views registered in setup_hook restore.
         # (Discord requires at least one registered persistent view per
-        # custom_id; per-questionnaire views are added in setup via
+        # custom_id; per-questionnaire views are added in cog_load via
         # restore_persistent_views.)
+
+    async def cog_load(self) -> None:
+        """Schedule the persistent-view restore when the cog is added.
+
+        The bot registers cogs directly in AMCDiscordBot.setup_hook
+        (add_cog), NOT via load_extension — the module-level setup()
+        below never runs, so the restore must hook the cog lifecycle.
+        discord.py calls cog_load() for every add_cog.
+        """
+
+        async def _restore_when_ready() -> None:
+            await self.bot.wait_until_ready()
+            try:
+                await self.restore_persistent_views()
+            except Exception:
+                log.exception("Questionnaire persistent-view restore crashed")
+
+        self.bot.loop.create_task(_restore_when_ready())
 
     async def restore_persistent_views(self) -> None:
         """Re-register Open-form views for every open questionnaire.
@@ -1142,14 +1160,9 @@ class QuestionnaireCog(commands.Cog):
 
 
 async def setup(bot: commands.Bot):
-    cog = QuestionnaireCog(bot)
-    await bot.add_cog(cog)
+    """Extension entry point (load_extension path only).
 
-    async def _restore_when_ready() -> None:
-        await bot.wait_until_ready()
-        try:
-            await cog.restore_persistent_views()
-        except Exception:
-            log.exception("Questionnaire persistent-view restore crashed")
-
-    bot.loop.create_task(_restore_when_ready())
+    The production bot adds cogs directly in setup_hook, so this is never
+    called there; the restore now lives in QuestionnaireCog.cog_load.
+    """
+    await bot.add_cog(QuestionnaireCog(bot))
