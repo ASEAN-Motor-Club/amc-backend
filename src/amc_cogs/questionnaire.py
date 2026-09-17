@@ -34,6 +34,7 @@ import asyncio
 import csv
 import io
 import json
+import logging
 from collections import Counter
 
 import discord
@@ -42,6 +43,15 @@ from discord.ext import commands
 from django.conf import settings
 
 from amc.models import Questionnaire, QuestionnaireResponse
+
+log = logging.getLogger("amc.questionnaire")
+
+OPEN_FORM_CUSTOM_ID_PREFIX = "qnaire_open:"
+
+
+def open_form_custom_id(questionnaire_id: int) -> str:
+    """Deterministic component custom_id so views survive bot restarts."""
+    return f"{OPEN_FORM_CUSTOM_ID_PREFIX}{questionnaire_id}"
 
 QUESTIONS_JSON_DOC = (
     "Schema: {\"title\": str, \"description\": str (optional), "
@@ -642,16 +652,44 @@ class _SubmitFollowupView(discord.ui.View):
 
 class _OpenFormButton(discord.ui.Button):
     def __init__(self, parent_view: "QuestionnaireAnswerView"):
-        super().__init__(label="Open form", style=discord.ButtonStyle.primary)
+        super().__init__(
+            label="Open form",
+            style=discord.ButtonStyle.primary,
+            custom_id=open_form_custom_id(parent_view.questionnaire_id),
+        )
         self.parent_view = parent_view
 
     async def callback(self, interaction: discord.Interaction):
-        pages = _paginate_rows(list(enumerate(self.parent_view.questions)))
-        await interaction.response.send_modal(
-            QuestionnaireFormModal(
-                self.parent_view, pages[0], 1, len(pages), next_pages=pages[1:]
-            )
+        qid = self.parent_view.questionnaire_id
+        user = getattr(interaction, "user", None)
+        log.info(
+            "Open form clicked: questionnaire=%s user=%s message=%s",
+            qid,
+            getattr(user, "id", None),
+            interaction.message.id if interaction.message else None,
         )
+        try:
+            pages = _paginate_rows(list(enumerate(self.parent_view.questions)))
+            log.info(
+                "Open form: questionnaire=%s built %d modal page(s) "
+                "(rows/page=%s)",
+                qid,
+                len(pages),
+                [len(p) for p in pages],
+            )
+            await interaction.response.send_modal(
+                QuestionnaireFormModal(
+                    self.parent_view, pages[0], 1, len(pages), next_pages=pages[1:]
+                )
+            )
+            log.info("Open form: questionnaire=%s modal sent OK", qid)
+        except Exception:
+            log.exception(
+                "Open form FAILED: questionnaire=%s user=%s",
+                qid,
+                getattr(user, "id", None),
+            )
+            raise
 
 
 async def _save_response(
@@ -684,6 +722,13 @@ async def _save_response(
         return "Your response has been recorded. Thank you!", True
 
     message, _ok = await asyncio.to_thread(_db)
+    log.info(
+        "Response save: questionnaire=%s user=%s ok=%s msg=%r",
+        questionnaire_id,
+        interaction.user.id,
+        _ok,
+        message,
+    )
     await interaction.response.send_message(message, ephemeral=True)
 
 
@@ -716,6 +761,92 @@ class QuestionnaireCog(commands.Cog):
 
     def __init__(self, bot: commands.Bot):
         self.bot = bot
+        # Placeholder dynamic view: matches ONLY unknown/deterministic ids not
+        # covered by per-questionnaire views registered in setup_hook restore.
+        # (Discord requires at least one registered persistent view per
+        # custom_id; per-questionnaire views are added in setup via
+        # restore_persistent_views.)
+
+    async def restore_persistent_views(self) -> None:
+        """Re-register Open-form views for every open questionnaire.
+
+        Persistent views need bot.add_view() at startup AND the posted
+        message's button must carry the deterministic custom_id. Old posts
+        (random auto-generated ids) are edited in place so their buttons
+        match the deterministic id again.
+        """
+        def _open_rows() -> list[Questionnaire]:
+            return list(Questionnaire.objects.filter(closed=False))
+
+        rows = await asyncio.to_thread(_open_rows)
+        log.info("View restore: %d open questionnaire(s)", len(rows))
+        for q in rows:
+            view = QuestionnaireAnswerView(
+                q.id, q.questions, form_title=q.title
+            )
+            self.bot.add_view(view)
+            log.info(
+                "View restore: registered view questionnaire=%s custom_id=%s",
+                q.id,
+                open_form_custom_id(q.id),
+            )
+            # Fix posts made before deterministic ids: rebuild the button.
+            try:
+                channel = self.bot.get_channel(int(q.channel_id))
+                if channel is None:
+                    log.warning(
+                        "View restore: questionnaire=%s channel=%s not in cache, "
+                        "fetching",
+                        q.id,
+                        q.channel_id,
+                    )
+                    channel = await self.bot.fetch_channel(int(q.channel_id))
+                if not hasattr(channel, "fetch_message"):
+                    log.warning(
+                        "View restore: questionnaire=%s channel=%s is a %s — "
+                        "cannot fetch the posted message",
+                        q.id,
+                        q.channel_id,
+                        type(channel).__name__,
+                    )
+                    continue
+                message = await channel.fetch_message(int(q.message_id))
+                posted_ids: list[str] = []
+                for row in message.components:
+                    children = getattr(row, "children", [row])
+                    for child in children:
+                        cid = getattr(child, "custom_id", None)
+                        if isinstance(cid, str):
+                            posted_ids.append(cid)
+                expected = open_form_custom_id(q.id)
+                log.info(
+                    "View restore: questionnaire=%s message=%s posted custom_ids=%s",
+                    q.id,
+                    q.message_id,
+                    posted_ids,
+                )
+                if posted_ids != [expected]:
+                    log.warning(
+                        "View restore: questionnaire=%s button id mismatch "
+                        "(expected %s, found %s) — editing message in place",
+                        q.id,
+                        expected,
+                        posted_ids,
+                    )
+                    await message.edit(
+                        embed=build_questionnaire_embed(q), view=view
+                    )
+                    log.info(
+                        "View restore: questionnaire=%s message re-attached with "
+                        "deterministic button id",
+                        q.id,
+                    )
+            except Exception:
+                log.exception(
+                    "View restore: FAILED for questionnaire=%s — its Open form "
+                    "button may be dead until manually reposted",
+                    q.id,
+                )
 
     @questionnaire_group.command(
         name="create", description="Create a questionnaire from questions JSON"
@@ -956,4 +1087,14 @@ class QuestionnaireCog(commands.Cog):
 
 
 async def setup(bot: commands.Bot):
-    await bot.add_cog(QuestionnaireCog(bot))
+    cog = QuestionnaireCog(bot)
+    await bot.add_cog(cog)
+
+    async def _restore_when_ready() -> None:
+        await bot.wait_until_ready()
+        try:
+            await cog.restore_persistent_views()
+        except Exception:
+            log.exception("Questionnaire persistent-view restore crashed")
+
+    bot.loop.create_task(_restore_when_ready())
