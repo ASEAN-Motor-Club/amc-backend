@@ -497,6 +497,14 @@ class QuestionnaireFormModal(discord.ui.Modal):
     async def on_submit(self, interaction: discord.Interaction):
         collected = self._collect_answers()
         self.parent_view.store_answers(collected)
+        log.info(
+            "modal page submitted: qid=%s user=%s page=%s/%s answers=%s",
+            self.parent_view.questionnaire_id,
+            interaction.user.id,
+            self.page,
+            self.total_pages,
+            collected,
+        )
         if self.next_pages:
             next_page = self.page + 1
             await interaction.response.send_message(
@@ -550,6 +558,19 @@ class QuestionnaireFormModal(discord.ui.Modal):
             return [str(a.id) for a in (item.values or [])]
         return None
 
+    async def on_error(
+        self,
+        interaction: discord.Interaction,
+        error: Exception,
+    ) -> None:
+        log.exception(
+            "modal error: qid=%s user=%s page=%s/%s",
+            self.parent_view.questionnaire_id,
+            interaction.user.id,
+            self.page,
+            self.total_pages,
+        )
+
 
 class _NextPageView(discord.ui.View):
     """Ephemeral button that opens the next modal page (modals can't nest)."""
@@ -583,15 +604,24 @@ class _NextPageButton(discord.ui.Button):
         self.total_pages = total_pages
 
     async def callback(self, interaction: discord.Interaction):
-        await interaction.response.send_modal(
-            QuestionnaireFormModal(
-                self.parent_view,
-                self.next_pages[0],
-                self.page,
-                self.total_pages,
-                next_pages=self.next_pages[1:],
+        try:
+            await interaction.response.send_modal(
+                QuestionnaireFormModal(
+                    self.parent_view,
+                    self.next_pages[0],
+                    self.page,
+                    self.total_pages,
+                    next_pages=self.next_pages[1:],
+                )
             )
-        )
+        except Exception:
+            log.exception(
+                "next page FAILED to send modal: qid=%s user=%s page=%s",
+                self.parent_view.questionnaire_id,
+                interaction.user.id,
+                self.page + 1,
+            )
+            raise
 
 
 class QuestionnaireAnswerView(discord.ui.View):
@@ -623,13 +653,38 @@ class QuestionnaireAnswerView(discord.ui.View):
             if q.get("required", True) and i not in self.selections
         ]
         if missing:
+            log.info(
+                "submit incomplete: qid=%s user=%s missing=%s",
+                self.questionnaire_id,
+                interaction.user.id,
+                missing,
+            )
             await interaction.response.send_message(
                 f"Please answer question(s): {', '.join(map(str, missing))}.",
                 ephemeral=True,
             )
             return
+        log.info(
+            "submit: qid=%s user=%s answers=%s",
+            self.questionnaire_id,
+            interaction.user.id,
+            self.selections,
+        )
         await _save_response(
             interaction, self.questionnaire_id, self.selections
+        )
+
+    async def on_error(
+        self,
+        interaction: discord.Interaction,
+        error: Exception,
+        item: discord.ui.Item,
+    ) -> None:
+        log.exception(
+            "questionnaire view error: qid=%s user=%s item=%s",
+            self.questionnaire_id,
+            interaction.user.id,
+            type(item).__name__,
         )
 
 

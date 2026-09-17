@@ -102,6 +102,15 @@ LOGGING = {
             "level": "INFO",
             "propagate": False,
         },
+        # Questionnaire diagnostics: INFO breadcrumbs (open-form click, modal
+        # accept, page submit, save outcome) plus WARNING/ERROR tracebacks
+        # from view/modal on_error — the parent "amc" logger runs at ERROR
+        # with propagate=False and would swallow the INFO lines.
+        "amc.questionnaire": {
+            "handlers": ["console"],
+            "level": "INFO",
+            "propagate": False,
+        },
     },
 }
 
