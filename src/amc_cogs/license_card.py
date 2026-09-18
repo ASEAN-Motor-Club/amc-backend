@@ -125,12 +125,29 @@ def render_license_card(
     joined: date | None,
     logo_bytes: bytes,
     avatar_bytes: bytes | None,
+    gov_level: int | None = None,
 ) -> bytes:
     """Render the license card to PNG bytes.
 
     joined=None renders as an em-dash (data missing, not "Unknown").
+    gov_level >= 50 switches to the gold Government Official theme with a
+    "GOV LEVEL" field.
     """
-    card = _vertical_gradient((CARD_W, CARD_H), (_BG_TOP, _BG_MID, _BG_BOT))
+    gov = gov_level is not None and gov_level >= 50
+
+    # theme: standard (navy/amber) vs government official (dark gold/black)
+    if gov:
+        bg_stops = ((24, 20, 6), (54, 44, 12), (14, 12, 4))
+        accent = (255, 191, 0)  # richer gold
+        accent_light = (255, 226, 120)
+        title = "GOVERNMENT OFFICIAL"
+    else:
+        bg_stops = (_BG_TOP, _BG_MID, _BG_BOT)
+        accent = _AMBER
+        accent_light = _AMBER_LIGHT
+        title = "DRIVER'S LICENSE"
+
+    card = _vertical_gradient((CARD_W, CARD_H), bg_stops)
     # subtle diagonal sheen: overlay a soft light band
     sheen = Image.new("L", (CARD_W, CARD_H), 0)
     sd = ImageDraw.Draw(sheen)
@@ -144,7 +161,7 @@ def render_license_card(
     draw.text((56, 60), "ASEAN MOTOR CLUB", font=_load_font(26), fill=_LABEL)
     # letter-spacing approximation: redraw spaced
     f_title = _load_font(40)
-    draw.text((56, 92), "DRIVER'S LICENSE", font=f_title, fill=_AMBER)
+    draw.text((56, 92), title, font=f_title, fill=accent)
 
     # --- logo: white ring + emblem ---
     rx, ry = _LOGO_CENTER
@@ -159,7 +176,7 @@ def render_license_card(
     # --- avatar: amber ring + circular avatar ---
     ax, ay = _AVATAR_CENTER
     ar = 124
-    draw.ellipse([ax - ar, ay - ar, ax + ar, ay + ar], fill=_AMBER)
+    draw.ellipse([ax - ar, ay - ar, ax + ar, ay + ar], fill=accent)
     if avatar_bytes:
         try:
             av = Image.open(io.BytesIO(avatar_bytes)).convert("RGBA")
@@ -170,8 +187,8 @@ def render_license_card(
     else:
         av = _placeholder_avatar()
     card.paste(av, (ax - _AVATAR_DIAMETER // 2, ay - _AVATAR_DIAMETER // 2), av)
-    # redraw the amber ring above the avatar so the circle frame stays intact
-    draw.ellipse([ax - ar, ay - ar, ax + ar, ay + ar], outline=_AMBER, width=10)
+    # redraw the ring above the avatar so the circle frame stays intact
+    draw.ellipse([ax - ar, ay - ar, ax + ar, ay + ar], outline=accent, width=10)
 
     # --- fields ---
     fx = 420
@@ -201,15 +218,26 @@ def render_license_card(
     draw.text((700, 440), (joined.isoformat() if joined else "—"),
               font=f_date, fill=_WHITE)
 
+    # --- gov level badge (government theme only) ---
+    if gov:
+        f_badge = _load_font(22, mono=True)
+        badge_text = f"GOV LEVEL {gov_level}"
+        bbox = draw.textbbox((0, 0), badge_text, font=f_badge)
+        bw, bh = bbox[2] - bbox[0], bbox[3] - bbox[1]
+        bx, by = 700, 492
+        draw.rounded_rectangle([bx - 14, by - 10, bx + bw + 14, by + bh + 16],
+                               radius=8, fill=accent)
+        draw.text((bx, by), badge_text, font=f_badge, fill=(24, 18, 2))
+
     # --- footer ---
     draw.text((56, CARD_H - 62), "CLASS: ALL VEHICLES",
               font=_load_font(18, mono=True), fill=_LABEL)
     draw.text((560, CARD_H - 62), "ASEAN MOTOR CLUB — MOTOR TOWN",
               font=_load_font(18, mono=True), fill=_DIM)
-    # amber bottom stripe (gradient left→right)
+    # bottom stripe (gradient left→right)
     for x in range(CARD_W):
         t = x / (CARD_W - 1)
-        color = tuple(int(_AMBER[i] + (_AMBER_LIGHT[i] - _AMBER[i]) * t) for i in range(3))
+        color = tuple(int(accent[i] + (accent_light[i] - accent[i]) * t) for i in range(3))
         draw.line([(x, CARD_H - 26), (x, CARD_H - 1)], fill=color)
 
     # rounded-corner mask

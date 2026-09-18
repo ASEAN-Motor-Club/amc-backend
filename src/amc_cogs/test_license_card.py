@@ -102,3 +102,46 @@ def test_long_name_is_rendered_without_overflow():
         avatar_bytes=None,
     )
     assert Image.open(io.BytesIO(png)).size == (1012, 638)
+
+
+def test_gov_theme_renders_and_differs_from_standard():
+    plain = render_license_card(
+        name="Gov Worker", discord_id="1155069673512120341",
+        issued=date(2026, 9, 18), joined=date(2024, 3, 2),
+        logo_bytes=_emblem_bytes(), avatar_bytes=None,
+    )
+    gov = render_license_card(
+        name="Gov Worker", discord_id="1155069673512120341",
+        issued=date(2026, 9, 18), joined=date(2024, 3, 2),
+        logo_bytes=_emblem_bytes(), avatar_bytes=None, gov_level=72,
+    )
+    # same size, different pixels (different theme actually rendered)
+    assert Image.open(io.BytesIO(gov)).size == (1012, 638)
+    assert plain != gov
+
+
+def test_gov_theme_below_level_50_is_standard():
+    plain = render_license_card(
+        name="Gov Worker", discord_id="1",
+        issued=date(2026, 9, 18), joined=date(2024, 3, 2),
+        logo_bytes=_emblem_bytes(), avatar_bytes=None,
+    )
+    lvl49 = render_license_card(
+        name="Gov Worker", discord_id="1",
+        issued=date(2026, 9, 18), joined=date(2024, 3, 2),
+        logo_bytes=_emblem_bytes(), avatar_bytes=None, gov_level=49,
+    )
+    assert plain == lvl49
+
+
+def test_gov_theme_golden_pixel_is_gold():
+    png = render_license_card(
+        name="Gov Worker", discord_id="2",
+        issued=date(2026, 9, 18), joined=date(2024, 3, 2),
+        logo_bytes=_emblem_bytes(), avatar_bytes=None, gov_level=55,
+    )
+    img = Image.open(io.BytesIO(png)).convert("RGBA")
+    # footer stripe left edge (past the rounded corner) carries the gold accent
+    px = img.getpixel((40, 636))
+    assert px[0] > 200 and px[1] > 140 and px[2] < 80
+    assert px[3] == 255

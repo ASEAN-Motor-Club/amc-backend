@@ -7,6 +7,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import discord
 
+from amc.models import Character
 from amc_cogs.license import DriversLicenseCog, _fetch_avatar_bytes
 
 
@@ -77,6 +78,10 @@ def test_linked_player_gets_card_file():
             agg = {"first": None, "latest": recent}
             log_stub.objects.filter.return_value.aaggregate = AsyncMock(
                 return_value=agg
+            )
+            # no characters → plain theme
+            player.characters.with_last_login.return_value.filter.return_value.alatest = AsyncMock(
+                side_effect=Character.DoesNotExist
             )
             await DriversLicenseCog.drivers_license.callback(cog, interaction)
         return render
@@ -153,6 +158,77 @@ def test_no_login_rows_fails_recency_gate():
     render = asyncio.run(scenario())
     render.assert_not_called()
     assert interaction.followup.send.await_args.kwargs.get("ephemeral") is True
+
+
+def test_gov_employee_level_50_plus_passes_gov_level():
+    cog, _bot = _make_cog()
+    interaction = _make_interaction()
+
+    player = MagicMock()
+    player.discord_name = "Gov Worker"
+
+    character = MagicMock()
+    character.is_gov_employee = True
+    character.gov_employee_level = 72
+
+    fake_png = b"\x89PNG\r\n\x1a\n" + b"1" * 64
+
+    async def scenario():
+        with (
+            patch("amc_cogs.license.Player") as player_stub,
+            patch("amc_cogs.license.PlayerStatusLog") as log_stub,
+            patch("amc_cogs.license.render_license_card", return_value=fake_png) as render,
+            patch("amc_cogs.license._fetch_avatar_bytes", new=AsyncMock(return_value=None)),
+        ):
+            player_stub.objects.aget = AsyncMock(return_value=player)
+            recent = datetime.now(UTC) - timedelta(hours=2)
+            agg = {"first": None, "latest": recent}
+            log_stub.objects.filter.return_value.aaggregate = AsyncMock(
+                return_value=agg
+            )
+            chain = player.characters.with_last_login.return_value.filter.return_value
+            chain.alatest = AsyncMock(return_value=character)
+            await DriversLicenseCog.drivers_license.callback(cog, interaction)
+        return render
+
+    render = asyncio.run(scenario())
+    assert render.call_args.kwargs["gov_level"] == 72
+
+
+def test_gov_employee_below_50_gets_no_gov_level():
+    cog, _bot = _make_cog()
+    interaction = _make_interaction()
+
+    player = MagicMock()
+    player.discord_name = "Junior Clerk"
+
+    character = MagicMock()
+    character.is_gov_employee = True
+    character.gov_employee_level = 30
+
+    fake_png = b"\x89PNG\r\n\x1a\n" + b"2" * 64
+
+    async def scenario():
+        with (
+            patch("amc_cogs.license.Player") as player_stub,
+            patch("amc_cogs.license.PlayerStatusLog") as log_stub,
+            patch("amc_cogs.license.render_license_card", return_value=fake_png) as render,
+            patch("amc_cogs.license._fetch_avatar_bytes", new=AsyncMock(return_value=None)),
+        ):
+            player_stub.objects.aget = AsyncMock(return_value=player)
+            recent = datetime.now(UTC) - timedelta(hours=2)
+            agg = {"first": None, "latest": recent}
+            log_stub.objects.filter.return_value.aaggregate = AsyncMock(
+                return_value=agg
+            )
+            chain = player.characters.with_last_login.return_value.filter.return_value
+            chain.alatest = AsyncMock(return_value=character)
+            await DriversLicenseCog.drivers_license.callback(cog, interaction)
+        return render
+
+    render = asyncio.run(scenario())
+    # the raw level passes through; the renderer applies the >=50 theme gate
+    assert render.call_args.kwargs["gov_level"] == 30
 
 
 def test_fetch_avatar_bytes_cache_hit_avoids_refetch():

@@ -14,7 +14,7 @@ from discord import app_commands
 from discord.ext import commands
 from django.db.models import Max, Min
 
-from amc.models import Player, PlayerStatusLog
+from amc.models import Character, Player, PlayerStatusLog
 from amc_cogs.license_card import render_license_card
 
 if TYPE_CHECKING:
@@ -105,6 +105,20 @@ class DriversLicenseCog(commands.Cog):
 
         avatar = await _fetch_avatar_bytes(self.bot, user_id, self._avatar_cache)
         name = player.discord_name or interaction.user.display_name
+        # Government officials (level 50+) get the gold Government Official
+        # theme; active employees only (is_gov_employee checks the term).
+        # The employee's level comes from their most recently active character.
+        gov_level: int | None = None
+        try:
+            character = await (
+                player.characters.with_last_login()
+                .filter(last_login__isnull=False)
+                .alatest("last_login")
+            )
+            if character.is_gov_employee:
+                gov_level = character.gov_employee_level
+        except Character.DoesNotExist:
+            pass
         png = await asyncio.to_thread(
             render_license_card,
             name=name,
@@ -113,6 +127,7 @@ class DriversLicenseCog(commands.Cog):
             joined=(first_login.date() if first_login else None),
             logo_bytes=_emblem_bytes(),
             avatar_bytes=avatar,
+            gov_level=gov_level,
         )
         await interaction.followup.send(
             file=discord.File(io.BytesIO(png), filename="amc_license.png"),
