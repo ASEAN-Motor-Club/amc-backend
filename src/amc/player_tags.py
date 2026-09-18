@@ -117,7 +117,11 @@ def build_display_name(
 
 
 async def refresh_player_name(
-    character, session, *, has_custom_parts: bool | None = None
+    character,
+    session,
+    *,
+    has_custom_parts: bool | None = None,
+    force_push: bool = False,
 ):
     """Recompute and apply the correct display name for a character.
 
@@ -129,6 +133,12 @@ async def refresh_player_name(
         session: HTTP client for mod server
         has_custom_parts: If provided, use this value. If None, preserve the
             character's current MOD tag state (from custom_name).
+        force_push: Skip the pushed_name dedupe cache and always PUT the name.
+            Use on the login path: the game server resets a player's displayed
+            name to the account default at logout, so a cached "already
+            pushed" value can be stale exactly when the player rejoins
+            (relogged-in player reappears untagged until some other event
+            triggers a refresh).
     """
     if not character:
         return
@@ -251,9 +261,10 @@ async def refresh_player_name(
     # Push to game server if GUID exists
     if session and character.guid:
         cache_key = f"pushed_name:{character.guid}"
-        last_pushed = await cache.aget(cache_key)
-        if last_pushed == new_name:
-            return  # already correct on game server
+        if not force_push:
+            last_pushed = await cache.aget(cache_key)
+            if last_pushed == new_name:
+                return  # already correct on game server
 
         try:
             await set_character_name(session, character.guid, new_name)

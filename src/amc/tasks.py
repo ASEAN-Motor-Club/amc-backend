@@ -1297,7 +1297,13 @@ async def process_log_event(
             if character:
                 await process_login_event(character.id, timestamp)
                 asyncio.create_task(send_player_messages(http_client_mod, player))
-                await refresh_player_name(character, http_client_mod)
+                # force_push: the game resets the displayed name at logout, so
+                # the pushed_name cache from the previous session is stale —
+                # without this the relogged-in player reappears untagged
+                # (e.g. an RP player losing server-side RP enforcement).
+                await refresh_player_name(
+                    character, http_client_mod, force_push=True
+                )
                 # Non-blocking auto-moderation of the display name (LLM judge)
                 # — login is never gated on it; failures degrade to no-op.
                 from amc.name_policy import run_name_moderation
