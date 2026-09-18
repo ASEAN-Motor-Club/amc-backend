@@ -64,7 +64,7 @@ class DriversLicenseCog(commands.Cog):
         description="Show your AMC Driver's License card",
     )
     async def drivers_license(self, interaction: discord.Interaction):
-        await interaction.response.defer(ephemeral=True)
+        await interaction.response.defer()  # public — the card is visible to all
         user_id = interaction.user.id
 
         try:
@@ -131,7 +131,6 @@ class DriversLicenseCog(commands.Cog):
         )
         await interaction.followup.send(
             file=discord.File(io.BytesIO(png), filename="amc_license.png"),
-            ephemeral=True,
         )
 
 
