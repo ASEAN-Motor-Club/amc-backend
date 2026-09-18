@@ -104,6 +104,24 @@ def test_long_name_is_rendered_without_overflow():
     assert Image.open(io.BytesIO(png)).size == (1012, 638)
 
 
+def test_truetype_fonts_actually_load():
+    # Regression: prod env has NO system fonts — the bundled TTFs in
+    # assets/fonts must be what renders, not PIL's tiny bitmap default.
+    from PIL import ImageFont
+
+    from amc_cogs.license_card import _FONT_DIR, _load_font, _load_font_regular
+
+    for f in (_load_font(40), _load_font(20, mono=True), _load_font_regular(22)):
+        assert isinstance(f, ImageFont.FreeTypeFont), (
+            "font fell back to bitmap default — bundled TTFs missing"
+        )
+    # and the bundled files themselves are loadable
+    import os
+    for name in ("DejaVuSans-Bold.ttf", "DejaVuSans.ttf",
+                 "DejaVuSansMono-Bold.ttf"):
+        assert os.path.exists(os.path.join(_FONT_DIR, name))
+
+
 def test_gov_theme_renders_and_differs_from_standard():
     plain = render_license_card(
         name="Gov Worker", discord_id="1155069673512120341",

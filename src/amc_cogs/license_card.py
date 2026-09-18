@@ -18,6 +18,7 @@ from __future__ import annotations
 
 import hashlib
 import io
+import os
 from datetime import date
 
 from PIL import Image, ImageDraw, ImageFilter, ImageFont
@@ -42,6 +43,9 @@ _LOGO_CENTER = (900, 128)
 _LOGO_DIAMETER = 132  # emblem circle inside the 148px white ring
 
 _DEJAVU = "/usr/share/fonts/truetype/dejavu/"
+# Bundled fallback fonts — the prod nix env has no system fonts
+# (verified: no /usr/share/fonts on the host, no TTFs in the env closure).
+_FONT_DIR = os.path.join(os.path.dirname(__file__), "assets", "fonts")
 
 
 def card_number(discord_id: str) -> str:
@@ -52,17 +56,21 @@ def card_number(discord_id: str) -> str:
 
 def _load_font(size: int, mono: bool = False):
     name = "DejaVuSansMono-Bold.ttf" if mono else "DejaVuSans-Bold.ttf"
-    try:
-        return ImageFont.truetype(_DEJAVU + name, size)
-    except OSError:
-        return ImageFont.load_default()
+    for base in (_DEJAVU, _FONT_DIR):
+        try:
+            return ImageFont.truetype(os.path.join(base, name), size)
+        except OSError:
+            continue
+    return ImageFont.load_default()
 
 
 def _load_font_regular(size: int):
-    try:
-        return ImageFont.truetype(_DEJAVU + "DejaVuSans.ttf", size)
-    except OSError:
-        return ImageFont.load_default()
+    for base in (_DEJAVU, _FONT_DIR):
+        try:
+            return ImageFont.truetype(os.path.join(base, "DejaVuSans.ttf"), size)
+        except OSError:
+            continue
+    return ImageFont.load_default()
 
 
 def _vertical_gradient(size, stops):

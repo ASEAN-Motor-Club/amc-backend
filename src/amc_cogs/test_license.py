@@ -48,7 +48,7 @@ def test_unlinked_player_gets_verify_hint():
             await DriversLicenseCog.drivers_license.callback(cog, interaction)
 
     asyncio.run(scenario())
-    interaction.response.defer.assert_awaited_once_with(ephemeral=True)
+    interaction.response.defer.assert_awaited_once_with()  # public defer
     call = interaction.followup.send.await_args
     kwargs = call.kwargs
     content = call.args[0] if call.args else kwargs.get("content", "")
@@ -87,10 +87,11 @@ def test_linked_player_gets_card_file():
         return render
 
     render = asyncio.run(scenario())
-    interaction.response.defer.assert_awaited_once_with(ephemeral=True)
+    interaction.response.defer.assert_awaited_once_with()  # public defer
     kwargs = interaction.followup.send.await_args.kwargs
     assert "file" in kwargs
-    assert kwargs.get("ephemeral") is True
+    # the card itself is public (no ephemeral flag)
+    assert kwargs.get("ephemeral", False) is False
     file = kwargs["file"]
     assert isinstance(file, discord.File)
     assert file.filename == "amc_license.png"
