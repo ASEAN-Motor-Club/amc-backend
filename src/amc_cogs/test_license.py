@@ -170,7 +170,9 @@ def test_gov_employee_level_50_plus_passes_gov_level():
 
     character = MagicMock()
     character.is_gov_employee = False  # term lapsed — level alone still qualifies
-    character.gov_employee_level = 72
+    character.gov_employee_level = 0  # stored field is zeroed on term lapse
+    # license derives the level from lifetime contributions
+    character.gov_employee_contributions = 35_500_000  # → level 72
 
     fake_png = b"\x89PNG\r\n\x1a\n" + b"1" * 64
 
@@ -205,7 +207,8 @@ def test_gov_employee_below_50_gets_no_gov_level():
 
     character = MagicMock()
     character.is_gov_employee = True
-    character.gov_employee_level = 30
+    # contributions 14_500_000 → 14_500_000 // 500_000 + 1 = level 30 (below 50)
+    character.gov_employee_contributions = 14_500_000
 
     fake_png = b"\x89PNG\r\n\x1a\n" + b"2" * 64
 

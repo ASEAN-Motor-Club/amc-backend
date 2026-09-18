@@ -14,6 +14,7 @@ from discord import app_commands
 from discord.ext import commands
 from django.db.models import Max, Min
 
+from amc.gov_employee import calculate_gov_level
 from amc.models import Character, Player, PlayerStatusLog
 from amc_cogs.license_card import render_license_card
 
@@ -110,6 +111,11 @@ class DriversLicenseCog(commands.Cog):
         # "It shouldn't need the player to be on active government worker
         # duty to get the government worker design").
         # The employee's level comes from their most recently active character.
+        # NOTE: derive from contributions, NOT the stored gov_employee_level —
+        # deactivate_gov_role() zeroes the stored field when the 24h term
+        # lapses, but the lifetime rank (contribs // GOV_LEVEL_STEP + 1) is
+        # what the license should show (worked case: fattron, 43.9M contribs,
+        # stored 0, real level 88).
         gov_level: int | None = None
         try:
             character = await (
@@ -117,7 +123,7 @@ class DriversLicenseCog(commands.Cog):
                 .filter(last_login__isnull=False)
                 .alatest("last_login")
             )
-            gov_level = character.gov_employee_level
+            gov_level = calculate_gov_level(character.gov_employee_contributions)
         except Character.DoesNotExist:
             pass
         png = await asyncio.to_thread(
