@@ -5,14 +5,14 @@ from __future__ import annotations
 import asyncio
 import io
 import time
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from importlib import resources
 from typing import TYPE_CHECKING
 
 import discord
 from discord import app_commands
 from discord.ext import commands
-from django.db.models import Min
+from django.db.models import Max, Min
 
 from amc.models import Player, PlayerStatusLog
 from amc_cogs.license_card import render_license_card
@@ -27,6 +27,9 @@ AVATAR_FETCH_SIZE = 256
 _AVATAR_CACHE_TTL = 24 * 3600
 
 _EMBLEM_NAME = "amc_emblem.png"
+
+# A license is only (re)issued to members who played within this window.
+RECENT_LOGIN_WINDOW = timedelta(days=7)
 
 
 def _emblem_bytes() -> bytes:
@@ -74,11 +77,31 @@ class DriversLicenseCog(commands.Cog):
             )
             return
 
-        # First observed login across all the player's characters.
-        joined_agg = await PlayerStatusLog.objects.filter(
+        # First observed login across all the player's characters, plus the
+        # most recent one — the recency gate decides whether a license is
+        # issued at all.
+        login_agg = await PlayerStatusLog.objects.filter(
             character__player=player
-        ).aaggregate(first=Min("timespan__startswith"))
-        first_login: datetime | None = joined_agg["first"]
+        ).aaggregate(
+            first=Min("timespan__startswith"),
+            latest=Max("timespan__startswith"),
+        )
+        first_login: datetime | None = login_agg["first"]
+        latest_login: datetime | None = login_agg["latest"]
+        if latest_login is not None and latest_login.tzinfo is None:
+            latest_login = latest_login.replace(tzinfo=UTC)
+
+        # Recency gate: no license unless the member logged in within the
+        # window. (No login rows at all also fails the gate.)
+        now = datetime.now(UTC)
+        if latest_login is None or now - latest_login > RECENT_LOGIN_WINDOW:
+            await interaction.followup.send(
+                "Your driver's license can't be issued: you haven't "
+                "logged in to AMC in the last 7 days. Hop in game and "
+                "try again!",
+                ephemeral=True,
+            )
+            return
 
         avatar = await _fetch_avatar_bytes(self.bot, user_id, self._avatar_cache)
         name = player.discord_name or interaction.user.display_name
