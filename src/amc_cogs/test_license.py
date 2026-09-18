@@ -169,7 +169,7 @@ def test_gov_employee_level_50_plus_passes_gov_level():
     player.discord_name = "Gov Worker"
 
     character = MagicMock()
-    character.is_gov_employee = True
+    character.is_gov_employee = False  # term lapsed — level alone still qualifies
     character.gov_employee_level = 72
 
     fake_png = b"\x89PNG\r\n\x1a\n" + b"1" * 64
