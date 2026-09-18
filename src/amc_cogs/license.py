@@ -106,7 +106,9 @@ class DriversLicenseCog(commands.Cog):
         avatar = await _fetch_avatar_bytes(self.bot, user_id, self._avatar_cache)
         name = player.discord_name or interaction.user.display_name
         # Government officials (level 50+) get the gold Government Official
-        # theme; active employees only (is_gov_employee checks the term).
+        # theme. Level alone qualifies — no active-term requirement (freeman:
+        # "It shouldn't need the player to be on active government worker
+        # duty to get the government worker design").
         # The employee's level comes from their most recently active character.
         gov_level: int | None = None
         try:
@@ -115,8 +117,7 @@ class DriversLicenseCog(commands.Cog):
                 .filter(last_login__isnull=False)
                 .alatest("last_login")
             )
-            if character.is_gov_employee:
-                gov_level = character.gov_employee_level
+            gov_level = character.gov_employee_level
         except Character.DoesNotExist:
             pass
         png = await asyncio.to_thread(
