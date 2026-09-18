@@ -1,0 +1,101 @@
+"""/drivers_license — render the member's AMC Driver's License card."""
+
+from __future__ import annotations
+
+import asyncio
+import io
+import time
+from datetime import UTC, datetime
+from importlib import resources
+from typing import TYPE_CHECKING
+
+import discord
+from discord import app_commands
+from discord.ext import commands
+from django.db.models import Min
+
+from amc.models import Player, PlayerStatusLog
+from amc_cogs.license_card import render_license_card
+
+if TYPE_CHECKING:
+    from amc.discord_client import AMCDiscordBot
+
+# Avatar fetch size: the card's avatar window is 236px, fetch above it
+# (Discord CDN default avatars ignore ?size= and serve 256 — the renderer
+# normalizes every source to the window size, so both paths are safe).
+AVATAR_FETCH_SIZE = 256
+_AVATAR_CACHE_TTL = 24 * 3600
+
+_EMBLEM_NAME = "amc_emblem.png"
+
+
+def _emblem_bytes() -> bytes:
+    return (resources.files("amc_cogs") / "assets" / _EMBLEM_NAME).read_bytes()
+
+
+async def _fetch_avatar_bytes(bot: AMCDiscordBot, user_id: int,
+                              cache: dict) -> bytes | None:
+    """Fetch a member's avatar PNG bytes (24h cache). None on failure."""
+    hit = cache.get(user_id)
+    now = time.monotonic()
+    if hit and now - hit[0] < _AVATAR_CACHE_TTL:
+        return hit[1]
+    try:
+        user = bot.get_user(user_id) or await bot.fetch_user(user_id)
+        data = await user.display_avatar.with_size(AVATAR_FETCH_SIZE).with_format(
+            "png"
+        ).read()
+    except Exception:  # noqa: BLE001 — a failed avatar fetch must never block the card
+        return None
+    cache[user_id] = (now, data)
+    return data
+
+
+class DriversLicenseCog(commands.Cog):
+    def __init__(self, bot: AMCDiscordBot):
+        self.bot = bot
+        self._avatar_cache: dict[int, tuple[float, bytes]] = {}
+
+    @app_commands.command(
+        name="drivers_license",
+        description="Show your AMC Driver's License card",
+    )
+    async def drivers_license(self, interaction: discord.Interaction):
+        await interaction.response.defer(ephemeral=True)
+        user_id = interaction.user.id
+
+        try:
+            player = await Player.objects.aget(discord_user_id=user_id)
+        except Player.DoesNotExist:
+            await interaction.followup.send(
+                "No verified AMC player is linked to this Discord account. "
+                "Use `/verify` in game to link it.",
+                ephemeral=True,
+            )
+            return
+
+        # First observed login across all the player's characters.
+        joined_agg = await PlayerStatusLog.objects.filter(
+            character__player=player
+        ).aaggregate(first=Min("timespan__startswith"))
+        first_login: datetime | None = joined_agg["first"]
+
+        avatar = await _fetch_avatar_bytes(self.bot, user_id, self._avatar_cache)
+        name = player.discord_name or interaction.user.display_name
+        png = await asyncio.to_thread(
+            render_license_card,
+            name=name,
+            discord_id=str(user_id),
+            issued=datetime.now(UTC).date(),
+            joined=(first_login.date() if first_login else None),
+            logo_bytes=_emblem_bytes(),
+            avatar_bytes=avatar,
+        )
+        await interaction.followup.send(
+            file=discord.File(io.BytesIO(png), filename="amc_license.png"),
+            ephemeral=True,
+        )
+
+
+async def setup(bot):
+    await bot.add_cog(DriversLicenseCog(bot))
