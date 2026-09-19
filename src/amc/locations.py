@@ -71,13 +71,13 @@ For any other purposes, <Highlight>please contact the admins on the discord</>.
 ]
 
 # Taint + allowance constants (100 game units = 1 m).
-# Shortcuts have a 20 m ALLOWANCE measured INSIDE the polygon: the penalty
+# Shortcuts have a 10 m ALLOWANCE measured INSIDE the polygon: the penalty
 # starts only once the player is more than this depth past the zone edge
 # (100 units = 1 m). Outside the polygon nothing is ever penalised: the zone
 # boundary itself is not the trigger — only penetration past the allowance is.
 # Skimming the boundary or an edge-touch (distance 0) is tolerated, since
 # telemetry oscillates and drivers legitimately hug zone edges.
-SHORTCUT_ZONE_ALLOWANCE_RADIUS = 2_000  # game units = 20 m (100 units = 1 m)
+SHORTCUT_ZONE_ALLOWANCE_RADIUS = 1_000  # game units = 10 m (100 units = 1 m)
 
 # Popup escalation tier debounce TTL — matches the delivery taint window in
 # webhook.py (`shortcut_zone_entered_at > now - 1h`): while the player's
@@ -96,13 +96,13 @@ SHORTCUT_ZONE_ENTRY_NOTICE_REPEAT_SECONDS = 5
 
 SHORTCUT_ZONE_ENTRY_MESSAGE = """\
 <Title>⛔ Shortcut Zone Penalty</>
-<Warning>You are more than 20m past the zone edge!</>
+<Warning>You are more than 10m past the zone edge!</>
 Any delivery completed while having passed through this area will <Highlight>NOT be subsidised</> and will <Highlight>NOT count towards job completion</>.
 """
 
 # Chat variant of the warning notice (system message — no popup markup).
 SHORTCUT_ZONE_ENTRY_CHAT_MESSAGE = """\
-⚠️ Shortcut Zone: you are entering a shortcut zone! Turn back before you are 20m past the zone edge to avoid the penalty — deliveries made through this area beyond that point will NOT be subsidised and will NOT count towards job completion.
+⚠️ Shortcut Zone: you are entering a shortcut zone! Turn back before you are 10m past the zone edge to avoid the penalty — deliveries made through this area beyond that point will NOT be subsidised and will NOT count towards job completion.
 """
 
 
@@ -174,7 +174,7 @@ async def _is_beyond_allowance(point, zone_geom, allowance, zone_id=0):
 
 
 async def _check_shortcut_zones(character, old_location, new_location, ctx):
-    """Enforce shortcut zones with a 20m grace buffer and a two-tier notice.
+    """Enforce shortcut zones with a 10m grace buffer and a two-tier notice.
 
     Ladder (RP-mode anti-autopilot pattern):
 
@@ -182,11 +182,11 @@ async def _check_shortcut_zones(character, old_location, new_location, ctx):
       ("turn back"), once per actual outside→inside crossing. Proximity alone
       never warns: outside the zone there is no message and no consequence.
     * PENALTY — penetrating deeper than ``SHORTCUT_ZONE_ALLOWANCE_RADIUS``
-      (20 m) into the polygon sets ``character.shortcut_zone_entered_at``
+      (10 m) into the polygon sets ``character.shortcut_zone_entered_at``
       (the rolling 1-hour delivery taint read by webhook processing) and
       escalates to the popup, debounced for the taint window.
 
-    Entering the polygon is NOT the penalty — the 20 m buffer is the grace
+    Entering the polygon is NOT the penalty — the 10 m buffer is the grace
     band that lets a player leave without incurring it. A warning tick never
     also sends the notice message (same-tick dedupe).
 
@@ -245,7 +245,7 @@ async def _check_shortcut_zones(character, old_location, new_location, ctx):
                 )
                 await asyncio.sleep(0.1)
 
-            # PENALTY (violation depth): penetrating beyond the 20m buffer is
+            # PENALTY (violation depth): penetrating beyond the 10m buffer is
             # what incurs the 1-hour delivery taint. Shallow edge-touches
             # within the buffer are explicitly NOT penalised — the buffer
             # exists so players have a chance to leave without incurring it.
@@ -257,10 +257,10 @@ async def _check_shortcut_zones(character, old_location, new_location, ctx):
         elif is_inside_polygon:
             # SHALLOW tier: chat notice while inside but not yet in violation.
             # Nothing outside the polygon carries any consequence: the penalty
-            # starts 20m PAST the edge, inside. This elif is also the
+            # starts 10m PAST the edge, inside. This elif is also the
             # same-tick dedupe: when the tick is a violation the popup above
             # IS the notice — an extra chat would double-notify (observed
-            # live: a driver at speed clears the 20m allowance within a
+            # live: a driver at speed clears the 10m allowance within a
             # single telemetry tick, so entry and violation land together).
             # Repeat notice: the chat message is visible only ~2 s, so a
             # single send is easily missed — re-send while the player stays
