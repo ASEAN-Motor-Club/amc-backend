@@ -171,16 +171,14 @@ async def cmd_police(ctx: CommandContext):
 
 @registry.register(
     ["/setwanted", '/sw'],
-    description=gettext_lazy("Set a player as wanted (police only)"),
-    category="Faction",
-    deprecated=True,
+    description=gettext_lazy("Set a player as wanted (admin only)"),
+    category="Admin",
 )
 async def cmd_setwanted(ctx: CommandContext, target_player_name: str):
     from amc.models import CriminalRecord
 
-    # Only on-duty police can use this command
-    if not await is_police(ctx.character):
-        await ctx.reply(_("You must be on police duty to use this command."))
+    # Only game admins can use this command
+    if not ctx.player_info or not ctx.player_info.get("bIsAdmin"):
         return
 
     # Find the target player online
