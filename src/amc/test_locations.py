@@ -26,7 +26,7 @@ class ShortcutZoneWarningTests(TestCase):
     def setUpClass(cls):
         super().setUpClass()
         # A 6000x6000 square polygon centered at (1000, 1000) — big enough
-        # that the 2000-unit (20m) allowance erosion leaves a core (real
+        # that the 2000-unit (20m) allowance erosion leaves a core (kept at 20m so the 10m allowance still leaves a wide core) (real
         # zones are 12k-20k units across; 200x200 erodes to nothing).
         cls.zone_polygon = Polygon(
             (
@@ -60,10 +60,10 @@ class ShortcutZoneWarningTests(TestCase):
     async def test_violation_beyond_allowance_escalates_to_popup(
         self, mock_send_msg, mock_show_popup
     ):
-        """Deep entry (>20m allowance) → escalation POPUP fires (penalty tier).
+        """Deep entry (>10m allowance) → escalation POPUP fires (penalty tier).
 
         SAME-TICK DEDUPE: entering already beyond the allowance is the tick
-        where a driver at speed arrives (they clear the 20m band within one
+        where a driver at speed arrives (they clear the 10m band within one
         tick), so the popup IS the notice — the chat message must NOT also
         fire, or the player sees two near-identical notices at once (the
         live 2026-09-13 report).
@@ -98,7 +98,7 @@ class ShortcutZoneWarningTests(TestCase):
     async def test_edge_touch_within_allowance_tolerated(
         self, mock_show_popup, mock_send_msg, mock_aset, mock_aget
     ):
-        """Shallow edge-touch (within the 20m allowance) → entry chat notice only.
+        """Shallow edge-touch (within the 20m fixture allowance note: real allowance is now 10m; the fixture uses 20m depths so both 10m and 20m semantics hold) → entry chat notice only.
 
         No escalation popup — the penalty tier requires penetrating beyond
         the allowance. Occupancy (taint) is still recorded.
@@ -124,7 +124,7 @@ class ShortcutZoneWarningTests(TestCase):
         # No escalation popup — violation tier not reached
         mock_show_popup.assert_not_called()
 
-        # NO taint — the 20m buffer is the grace band; turning back is safe.
+        # NO taint — the 10m buffer is the grace band; turning back is safe.
         # (In-memory attribute: the prod flush is _flush_locations_to_db,
         # which this direct call doesn't run.)
         self.assertIsNone(character.shortcut_zone_entered_at)
@@ -192,8 +192,8 @@ class ShortcutZoneWarningTests(TestCase):
         await self._create_zone()
         character = await sync_to_async(CharacterFactory)()
 
-        old_loc = Point(-1000, 1000, 0, srid=0)  # 1000 units from edge (inside allowance band)
-        new_loc = Point(-500, 1000, 0, srid=0)  # 1500 units from edge (still in allowance band)
+        old_loc = Point(-1500, 1000, 0, srid=0)  # 500 units deep: inside the 1000-unit (10m) allowance
+        new_loc = Point(-1200, 1000, 0, srid=0)  # 800 units deep: still inside the 10m allowance
 
         await self._refresh_zones()
         ctx = self._make_ctx(AsyncMock())
@@ -206,7 +206,7 @@ class ShortcutZoneWarningTests(TestCase):
     async def test_entry_notification(self, mock_show_popup, mock_send_msg):
         """Crossing from outside to inside the polygon → entry chat notice fires (no popup).
 
-        Shallow entry (within the 20m allowance) — the escalation popup
+        Shallow entry (within the 10m allowance) — the escalation popup
         requires penetrating beyond the allowance.
         """
         await self._create_zone()
@@ -371,7 +371,7 @@ class ShortcutZoneWarningTests(TestCase):
         await self._refresh_zones()
         ctx = self._make_ctx(AsyncMock())
 
-        # Tick 1: cross INTO the polygon, still inside the 20m allowance
+        # Tick 1: cross INTO the polygon, still inside the 10m allowance
         # (edge is x=-2000; x=-1500 is 500 units in) → notice only
         await _check_shortcut_zones(
             character, Point(-30000, 1000, 0, srid=0), Point(-1500, 1000, 0, srid=0), ctx
@@ -380,7 +380,7 @@ class ShortcutZoneWarningTests(TestCase):
         mock_show_popup.assert_not_called()
         self.assertIsNone(character.shortcut_zone_entered_at)
 
-        # Tick 2: keep going, now well past the 20m allowance → popup + taint
+        # Tick 2: keep going, now well past the 10m allowance → popup + taint
         # (the eroded core spans 0..2000, so x=500 is beyond the allowance).
         # The popup replaces the chat on this tick (same-tick dedupe).
         mock_send_msg.reset_mock()
