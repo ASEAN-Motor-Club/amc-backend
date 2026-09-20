@@ -200,7 +200,9 @@ async def monitor_events_event(ctx):
 
 
 async def wanted_countdown_tick(ctx):
-    await tick_wanted_countdown(ctx["http_client"], ctx["http_client_mod"])
+    await tick_wanted_countdown(
+        ctx["http_client"], ctx["http_client_mod"], ctx["http_client_mgmt"]
+    )
 
 
 async def suspect_tag_refresh_tick(ctx):

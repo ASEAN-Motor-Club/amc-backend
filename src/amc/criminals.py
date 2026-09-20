@@ -54,6 +54,53 @@ BOUNTY_GROWTH_PER_TICK = 100  # $/s at reference distance (100m), rate is capped
 LOGOUT_HEAT_MAX = 300     # max heat added when police are point-blank
 LOGOUT_PROXIMITY_RANGE = 200_000  # 2km in game units — no effect beyond this
 
+# --- Speed & distance wanted law + compass cadence (2026-09 rework) ---
+# Wanted level is driven by SUSPECT SPEED with a 50 km/h pivot:
+#   running (S >= 50 km/h):  dW/dt = +(S - 50) / 50   [s of wanted per second]
+#   hiding (S < 50 km/h):    dW/dt = -(50 - S) / 50 * F(D)
+#   gate (any cop <= 500 m): no decay while hiding (running still accrues)
+# F(D) accelerates far-from-police hiding, saturating at HIDE_DECAY_MAX_MULT:
+#   1.0x at 500 m, ~1.4x at 1 km, ~2.1x at 3 km, 3.0x ceiling.
+WANTED_SPEED_PIVOT_KMH = 50.0     # above: wanted grows; below: wanted decays
+WANTED_LAW_RATE = 1.0 / 50.0      # s of wanted per (km/h from pivot) per second
+HIDE_DECAY_MAX_MULT = 3.0         # F(D) ceiling — far-parked decay multiplier
+HIDE_DECAY_KM = 2000.0            # metres past the gate for half the bonus
+WANTED_ESCAPE_HINT_STARS = 120.0  # remaining seconds under which gated suspects
+                                  # get the "escape the police" hint popup
+
+# Compass cadence — per-officer interval from THAT officer's distance to the
+# suspect and the suspect's speed:
+#   interval = 1 / ((D - 500 m) * (S + 20 km/h) * COMPASS_C), clamped
+#   [5 s, 120 s]; an officer inside the suspect's 500 m ring gets no updates.
+COMPASS_C = 1.5e-6                # Hz per (metre * km/h)
+COMPASS_MIN_INTERVAL = 5.0        # seconds — hot far-range routing intel
+COMPASS_MAX_INTERVAL = 120.0      # seconds — slow near-ring pulses
+COMPASS_HIDE_DISTANCE = 50_000    # 500 m in game units — per-officer silence ring
+
+
+def hide_decay_multiplier(dist_units: float) -> float:
+    """F(D): decay multiplier for a hiding suspect, by distance to nearest cop.
+
+    1.0x at the escape gate (500 m), rising hyperbolically to
+    HIDE_DECAY_MAX_MULT (3.0x) far away (half the bonus at HIDE_DECAY_KM).
+    """
+    d_m = max((dist_units - ESCAPE_DISTANCE) / 100.0, 0.0)
+    return 1.0 + (HIDE_DECAY_MAX_MULT - 1.0) * d_m / (d_m + HIDE_DECAY_KM)
+
+
+def compass_interval_seconds(dist_units: float, speed_kmh: float) -> float | None:
+    """Per-officer compass update interval; None = silent (inside 500 m ring)."""
+    d_m = (dist_units - COMPASS_HIDE_DISTANCE) / 100.0
+    if d_m <= 0:
+        return None
+    prod = d_m * (speed_kmh + 20.0)
+    if prod <= 0:
+        return COMPASS_MAX_INTERVAL
+    return min(
+        max(1.0 / (prod * COMPASS_C), COMPASS_MIN_INTERVAL),
+        COMPASS_MAX_INTERVAL,
+    )
+
 # Tracks the last notified star level per character guid
 _last_star_notified: dict[str, int] = {}
 
@@ -90,9 +137,10 @@ _last_suspect_guids: set[str] = set()
 # player entered a modded vehicle while already wanted).
 _last_modded_vehicle_guids: set[str] = set()
 
-# Tracks when each suspect last received a compass update (monotonic clock).
-# Used for speed-based throttle: faster suspects get more frequent updates.
-_last_compass_sent: dict[str, float] = {}
+# Tracks when each (officer guid, suspect guid) pair last received a compass
+# update (monotonic clock). Per-officer cadence — each officer's interval is
+# keyed on their own distance to the suspect.
+_last_compass_sent: dict[tuple[str, str], float] = {}
 
 
 def _calculate_logout_heat(min_police_distance: float) -> float:
@@ -333,21 +381,22 @@ def compute_stars(wanted_remaining: float) -> int:
 _compute_stars = compute_stars
 
 
-async def tick_wanted_countdown(http_client, http_client_mod) -> None:
+async def tick_wanted_countdown(http_client, http_client_mod, http_client_mgmt=None) -> None:
     """Single tick of the wanted countdown. Called from an arq cron.
 
-    Time-based decay: online suspects always lose BASE_DECAY_PER_TICK per tick,
-    clearing in BASE_WANTED_DURATION (5 min) with no police nearby.
+    Speed-based wanted law (2026-09 rework):
+        running (S >= 50 km/h):  wanted GROWS at (S - 50)/50 s per second
+                                 (capped at INITIAL_WANTED_LEVEL — 5 stars)
+        hiding  (S < 50 km/h):   wanted DECAYS at (50 - S)/50 * F(D) s per
+                                 second, where D is the distance to the
+                                 nearest on-duty cop and F(D) rises from 1.0x
+                                 at the escape gate to 3.0x far away
+        gate:                    NO decay while any on-duty cop is within
+                                 ESCAPE_DISTANCE (500 m) — running still accrues
 
-    Police proximity SLOWS decay via 1/r² law:
-        effective_decay = BASE_DECAY_PER_TICK / (1 + proximity_factor)
-    Closer police → larger factor → slower decay. Decay never reverses.
-
-    Bounty growth: uses 1/r law (flatter than decay) while police are within
-    ESCAPE_DISTANCE (500m).  $50/s at 200m, ~$15k over a 5-min chase.
-
-    Escape gate: cannot expire (clamped at ESCAPE_FLOOR) while any officer
-    is within ESCAPE_DISTANCE (500m). Beyond 500m, full base-rate decay resumes.
+    Replaces the former 1/r² proximity-slowed decay: cops now slow a hider's
+    clock only by standing inside the 500 m ring, and hiding far from police
+    is explicitly rewarded.
 
     Offline suspects: no decay, wanted persists indefinitely.
     """
@@ -366,6 +415,17 @@ async def tick_wanted_countdown(http_client, http_client_mod) -> None:
     # Fetch player locations (best-effort; empty is fine)
     players = await get_players(http_client)
     locations = _build_player_locations(players) if players else {}
+
+    # Speed telemetry from the mod management API (game units/s).
+    # Missing entry or unavailable API -> treat as stationary (full decay).
+    speed_map: dict[str, float] = {}
+    if http_client_mgmt:
+        try:
+            mgmt_locations = await get_players_locations(http_client_mgmt)
+        except Exception:  # noqa: BLE001 — graceful degradation to stationary
+            mgmt_locations = None
+        if mgmt_locations:
+            speed_map = {e["CharacterGuid"]: e["Speed"] for e in mgmt_locations}
 
     # Identify on-duty police officers (only if we have locations)
     cop_locations = []
@@ -494,41 +554,59 @@ async def tick_wanted_countdown(http_client, http_client_mod) -> None:
         if currently_in_modded:
             _current_modded_guids.add(sus_guid)
 
-        # Default: full base decay rate
-        effective_decay = BASE_DECAY_PER_TICK * TICK_INTERVAL
-        near_police = False
+        # --- Speed-based wanted law ---
+        # Running (>= 50 km/h): grow, capped at 5 stars.
+        # Hiding (< 50 km/h): decay, accelerated by distance from the nearest
+        # on-duty cop (F(D)), frozen entirely while any cop is within 500 m.
+        speed_units = speed_map.get(sus_guid.upper(), 0.0)
+        speed_kmh = speed_units * 0.036  # game units/s -> km/h
 
+        min_dist = None
+        near_police = False
         if cop_locations:
             min_dist = min(_distance_3d(sus_loc, cop_loc) for cop_loc in cop_locations)
+            near_police = min_dist <= ESCAPE_DISTANCE
 
-            if min_dist < ESCAPE_DISTANCE:
-                near_police = True
-                clamped_dist = max(min_dist, Wanted.MIN_DISTANCE)
-                proximity_factor = min(
-                    Wanted.MAX_DECAY, (Wanted.REF_DISTANCE / clamped_dist) ** 2
-                )
-                # Proximity slows decay: divide by (1 + factor)
-                effective_decay = (BASE_DECAY_PER_TICK / (1 + proximity_factor)) * TICK_INTERVAL
-
-                # DEPRECATED: Bounty growth from police proximity — disabled 2026-04-26
-                # bounty_factor = min(1.0, Wanted.REF_DISTANCE / clamped_dist)
-                # wanted.amount += int(BOUNTY_GROWTH_PER_TICK * bounty_factor)
-
-        # Apply decay
-        if near_police:
-            # Cannot expire while within ESCAPE_DISTANCE — clamp at floor
-            if wanted.wanted_remaining > ESCAPE_FLOOR:
-                wanted.wanted_remaining = max(ESCAPE_FLOOR, wanted.wanted_remaining - effective_decay)
-            # At floor near police → queue throttled escape popup
-            if wanted.wanted_remaining <= ESCAPE_FLOOR:
+        if speed_kmh >= WANTED_SPEED_PIVOT_KMH:
+            # Accrual is DISTANCE-BLIND by design: running at a given speed
+            # costs the same everywhere. Fast driving far from police must not
+            # accrue faster than fast driving close to police — only the
+            # compass cadence punishes far+fast (live 5 s feed), never the
+            # wanted meter itself.
+            growth = (
+                (speed_kmh - WANTED_SPEED_PIVOT_KMH)
+                * WANTED_LAW_RATE
+                * TICK_INTERVAL
+            )
+            wanted.wanted_remaining = min(
+                float(Wanted.INITIAL_WANTED_LEVEL),
+                wanted.wanted_remaining + growth,
+            )
+        elif near_police:
+            # Gate: no decay while any on-duty cop is within 500 m.
+            # Throttled hint for suspects whose clear is being held up.
+            if wanted.wanted_remaining < WANTED_ESCAPE_HINT_STARS:
                 now = time.monotonic()
                 last_sent = _last_escape_msg_sent.get(sus_guid, 0.0)
                 if now - last_sent >= ESCAPE_MSG_COOLDOWN:
                     _last_escape_msg_sent[sus_guid] = now
                     escape_popups.append(sus_guid)
         else:
-            # No cops within escape distance — full decay, can expire freely
-            wanted.wanted_remaining = max(0.0, wanted.wanted_remaining - effective_decay)
+            # No cops on duty at all -> base rate (F applies to distance from
+            # actual police; a cop-less server is not "infinitely far").
+            if min_dist is not None:
+                mult = hide_decay_multiplier(min_dist)
+            else:
+                mult = 1.0
+            decay = (
+                (WANTED_SPEED_PIVOT_KMH - speed_kmh)
+                * WANTED_LAW_RATE
+                * mult
+                * TICK_INTERVAL
+            )
+            wanted.wanted_remaining = max(
+                0.0, wanted.wanted_remaining - decay
+            )
             if wanted.wanted_remaining <= 0:
                 expired_characters.append(wanted.character)
 
@@ -823,9 +901,15 @@ async def tick_police_suspect_locations(http_client, http_client_mod, http_clien
     """Send every on-duty police officer a combined system message showing
     distance and bearing for each online wanted suspect.
 
-    Update frequency is speed-based: faster suspects get more frequent
-    compass updates (down to every 5 s), while stationary suspects
-    update every 15 s.
+    Update cadence is per-officer, keyed on THAT officer's distance to the
+    suspect and the suspect's speed:
+
+        interval = 1 / ((D - 500 m) * (S + 20 km/h) * COMPASS_C)
+
+    clamped to [5 s, 120 s]. An officer inside the suspect's 500 m silence
+    ring gets no updates for that suspect at all; officers farther out get
+    progressively faster updates (far-range routing intel). Missing speed
+    telemetry degrades to the stationary cadence.
     """
     wanted_list = [
         w
@@ -844,11 +928,13 @@ async def tick_police_suspect_locations(http_client, http_client_mod, http_clien
         return
 
     # Speed telemetry from mod management API (game units/s).
-    # Falls back to None if the API is unavailable — in that case we send
-    # all suspects unthrottled (graceful degradation).
-    mgmt_locations = await get_players_locations(http_client_mgmt)
+    # Falls back to the stationary cadence if the API is unavailable.
+    try:
+        mgmt_locations = await get_players_locations(http_client_mgmt)
+    except Exception:  # noqa: BLE001 — graceful degradation to stationary cadence
+        mgmt_locations = None
     speed_map: dict[str, float] = {}
-    if mgmt_locations is not None:
+    if mgmt_locations:
         speed_map = {e["CharacterGuid"]: e["Speed"] for e in mgmt_locations}
 
     # Pre-compute online suspect (character, location) pairs
@@ -865,29 +951,9 @@ async def tick_police_suspect_locations(http_client, http_client_mod, http_clien
 
     if not online_suspects:
         # Purge stale compass timestamps
-        for stale in set(_last_compass_sent) - wanted_guids:
-            del _last_compass_sent[stale]
-        return
-
-    # Speed-based throttle: build a set of suspect GUIDs eligible by
-    # speed + interval.  We do NOT update _last_compass_sent here —
-    # that happens after the proximity filter so that suspects hidden
-    # by proximity don't consume their interval slot.
-    now = time.monotonic()
-    if speed_map:
-        throttled = []
-        for character, suspect_loc in online_suspects:
-            speed = speed_map.get(character.guid.upper(), 0.0)
-            speed_mps = speed / 100  # game units/s → m/s
-            interval = max(5, min(15, 300 / max(speed_mps, 1)))
-            last_sent = _last_compass_sent.get(character.guid, 0)
-            if now - last_sent >= interval:
-                throttled.append((character, suspect_loc))
-        online_suspects = throttled
-    # If the mod management API is unavailable (speed_map empty),
-    # send all suspects unthrottled (graceful degradation).
-
-    if not online_suspects:
+        for stale in set(_last_compass_sent):
+            if stale[1] not in wanted_guids:
+                del _last_compass_sent[stale]
         return
 
     from amc.police import get_active_police_characters
@@ -895,7 +961,7 @@ async def tick_police_suspect_locations(http_client, http_client_mod, http_clien
 
     police_chars = await get_active_police_characters()
 
-    # Collect all officer locations first so we can filter suspects
+    # Collect all officer locations first
     officer_entries = []  # (officer, officer_loc)
     async for officer in police_chars:
         officer_guid = officer.guid
@@ -907,51 +973,40 @@ async def tick_police_suspect_locations(http_client, http_client_mod, http_clien
     if not officer_entries:
         return
 
-    # Filter out suspects that have any police officer within 500m (50000 units)
-    PROXIMITY_HIDE_DISTANCE = 50_000
-    visible_suspects = []
-    for character, suspect_loc in online_suspects:
-        if any(
-            _distance_3d(suspect_loc, cop_loc) < PROXIMITY_HIDE_DISTANCE
-            for _, cop_loc in officer_entries
-        ):
-            continue
-        visible_suspects.append((character, suspect_loc))
-
-    if not visible_suspects:
-        return
-
-    # NOW update _last_compass_sent for suspects that survived both
-    # the speed throttle AND the proximity filter.
-    for character, _ in visible_suspects:
-        _last_compass_sent[character.guid] = now
-
+    now = time.monotonic()
     for officer, officer_loc in officer_entries:
         officer_guid = officer.guid
         officer_x, officer_y, officer_z = officer_loc
 
         entries = []  # (distance, formatted_line)
-        for character, suspect_loc in visible_suspects:
+        for character, suspect_loc in online_suspects:
             # Wanted players should never be police, but guard anyway
             if character.guid == officer_guid:
                 continue
 
             dist = _distance_3d(officer_loc, suspect_loc)
+            speed_kmh = speed_map.get(character.guid.upper(), 0.0) * 0.036
+            interval = compass_interval_seconds(dist, speed_kmh)
+            if interval is None:
+                # This officer is inside the suspect's 500 m silence ring
+                continue
+            key = (officer_guid, character.guid)
+            if now - _last_compass_sent.get(key, 0.0) < interval:
+                continue
+            _last_compass_sent[key] = now
+
             metres = game_units_to_metres(dist)
 
-            if metres < 100:
-                entries.append((dist, f"[{character.name}] is within 100m"))
+            dx = suspect_loc[0] - officer_x
+            dy = suspect_loc[1] - officer_y
+            direction = compass_heading(dx, dy)
+
+            if metres < 1000:
+                dist_str = f"{metres}m"
             else:
-                dx = suspect_loc[0] - officer_x
-                dy = suspect_loc[1] - officer_y
-                direction = compass_heading(dx, dy)
+                dist_str = f"{metres / 1000:.1f}km"
 
-                if metres < 1000:
-                    dist_str = f"{metres}m"
-                else:
-                    dist_str = f"{metres / 1000:.1f}km"
-
-                entries.append((dist, f"[{character.name}] {dist_str} {direction}"))
+            entries.append((dist, f"[{character.name}] {dist_str} {direction}"))
 
         if not entries:
             continue
@@ -970,8 +1025,12 @@ async def tick_police_suspect_locations(http_client, http_client_mod, http_clien
                 "Failed to send suspect locations to officer %s", officer.name
             )
 
-    # Purge stale compass timestamps
-    for stale in set(_last_compass_sent) - wanted_guids:
+    # Purge stale (officer, suspect) compass timestamps
+    officer_guids = {officer.guid for officer, _ in officer_entries}
+    valid_keys = {
+        (og, sg) for og in officer_guids for sg in wanted_guids
+    }
+    for stale in set(_last_compass_sent) - valid_keys:
         del _last_compass_sent[stale]
 
 
