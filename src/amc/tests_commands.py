@@ -3439,16 +3439,19 @@ class RentGroupingTestCase(SimpleTestCase):
         v2 = self._make_vehicle(2, "Truck B", "Corp One")
         v3 = self._make_vehicle(3, "Van C", "Corp Two")
 
-        with patch("amc.commands.vehicles.CharacterVehicle.objects.filter") as mock_filter:
-            mock_qs = MagicMock()
+        mock_filtered = MagicMock()
 
-            async def async_iter(items):
-                for item in items:
-                    yield item
+        async def async_iter(items):
+            for item in items:
+                yield item
 
-            mock_qs.__aiter__ = lambda self_=None: async_iter([v1, v2, v3])
-            mock_filter.return_value = mock_qs
-
+        mock_filtered.__aiter__ = lambda self_=None: async_iter([v1, v2, v3])
+        mock_qs = MagicMock()
+        mock_qs.filter = MagicMock(return_value=mock_filtered)
+        with patch(
+            "amc.commands.vehicles.CharacterVehicle.objects.select_related",
+            return_value=mock_qs,
+        ):
             await cmd_rent(self.ctx)
 
             self.ctx.reply.assert_called_once()
@@ -3465,16 +3468,19 @@ class RentGroupingTestCase(SimpleTestCase):
 
     async def test_rent_list_no_rentals(self):
         """When no rentals exist, shows appropriate message."""
-        with patch("amc.commands.vehicles.CharacterVehicle.objects.filter") as mock_filter:
-            mock_qs = MagicMock()
+        mock_filtered = MagicMock()
 
-            async def async_iter(items):
-                for item in items:
-                    yield item
+        async def async_iter(items):
+            for item in items:
+                yield item
 
-            mock_qs.__aiter__ = lambda self_=None: async_iter([])
-            mock_filter.return_value = mock_qs
-
+        mock_filtered.__aiter__ = lambda self_=None: async_iter([])
+        mock_qs = MagicMock()
+        mock_qs.filter = MagicMock(return_value=mock_filtered)
+        with patch(
+            "amc.commands.vehicles.CharacterVehicle.objects.select_related",
+            return_value=mock_qs,
+        ):
             await cmd_rent(self.ctx)
 
             self.ctx.reply.assert_called_once()
@@ -3486,22 +3492,78 @@ class RentGroupingTestCase(SimpleTestCase):
         v1 = self._make_vehicle(1, "SportCar_X", "Corp A")
         v2 = self._make_vehicle(2, "Truck_Y", "Corp B")
 
-        with patch("amc.commands.vehicles.CharacterVehicle.objects.filter") as mock_filter:
-            mock_qs = MagicMock()
+        mock_filtered = MagicMock()
 
-            async def async_iter(items):
-                for item in items:
-                    yield item
+        async def async_iter(items):
+            for item in items:
+                yield item
 
-            mock_qs.__aiter__ = lambda self_=None: async_iter([v1, v2])
-            mock_filter.return_value = mock_qs
-
+        mock_filtered.__aiter__ = lambda self_=None: async_iter([v1, v2])
+        mock_qs = MagicMock()
+        mock_qs.filter = MagicMock(return_value=mock_filtered)
+        with patch(
+            "amc.commands.vehicles.CharacterVehicle.objects.select_related",
+            return_value=mock_qs,
+        ):
             await cmd_rent(self.ctx, "sport")
 
             self.ctx.reply.assert_called_once()
             output = self.ctx.reply.call_args[0][0]
             self.assertIn("SportCar_X", output)
             self.assertNotIn("Truck_Y", output)
+
+    async def test_rent_list_personal_vehicles_grouped_by_owner(self):
+        """Personal vehicles group under the owner's name as \"<name>'s rentals\"."""
+        personal = self._make_vehicle(4, "MyCar")
+        personal.character.name = "freeman"
+        company = self._make_vehicle(5, "CorpCar", "Corp One")
+
+        mock_filtered = MagicMock()
+
+        async def async_iter(items):
+            for item in items:
+                yield item
+
+        mock_filtered.__aiter__ = lambda self_=None: async_iter([personal, company])
+        mock_qs = MagicMock()
+        mock_qs.filter = MagicMock(return_value=mock_filtered)
+        with patch(
+            "amc.commands.vehicles.CharacterVehicle.objects.select_related",
+            return_value=mock_qs,
+        ):
+            await cmd_rent(self.ctx)
+
+            self.ctx.reply.assert_called_once()
+            output = self.ctx.reply.call_args[0][0]
+            self.assertIn("freeman's rentals", output)
+            self.assertIn("MyCar", output)
+            self.assertIn("Corp One", output)
+            self.assertNotIn("Independent", output)
+
+    async def test_rent_list_missing_owner_falls_back_to_independent(self):
+        """A vehicle with no company and no owner still lists, under Independent."""
+        orphan = self._make_vehicle(6, "GhostCar")
+        orphan.character = None
+
+        mock_filtered = MagicMock()
+
+        async def async_iter(items):
+            for item in items:
+                yield item
+
+        mock_filtered.__aiter__ = lambda self_=None: async_iter([orphan])
+        mock_qs = MagicMock()
+        mock_qs.filter = MagicMock(return_value=mock_filtered)
+        with patch(
+            "amc.commands.vehicles.CharacterVehicle.objects.select_related",
+            return_value=mock_qs,
+        ):
+            await cmd_rent(self.ctx)
+
+            self.ctx.reply.assert_called_once()
+            output = self.ctx.reply.call_args[0][0]
+            self.assertIn("Independent", output)
+            self.assertIn("GhostCar", output)
 
     async def test_rent_spawn_success(self):
         """Renting by ID should spawn the vehicle."""
@@ -3555,9 +3617,11 @@ class RentGroupingTestCase(SimpleTestCase):
         """Renting a nonexistent ID should show error."""
         from amc.models import CharacterVehicle as CV
 
+        mock_qs = MagicMock()
+        mock_qs.aget = AsyncMock(side_effect=CV.DoesNotExist)
         with patch(
-            "amc.commands.vehicles.CharacterVehicle.objects.aget",
-            new=AsyncMock(side_effect=CV.DoesNotExist),
+            "amc.commands.vehicles.CharacterVehicle.objects.select_related",
+            return_value=mock_qs,
         ):
             await cmd_rent(self.ctx, "999")
 

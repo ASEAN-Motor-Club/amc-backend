@@ -383,7 +383,12 @@ async def cmd_rental(ctx: CommandContext, alias: str = ""):
 )
 async def cmd_rent(ctx: CommandContext, vehicle_id: str = ""):
     if not vehicle_id or not vehicle_id.isdigit():
-        vehicles = [v async for v in CharacterVehicle.objects.filter(rental=True)]
+        vehicles = [
+            v
+            async for v in CharacterVehicle.objects.select_related("character").filter(
+                rental=True
+            )
+        ]
         if vehicle_id.strip():
             search = vehicle_id.strip().lower()
             vehicles = [
@@ -396,13 +401,18 @@ async def cmd_rent(ctx: CommandContext, vehicle_id: str = ""):
             await ctx.reply(_("<Title>Rentals</>\nNo rentals found."))
             return
 
-        vehicles.sort(key=lambda v: v.config.get("CompanyName") or "Independent")
+        def rental_label(v):
+            if company := v.config.get("CompanyName"):
+                return company
+            if v.character:
+                return f"{v.character.name}'s rentals"
+            return "Independent"
+
+        vehicles.sort(key=rental_label)
 
         lines: list[str] = []
-        for company, group in itertools.groupby(
-            vehicles, key=lambda v: v.config.get("CompanyName") or "Independent"
-        ):
-            lines.append(f"<Bold>{company}</>")
+        for label, group in itertools.groupby(vehicles, key=rental_label):
+            lines.append(f"<Bold>{label}</>")
             for v in group:
                 lines.append(f" <Small>#{v.id} - {v.config['VehicleName']}</>")
             lines.append("")
