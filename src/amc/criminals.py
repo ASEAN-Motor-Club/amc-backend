@@ -290,6 +290,39 @@ STAR_MESSAGES = {
 }
 
 
+async def _effective_cop_characters(http_client_mod) -> list:
+    """Characters of every EFFECTIVE cop: on-duty PoliceSession, online
+    (last_online within 60 s) and not AFK (mod ``bAFK`` flag).
+
+    Fail-open per cop: if the mod API cannot confirm a cop's AFK state, the
+    cop counts as present — wanted is never amnestied on uncertain data.
+    """
+    online_threshold = timezone.now() - timedelta(seconds=60)
+    sessions = [
+        ps
+        async for ps in PoliceSession.objects.filter(
+            ended_at__isnull=True,
+            character__last_online__gte=online_threshold,
+        ).select_related("character__player")
+    ]
+    effective: list = []
+    for ps in sessions:
+        player_id = str(ps.character.player.unique_id)
+        try:
+            player_data = await get_player(http_client_mod, player_id)
+        except Exception:
+            logger.debug(
+                "_effective_cop_characters: AFK check failed for %s, assuming present",
+                player_id,
+            )
+            effective.append(ps.character)  # fail open — never amnesty on uncertain data
+            continue
+        if player_data and player_data.get("bAFK") is True:
+            continue  # AFK cop doesn't keep the system armed
+        effective.append(ps.character)
+    return effective
+
+
 async def active_police_present(http_client_mod) -> bool:
     """True if at least one EFFECTIVE cop is on duty right now.
 
@@ -305,30 +338,46 @@ async def active_police_present(http_client_mod) -> bool:
     Fail-open: if the mod API cannot confirm a cop's AFK state, the cop
     counts as present — wanted is never amnestied on uncertain data.
     """
-    online_threshold = timezone.now() - timedelta(seconds=60)
-    sessions = [
-        ps
-        async for ps in PoliceSession.objects.filter(
-            ended_at__isnull=True,
-            character__last_online__gte=online_threshold,
-        ).select_related("character__player")
-    ]
-    if not sessions:
-        return False
-    for ps in sessions:
-        player_id = str(ps.character.player.unique_id)
-        try:
-            player_data = await get_player(http_client_mod, player_id)
-        except Exception:
-            logger.debug(
-                "active_police_present: AFK check failed for %s, assuming present",
-                player_id,
-            )
-            return True  # fail open — never amnesty on uncertain data
-        if player_data and player_data.get("bAFK") is True:
-            continue  # AFK cop doesn't keep the system armed
-        return True
-    return False
+    return bool(await _effective_cop_characters(http_client_mod))
+
+
+async def nearest_effective_cop_distance_m(
+    http_client, http_client_mod, character
+) -> tuple[bool, float | None]:
+    """(cops_present, metres) to the nearest EFFECTIVE cop, for trigger gating.
+
+    Present=False ⇔ zero effective cops on duty ⇒ the wanted system is
+    dormant and organic triggers must not fire. Otherwise metres is the
+    distance to the nearest effective cop, or None when position data is
+    unavailable — callers fail OPEN toward the unattenuated roll (the
+    suppression is anti-abuse, not a safety interlock).
+    """
+    cops = await _effective_cop_characters(http_client_mod)
+    if not cops:
+        return False, None
+    try:
+        players = await get_players(http_client)
+    except Exception:
+        logger.debug(
+            "nearest_effective_cop_distance_m: get_players failed, failing open",
+            exc_info=True,
+        )
+        return True, None
+    locations = _build_player_locations(players) if players else {}
+    target = locations.get(character.guid)
+    if target is None:
+        return True, None
+    from amc.utils import game_units_to_metres
+
+    best_metres: float | None = None
+    for cop in cops:
+        entry = locations.get(cop.guid)
+        if entry is None:
+            continue
+        metres = game_units_to_metres(_distance_3d(entry[1], target[1]))
+        if best_metres is None or metres < best_metres:
+            best_metres = metres
+    return True, best_metres
 
 
 async def create_or_refresh_wanted(

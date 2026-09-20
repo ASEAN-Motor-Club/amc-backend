@@ -676,42 +676,317 @@ class DeliveryDebounceAccumulationTests(TestCase):
         self.assertEqual(total, 100_000)
 
 
-class ShouldTriggerWantedAccumulatedTests(TestCase):
-    """should_trigger_wanted uses accumulated totals correctly."""
+class WantedTriggerChanceTests(TestCase):
+    """wanted_trigger_chance: ratio curve + cop attenuation (freeman 2026-09-20).
 
-    def test_zero_amount_uses_min_chance(self):
-        from amc.special_cargo import should_trigger_wanted, WANTED_MIN_CHANCE
+    Anchors are the KB values (YouTrack 183-4): fresh records roll against the
+    100k yardstick floor; established criminals roll colder for the same haul.
+    """
+
+    def test_fresh_record_anchors(self):
+        from amc.special_cargo import wanted_trigger_chance
+
+        for pay, expected in (
+            (10_000, 0.095),
+            (50_000, 0.381),
+            (100_000, 0.463),
+            (500_000, 0.498),
+            (1_500_000, 0.500),
+        ):
+            self.assertAlmostEqual(
+                wanted_trigger_chance(pay, 0, None), expected, places=3, msg=f"pay={pay}"
+            )
+
+    def test_one_million_score_anchors(self):
+        from amc.special_cargo import wanted_trigger_chance
+
+        for pay, expected in (
+            (100_000, 0.167),
+            (500_000, 0.454),
+            (1_000_000, 0.488),
+            (1_500_000, 0.494),
+        ):
+            self.assertAlmostEqual(
+                wanted_trigger_chance(pay, 1_000_000, None),
+                expected,
+                places=3,
+                msg=f"pay={pay}",
+            )
+
+    def test_kingpin_20m_anchors(self):
+        from amc.special_cargo import wanted_trigger_chance
+
+        for pay, expected in (
+            (500_000, 0.090),
+            (1_000_000, 0.177),
+            (1_500_000, 0.261),
+        ):
+            self.assertAlmostEqual(
+                wanted_trigger_chance(pay, 20_000_000, None),
+                expected,
+                places=3,
+                msg=f"pay={pay}",
+            )
+
+    def test_stays_within_floor_and_ceiling(self):
+        from amc.special_cargo import (
+            WANTED_TRIGGER_CEILING_CHANCE,
+            WANTED_TRIGGER_FLOOR_CHANCE,
+            wanted_trigger_chance,
+        )
+
+        for score in (0, 100_000, 1_000_000, 20_000_000, 100_000_000):
+            for pay in (0, 1_000, 10_000, 50_000, 100_000, 500_000, 1_500_000, 10_000_000):
+                chance = wanted_trigger_chance(pay, score, None)
+                self.assertGreaterEqual(chance, WANTED_TRIGGER_FLOOR_CHANCE)
+                self.assertLessEqual(chance, WANTED_TRIGGER_CEILING_CHANCE)
+
+    def test_monotone_in_pay_and_score(self):
+        from amc.special_cargo import wanted_trigger_chance
+
+        last = 0.0
+        for pay in (1_000, 10_000, 100_000, 500_000, 1_500_000):
+            chance = wanted_trigger_chance(pay, 0, None)
+            self.assertGreaterEqual(chance, last)
+            last = chance
+        last = 1.0
+        for score in (0, 100_000, 1_000_000, 20_000_000):
+            chance = wanted_trigger_chance(100_000, score, None)
+            self.assertLessEqual(chance, last)
+            last = chance
+
+    def test_attenuation_profile(self):
+        """γ=2 ramp on a fresh 100k run (base 46.3%)."""
+        from amc.special_cargo import wanted_trigger_chance
+
+        for metres, expected in (
+            (0, 0.050),
+            (250, 0.076),
+            (500, 0.153),
+            (750, 0.282),
+            (1_000, 0.463),
+            (2_000, 0.463),
+        ):
+            self.assertAlmostEqual(
+                wanted_trigger_chance(100_000, 0, metres),
+                expected,
+                places=3,
+                msg=f"distance={metres}",
+            )
+
+
+class CopAttenuationMultiplierTests(TestCase):
+    """cop_attenuation_multiplier: quadratic ramp, clamped, fail-open on None."""
+
+    def test_profile(self):
+        from amc.special_cargo import cop_attenuation_multiplier
+
+        self.assertEqual(cop_attenuation_multiplier(0), 0.0)
+        self.assertAlmostEqual(cop_attenuation_multiplier(250), 0.0625, places=9)
+        self.assertAlmostEqual(cop_attenuation_multiplier(500), 0.25, places=9)
+        self.assertAlmostEqual(cop_attenuation_multiplier(750), 0.5625, places=9)
+        self.assertEqual(cop_attenuation_multiplier(1_000), 1.0)
+        self.assertEqual(cop_attenuation_multiplier(10_000), 1.0)
+
+    def test_none_fails_open(self):
+        from amc.special_cargo import cop_attenuation_multiplier
+
+        self.assertEqual(cop_attenuation_multiplier(None), 1.0)
+
+    def test_negative_distance_clamps_to_zero(self):
+        from amc.special_cargo import cop_attenuation_multiplier
+
+        self.assertEqual(cop_attenuation_multiplier(-100), 0.0)
+
+
+class ShouldTriggerWantedRollTests(TestCase):
+    """should_trigger_wanted: compares random() against the computed chance."""
+
+    def test_roll_boundary_at_chance(self):
+        from amc.special_cargo import should_trigger_wanted
 
         with patch("amc.special_cargo.random") as mock_rng:
-            mock_rng.random.return_value = WANTED_MIN_CHANCE - 0.001
-            self.assertTrue(should_trigger_wanted(0))
-            mock_rng.random.return_value = WANTED_MIN_CHANCE + 0.001
-            self.assertFalse(should_trigger_wanted(0))
+            # Fresh 10k haul → chance exactly 9.5%
+            mock_rng.random.return_value = 0.0949
+            self.assertTrue(should_trigger_wanted(10_000, 0, None))
+            mock_rng.random.return_value = 0.0951
+            self.assertFalse(should_trigger_wanted(10_000, 0, None))
 
-    def test_100k_accumulated_guarantees_trigger(self):
+    def test_point_blank_chance_is_the_floor(self):
+        """Point-blank under a cop the sweep is dead — only the 5% floor rolls."""
+        from amc.special_cargo import (
+            WANTED_TRIGGER_FLOOR_CHANCE,
+            should_trigger_wanted,
+            wanted_trigger_chance,
+        )
+
+        self.assertEqual(
+            wanted_trigger_chance(50_000, 20_000_000, 0), WANTED_TRIGGER_FLOOR_CHANCE
+        )
+        with patch("amc.special_cargo.random") as mock_rng:
+            mock_rng.random.return_value = WANTED_TRIGGER_FLOOR_CHANCE - 0.001
+            self.assertTrue(should_trigger_wanted(50_000, 20_000_000, 0))
+            mock_rng.random.return_value = WANTED_TRIGGER_FLOOR_CHANCE + 0.001
+            self.assertFalse(should_trigger_wanted(50_000, 20_000_000, 0))
+
+    def test_never_guarantees_trigger(self):
+        """No haul size reaches 100% — the ceiling is asymptotic."""
         from amc.special_cargo import should_trigger_wanted
 
         with patch("amc.special_cargo.random") as mock_rng:
             mock_rng.random.return_value = 0.9999
-            # 100k = 100% chance so even 0.9999 should pass
-            self.assertTrue(should_trigger_wanted(100_000))
+            self.assertFalse(should_trigger_wanted(10_000_000, 0, 5_000))
 
-    def test_50k_accumulated_is_50_percent_chance(self):
-        from amc.special_cargo import should_trigger_wanted
+
+@patch("amc.special_cargo.refresh_player_name", new_callable=AsyncMock)
+@patch("amc.criminals.send_system_message", new_callable=AsyncMock)
+@patch("amc.criminals.refresh_player_name", new_callable=AsyncMock)
+@patch("amc.webhook.get_rp_mode", new_callable=AsyncMock)
+@patch("amc.webhook.get_treasury_fund_balance", new_callable=AsyncMock)
+@patch("amc.handlers.cargo.nearest_effective_cop_distance_m", new_callable=AsyncMock)
+@patch(
+    "amc.handlers.cargo.accumulate_illicit_delivery",
+    new_callable=AsyncMock,
+    return_value=100_000,
+)
+class WantedTriggerRestoreTests(TestCase):
+    """Handler-level tests for the restored ratio-driven trigger.
+
+    Dormant rule: zero effective cops → no roll at all. Cop presence +
+    distance are mocked at the import site (amc.handlers.cargo); the roll is
+    controlled via amc.special_cargo.random.
+    """
+
+    async def _setup_character(self):
+        player = await sync_to_async(PlayerFactory)()
+        character = await sync_to_async(CharacterFactory)(player=player)
+        await CharacterLocation.objects.acreate(
+            character=character, location=Point(0, 0, 0), vehicle_key="TestVehicle"
+        )
+        await DeliveryPoint.objects.acreate(guid="s1", name="S1", coord=Point(0, 0, 0))
+        await DeliveryPoint.objects.acreate(
+            guid="d1", name="D1", coord=Point(100, 100, 0)
+        )
+        return player, character
+
+    def _cargo_event(self, character, cargo_key, payment=5000):
+        return {
+            "hook": "ServerCargoArrived",
+            "timestamp": int(time.time()),
+            "data": {
+                "CharacterGuid": str(character.guid),
+                "Cargos": [
+                    {
+                        "Net_CargoKey": cargo_key,
+                        "Net_Payment": payment,
+                        "Net_Weight": 10.0,
+                        "Net_Damage": 0.0,
+                        "Net_SenderAbsoluteLocation": {"X": 0, "Y": 0, "Z": 0},
+                        "Net_DestinationLocation": {"X": 100, "Y": 100, "Z": 0},
+                    }
+                ],
+            },
+        }
+
+    async def test_dormant_system_never_triggers(
+        self, mock_accumulate, mock_cops, mock_get_treasury, mock_get_rp_mode,
+        mock_send_system, mock_refresh_crim, mock_refresh_special,
+    ):
+        """Zero effective cops → no roll, no Wanted (dormant rule)."""
+        mock_get_rp_mode.return_value = False
+        mock_get_treasury.return_value = 100_000
+        mock_cops.return_value = (False, None)
+        player, character = await self._setup_character()
 
         with patch("amc.special_cargo.random") as mock_rng:
-            mock_rng.random.return_value = 0.49
-            self.assertTrue(should_trigger_wanted(50_000))
-            mock_rng.random.return_value = 0.51
-            self.assertFalse(should_trigger_wanted(50_000))
+            mock_rng.random.return_value = 0.0  # would pass any chance > 0
+            event = self._cargo_event(character, "Ganja", payment=500_000)
+            await process_event(event, player, character)
 
-    def test_10_micro_deliveries_vs_one_large_delivery_same_probability(self):
-        """10 × 10k accumulated = one 100k delivery = 100% chance."""
-        from amc.special_cargo import should_trigger_wanted
+        exists = await Wanted.objects.filter(
+            character=character, expired_at__isnull=True
+        ).aexists()
+        self.assertFalse(exists)
+        mock_cops.assert_awaited_once()
+
+    async def test_roll_hit_creates_wanted(
+        self, mock_accumulate, mock_cops, mock_get_treasury, mock_get_rp_mode,
+        mock_send_system, mock_refresh_crim, mock_refresh_special,
+    ):
+        mock_get_rp_mode.return_value = False
+        mock_get_treasury.return_value = 100_000
+        mock_cops.return_value = (True, None)
+        player, character = await self._setup_character()
 
         with patch("amc.special_cargo.random") as mock_rng:
-            mock_rng.random.return_value = 0.9999
-            # Single 100k delivery
-            self.assertTrue(should_trigger_wanted(100_000))
-            # 10 accumulations — if we passed accumulated=100_000 (as the handler now does)
-            self.assertTrue(should_trigger_wanted(100_000))
+            mock_rng.random.return_value = 0.0
+            event = self._cargo_event(character, "Ganja", payment=5000)
+            await process_event(event, player, character)
+
+        wanted = await Wanted.objects.filter(
+            character=character, expired_at__isnull=True
+        ).afirst()
+        self.assertIsNotNone(wanted)
+        self.assertEqual(wanted.amount, 0)
+        self.assertEqual(wanted.wanted_remaining, Wanted.INITIAL_WANTED_LEVEL)
+
+    async def test_roll_miss_does_not_create_wanted(
+        self, mock_accumulate, mock_cops, mock_get_treasury, mock_get_rp_mode,
+        mock_send_system, mock_refresh_crim, mock_refresh_special,
+    ):
+        mock_get_rp_mode.return_value = False
+        mock_get_treasury.return_value = 100_000
+        mock_cops.return_value = (True, None)
+        player, character = await self._setup_character()
+
+        with patch("amc.special_cargo.random") as mock_rng:
+            mock_rng.random.return_value = 0.999
+            event = self._cargo_event(character, "Ganja", payment=5000)
+            await process_event(event, player, character)
+
+        exists = await Wanted.objects.filter(
+            character=character, expired_at__isnull=True
+        ).aexists()
+        self.assertFalse(exists)
+
+    async def test_roll_receives_debounce_total_pre_accrual_score_and_distance(
+        self, mock_accumulate, mock_cops, mock_get_treasury, mock_get_rp_mode,
+        mock_send_system, mock_refresh_crim, mock_refresh_special,
+    ):
+        """The roll sees the debounce aggregate, the PRE-accrual lifetime
+        total, and the cop distance from the gating helper."""
+        mock_get_rp_mode.return_value = False
+        mock_get_treasury.return_value = 100_000
+        mock_cops.return_value = (True, 350.0)
+        mock_accumulate.return_value = 5_000
+        player, character = await self._setup_character()
+        character.criminal_laundered_total = 1_000_000
+        await character.asave(update_fields=["criminal_laundered_total"])
+
+        with patch("amc.handlers.cargo.should_trigger_wanted") as mock_roll:
+            mock_roll.return_value = False
+            event = self._cargo_event(character, "Ganja", payment=5_000)
+            await process_event(event, player, character)
+
+        mock_roll.assert_called_once_with(5_000, 1_000_000, 350.0)
+
+    async def test_already_wanted_refreshes_without_roll(
+        self, mock_accumulate, mock_cops, mock_get_treasury, mock_get_rp_mode,
+        mock_send_system, mock_refresh_crim, mock_refresh_special,
+    ):
+        mock_get_rp_mode.return_value = False
+        mock_get_treasury.return_value = 100_000
+        mock_cops.return_value = (True, None)
+        player, character = await self._setup_character()
+        seeded = await Wanted.objects.acreate(
+            character=character, wanted_remaining=300
+        )
+
+        with patch("amc.handlers.cargo.should_trigger_wanted") as mock_roll:
+            event = self._cargo_event(character, "Ganja", payment=5000)
+            await process_event(event, player, character)
+
+        mock_roll.assert_not_called()
+        mock_cops.assert_not_awaited()
+        await seeded.arefresh_from_db()
+        self.assertEqual(seeded.wanted_remaining, Wanted.INITIAL_WANTED_LEVEL)

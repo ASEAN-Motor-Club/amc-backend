@@ -37,6 +37,7 @@ from amc.criminals import (
     _last_suspect_guids,
     active_police_present,
     hide_decay_multiplier,
+    nearest_effective_cop_distance_m,
     refresh_suspect_tags,
     tick_criminal_record_decay,
     tick_police_suspect_locations,
@@ -1295,6 +1296,159 @@ class ActivePolicePresentTests(TestCase):
 
         with patch("amc.criminals.get_player", new=fake_get_player):
             self.assertTrue(await active_police_present(mock_mod))
+
+
+class NearestEffectiveCopDistanceTests(TestCase):
+    """Unit tests for nearest_effective_cop_distance_m (trigger gating).
+
+    Same effective-cop filter as active_police_present, plus position data:
+    (False, None) = dormant (no effective cop → no roll); (True, None) =
+    present but position unknown → fail open toward the unattenuated roll.
+    """
+
+    async def _setup_officer(self, last_online_offset=0):
+        player = await sync_to_async(PlayerFactory)()
+        officer = await sync_to_async(CharacterFactory)(
+            player=player,
+            last_online=timezone.now() - timedelta(seconds=last_online_offset),
+        )
+        await officer.asave(update_fields=["last_online"])
+        await PoliceSession.objects.acreate(character=officer)
+        return officer
+
+    async def _setup_criminal(self):
+        player = await sync_to_async(PlayerFactory)()
+        return await sync_to_async(CharacterFactory)(player=player)
+
+    async def test_no_sessions_is_dormant(self):
+        criminal = await self._setup_criminal()
+        self.assertEqual(
+            await nearest_effective_cop_distance_m(AsyncMock(), AsyncMock(), criminal),
+            (False, None),
+        )
+
+    async def test_measures_distance_to_nearest_effective_cop(self):
+        criminal = await self._setup_criminal()
+        cop = await self._setup_officer()
+        # 10_000 units apart = 100 m
+        players = _make_players_list(
+            [
+                _make_player_data(cop.player.unique_id, cop.guid, 15_000, 5000, 0),
+                _make_player_data(criminal.player.unique_id, criminal.guid, 5000, 5000, 0),
+            ]
+        )
+        with patch("amc.criminals.get_player", new_callable=AsyncMock,
+                   return_value={"bAFK": False}), \
+             patch("amc.criminals.get_players", new_callable=AsyncMock,
+                   return_value=players):
+            present, metres = await nearest_effective_cop_distance_m(
+                AsyncMock(), AsyncMock(), criminal
+            )
+        self.assertTrue(present)
+        self.assertEqual(metres, 100)
+
+    async def test_nearest_of_two_cops_wins(self):
+        criminal = await self._setup_criminal()
+        far_cop = await self._setup_officer()
+        near_cop = await self._setup_officer()
+        players = _make_players_list(
+            [
+                _make_player_data(far_cop.player.unique_id, far_cop.guid, 15_000, 5000, 0),
+                _make_player_data(near_cop.player.unique_id, near_cop.guid, 10_000, 5000, 0),
+                _make_player_data(criminal.player.unique_id, criminal.guid, 5000, 5000, 0),
+            ]
+        )
+        with patch("amc.criminals.get_player", new_callable=AsyncMock,
+                   return_value={"bAFK": False}), \
+             patch("amc.criminals.get_players", new_callable=AsyncMock,
+                   return_value=players):
+            _, metres = await nearest_effective_cop_distance_m(
+                AsyncMock(), AsyncMock(), criminal
+            )
+        self.assertEqual(metres, 50)
+
+    async def test_afk_cop_is_skipped(self):
+        """An AFK cop is not an effective cop — the system stays dormant."""
+        criminal = await self._setup_criminal()
+        await self._setup_officer()
+        with patch("amc.criminals.get_player", new_callable=AsyncMock,
+                   return_value={"bAFK": True}):
+            result = await nearest_effective_cop_distance_m(
+                AsyncMock(), AsyncMock(), criminal
+            )
+        self.assertEqual(result, (False, None))
+
+    async def test_afk_check_failure_fails_open(self):
+        criminal = await self._setup_criminal()
+        cop = await self._setup_officer()
+        players = _make_players_list(
+            [
+                _make_player_data(cop.player.unique_id, cop.guid, 15_000, 5000, 0),
+                _make_player_data(criminal.player.unique_id, criminal.guid, 5000, 5000, 0),
+            ]
+        )
+        with patch("amc.criminals.get_player", new_callable=AsyncMock,
+                   side_effect=Exception("mod api down")), \
+             patch("amc.criminals.get_players", new_callable=AsyncMock,
+                   return_value=players):
+            present, metres = await nearest_effective_cop_distance_m(
+                AsyncMock(), AsyncMock(), criminal
+            )
+        self.assertTrue(present)
+        self.assertEqual(metres, 100)
+
+    async def test_position_fetch_failure_fails_open_unattenuated(self):
+        criminal = await self._setup_criminal()
+        await self._setup_officer()
+        with patch("amc.criminals.get_player", new_callable=AsyncMock,
+                   return_value={"bAFK": False}), \
+             patch("amc.criminals.get_players", new_callable=AsyncMock,
+                   side_effect=Exception("game api down")):
+            present, metres = await nearest_effective_cop_distance_m(
+                AsyncMock(), AsyncMock(), criminal
+            )
+        self.assertTrue(present)
+        self.assertIsNone(metres)
+
+    async def test_criminal_position_unknown_fails_open(self):
+        criminal = await self._setup_criminal()
+        cop = await self._setup_officer()
+        players = _make_players_list(
+            [_make_player_data(cop.player.unique_id, cop.guid, 15_000, 5000, 0)]
+        )
+        with patch("amc.criminals.get_player", new_callable=AsyncMock,
+                   return_value={"bAFK": False}), \
+             patch("amc.criminals.get_players", new_callable=AsyncMock,
+                   return_value=players):
+            present, metres = await nearest_effective_cop_distance_m(
+                AsyncMock(), AsyncMock(), criminal
+            )
+        self.assertTrue(present)
+        self.assertIsNone(metres)
+
+    async def test_cop_without_position_is_ignored(self):
+        """A cop with no position entry doesn't gate the measurement — the
+        distance comes from the positioned cops only."""
+        criminal = await self._setup_criminal()
+        _blind_cop = await self._setup_officer()
+        positioned_cop = await self._setup_officer()
+        # blind_cop is an effective cop (on-duty session) but is NOT in the
+        # game player list — no position entry for it.
+        players = _make_players_list(
+            [
+                _make_player_data(positioned_cop.player.unique_id, positioned_cop.guid, 15_000, 5000, 0),
+                _make_player_data(criminal.player.unique_id, criminal.guid, 5000, 5000, 0),
+            ]
+        )
+        with patch("amc.criminals.get_player", new_callable=AsyncMock,
+                   return_value={"bAFK": False}), \
+             patch("amc.criminals.get_players", new_callable=AsyncMock,
+                   return_value=players):
+            _, metres = await nearest_effective_cop_distance_m(
+                AsyncMock(), AsyncMock(), criminal
+            )
+        # 10 m blind cop unknown → the 100 m positioned cop decides.
+        self.assertEqual(metres, 100)
 
 
 @patch("amc.criminals.make_suspect", new_callable=AsyncMock)
