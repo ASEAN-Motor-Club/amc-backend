@@ -437,8 +437,6 @@ HELP_TEXT = """\
 <Highlight>/teleport</> - See a list of teleport points.
 <Secondary>Shorthand: /tp</>
 <Secondary></>
-<Highlight>/bot [your question]</> - Ask the bot anything related to the game.
-<Secondary></>
 <Highlight>/jobs</> - List available server jobs and subsidies.
 <Secondary></>
 <Highlight>/bank</> - See your Bank ASEAN account.
