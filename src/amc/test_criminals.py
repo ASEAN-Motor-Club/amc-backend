@@ -239,6 +239,122 @@ class WantedCountdownTickTests(TestCase):
         mock_announce.assert_awaited_once()
         self.assertIn("no longer wanted", mock_announce.call_args.args[0])
 
+    async def _setup_admin_flag(self, wanted_remaining=600):
+        """Create a wanted record set by an admin character (set_by) — the
+        shape /setwanted produces."""
+        admin_player = await sync_to_async(PlayerFactory)()
+        admin = await sync_to_async(CharacterFactory)(player=admin_player)
+        player = await sync_to_async(PlayerFactory)()
+        character = await sync_to_async(CharacterFactory)(
+            player=player,
+            last_online=timezone.now(),
+        )
+        await character.asave(update_fields=["last_online"])
+        await Wanted.objects.acreate(
+            character=character,
+            wanted_remaining=wanted_remaining,
+            set_by=admin,
+        )
+        return character
+
+    async def test_dormant_preserves_admin_set_wanted(
+        self,
+        mock_sys_msg,
+        mock_refresh,
+    ):
+        """Admin /setwanted flags survive the dormant amnesty — the command
+        is cop-independent, so its output must not be amnestied one tick
+        later (freeman 2026-09-20)."""
+        self.armed_mock.return_value = False
+        flagged = await self._setup_admin_flag(wanted_remaining=600)
+        players = _make_players_list(
+            [_make_player_data(flagged.player.unique_id, flagged.guid, *_SUSPECT_LOC)]
+        )
+        mock_http = AsyncMock()
+        mock_http_mod = AsyncMock()
+
+        with patch("amc.criminals.get_players", new_callable=AsyncMock, return_value=players):
+            for _ in range(5):
+                await tick_wanted_countdown(mock_http, mock_http_mod)
+
+        wanted = await Wanted.objects.aget(character=flagged)
+        self.assertEqual(wanted.wanted_remaining, 600)
+        self.assertIsNone(wanted.expired_at)
+        # No expiry flow ran for the admin flag
+        mock_refresh.assert_not_called()
+
+    async def test_dormant_clears_organic_preserves_admin(
+        self,
+        mock_sys_msg,
+        mock_refresh,
+    ):
+        """One dormant tick: organic heat is cleared, the admin flag is not."""
+        self.armed_mock.return_value = False
+        organic_criminal = await self._setup_criminal(wanted_remaining=300)
+        flagged = await self._setup_admin_flag(wanted_remaining=600)
+        players = _make_players_list([
+            _make_player_data(
+                organic_criminal.player.unique_id, organic_criminal.guid, *_SUSPECT_LOC
+            ),
+            _make_player_data(flagged.player.unique_id, flagged.guid, *_SUSPECT_LOC),
+        ])
+        mock_http = AsyncMock()
+        mock_http_mod = AsyncMock()
+
+        with patch("amc.criminals.get_players", new_callable=AsyncMock, return_value=players), \
+             patch("amc.criminals.announce", new_callable=AsyncMock):
+            await tick_wanted_countdown(mock_http, mock_http_mod)
+
+        organic_wanted = await Wanted.objects.aget(character=organic_criminal)
+        self.assertEqual(organic_wanted.wanted_remaining, 0)
+        self.assertIsNotNone(organic_wanted.expired_at)
+
+        admin_wanted = await Wanted.objects.aget(character=flagged)
+        self.assertEqual(admin_wanted.wanted_remaining, 600)
+        self.assertIsNone(admin_wanted.expired_at)
+
+    async def test_admin_flag_frozen_dormant_then_decays_when_armed(
+        self,
+        mock_sys_msg,
+        mock_refresh,
+    ):
+        """Admin flags freeze while dormant and re-enter the normal speed law
+        once a cop is back on duty."""
+        flagged = await self._setup_admin_flag(wanted_remaining=200)
+        officer = await self._setup_police()
+        mock_http = AsyncMock()
+        mock_http_mod = AsyncMock()
+
+        # Phase 1: dormant — flag frozen, no decay even while online + still
+        self.armed_mock.return_value = False
+        players = _make_players_list([
+            _make_player_data(flagged.player.unique_id, flagged.guid, *_SUSPECT_LOC),
+        ])
+        with patch("amc.criminals.get_players", new_callable=AsyncMock, return_value=players):
+            for _ in range(10):
+                await tick_wanted_countdown(mock_http, mock_http_mod)
+        wanted = await Wanted.objects.aget(character=flagged)
+        self.assertEqual(wanted.wanted_remaining, 200)
+        self.assertIsNone(wanted.expired_at)
+
+        # Phase 2: cop back on duty — normal hiding decay resumes
+        # (stationary suspect, cop 1 km away -> F(1000 m) multiplier)
+        self.armed_mock.return_value = True
+        players_armed = _make_players_list([
+            _make_player_data(flagged.player.unique_id, flagged.guid, *_SUSPECT_LOC),
+            _make_player_data(officer.player.unique_id, officer.guid, *_COP_FAR),
+        ])
+        with patch("amc.criminals.get_players", new_callable=AsyncMock, return_value=players_armed):
+            for _ in range(10):
+                await tick_wanted_countdown(mock_http, mock_http_mod)
+        wanted = await Wanted.objects.aget(character=flagged)
+        self.assertAlmostEqual(
+            wanted.wanted_remaining,
+            200 - 10 * hide_decay_multiplier(100_000),
+            delta=0.5,
+        )
+        self.assertIsNone(wanted.expired_at)
+
     async def test_offline_suspect_no_decay(
         self,
         mock_sys_msg,

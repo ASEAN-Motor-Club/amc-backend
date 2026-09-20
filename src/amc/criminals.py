@@ -62,8 +62,9 @@ LOGOUT_PROXIMITY_RANGE = 200_000  # 2km in game units — no effect beyond this
 #   F = 1 + 2w    (half the swing at 2.5 km)
 #   A = 1 - (2/3)w
 # No effective cops on duty (zero on-duty + online + non-AFK): the wanted
-# system is DORMANT — organic triggers are blocked and every active Wanted
-# record is cleared (see active_police_present + tick_wanted_countdown).
+# system is DORMANT — organic triggers are blocked and every active ORGANIC
+# Wanted record is cleared; admin /setwanted flags survive the dormant
+# window (see active_police_present + tick_wanted_countdown).
 WANTED_SPEED_PIVOT_KMH = 50.0     # above: wanted grows; below: wanted decays
 WANTED_LAW_RATE = 1.0 / 50.0      # s of wanted per (km/h from pivot) per second
 HIDE_DECAY_MAX_MULT = 3.0         # F(D) ceiling — far-parked decay multiplier
@@ -298,7 +299,8 @@ async def active_police_present(http_client_mod) -> bool:
 
     With zero effective cops the wanted system is DORMANT:
       - organic wanted triggers must not fire (gate call sites with this), and
-      - every active Wanted record is cleared (dormant amnesty in the tick).
+      - every active ORGANIC Wanted record is cleared (dormant amnesty in
+        the tick); admin /setwanted flags are preserved while dormant.
 
     Fail-open: if the mod API cannot confirm a cop's AFK state, the cop
     counts as present — wanted is never amnestied on uncertain data.
@@ -456,8 +458,11 @@ async def tick_wanted_countdown(http_client, http_client_mod, http_client_mgmt=N
     Dormant rule (freeman 2026-09-20): with zero effective cops on duty
     (on-duty + online + non-AFK — see active_police_present) the wanted
     system is off. No decay, no growth, no underwater arrests, no modded
-    despawns, and every active Wanted record is cleared: online suspects get
-    the normal expiry flow, offline suspects are expired silently.
+    despawns, and every active ORGANIC Wanted record is cleared: online
+    suspects get the normal expiry flow, offline suspects are expired
+    silently. Admin /setwanted flags (set_by set) survive the dormant
+    window at their current heat; the normal speed law resumes once a cop
+    goes back on duty.
 
     Offline suspects (while armed): no decay, wanted persists indefinitely.
     """
@@ -473,26 +478,44 @@ async def tick_wanted_countdown(http_client, http_client_mod, http_client_mgmt=N
         return
     logger.info("wanted tick: %d active records", len(wanted_list))
 
-    # --- Dormant amnesty: no effective cops on duty -> clear everything ---
+    # --- Dormant amnesty: no effective cops on duty -> clear ORGANIC heat ---
+    # Admin /setwanted flags (set_by set) are deliberate and cop-independent:
+    # the command itself is exempt from the dormant gate, so its output must
+    # survive it too. They are preserved at their current heat while dormant
+    # and the normal speed law resumes once a cop goes back on duty
+    # (freeman 2026-09-20: setwanted defaults to full wanted_remaining).
     if not await active_police_present(http_client_mod):
-        await Wanted.objects.filter(
-            id__in=[w.id for w in wanted_list]
-        ).aupdate(wanted_remaining=0, expired_at=timezone.now())
-        # Online suspects get the normal expiry flow; offline suspects are
-        # expired silently (their suspect GE is only maintained while an
-        # active Wanted row exists, so nothing to undo game-side).
-        players = await get_players(http_client)
-        locations = _build_player_locations(players) if players else {}
-        online_chars = [
-            w.character for w in wanted_list if w.character.guid in locations
-        ]
-        logger.info(
-            "wanted tick: no effective cops on duty — dormant amnesty "
-            "cleared %d records (%d online)",
-            len(wanted_list),
-            len(online_chars),
-        )
-        await _finalize_expired_wanted(online_chars, http_client, http_client_mod)
+        organic = [w for w in wanted_list if w.set_by_id is None]
+        admin_flags = [w for w in wanted_list if w.set_by_id is not None]
+        if organic:
+            await Wanted.objects.filter(
+                id__in=[w.id for w in organic]
+            ).aupdate(wanted_remaining=0, expired_at=timezone.now())
+            # Online suspects get the normal expiry flow; offline suspects
+            # are expired silently (their suspect GE is only maintained
+            # while an active Wanted row exists, so nothing to undo
+            # game-side).
+            players = await get_players(http_client)
+            locations = _build_player_locations(players) if players else {}
+            online_chars = [
+                w.character for w in organic if w.character.guid in locations
+            ]
+            logger.info(
+                "wanted tick: no effective cops on duty — dormant amnesty "
+                "cleared %d organic records (%d online); "
+                "%d admin flag(s) preserved",
+                len(organic),
+                len(online_chars),
+                len(admin_flags),
+            )
+            await _finalize_expired_wanted(
+                online_chars, http_client, http_client_mod
+            )
+        elif admin_flags:
+            logger.info(
+                "wanted tick: dormant — %d admin flag(s) preserved",
+                len(admin_flags),
+            )
         return
 
     # Fetch player locations (best-effort; empty is fine)
