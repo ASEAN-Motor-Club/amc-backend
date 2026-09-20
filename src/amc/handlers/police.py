@@ -11,8 +11,11 @@ import logging
 
 from django.core.cache import cache
 
+from django.utils import timezone
+
 from amc.commands.faction import _build_player_locations, perform_arrest
 from amc.handlers import register
+from amc.player_tags import refresh_player_name
 from amc.special_cargo import ILLICIT_CARGO_KEYS
 from amc.models import (
     Character,
@@ -22,10 +25,13 @@ from amc.models import (
     PolicePenaltyLog,
     PoliceSession,
     PoliceShiftLog,
+    Wanted,
 )
 from amc.mod_server import (
+    clear_suspect,
     despawn_player_cargo,
     send_system_message,
+    show_popup,
     transfer_money,
 )
 from amc.game_server import announce, get_players
@@ -73,6 +79,50 @@ async def handle_patrol_arrived(event, player, character, ctx):
 # ---------------------------------------------------------------------------
 
 
+async def _clear_wanted_on_pullover(officer_character, suspect_character, ctx):
+    """End an active Wanted on a penalty pull-over when there is no record.
+
+    The confiscation arrest path requires an active CriminalRecord (admin
+    /setwanted flags create none, by design), but the penalty pull-over itself
+    should still resolve the suspect's Wanted status — no jail, no
+    confiscation (nothing confiscatable exists without a record).
+    """
+    wanted = await Wanted.objects.filter(
+        character=suspect_character, expired_at__isnull=True
+    ).afirst()
+    if wanted is None:
+        return
+
+    wanted.wanted_remaining = 0
+    wanted.expired_at = timezone.now()
+    await wanted.asave(update_fields=["wanted_remaining", "expired_at"])
+
+    # Drop the in-game suspect overlay immediately (no-op when not a suspect)
+    if suspect_character.guid:
+        try:
+            await clear_suspect(ctx.http_client_mod, suspect_character.guid)
+        except Exception:
+            logger.warning(
+                "clear_suspect failed for %s after pull-over clear",
+                suspect_character.name,
+            )
+
+    # Strip the wanted stars from the name tag
+    asyncio.create_task(refresh_player_name(suspect_character, ctx.http_client_mod))
+
+    if ctx.http_client_mod:
+        await show_popup(
+            ctx.http_client_mod,
+            "Your wanted status has been cleared (traffic stop penalty).",
+            character_guid=str(suspect_character.guid),
+        )
+        await send_system_message(
+            ctx.http_client_mod,
+            f"{suspect_character.name}'s wanted status was cleared (traffic stop penalty).",
+            character_guid=officer_character.guid,
+        )
+
+
 @register("ServerSelectPolicePullOverPenaltyResponse")
 async def handle_police_penalty(event, player, character, ctx):
     timestamp = _parse_timestamp(event)
@@ -112,6 +162,10 @@ async def handle_police_penalty(event, player, character, ctx):
         cleared_at__isnull=True,
     ).aexists()
     if not has_record:
+        # No active CriminalRecord (e.g. an admin /setwanted flag, which is
+        # bounty/record-free by design) — the penalty pull-over still ends the
+        # suspect's Wanted, just without jail or confiscation.
+        await _clear_wanted_on_pullover(character, suspect_character, ctx)
         return 0, 0, 0, 0
 
     # Suspect is wanted — execute arrest
