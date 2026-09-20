@@ -6,6 +6,7 @@ import time
 from datetime import timedelta
 
 from django.conf import settings
+from django.db.models import F
 from django.utils import timezone
 
 from amc.commands.faction import _build_player_locations, _distance_3d, execute_arrest
@@ -614,6 +615,11 @@ async def tick_wanted_countdown(http_client, http_client_mod, http_client_mgmt=N
             cop_locations.append(cop_loc)
 
     expired_characters = []
+    # ORGANIC wanteds (set_by is None) that decayed out while cops were on
+    # duty — the only expiry flavour that counts as "successfully evading
+    # arrest" for the score bonus. Dormant-amnesty clears, arrests, and
+    # pull-over clears never enter this list.
+    evaded_characters = []
     star_change_notifications = []  # (wanted, message) for deferred processing
     _current_modded_guids: set[str] = set()  # modded vehicle state this tick
 
@@ -762,6 +768,8 @@ async def tick_wanted_countdown(http_client, http_client_mod, http_client_mgmt=N
             )
             if wanted.wanted_remaining <= 0:
                 expired_characters.append(wanted.character)
+                if wanted.set_by_id is None:
+                    evaded_characters.append(wanted.character)
 
         # Track star changes for deferred notification
         new_stars = _compute_stars(wanted.wanted_remaining)
@@ -790,6 +798,23 @@ async def tick_wanted_countdown(http_client, http_client_mod, http_client_mgmt=N
         await Wanted.objects.filter(id__in=expired_ids).aupdate(
             wanted_remaining=0,
             expired_at=timezone.now(),
+        )
+
+    # Evasion bonus (freeman 2026-09-20): an ORGANIC wanted that decays to
+    # zero while cops are on duty means the suspect outran a live chase —
+    # reward it with +10% criminal score (integer floor; score//10). Only
+    # this tick path grants it: dormant-amnesty clears, arrests (score
+    # negation instead), and pull-over clears never reach here. The decay
+    # clock (last_illicit_delivery_at) is deliberately untouched — evading
+    # is not an illicit delivery.
+    if evaded_characters:
+        await Character.objects.filter(
+            pk__in=[c.pk for c in evaded_characters]
+        ).aupdate(criminal_score=F("criminal_score") + F("criminal_score") / 10)
+        logger.info(
+            "wanted tick: %d player(s) evaded arrest — criminal score +10%%: %s",
+            len(evaded_characters),
+            [c.name for c in evaded_characters],
         )
 
     # Send star-change messages and refresh names (DB is now up-to-date)

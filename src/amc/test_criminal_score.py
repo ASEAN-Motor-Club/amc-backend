@@ -9,14 +9,22 @@ against the historical migration state. It is exercised end-to-end by
 staging DB-copy dry run (plan §12 level-continuity check) before prod.
 """
 
+from datetime import timedelta
 from unittest.mock import AsyncMock, MagicMock, patch
 
 from asgiref.sync import sync_to_async
 from django.test import TestCase
+from django.utils import timezone
 
 from amc.commands.wanted import cmd_criminals
-from amc.criminals import create_or_refresh_wanted
+from amc.criminals import (
+    BASE_DECAY_PER_TICK,
+    TICK_INTERVAL,
+    create_or_refresh_wanted,
+    tick_wanted_countdown,
+)
 from amc.factories import CharacterFactory, PlayerFactory
+from amc.models import Wanted
 from amc.special_cargo import (
     BOSS_CUT_CAP,
     BOSS_CUT_FLOOR,
@@ -392,3 +400,183 @@ class CriminalsLeaderboardTests(TestCase):
         # Levels are derived live from score
         self.assertIn("C13", output)  # 600_000 // 50_000 + 1
         self.assertIn("C3", output)  # 100_000 // 50_000 + 1
+
+
+class EvasionBonusTests(TestCase):
+    """Successfully evading arrest = an ORGANIC wanted decaying to zero while
+    cops are on duty → +10% criminal score (freeman 2026-09-20).
+
+    Expiry flavours that are NOT evasions and must not pay:
+      - dormant amnesty (no effective cops — the system was off, not outplayed)
+      - admin /setwanted flags (set_by set) expiring by decay
+      - arrests (score negation instead, ArrestScoreNegationTests)
+      - pull-over penalty clears (police action ended it)
+    """
+
+    async def _setup_evader(self, score=50_000):
+        player = await _sync_create(PlayerFactory)()
+        character = await _sync_create(CharacterFactory)(
+            player=player, last_online=timezone.now()
+        )
+        character.criminal_score = score
+        character.last_illicit_delivery_at = timezone.now() - timedelta(days=3)
+        await character.asave(
+            update_fields=["criminal_score", "last_illicit_delivery_at"]
+        )
+        return player, character
+
+    @staticmethod
+    def _players_for(player, character):
+        return [
+            (
+                str(player.unique_id),
+                {
+                    "unique_id": str(player.unique_id),
+                    "character_guid": str(character.guid),
+                    "location": "X=5000 Y=5000 Z=0",
+                },
+            )
+        ]
+
+    @patch("amc.criminals.announce_money_secured", new_callable=AsyncMock)
+    @patch("amc.criminals.announce", new_callable=AsyncMock)
+    @patch("amc.criminals.clear_suspect", new_callable=AsyncMock)
+    @patch("amc.criminals.refresh_player_name", new_callable=AsyncMock)
+    @patch(
+        "amc.criminals.active_police_present",
+        new_callable=AsyncMock,
+        return_value=True,
+    )
+    @patch("amc.criminals.get_players", new_callable=AsyncMock)
+    async def test_organic_expiry_grants_10pct(
+        self,
+        mock_get_players,
+        mock_armed,
+        mock_refresh,
+        mock_clear,
+        mock_announce,
+        mock_money,
+    ):
+        player, character = await self._setup_evader(score=50_000)
+        mock_get_players.return_value = self._players_for(player, character)
+        clock_before = character.last_illicit_delivery_at
+        await _sync_create(
+            Wanted,
+            character=character,
+            wanted_remaining=BASE_DECAY_PER_TICK * TICK_INTERVAL,
+        )
+
+        await tick_wanted_countdown(AsyncMock(), AsyncMock())
+
+        await character.arefresh_from_db(
+            fields=["criminal_score", "last_illicit_delivery_at"]
+        )
+        self.assertEqual(character.criminal_score, 55_000)
+        # The decay clock is anchored to illicit deliveries only — evading
+        # must not reset the 30-day grace window.
+        self.assertEqual(character.last_illicit_delivery_at, clock_before)
+        wanted = await Wanted.objects.filter(character=character).afirst()
+        self.assertIsNotNone(wanted.expired_at)
+
+    @patch("amc.criminals.announce_money_secured", new_callable=AsyncMock)
+    @patch("amc.criminals.announce", new_callable=AsyncMock)
+    @patch("amc.criminals.clear_suspect", new_callable=AsyncMock)
+    @patch("amc.criminals.refresh_player_name", new_callable=AsyncMock)
+    @patch(
+        "amc.criminals.active_police_present",
+        new_callable=AsyncMock,
+        return_value=True,
+    )
+    @patch("amc.criminals.get_players", new_callable=AsyncMock)
+    async def test_floor_rounding_truncates(
+        self,
+        mock_get_players,
+        mock_armed,
+        mock_refresh,
+        mock_clear,
+        mock_announce,
+        mock_money,
+    ):
+        # 55_555 + 55_555//10 = 61_110 (integer floor, not rounding)
+        player, character = await self._setup_evader(score=55_555)
+        mock_get_players.return_value = self._players_for(player, character)
+        await _sync_create(
+            Wanted,
+            character=character,
+            wanted_remaining=BASE_DECAY_PER_TICK * TICK_INTERVAL,
+        )
+
+        await tick_wanted_countdown(AsyncMock(), AsyncMock())
+
+        await character.arefresh_from_db(fields=["criminal_score"])
+        self.assertEqual(character.criminal_score, 61_110)
+
+    @patch("amc.criminals.announce_money_secured", new_callable=AsyncMock)
+    @patch("amc.criminals.announce", new_callable=AsyncMock)
+    @patch("amc.criminals.clear_suspect", new_callable=AsyncMock)
+    @patch("amc.criminals.refresh_player_name", new_callable=AsyncMock)
+    @patch(
+        "amc.criminals.active_police_present",
+        new_callable=AsyncMock,
+        return_value=True,
+    )
+    @patch("amc.criminals.get_players", new_callable=AsyncMock)
+    async def test_admin_flag_expiry_grants_nothing(
+        self,
+        mock_get_players,
+        mock_armed,
+        mock_refresh,
+        mock_clear,
+        mock_announce,
+        mock_money,
+    ):
+        player, character = await self._setup_evader(score=50_000)
+        officer = await _sync_create(CharacterFactory)(name="FlagCop")
+        mock_get_players.return_value = self._players_for(player, character)
+        await _sync_create(
+            Wanted,
+            character=character,
+            wanted_remaining=BASE_DECAY_PER_TICK * TICK_INTERVAL,
+            set_by=officer,
+        )
+
+        await tick_wanted_countdown(AsyncMock(), AsyncMock())
+
+        await character.arefresh_from_db(fields=["criminal_score"])
+        self.assertEqual(character.criminal_score, 50_000)
+        wanted = await Wanted.objects.filter(character=character).afirst()
+        self.assertIsNotNone(wanted.expired_at)  # still expires, just no bonus
+
+    @patch("amc.criminals.announce_money_secured", new_callable=AsyncMock)
+    @patch("amc.criminals.announce", new_callable=AsyncMock)
+    @patch("amc.criminals.clear_suspect", new_callable=AsyncMock)
+    @patch("amc.criminals.refresh_player_name", new_callable=AsyncMock)
+    @patch(
+        "amc.criminals.active_police_present",
+        new_callable=AsyncMock,
+        return_value=False,
+    )
+    @patch("amc.criminals.get_players", new_callable=AsyncMock)
+    async def test_dormant_amnesty_grants_nothing(
+        self,
+        mock_get_players,
+        mock_armed,
+        mock_refresh,
+        mock_clear,
+        mock_announce,
+        mock_money,
+    ):
+        player, character = await self._setup_evader(score=50_000)
+        mock_get_players.return_value = self._players_for(player, character)
+        await _sync_create(
+            Wanted,
+            character=character,
+            wanted_remaining=300,
+        )
+
+        await tick_wanted_countdown(AsyncMock(), AsyncMock())
+
+        await character.arefresh_from_db(fields=["criminal_score"])
+        self.assertEqual(character.criminal_score, 50_000)
+        wanted = await Wanted.objects.filter(character=character).afirst()
+        self.assertIsNotNone(wanted.expired_at)  # amnesty cleared it, no bonus
