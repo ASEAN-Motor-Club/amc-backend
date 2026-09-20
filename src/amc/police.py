@@ -141,7 +141,7 @@ async def record_confiscation_for_level(
 
             asyncio.create_task(
                 announce(
-                    f"🎉 {character.name} has been promoted to Police Level {new_level}!",
+                    f"{character.name} has been promoted to Police Level {new_level}!",
                     http_client,
                     color="4A90D9",
                 )
