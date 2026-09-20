@@ -92,7 +92,7 @@ async def _redirect_police_near_wanted(character, player, ctx, action_label):
         return
     _officer_name, officer_loc, _officer_vehicle = officer_entry
 
-    wanted_nearby = False
+    suspect_locs = []
     async for wanted in Wanted.objects.filter(
         expired_at__isnull=True, wanted_remaining__gt=0
     ).select_related("character"):
@@ -103,56 +103,74 @@ async def _redirect_police_near_wanted(character, player, ctx, action_label):
         if not entry:
             continue
         _name, suspect_loc, _vehicle = entry
-        if _distance_3d(officer_loc, suspect_loc) < SETWANTED_MIN_DISTANCE:
-            wanted_nearby = True
-            break
+        suspect_locs.append(suspect_loc)
 
-    if not wanted_nearby:
+    if not any(
+        _distance_3d(officer_loc, loc) < SETWANTED_MIN_DISTANCE
+        for loc in suspect_locs
+    ):
         return
 
+    # The redirect target must be OUTSIDE every online suspect's wanted
+    # radius — the officer-nearest station can be the suspect-adjacent one,
+    # which would land the cop back inside the radius and re-fire this
+    # handler on the redirect's own ServerTeleportCharacter (a loop).
     nearest = None
     min_dist = float("inf")
     for _name, tx, ty, tz in POLICE_STATIONS:
-        dist = _distance_3d(officer_loc, (tx, ty, tz))
+        station_pos = (tx, ty, tz)
+        if any(
+            _distance_3d(station_pos, loc) < SETWANTED_MIN_DISTANCE
+            for loc in suspect_locs
+        ):
+            continue
+        dist = _distance_3d(officer_loc, station_pos)
         if dist < min_dist:
             min_dist = dist
-            nearest = (tx, ty, tz)
+            nearest = station_pos
 
-    if nearest:
-        tx, ty, tz = nearest
-        for attempt in range(_REDIRECT_MAX_ATTEMPTS):
-            try:
-                await teleport_player(
-                    ctx.http_client_mod,
-                    str(player.unique_id),
-                    {"X": tx, "Y": ty, "Z": tz},
-                    no_vehicles=True,
+    if not nearest:
+        logger.warning(
+            "Police redirect skipped for %s: no police station lies outside "
+            "the wanted radius of all online suspects — officer stays put",
+            character.guid,
+        )
+        return
+
+    tx, ty, tz = nearest
+    for attempt in range(_REDIRECT_MAX_ATTEMPTS):
+        try:
+            await teleport_player(
+                ctx.http_client_mod,
+                str(player.unique_id),
+                {"X": tx, "Y": ty, "Z": tz},
+                no_vehicles=True,
+            )
+            await send_system_message(
+                ctx.http_client_mod,
+                f"{action_label} redirected — too close to a wanted suspect.",
+                character_guid=character.guid,
+            )
+            return
+        except Exception:
+            if attempt < _REDIRECT_MAX_ATTEMPTS - 1:
+                delay = _REDIRECT_BACKOFF_BASE * (attempt + 1)
+                logger.warning(
+                    "Police redirect attempt %d/%d failed, retrying in %ds",
+                    attempt + 1,
+                    _REDIRECT_MAX_ATTEMPTS,
+                    delay,
+                    exc_info=True,
                 )
-                await send_system_message(
-                    ctx.http_client_mod,
-                    f"{action_label} redirected — too close to a wanted suspect.",
-                    character_guid=character.guid,
+                await asyncio.sleep(delay)
+            else:
+                logger.error(
+                    "Failed to redirect police %s after %d attempts — "
+                    "officer may be near a wanted suspect!",
+                    character.guid,
+                    _REDIRECT_MAX_ATTEMPTS,
+                    exc_info=True,
                 )
-                return
-            except Exception:
-                if attempt < _REDIRECT_MAX_ATTEMPTS - 1:
-                    delay = _REDIRECT_BACKOFF_BASE * (attempt + 1)
-                    logger.warning(
-                        "Police redirect attempt %d/%d failed, retrying in %ds",
-                        attempt + 1,
-                        _REDIRECT_MAX_ATTEMPTS,
-                        delay,
-                        exc_info=True,
-                    )
-                    await asyncio.sleep(delay)
-                else:
-                    logger.error(
-                        "Failed to redirect police %s after %d attempts — "
-                        "officer may be near a wanted suspect!",
-                        character.guid,
-                        _REDIRECT_MAX_ATTEMPTS,
-                        exc_info=True,
-                    )
 
 
 async def _handle_teleport_or_respawn(event, character, ctx):
