@@ -20,7 +20,7 @@ from amc.police import (
     POLICE_STATIONS,
 )
 from amc.criminals import create_or_refresh_wanted
-from amc.utils import fuzzy_find_player
+from amc.utils import fuzzy_find_player, with_verification_code
 from django.conf import settings
 from django.utils.translation import gettext as _, gettext_lazy
 
@@ -39,7 +39,7 @@ def _distance_3d(a, b):
     category="Faction",
     featured=True,
 )
-async def cmd_police(ctx: CommandContext):
+async def cmd_police(ctx: CommandContext, verification_code: str = ""):
     active = await is_police(ctx.character)
 
     if active:
@@ -63,18 +63,6 @@ async def cmd_police(ctx: CommandContext):
             await send_system_message(
                 ctx.http_client_mod,
                 _("You cannot go on police duty while you are wanted."),
-                character_guid=ctx.character.guid,
-            )
-            return
-
-        # Criminal score blocks police duty (any illicit activity on the
-        # ledger — the score decays to zero over time, which re-opens duty)
-        if ctx.character.criminal_score > 0:
-            await send_system_message(
-                ctx.http_client_mod,
-                _(
-                    "You cannot go on police duty while you have a criminal score."
-                ),
                 character_guid=ctx.character.guid,
             )
             return
@@ -109,6 +97,36 @@ async def cmd_police(ctx: CommandContext):
                 _("<Title>Cannot Go On Duty</>\n\nPlease exit the vehicle first.")
             )
             return
+
+        # Criminal score gate — a positive score does not hard-block duty, but
+        # going on duty requires a verified reset to 0. The gate sits LAST so
+        # the wipe can only fire when every other check has already passed.
+        if ctx.character.criminal_score > 0:
+            code_expected, verified = with_verification_code(
+                (ctx.character.id, ctx.character.criminal_score),
+                verification_code,
+            )
+            if not verified:
+                await ctx.reply(
+                    _(
+                        "<Title>Criminal Score</>\n\n"
+                        "Your criminal score: <Money>{score:,}</>\n"
+                        "Going on police duty will <Warning>permanently reset</> "
+                        "your criminal score to <Money>0</>.\n"
+                        "To confirm, type: <Highlight>/police {code}</>"
+                    ).format(
+                        score=ctx.character.criminal_score,
+                        code=code_expected.upper(),
+                    )
+                )
+                return
+            ctx.character.criminal_score = 0
+            await ctx.character.asave(update_fields=["criminal_score"])
+            await send_system_message(
+                ctx.http_client_mod,
+                _("Your criminal score has been reset to 0."),
+                character_guid=ctx.character.guid,
+            )
 
         # Parse location and teleport to nearest police station
         if pdata and pdata.get("location"):

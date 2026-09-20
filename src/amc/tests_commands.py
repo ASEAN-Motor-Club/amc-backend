@@ -3197,8 +3197,8 @@ class PoliceCommandTestCase(TestCase):
             mock_deactivate.assert_called_once()
             mock_tp.assert_not_called()
 
-    async def test_cmd_police_blocked_by_criminal_score(self):
-        """Going on duty is blocked while the player carries a criminal score."""
+    async def test_cmd_police_score_prompts_verification_code(self):
+        """A positive criminal score prompts for a wipe-confirmation code."""
         self.character.criminal_score = 5_000
         await self.character.asave(update_fields=["criminal_score"])
 
@@ -3209,17 +3209,116 @@ class PoliceCommandTestCase(TestCase):
                 new=AsyncMock(return_value=[]),
             ),
             patch(
+                "amc.commands.police.get_player_customization",
+                new=AsyncMock(return_value={"Costume": "Costume_Police_01"}),
+            ),
+            patch(
+                "amc.commands.police.activate_police", new=AsyncMock()
+            ) as mock_activate,
+        ):
+            await cmd_police(self.ctx)
+            self.ctx.reply.assert_called()
+            msg = self.ctx.reply.call_args[0][0]
+            self.assertIn("To confirm, type: <Highlight>/police ", msg)
+            mock_activate.assert_not_called()
+            fresh = await Character.objects.aget(pk=self.character.pk)
+            self.assertEqual(fresh.criminal_score, 5_000)
+
+    async def test_cmd_police_score_wrong_code_reprompts(self):
+        """A wrong verification code re-prompts and leaves the score intact."""
+        from amc.utils import with_verification_code
+
+        self.character.criminal_score = 5_000
+        await self.character.asave(update_fields=["criminal_score"])
+        code, _ = with_verification_code((self.character.id, 5_000), "")
+
+        with (
+            patch("amc.commands.police.is_police", new=AsyncMock(return_value=False)),
+            patch(
+                "amc.commands.police.get_players",
+                new=AsyncMock(return_value=[]),
+            ),
+            patch(
+                "amc.commands.police.get_player_customization",
+                new=AsyncMock(return_value={"Costume": "Costume_Police_01"}),
+            ),
+            patch(
+                "amc.commands.police.activate_police", new=AsyncMock()
+            ) as mock_activate,
+        ):
+            # +X guarantees a mismatch — the real code is always 4 chars
+            await cmd_police(self.ctx, code + "X")
+            self.ctx.reply.assert_called()
+            msg = self.ctx.reply.call_args[0][0]
+            self.assertIn("To confirm, type: <Highlight>/police ", msg)
+            mock_activate.assert_not_called()
+            fresh = await Character.objects.aget(pk=self.character.pk)
+            self.assertEqual(fresh.criminal_score, 5_000)
+
+    async def test_cmd_police_score_correct_code_resets_and_activates(self):
+        """The correct code wipes the criminal score and completes duty-up."""
+        from amc.utils import with_verification_code
+
+        self.character.criminal_score = 5_000
+        await self.character.asave(update_fields=["criminal_score"])
+        code, _ = with_verification_code((self.character.id, 5_000), "")
+
+        with (
+            patch("amc.commands.police.is_police", new=AsyncMock(return_value=False)),
+            patch(
+                "amc.commands.police.get_players",
+                new=AsyncMock(
+                    return_value=[
+                        (str(self.player.unique_id), {"name": "TestChar"}),
+                    ]
+                ),
+            ),
+            patch(
+                "amc.commands.police.get_player_customization",
+                new=AsyncMock(return_value={"Costume": "Costume_Police_01"}),
+            ),
+            patch(
+                "amc.commands.police.activate_police", new=AsyncMock()
+            ) as mock_activate,
+            patch("amc.commands.police.teleport_player", new=AsyncMock()),
+            patch(
+                "amc.commands.police.send_system_message", new=AsyncMock()
+            ) as mock_ssm,
+        ):
+            await cmd_police(self.ctx, code)
+            mock_activate.assert_called_once()
+            mock_ssm.assert_called()
+            wipe_msg = mock_ssm.call_args[0][1]
+            self.assertIn("reset to 0", wipe_msg)
+            fresh = await Character.objects.aget(pk=self.character.pk)
+            self.assertEqual(fresh.criminal_score, 0)
+
+    async def test_cmd_police_score_wipe_blocked_without_costume(self):
+        """The wipe never fires while another gate (costume) still rejects."""
+        from amc.utils import with_verification_code
+
+        self.character.criminal_score = 5_000
+        await self.character.asave(update_fields=["criminal_score"])
+        code, _ = with_verification_code((self.character.id, 5_000), "")
+
+        with (
+            patch("amc.commands.police.is_police", new=AsyncMock(return_value=False)),
+            patch(
+                "amc.commands.police.get_player_customization",
+                new=AsyncMock(return_value={"Costume": "Costume_Butcher_01"}),
+            ),
+            patch(
                 "amc.commands.police.activate_police", new=AsyncMock()
             ) as mock_activate,
             patch(
                 "amc.commands.police.send_system_message", new=AsyncMock()
             ) as mock_ssm,
         ):
-            await cmd_police(self.ctx)
-            mock_ssm.assert_called()
-            msg = mock_ssm.call_args[0][1]
-            self.assertIn("criminal score", msg)
+            await cmd_police(self.ctx, code)
             mock_activate.assert_not_called()
+            mock_ssm.assert_not_called()
+            fresh = await Character.objects.aget(pk=self.character.pk)
+            self.assertEqual(fresh.criminal_score, 5_000)
 
     async def test_cmd_police_allowed_no_criminal_delivery(self):
         """Going on duty is allowed if the player has no criminal deliveries at all."""
