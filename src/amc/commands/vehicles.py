@@ -341,7 +341,7 @@ async def cmd_unrental(ctx: CommandContext, category: str = ""):
     description=gettext_lazy("Mark vehicle as for rental"),
     category="Vehicle Management",
 )
-async def cmd_rental(ctx: CommandContext, alias: str = ""):
+async def cmd_rental(ctx: CommandContext, name: str = ""):
     vehicles = await register_player_vehicles(ctx.http_client_mod, ctx.character, ctx.player, active=True)
     own_company_guid = ctx.player_info.get("OwnCompanyGuid") if ctx.player_info else None
     vehicles = (
@@ -363,11 +363,12 @@ async def cmd_rental(ctx: CommandContext, alias: str = ""):
         )
         return
 
+    rental_name = name.strip()[:30]
     for v in vehicles:
         if not v.rental:
             v.rental = True
-        if alias.strip():
-            v.alias = alias.strip()
+        if rental_name:
+            v.alias = rental_name
         await v.asave()
 
     names = "\n".join(
@@ -402,6 +403,8 @@ async def cmd_rent(ctx: CommandContext, vehicle_id: str = ""):
             return
 
         def rental_label(v):
+            if v.alias:
+                return v.alias
             if company := v.config.get("CompanyName"):
                 return company
             if v.character:

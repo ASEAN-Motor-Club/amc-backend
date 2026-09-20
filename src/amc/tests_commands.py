@@ -3428,6 +3428,7 @@ class RentGroupingTestCase(SimpleTestCase):
         v = MagicMock()
         v.id = pk
         v.pk = pk
+        v.alias = None
         v.config = {"VehicleName": name}
         if company_name:
             v.config["CompanyName"] = company_name
@@ -3565,6 +3566,31 @@ class RentGroupingTestCase(SimpleTestCase):
             self.assertIn("Independent", output)
             self.assertIn("GhostCar", output)
 
+    async def test_rent_list_alias_overrides_label(self):
+        """An explicit rental name groups the vehicle under that name."""
+        named = self._make_vehicle(7, "CorpCar", "Corp One")
+        named.alias = "Turbo Garage"
+
+        mock_filtered = MagicMock()
+
+        async def async_iter(items):
+            for item in items:
+                yield item
+
+        mock_filtered.__aiter__ = lambda self_=None: async_iter([named])
+        mock_qs = MagicMock()
+        mock_qs.filter = MagicMock(return_value=mock_filtered)
+        with patch(
+            "amc.commands.vehicles.CharacterVehicle.objects.select_related",
+            return_value=mock_qs,
+        ):
+            await cmd_rent(self.ctx)
+
+            self.ctx.reply.assert_called_once()
+            output = self.ctx.reply.call_args[0][0]
+            self.assertIn("Turbo Garage", output)
+            self.assertNotIn("Corp One", output)
+
     async def test_rent_spawn_success(self):
         """Renting by ID should spawn the vehicle."""
         mock_vehicle = MagicMock()
@@ -3691,6 +3717,24 @@ class RentalMarkTestCase(SimpleTestCase):
     async def test_rental_no_registered_vehicle(self):
         output = await self._run_rental(None)
         self.assertIn("No rentable vehicle found", output)
+
+    async def test_rental_name_truncated_to_30(self):
+        v = self._make_vehicle()
+        with patch(
+            "amc.commands.vehicles.register_player_vehicles",
+            new=AsyncMock(return_value=[v]),
+        ):
+            await cmd_rental(self.ctx, "x" * 40)
+        self.assertEqual(v.alias, "x" * 30)
+
+    async def test_rental_blank_name_keeps_existing_alias(self):
+        v = self._make_vehicle(alias="Old Name")
+        with patch(
+            "amc.commands.vehicles.register_player_vehicles",
+            new=AsyncMock(return_value=[v]),
+        ):
+            await cmd_rental(self.ctx, "   ")
+        self.assertEqual(v.alias, "Old Name")
 
 
 class AdminVehicleSaveTestCase(SimpleTestCase):
