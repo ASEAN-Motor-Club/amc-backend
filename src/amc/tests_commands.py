@@ -62,7 +62,7 @@ from amc.commands.police import cmd_police
 from amc.commands.wanted import cmd_wanted
 
 
-from amc.models import Character, CriminalRecord, Player, PoliceSession, WorldObject
+from amc.models import Character, Player, PoliceSession, WorldObject
 # Import other models as needed for mocking or actual DB tests if we go that route
 
 
@@ -2724,53 +2724,30 @@ class ArrestCommandTestCase(TestCase):
         self.ctx.reply.assert_called_with("No wanted criminals")
 
     async def test_cmd_wanted_with_records(self):
-        """Active records shown online-first, sorted by confiscatable_amount desc."""
+        """Active criminals shown online-first, sorted by criminal_score desc."""
         timezone.now()
 
         # Create characters (IDs avoid setUp collision)
         player_a = await Player.objects.acreate(unique_id="76561198000000101")
-        char_online = await Character.objects.acreate(
+        await Character.objects.acreate(
             name="OnlineCriminal",
             player=player_a,
             guid="guid-online",
-            criminal_laundered_total=250_000,  # level 6
+            criminal_score=250_000,  # level 6
         )
         player_b = await Player.objects.acreate(unique_id="76561198000000102")
-        char_offline = await Character.objects.acreate(
+        await Character.objects.acreate(
             name="OfflineCriminal",
             player=player_b,
             guid="guid-offline",
-            criminal_laundered_total=500_000,  # level 11
+            criminal_score=500_000,  # level 11
         )
         player_c = await Player.objects.acreate(unique_id="76561198000000103")
-        char_online2 = await Character.objects.acreate(
+        await Character.objects.acreate(
             name="OnlineCriminal2",
             player=player_c,
             guid="guid-online2",
-            criminal_laundered_total=100_000,  # level 3
-        )
-
-        # Create active records with confiscatable_amount driving sort order
-        await CriminalRecord.objects.acreate(
-            character=char_online,
-            reason="Money delivery",
-            cleared_at=None,  # active
-            amount=250_000,
-            confiscatable_amount=250_000,
-        )
-        await CriminalRecord.objects.acreate(
-            character=char_offline,
-            reason="Money delivery",
-            cleared_at=None,  # active
-            amount=500_000,
-            confiscatable_amount=500_000,
-        )
-        await CriminalRecord.objects.acreate(
-            character=char_online2,
-            reason="Money delivery",
-            cleared_at=None,  # active
-            amount=100_000,
-            confiscatable_amount=100_000,
+            criminal_score=100_000,  # level 3
         )
 
         # Mock online players: only guid-online and guid-online2 are online
@@ -2807,16 +2784,16 @@ class ArrestCommandTestCase(TestCase):
         self.assertIn("OfflineCriminal", output)
         self.assertIn("C11", output)
 
-        # Only confiscatable_amount shown (not laundered total)
-        self.assertIn("$250,000", output)  # OnlineCriminal confiscatable
-        self.assertIn("$500,000", output)  # OfflineCriminal confiscatable
-        self.assertIn("$100,000", output)  # OnlineCriminal2 confiscatable
+        # Scores shown
+        self.assertIn("$250,000", output)
+        self.assertIn("$500,000", output)
+        self.assertIn("$100,000", output)
 
         # Criminal Record section header present
         self.assertIn("<Title>Criminal Record</>", output)
 
-    async def test_cmd_wanted_active_bounty_shows_confiscatable(self):
-        """Active Wanted records show confiscatable_amount from CriminalRecord, not Wanted.amount."""
+    async def test_cmd_wanted_active_bounty_shows_bounty(self):
+        """Active Wanted records show the bounty (Wanted.amount)."""
         from amc.models import Wanted
 
         player_a = await Player.objects.acreate(unique_id="76561198000000301")
@@ -2824,42 +2801,26 @@ class ArrestCommandTestCase(TestCase):
             name="BountyOnline",
             player=player_a,
             guid="guid-bounty-online",
-            criminal_laundered_total=100_000,
+            criminal_score=100_000,
         )
         player_b = await Player.objects.acreate(unique_id="76561198000000302")
         char_b = await Character.objects.acreate(
             name="BountyOffline",
             player=player_b,
             guid="guid-bounty-offline",
-            criminal_laundered_total=50_000,
+            criminal_score=50_000,
         )
 
-        # Active Wanted records (Wanted.amount may differ from confiscatable_amount)
+        # Active Wanted records with chase-frozen bounties (10% of score at trigger)
         await Wanted.objects.acreate(
             character=char_a,
             wanted_remaining=180,
-            amount=9_999,  # intentionally low — should NOT be shown
+            amount=10_000,
         )
         await Wanted.objects.acreate(
             character=char_b,
             wanted_remaining=60,
-            amount=9_999,
-        )
-
-        # CriminalRecord with the real confiscatable values
-        await CriminalRecord.objects.acreate(
-            character=char_a,
-            reason="Money delivery",
-            cleared_at=None,
-            amount=300_000,
-            confiscatable_amount=300_000,
-        )
-        await CriminalRecord.objects.acreate(
-            character=char_b,
-            reason="Money delivery",
-            cleared_at=None,
-            amount=150_000,
-            confiscatable_amount=150_000,
+            amount=5_000,
         )
 
         # Only char_a is online
@@ -2881,10 +2842,9 @@ class ArrestCommandTestCase(TestCase):
         # Active Bounties section shown
         self.assertIn("Active Bounties", output)
 
-        # Confiscatable amounts shown, not Wanted.amount (9999)
-        self.assertIn("$300,000", output)
-        self.assertIn("$150,000", output)
-        self.assertNotIn("$9,999", output)
+        # Bounties shown
+        self.assertIn("$10,000", output)
+        self.assertIn("$5,000", output)
 
         # Online player appears before offline
         online_pos = output.index("BountyOnline")
@@ -2892,19 +2852,14 @@ class ArrestCommandTestCase(TestCase):
         self.assertLess(online_pos, offline_pos)
 
     async def test_cmd_wanted_expired_excluded(self):
-        """Expired records are not shown."""
+        """Zero-score characters are not shown."""
         timezone.now()
         player_x = await Player.objects.acreate(unique_id="76561198000000104")
-        char = await Character.objects.acreate(
+        await Character.objects.acreate(
             name="ExpiredCriminal",
             player=player_x,
             guid="guid-expired",
-            criminal_laundered_total=100_000,
-        )
-        await CriminalRecord.objects.acreate(
-            character=char,
-            reason="Money delivery",
-            cleared_at=timezone.now(),  # cleared = no longer active
+            criminal_score=0,
         )
 
         with patch(
@@ -2922,30 +2877,20 @@ class ArrestCommandTestCase(TestCase):
         # Criminal with active police session — should be excluded
         player_cop = await Player.objects.acreate(unique_id="76561198000000201")
         char_cop = await Character.objects.acreate(
-            name="CopWithRecord",
+            name="CopWithScore",
             player=player_cop,
-            guid="guid-cop-record",
-            criminal_laundered_total=300_000,
-        )
-        await CriminalRecord.objects.acreate(
-            character=char_cop,
-            reason="Money delivery",
-            cleared_at=None,  # active
+            guid="guid-cop-score",
+            criminal_score=300_000,
         )
         await PoliceSession.objects.acreate(character=char_cop)  # active session
 
         # Regular criminal — should appear
         player_crim = await Player.objects.acreate(unique_id="76561198000000202")
-        char_crim = await Character.objects.acreate(
+        await Character.objects.acreate(
             name="RegularCriminal",
             player=player_crim,
             guid="guid-regular-crim",
-            criminal_laundered_total=200_000,
-        )
-        await CriminalRecord.objects.acreate(
-            character=char_crim,
-            reason="Money delivery",
-            cleared_at=None,  # active
+            criminal_score=200_000,
         )
 
         with patch(
@@ -2956,7 +2901,7 @@ class ArrestCommandTestCase(TestCase):
 
         self.ctx.reply.assert_called()
         output = self.ctx.reply.call_args[0][0]
-        self.assertNotIn("CopWithRecord", output)
+        self.assertNotIn("CopWithScore", output)
         self.assertIn("RegularCriminal", output)
 
 
@@ -3265,23 +3210,10 @@ class PoliceCommandTestCase(TestCase):
             mock_deactivate.assert_called_once()
             mock_tp.assert_not_called()
 
-    async def test_cmd_police_blocked_recent_criminal_delivery(self):
-        """Going on duty is blocked if the player had a criminal delivery in the last 24h."""
-        from amc.models import Delivery
-
-        crim_record = await CriminalRecord.objects.acreate(
-            character=self.character,
-            reason="Money delivery",
-            cleared_at=timezone.now(),
-        )
-        await Delivery.objects.acreate(
-            character=self.character,
-            cargo_key="Money",
-            quantity=1,
-            payment=1000,
-            timestamp=timezone.now() - timezone.timedelta(hours=12),
-            criminal_record=crim_record,
-        )
+    async def test_cmd_police_blocked_by_criminal_score(self):
+        """Going on duty is blocked while the player carries a criminal score."""
+        self.character.criminal_score = 5_000
+        await self.character.asave(update_fields=["criminal_score"])
 
         with (
             patch("amc.commands.police.is_police", new=AsyncMock(return_value=False)),
@@ -3299,52 +3231,8 @@ class PoliceCommandTestCase(TestCase):
             await cmd_police(self.ctx)
             mock_ssm.assert_called()
             msg = mock_ssm.call_args[0][1]
-            self.assertIn("24 hours", msg)
+            self.assertIn("criminal score", msg)
             mock_activate.assert_not_called()
-
-    async def test_cmd_police_allowed_old_criminal_delivery(self):
-        """Going on duty is allowed if the last criminal delivery was over 24h ago."""
-        from amc.models import Delivery
-
-        crim_record = await CriminalRecord.objects.acreate(
-            character=self.character,
-            reason="Money delivery",
-            cleared_at=timezone.now(),
-        )
-        await Delivery.objects.acreate(
-            character=self.character,
-            cargo_key="Money",
-            quantity=1,
-            payment=1000,
-            timestamp=timezone.now() - timezone.timedelta(hours=25),
-            criminal_record=crim_record,
-        )
-
-        with (
-            patch("amc.commands.police.is_police", new=AsyncMock(return_value=False)),
-            patch(
-                "amc.commands.police.get_players",
-                new=AsyncMock(
-                    return_value=[
-                        (
-                            str(self.player.unique_id),
-                            {"name": "TestChar"},
-                        )
-                    ]
-                ),
-            ),
-            patch(
-                "amc.commands.police.get_player_customization",
-                new=AsyncMock(return_value={"Costume": "Costume_Police_01"}),
-            ),
-            patch(
-                "amc.commands.police.activate_police", new=AsyncMock()
-            ) as mock_activate,
-            patch("amc.commands.police.teleport_player", new=AsyncMock()),
-            patch("amc.player_tags.refresh_player_name", new=AsyncMock()),
-        ):
-            await cmd_police(self.ctx)
-            mock_activate.assert_called_once()
 
     async def test_cmd_police_allowed_no_criminal_delivery(self):
         """Going on duty is allowed if the player has no criminal deliveries at all."""

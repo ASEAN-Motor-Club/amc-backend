@@ -9,7 +9,6 @@ from amc.webhook import process_event
 from amc.models import (
     DeliveryPoint,
     CharacterLocation,
-    CriminalRecord,
 )
 from amc_finance.services import get_treasury_fund_balance
 
@@ -58,10 +57,10 @@ async def _setup_character(guid_suffix=""):
 @patch("amc.game_server.announce", new_callable=AsyncMock)
 @patch("amc.special_cargo.announce", new_callable=AsyncMock)
 class MoneyLaunderingTests(TestCase):
-    async def test_money_delivery_creates_criminal_record(
+    async def test_money_delivery_accumulates_criminal_score(
         self, mock_sc_announce, mock_announce, mock_get_treasury, mock_get_rp_mode, mock_check_floor
     ):
-        """Money delivery should create an active CriminalRecord (cleared_at=None)."""
+        """Money delivery should accumulate the criminal score."""
         mock_get_rp_mode.return_value = False
         mock_get_treasury.return_value = 1_000_000
 
@@ -70,44 +69,26 @@ class MoneyLaunderingTests(TestCase):
 
         await process_event(event, player, character)
 
-        record = await CriminalRecord.objects.filter(character=character).afirst()
-        self.assertIsNotNone(record)
-        self.assertEqual(record.reason, "Money delivery")
-        # Active record has cleared_at = None
-        self.assertIsNone(record.cleared_at)
-        # Amount should be accumulated
-        self.assertEqual(record.amount, 10_000)
-        self.assertEqual(record.confiscatable_amount, 8_000)  # 80% of 10_000
+        await character.arefresh_from_db(fields=["criminal_score"])
+        self.assertEqual(character.criminal_score, 10_000)
 
-    async def test_money_delivery_reuses_existing_criminal_record(
+    async def test_money_delivery_accumulates_on_existing_criminal_score(
         self, mock_sc_announce, mock_announce, mock_get_treasury, mock_get_rp_mode, mock_check_floor
     ):
-        """Subsequent Money deliveries should accumulate on the same active CriminalRecord."""
+        """Subsequent Money deliveries should accumulate onto the same score."""
         mock_get_rp_mode.return_value = False
         mock_get_treasury.return_value = 1_000_000
 
         player, character = await _setup_character("cr2")
 
-        # Create existing active record
-        await CriminalRecord.objects.acreate(
-            character=character,
-            reason="Money delivery",
-            cleared_at=None,  # active
-            amount=50_000,
-            confiscatable_amount=50_000,
-        )
+        character.criminal_score = 50_000
+        await character.asave(update_fields=["criminal_score"])
 
         event = _money_cargo_event(character.guid, player.unique_id, payment=5_000)
         await process_event(event, player, character)
 
-        # Still only one active record
-        self.assertEqual(
-            await CriminalRecord.objects.filter(character=character, cleared_at__isnull=True).acount(), 1
-        )
-        record = await CriminalRecord.objects.aget(character=character, cleared_at__isnull=True)
-        # Amount should be the original + new delivery
-        self.assertEqual(record.amount, 55_000)
-        self.assertEqual(record.confiscatable_amount, 54_000)  # 50_000 + 80% of 5_000
+        await character.arefresh_from_db(fields=["criminal_score"])
+        self.assertEqual(character.criminal_score, 55_000)
 
     async def test_money_delivery_no_new_wanted_no_laundering_announce(
         self, mock_sc_announce, mock_announce, mock_get_treasury, mock_get_rp_mode, mock_check_floor

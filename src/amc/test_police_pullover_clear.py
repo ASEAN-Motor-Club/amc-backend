@@ -7,7 +7,7 @@ from django.test import TestCase
 
 from amc.factories import CharacterFactory, PlayerFactory
 from amc.handlers.police import handle_police_penalty
-from amc.models import Confiscation, CriminalRecord, Player, PoliceSession, Wanted
+from amc.models import Confiscation, Player, PoliceSession, Wanted
 from amc.webhook_context import EventContext
 
 
@@ -43,7 +43,7 @@ async def _cleanup_players(*players):
 
 
 class PulloverClearWantedTests(TestCase):
-    """Pull-over penalty resolves an active Wanted even without a CriminalRecord."""
+    """Pull-over penalty resolves an active Wanted even without a score."""
 
     async def _setup_officer_and_suspect(self):
         officer_player = await sync_to_async(PlayerFactory)()
@@ -60,7 +60,7 @@ class PulloverClearWantedTests(TestCase):
     @patch("amc.handlers.police.refresh_player_name", new_callable=AsyncMock)
     @patch("amc.handlers.police.clear_suspect", new_callable=AsyncMock)
     @patch("amc.handlers.police.perform_arrest", new_callable=AsyncMock)
-    async def test_penalty_clears_wanted_without_record(
+    async def test_penalty_clears_wanted_without_score(
         self, mock_perform, mock_clear, mock_refresh
     ):
         officer, suspect = await self._setup_officer_and_suspect()
@@ -122,7 +122,7 @@ class PulloverClearWantedTests(TestCase):
     @patch("amc.handlers.police.refresh_player_name", new_callable=AsyncMock)
     @patch("amc.handlers.police.clear_suspect", new_callable=AsyncMock)
     @patch("amc.handlers.police.perform_arrest", new_callable=AsyncMock)
-    async def test_no_wanted_no_record_is_noop(
+    async def test_no_wanted_no_score_is_noop(
         self, mock_perform, mock_clear, mock_refresh
     ):
         officer, suspect = await self._setup_officer_and_suspect()
@@ -140,16 +140,13 @@ class PulloverClearWantedTests(TestCase):
     @patch("amc.handlers.police.clear_suspect", new_callable=AsyncMock)
     @patch("amc.handlers.police.get_players", new_callable=AsyncMock)
     @patch("amc.handlers.police.perform_arrest", new_callable=AsyncMock)
-    async def test_record_still_runs_full_arrest(
+    async def test_score_still_runs_full_arrest(
         self, mock_perform, mock_get_players, mock_clear, mock_refresh
     ):
         officer, suspect = await self._setup_officer_and_suspect()
         try:
-            await CriminalRecord.objects.acreate(
-                character=suspect,
-                amount=5000,
-                confiscatable_amount=4000,
-            )
+            suspect.criminal_score = 5000
+            await suspect.asave(update_fields=["criminal_score"])
             wanted = await Wanted.objects.acreate(
                 character=suspect,
                 wanted_remaining=300,

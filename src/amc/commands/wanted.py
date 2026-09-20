@@ -2,13 +2,12 @@ from datetime import timedelta
 
 from amc.command_framework import registry, CommandContext
 from amc.game_server import get_players
-from amc.models import CriminalRecord, PoliceSession, Wanted
+from amc.models import Character, PoliceSession, Wanted
 from amc.special_cargo import calculate_criminal_level
-from amc.criminals import _compute_stars, CRIMINAL_RECORD_DECAY_FACTOR
+from amc.criminals import _compute_stars
 from django.conf import settings
 from django.utils import timezone
 from django.utils.translation import gettext_lazy
-from django.db.models import OuterRef, Subquery
 
 SETWANTED_COOLDOWN = timedelta(minutes=settings.SETWANTED_COOLDOWN_MINUTES)
 
@@ -43,39 +42,30 @@ async def cmd_wanted(ctx: CommandContext):
         active_cop_ids.add(session.character_id)
 
     # --- Section 1: Active Wanted records (have a live bounty) ---
-    # Annotate with confiscatable_amount from the linked CriminalRecord
-    confiscatable_sq = (
-        CriminalRecord.objects.filter(
-            character=OuterRef("character"), cleared_at__isnull=True
-        )
-        .order_by("-confiscatable_amount")
-        .values("confiscatable_amount")[:1]
-    )
-
+    # Bounty = Wanted.amount, set at creation to 10% of the criminal score
+    # and frozen for the chase.
     active_bounties: list[dict] = []
     active_character_ids: set[int] = set()
     async for wanted in (
         Wanted.objects.filter(expired_at__isnull=True, wanted_remaining__gt=0)
         .select_related("character")
-        .annotate(confiscatable_amount=Subquery(confiscatable_sq))
     ):
         if wanted.character_id in active_cop_ids:
             continue
         active_character_ids.add(wanted.character_id)
         stars = _compute_stars(wanted.wanted_remaining)
         is_online = wanted.character.guid in online_guids
-        confiscatable = wanted.confiscatable_amount or 0
         active_bounties.append(
             {
                 "name": wanted.character.name,
                 "stars": stars,
-                "confiscatable_amount": confiscatable,
+                "bounty": wanted.amount,
                 "online": is_online,
             }
         )
 
-    # Sort active bounties: online first, then by confiscatable_amount desc within each group
-    active_bounties.sort(key=lambda e: (not e["online"], -e["confiscatable_amount"]))
+    # Sort active bounties: online first, then by bounty desc within each group
+    active_bounties.sort(key=lambda e: (not e["online"], -e["bounty"]))
 
     # --- Section 1.5: Recently expired wanteds (on cooldown) ---
     cooldown_entries: list[dict] = []
@@ -108,52 +98,40 @@ async def cmd_wanted(ctx: CommandContext):
         key=lambda e: (not e["online"], e["remaining_mins"], e["remaining_secs"])
     )
 
-    # --- Section 2: Criminal records without an active Wanted ---
-    other_records = [
-        r
-        async for r in CriminalRecord.objects.filter(cleared_at__isnull=True)
-        .order_by("-amount")
-        .exclude(character_id__in=active_character_ids)
-        .exclude(character_id__in=active_cop_ids)
-        .exclude(character_id__in=cooldown_character_ids)
-        .select_related("character")
+    # --- Section 2: Criminal scores without an active Wanted ---
+    other_criminals = [
+        c
+        async for c in Character.objects.filter(criminal_score__gt=0)
+        .order_by("-criminal_score")
+        .exclude(pk__in=active_character_ids)
+        .exclude(pk__in=active_cop_ids)
+        .exclude(pk__in=cooldown_character_ids)
     ]
 
-    if not active_bounties and not cooldown_entries and not other_records:
+    if not active_bounties and not cooldown_entries and not other_criminals:
         await ctx.reply("No wanted criminals")
         return
 
-    # Sort other records by criminal level desc
     other_entries = []
-    for record in other_records:
-        laundered = record.character.criminal_laundered_total
-        level = calculate_criminal_level(laundered)
-        guid = record.character.guid
-        decay_per_min = (
-            int(record.confiscatable_amount * (1 - CRIMINAL_RECORD_DECAY_FACTOR))
-            if record.confiscatable_amount > 0 and guid in online_guids
-            else 0
-        )
+    for char in other_criminals:
+        guid = char.guid
         other_entries.append(
             {
-                "name": record.character.name,
+                "name": char.name,
                 "guid": guid,
-                "level": level,
-                "laundered": laundered,
-                "cumulative_amount": record.amount,
-                "confiscatable_amount": record.confiscatable_amount,
+                "level": calculate_criminal_level(char.criminal_score),
+                "score": char.criminal_score,
                 "online": guid in online_guids,
-                "decay_per_min": decay_per_min,
             }
         )
     other_online = sorted(
         [e for e in other_entries if e["online"]],
-        key=lambda e: e["cumulative_amount"],
+        key=lambda e: e["score"],
         reverse=True,
     )
     other_offline = sorted(
         [e for e in other_entries if not e["online"]],
-        key=lambda e: e["cumulative_amount"],
+        key=lambda e: e["score"],
         reverse=True,
     )
 
@@ -161,23 +139,14 @@ async def cmd_wanted(ctx: CommandContext):
     msg = "<Title>Wanted List</>\n\n"
 
     def _row_bounty(e: dict) -> str:
-        confiscatable = e["confiscatable_amount"]
-        amount_str = f"${confiscatable:,}" if confiscatable > 0 else "no bounty"
+        amount_str = f"${e['bounty']:,}" if e["bounty"] > 0 else "no bounty"
         return f"{_stars(e['stars'])} {e['name']} <Secondary>{amount_str}</>\n"
 
     def _row_record(e: dict) -> str:
-        cumulative = e["cumulative_amount"]
-        confiscatable = e["confiscatable_amount"]
-        total_str = f"${cumulative:,}" if cumulative > 0 else "$0"
-        if confiscatable > 0:
-            decay = e.get("decay_per_min", 0)
-            decay_str = f", -${decay:,}/min" if decay > 0 else ""
-            detail = f" <Secondary>(${confiscatable:,} bounty{decay_str})</>"
-        else:
-            detail = ""
+        score_str = f"${e['score']:,}" if e["score"] > 0 else "$0"
         return (
             f"<Highlight>C{e['level']}</> {e['name']}"
-            f" <Secondary>{total_str}</>{detail}\n"
+            f" <Secondary>{score_str}</>\n"
         )
 
     def _row_cooldown(e: dict) -> str:
@@ -225,6 +194,43 @@ async def cmd_wanted(ctx: CommandContext):
             msg += "<Warning>Offline</>\n"
             for e in other_offline:
                 msg += _row_record(e)
-        msg += "<Secondary>Bounty decays ~0.6%/min of online time. Paused when AFK or in a modded vehicle.</>\n"
+        msg += (
+            "<Secondary>Criminal score decays (7-day half-life) after 48h "
+            "without illicit deliveries. Arrests negate the bounty from it.</>\n"
+        )
 
+    await ctx.reply(msg.rstrip())
+
+
+@registry.register(
+    "/criminals",
+    description=gettext_lazy("Criminal leaderboard — top 10 by criminal score"),
+    category="Faction",
+)
+async def cmd_criminals(ctx: CommandContext):
+    """Criminal leaderboard (plan §6.1): top 10 by criminal score.
+
+    Levels are derived live from the score, so the board reflects decay and
+    arrest negation automatically. Rank 1 is the boss — the character the
+    boss tax pays into.
+    """
+    rows = [
+        (char.name, char.criminal_score)
+        async for char in (
+            Character.objects.filter(criminal_score__gt=0)
+            .order_by("-criminal_score", "name")[:10]
+        )
+    ]
+
+    if not rows:
+        await ctx.reply("No criminals yet")
+        return
+
+    msg = "<Title>Criminal Leaderboard</>\n\n"
+    for i, (name, score) in enumerate(rows, start=1):
+        level = calculate_criminal_level(score)
+        marker = "👑 <Highlight>BOSS</> " if i == 1 else ""
+        msg += (
+            f"{i}. {marker}{name} — <Money>${score:,}</> <Secondary>(C{level})</>\n"
+        )
     await ctx.reply(msg.rstrip())

@@ -7,7 +7,7 @@ from django.test import TestCase
 
 from amc.factories import CharacterFactory, PlayerFactory
 from amc.handlers import dispatch
-from amc.models import CriminalRecord, PoliceSession
+from amc.models import PoliceSession
 from amc.webhook_context import EventContext
 
 
@@ -37,11 +37,10 @@ def _make_event(equipped=None, unequipped=None, character_guid="A" * 32):
     }
 
 
-class CostumeEquipWithRecordTests(TestCase):
-    async def test_costume_equipped_with_record_makes_suspect(self):
+class CostumeEquipTests(TestCase):
+    async def test_costume_equipped_makes_suspect(self):
         player = await sync_to_async(PlayerFactory)()
         character = await sync_to_async(CharacterFactory)(player=player)
-        await CriminalRecord.objects.acreate(character=character, reason="Test")
 
         event = _make_event(
             equipped=[{"Slot": 4, "ItemKey": "Costume_Police_01"}],
@@ -69,9 +68,9 @@ class CostumeEquipWithRecordTests(TestCase):
             duration_seconds=70,
         )
 
-    async def test_costume_equipped_without_record_creates_record_and_makes_suspect(
-        self,
-    ):
+    async def test_costume_equipped_makes_suspect_without_record(self):
+        """Costume equip applies the suspect overlay but creates no record
+        (costume-only suspects are cosmetic post-rework)."""
         player = await sync_to_async(PlayerFactory)()
         character = await sync_to_async(CharacterFactory)(player=player)
 
@@ -89,26 +88,17 @@ class CostumeEquipWithRecordTests(TestCase):
             patch(
                 "amc.handlers.customization.make_suspect", new_callable=AsyncMock
             ) as mock_suspect,
-            patch(
-                "amc.handlers.customization.refresh_player_name", new_callable=AsyncMock
-            ) as mock_refresh,
         ):
             await dispatch("ServerSetEquipmentInventory", event, player, character, ctx)
 
         await character.arefresh_from_db()
         self.assertTrue(character.wearing_costume)
         self.assertEqual(character.costume_item_key, "Costume_Police_01")
-        self.assertTrue(
-            await CriminalRecord.objects.filter(
-                character=character, cleared_at__isnull=True
-            ).aexists()
-        )
         mock_suspect.assert_called_once_with(
             ctx.http_client_mod,
             character.guid,
             duration_seconds=70,
         )
-        mock_refresh.assert_called_once_with(character, ctx.http_client_mod)
 
 
 class CostumeUnequipTests(TestCase):
@@ -262,11 +252,6 @@ class ArrestResetTests(TestCase):
             costume_item_key="Costume_Police_01",
         )
         await character.asave(update_fields=["wearing_costume", "costume_item_key"])
-        await CriminalRecord.objects.acreate(
-            character=character,
-            reason="Test",
-            confiscatable_amount=0,
-        )
 
         await sync_to_async(TeleportPoint.objects.create)(
             name="Jail",

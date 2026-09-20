@@ -20,7 +20,6 @@ from amc.special_cargo import ILLICIT_CARGO_KEYS
 from amc.models import (
     Character,
     Confiscation,
-    CriminalRecord,
     PolicePatrolLog,
     PolicePenaltyLog,
     PoliceSession,
@@ -80,12 +79,12 @@ async def handle_patrol_arrived(event, player, character, ctx):
 
 
 async def _clear_wanted_on_pullover(officer_character, suspect_character, ctx):
-    """End an active Wanted on a penalty pull-over when there is no record.
+    """End an active Wanted on a penalty pull-over when there is no score.
 
-    The confiscation arrest path requires an active CriminalRecord (admin
-    /setwanted flags create none, by design), but the penalty pull-over itself
+    The confiscation arrest path requires criminal score (admin /setwanted
+    flags are bounty-free by design), but the penalty pull-over itself
     should still resolve the suspect's Wanted status — no jail, no
-    confiscation (nothing confiscatable exists without a record).
+    confiscation (nothing to negate without a score).
     """
     wanted = await Wanted.objects.filter(
         character=suspect_character, expired_at__isnull=True
@@ -157,14 +156,18 @@ async def handle_police_penalty(event, player, character, ctx):
     except Character.DoesNotExist:
         return 0, 0, 0, 0
 
-    has_record = await CriminalRecord.objects.filter(
+    has_score = suspect_character.criminal_score > 0
+    is_wanted = await Wanted.objects.filter(
         character=suspect_character,
-        cleared_at__isnull=True,
+        expired_at__isnull=True,
+        wanted_remaining__gt=0,
     ).aexists()
-    if not has_record:
-        # No active CriminalRecord (e.g. an admin /setwanted flag, which is
-        # bounty/record-free by design) — the penalty pull-over still ends the
-        # suspect's Wanted, just without jail or confiscation.
+    if not has_score and not is_wanted:
+        return 0, 0, 0, 0
+    if not has_score:
+        # Zero-score wanted flag (admin /setwanted, bounty-free by design) —
+        # the penalty pull-over still ends the suspect's Wanted, just without
+        # jail or confiscation.
         await _clear_wanted_on_pullover(character, suspect_character, ctx)
         return 0, 0, 0, 0
 

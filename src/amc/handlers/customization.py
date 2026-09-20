@@ -4,15 +4,13 @@ from django.conf import settings
 
 from amc.handlers import register
 from amc.mod_server import clear_suspect, make_suspect, show_popup
-from amc.models import CriminalRecord, PoliceSession, Wanted
-from amc.player_tags import refresh_player_name
+from amc.models import PoliceSession, Wanted
 from amc.police import deactivate_police
 
 logger = logging.getLogger("amc.webhook.handlers.customization")
 
 COSTUME_SLOT = 4
 CRIMINAL_SUSPECT_DURATION = 70  # seconds — mod clamps to 60s; refresh_suspect_tags reapplies every 30s for overlap
-COSTUME_MIN_BOUNTY = 10_000
 
 
 @register("ServerSetEquipmentInventory")
@@ -45,29 +43,10 @@ async def handle_set_equipment_inventory(event, player, character, ctx):
     await character.asave(update_fields=["wearing_costume", "costume_item_key"])
 
     # Immediate suspect poke so the wearer lights up on cops' HUD without
-    # waiting for the 10 s refresh tick. Gated on an active CriminalRecord.
+    # waiting for the 30 s refresh tick. Cosmetic post-rework: a costume-only
+    # suspect carries no score/bounty and is not pull-over-arrestable — the
+    # overlay marks them until they carry score or become wanted.
     if character.wearing_costume and ctx.http_client_mod and character.guid:
-        has_record = await CriminalRecord.objects.filter(
-            character=character, cleared_at__isnull=True
-        ).aexists()
-        if not has_record:
-            await CriminalRecord.objects.acreate(
-                character=character,
-                reason="Wearing criminal costume",
-            )
-            try:
-                await refresh_player_name(character, ctx.http_client_mod)
-            except Exception:
-                logger.warning(
-                    "refresh_player_name (costume-equip) failed for %s",
-                    character.name,
-                    exc_info=True,
-                )
-        await CriminalRecord.objects.filter(
-            character=character,
-            cleared_at__isnull=True,
-            confiscatable_amount__lt=COSTUME_MIN_BOUNTY,
-        ).aupdate(confiscatable_amount=COSTUME_MIN_BOUNTY)
         try:
             await make_suspect(
                 ctx.http_client_mod,

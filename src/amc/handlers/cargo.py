@@ -27,7 +27,6 @@ from amc.criminals import create_or_refresh_wanted, nearest_effective_cop_distan
 from amc.special_cargo import (
     ILLICIT_CARGO_KEYS,
     accumulate_illicit_delivery,
-    link_delivery_to_criminal_record,
     should_trigger_wanted,
 )
 from amc.mod_detection import detect_custom_parts, POLICE_DUTY_WHITELIST
@@ -236,7 +235,7 @@ async def handle_cargo_arrived(event, player, character, ctx):
         # Capture the lifetime illicit total BEFORE this group's special-cargo
         # handler accrues the delivery into it — the trigger ratio measures
         # this delivery against the history that existed before it.
-        pre_delivery_score = character.criminal_laundered_total
+        pre_delivery_score = character.criminal_score
         # Special cargo side effects (criminal level, criminal record, modded penalty)
         await run_special_cargo_handlers(
             group_list, character, ctx.http_client, ctx.http_client_mod,
@@ -309,8 +308,7 @@ async def handle_cargo_arrived(event, player, character, ctx):
             already_wanted = await Wanted.objects.filter(
                 character=character, expired_at__isnull=True
             ).aexists()
-            # Random wanted trigger — restored 2026-09-20 (freeman design; see
-            # .hermes/plans/2026-09-20_095637-wanted-trigger-restore.md).
+            # Random wanted trigger — restored 2026-09-20 (#154; freeman design).
             # Ratio-driven chance, attenuated by distance to the nearest
             # effective cop so camping a delivery site farms nothing. The
             # dormant rule is enforced by nearest_effective_cop_distance_m:
@@ -326,9 +324,10 @@ async def handle_cargo_arrived(event, player, character, ctx):
                         accumulated_amount, pre_delivery_score, cop_distance_m
                     )
             if already_wanted or trigger:
-                # Bounty (Wanted.amount) starts at 0 — it only grows from police
-                # proximity during chase, tracked in tick_wanted_countdown.
-                # Delivery payments are confiscated via CriminalRecord.confiscatable_amount.
+                # Bounty: system-triggered CREATIONS auto-set 10% of the
+                # criminal score inside create_or_refresh_wanted (chase-
+                # frozen); this path is a REFRESH (already wanted), so
+                # amount stays 0 and the existing bounty is untouched.
                 wanted, newly_created = await create_or_refresh_wanted(
                     character,
                     ctx.http_client_mod,
@@ -351,11 +350,6 @@ async def handle_cargo_arrived(event, player, character, ctx):
                             character.guid, ctx.http_client, delay=15
                         )
                     )
-            # Link delivery to the criminal record — always, not just when wanted triggers
-            if delivery_obj:
-                await link_delivery_to_criminal_record(
-                    character, cargo_key, timestamp
-                )
 
         # Discord notification — suppressed for illicit cargo to avoid revealing
         # criminal activity in a public channel.

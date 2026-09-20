@@ -131,9 +131,13 @@ async def execute_arrest(
             except Wanted.DoesNotExist:
                 pass
 
+            # Confiscation = the bounty (Wanted.amount) ONLY — set at wanted
+            # creation to 10% of the criminal score, frozen for the chase
+            # (freeman 2026-09-20). No wanted → jail-only arrest, no money,
+            # no score change (§plan 8.3). Negative amount = wrongful wanted
+            # compensation path, unchanged.
             bounty = 0
             if wanted:
-                # Bounty component of confiscation (may be negative for wrongful wanted)
                 bounty = wanted.amount
 
                 # Expire Wanted status BEFORE teleport
@@ -141,34 +145,40 @@ async def execute_arrest(
                 wanted.expired_at = timezone.now()
                 await wanted.asave(update_fields=["wanted_remaining", "expired_at"])
 
-            # Delivery confiscation: use confiscatable_amount from active CriminalRecord
-            from amc.models import CriminalRecord
-
-            active_record = await CriminalRecord.objects.filter(
-                character=suspect_char, cleared_at__isnull=True
-            ).afirst()
-            delivery_confiscation = active_record.confiscatable_amount if active_record else 0
-            confiscated_amount = bounty + delivery_confiscation
+            confiscated_amount = bounty
 
             # Create a Confiscation record for the arrest
-            confiscation = await Confiscation.objects.acreate(
+            await Confiscation.objects.acreate(
                 character=suspect_char,
                 officer=officer_character,  # None for system arrests
                 cargo_key="Illicit",
                 amount=confiscated_amount,
             )
 
-            # Clear the CriminalRecord (removes [C] indicator)
-            if active_record:
-                active_record.cleared_at = timezone.now()
-                active_record.cleared_by_arrest = confiscation
-                await active_record.asave(update_fields=["cleared_at", "cleared_by_arrest"])
-                suspect_char.wearing_costume  = False
-                suspect_char.costume_item_key = None
-                await suspect_char.asave(update_fields=["wearing_costume", "costume_item_key"])
+            # The confiscated amount reduces the criminal score (freeman
+            # 2026-09-20) — money and rap sheet bite identically. Only
+            # positive bounties negate; negative (wrongful-wanted
+            # compensation) amounts never inflate the score.
+            if bounty > 0:
+                await suspect_char.arefresh_from_db(fields=["criminal_score"])
+                suspect_char.criminal_score = max(
+                    0, suspect_char.criminal_score - bounty
+                )
+                await suspect_char.asave(update_fields=["criminal_score"])
 
-            # Refresh display name now that wanted + criminal record state are finalized
-            if wanted or active_record:
+            # Arrest clears costume-suspect state (same as the old record
+            # clear): the player still wears the costume, but the flag drives
+            # the overlay reapplication loop, so dropping it stops the GE
+            # from being re-applied while jailed. The next equipment webhook
+            # re-syncs the flag.
+            suspect_char.wearing_costume = False
+            suspect_char.costume_item_key = None
+            await suspect_char.asave(
+                update_fields=["wearing_costume", "costume_item_key"]
+            )
+
+            # Refresh display name now that wanted state is finalized
+            if wanted:
                 asyncio.create_task(
                     refresh_player_name(suspect_char, http_client_mod)
                 )
@@ -189,13 +199,8 @@ async def execute_arrest(
                     )
 
             if confiscated_amount > 0:
-                # --- Legitimate arrest: confiscate delivery earnings from laundered total ---
-                await suspect_char.arefresh_from_db(fields=["criminal_laundered_total"])
-                new_criminal_total = max(
-                    0, suspect_char.criminal_laundered_total - delivery_confiscation
-                )
-                suspect_char.criminal_laundered_total = new_criminal_total
-                await suspect_char.asave(update_fields=["criminal_laundered_total"])
+                # (The score negation above IS the criminal-side penalty;
+                # the old criminal_laundered_total reduction is subsumed.)
 
                 await transfer_money(
                     http_client_mod,

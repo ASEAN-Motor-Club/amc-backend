@@ -79,7 +79,6 @@ from .models import (
     VehicleDecal,
     NewsItem,
     FactionMembership,
-    CriminalRecord,
     Confiscation,
     ArrestZone,
     PoliceSession,
@@ -765,24 +764,6 @@ class PoliceShiftLogAdmin(admin.ModelAdmin):
     search_fields = ["player__unique_id"]
     autocomplete_fields = ["player"]
     list_filter = ["action"]
-
-
-@admin.register(CriminalRecord)
-class CriminalRecordAdmin(admin.ModelAdmin):
-    list_display = [
-        "id",
-        "character",
-        "reason",
-        "amount",
-        "confiscatable_amount",
-        "cleared_at",
-        "created_at",
-    ]
-    list_select_related = ["character", "character__player"]
-    search_fields = ["character__name", "character__player__unique_id", "reason"]
-    list_filter = ["reason", ("cleared_at", admin.EmptyFieldListFilter)]
-    readonly_fields = ["character"]
-    ordering = ["-created_at"]
 
 
 @admin.register(Confiscation)

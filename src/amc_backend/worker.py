@@ -23,7 +23,7 @@ from amc.ubi import handout_ubi, TASK_FREQUENCY as UBI_TASK_FREQUENCY  # noqa: E
 from amc.deliverypoints import monitor_deliverypoints  # noqa: E402
 from amc.criminals import (  # noqa: E402
     refresh_suspect_tags,
-    tick_criminal_record_decay,
+    tick_criminal_score_decay,
     tick_police_suspect_locations,
     tick_wanted_countdown,
 )
@@ -213,8 +213,8 @@ async def police_suspect_locations_tick(ctx):
     await tick_police_suspect_locations(ctx["http_client"], ctx["http_client_mod"], ctx["http_client_mgmt"])
 
 
-async def criminal_record_decay_tick(ctx):
-    await tick_criminal_record_decay(ctx["http_client_mod"])
+async def criminal_score_decay_tick(ctx):
+    await tick_criminal_score_decay()
 
 
 async def crosscheck_events_tick(ctx):
@@ -249,7 +249,7 @@ class WorkerSettings:
         # pyrefly: ignore [bad-argument-type]
         cron(police_suspect_locations_tick, second=set(range(5, 60, 5))),
         # pyrefly: ignore [bad-argument-type]
-        cron(criminal_record_decay_tick, minute=None, second=30),  # every minute at :30s
+        cron(criminal_score_decay_tick, minute=0, second=30),  # hourly at :30
         # Event crosscheck — read-only live-vs-DB drift report, only does
         # real work while an event is in Ready/Racing.
         # pyrefly: ignore [bad-argument-type]

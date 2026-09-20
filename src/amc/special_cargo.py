@@ -21,9 +21,8 @@ from django.utils import timezone
 
 from amc.game_server import announce
 from amc.mod_server import show_popup, transfer_money
-from amc.models import Confiscation, CriminalRecord, ServerCargoArrivedLog
-from amc.player_tags import refresh_player_name
-from amc_finance.services import record_treasury_expense
+from amc.models import Character, Confiscation, ServerCargoArrivedLog
+from amc_finance.services import record_treasury_expense, register_player_deposit
 
 logger = logging.getLogger("amc.special_cargo")
 
@@ -61,10 +60,11 @@ WANTED_MIN_BOUNTY = 0
 ILLICIT_DELIVERY_DEBOUNCE = 30
 
 
-def calculate_criminal_level(laundered_total: int) -> int:
-    """Calculate criminal level from cumulative laundered amount.
-    Level scales infinitely: floor(total / step) + 1"""
-    return (laundered_total // CRIMINAL_LEVEL_STEP) + 1
+def calculate_criminal_level(criminal_score: int) -> int:
+    """Calculate criminal level from the current criminal score.
+    Level scales infinitely: floor(score / step) + 1 — derived live, so it
+    decays and drops with the score (same pattern as gov employee level)."""
+    return (criminal_score // CRIMINAL_LEVEL_STEP) + 1
 
 
 def cop_attenuation_multiplier(cop_distance_m: float | None) -> float:
@@ -210,66 +210,134 @@ async def announce_money_secured(character_guid: str, http_client) -> None:
         )
 
 
-async def ensure_criminal_record(
-    character, reason: str, http_client_mod=None
-) -> CriminalRecord:
-    """Ensure an active CriminalRecord exists for the character.
+BOSS_CUT_FLOOR = 0.05
+BOSS_CUT_CAP = 0.25
+BOSS_CUT_CURVE_WEIGHT = 0.20
 
-    Active = cleared_at IS NULL. UniqueConstraint ensures at most one.
-    Returns the existing active record or creates a new one.
-    Triggers a player tag refresh when a NEW record is created (adds [C] tag).
-    Called on both cargo load and cargo delivery.
+
+def calculate_boss_cut_ratio(level: int, boss_level: int) -> float:
+    """Non-linear boss cut, hard-capped to [BOSS_CUT_FLOOR, BOSS_CUT_CAP].
+
+    Progressive (freeman 2026-09-20): the closer a criminal's level is to the
+    boss's, the larger the cut — the boss's closest rivals pay up to the cap,
+    far-below players pay the floor.
+    cut_ratio = clamp(0.05 + 0.20 * (level / boss_level)^2, 0.05, 0.25)
     """
-    active_record = await CriminalRecord.objects.filter(
-        character=character, cleared_at__isnull=True
-    ).afirst()
-    if active_record:
-        return active_record
-    record = await CriminalRecord.objects.acreate(
-        character=character,
-        reason=reason,
-        cleared_at=None,  # NULL = active
-    )
-    # New record created — refresh tag to show [C] indicator
-    asyncio.create_task(refresh_player_name(character, http_client_mod))
-    return record
+    if boss_level <= 0:
+        return 0.0
+    ratio = min(1.0, max(0.0, level / boss_level))
+    raw = BOSS_CUT_FLOOR + BOSS_CUT_CURVE_WEIGHT * ratio * ratio
+    return max(BOSS_CUT_FLOOR, min(BOSS_CUT_CAP, raw))
 
 
-CONFISCATABLE_FRACTION = 0.8  # 80% of delivery payment is at risk of confiscation
+async def collect_boss_tax(character, payment: int, http_client_mod) -> None:
+    """Route the boss cut for an illicit delivery payment.
 
-
-async def accumulate_criminal_record_amount(character, payment: int) -> None:
-    """Add delivery payment to BOTH amount and confiscatable_amount.
-
-    amount = permanent audit total (never decays).
-    confiscatable_amount = decaying total (cron reduces when online).
-    Only 80% of the payment is added to confiscatable_amount — the remaining
-    20% is guaranteed safe from confiscation.
+    freeman ruling (2026-09-20): the cut ALWAYS goes via bank accounts — it is
+    deposited into the highest-ranked criminal's Checking Account (amc_finance
+    BANK ledger) via register_player_deposit, never a wallet transfer.  The
+    payer side is the wallet (the delivery payment just landed there).  The
+    deposit is a pure ledger op, so the boss may be offline.
     """
-    confiscatable_portion = int(payment * CONFISCATABLE_FRACTION)
-    await CriminalRecord.objects.filter(
-        character=character, cleared_at__isnull=True
-    ).aupdate(
-        amount=F("amount") + payment,
-        confiscatable_amount=F("confiscatable_amount") + confiscatable_portion,
-    )
-
-
-async def link_delivery_to_criminal_record(character, cargo_key, timestamp) -> None:
-    """Associate the Delivery record created for this cargo with the active CriminalRecord."""
-    from amc.models import Delivery
-
-    active_record = await CriminalRecord.objects.filter(
-        character=character, cleared_at__isnull=True
-    ).afirst()
-    if not active_record:
+    if payment <= 0:
         return
-    delivery = await Delivery.objects.filter(
-        character=character, cargo_key=cargo_key, timestamp=timestamp
-    ).afirst()
-    if delivery and not delivery.criminal_record_id:
-        delivery.criminal_record = active_record
-        await delivery.asave(update_fields=["criminal_record"])
+
+    boss = (
+        await Character.objects.filter(criminal_score__gt=0)
+        .select_related("player")
+        .order_by("-criminal_score", "pk")
+        .afirst()
+    )
+    if boss is None:
+        return
+    if boss.pk == character.pk:
+        # The top criminal doesn't pay a cut to himself.
+        return
+
+    my_level = calculate_criminal_level(character.criminal_score)
+    boss_level = calculate_criminal_level(boss.criminal_score)
+    ratio = calculate_boss_cut_ratio(my_level, boss_level)
+    cut = int(payment * ratio)
+    if cut <= 0:
+        return
+
+    try:
+        await transfer_money(
+            http_client_mod,
+            -cut,
+            "Boss Cut",
+            str(character.player_id),
+        )
+    except Exception:
+        logger.warning(
+            "collect_boss_tax: wallet deduction failed for %s (cut=$%s) — tax skipped",
+            character.name,
+            cut,
+            exc_info=True,
+        )
+        return
+
+    try:
+        await register_player_deposit(
+            cut, boss, boss.player, description=f"Boss Cut from {character.name}"
+        )
+    except Exception:
+        # Money conservation: the wallet leg applied but the ledger leg did
+        # not — refund the payer so no value vanishes, then log loudly.
+        logger.exception(
+            "collect_boss_tax: bank deposit to boss %s failed (cut=$%s from %s)",
+            boss.name,
+            cut,
+            character.name,
+        )
+        try:
+            await transfer_money(
+                http_client_mod,
+                cut,
+                "Boss Cut Refund",
+                str(character.player_id),
+            )
+        except Exception:
+            logger.critical(
+                "collect_boss_tax: refund ALSO failed — $%s deducted from %s "
+                "with no ledger leg; manual audit required",
+                cut,
+                character.name,
+                exc_info=True,
+            )
+        return
+
+    if http_client_mod and character.guid:
+        asyncio.create_task(
+            show_popup(
+                http_client_mod,
+                f"You paid ${cut:,} ({ratio * 100:.0f}%) to boss {boss.name} "
+                "— deposited to their bank account.",
+                character_guid=character.guid,
+            )
+        )
+
+
+async def accumulate_criminal_score(
+    character, payment: int, http_client_mod, *, collect_tax: bool = True
+) -> None:
+    """Add the illicit delivery payment to the character's criminal score.
+
+    The score accumulates the FULL payment — even when the wallet was
+    nullified (modded vehicle / invalid delivery), the rap sheet counts the
+    delivery. The boss tax is money-side only and is skipped for nullified
+    payments (a zeroed profit is not taxed).
+    """
+    if payment <= 0:
+        return
+    character.criminal_score = F("criminal_score") + payment
+    character.last_illicit_delivery_at = timezone.now()
+    await character.asave(
+        update_fields=["criminal_score", "last_illicit_delivery_at"]
+    )
+    await character.arefresh_from_db(fields=["criminal_score"])
+    if collect_tax:
+        await collect_boss_tax(character, payment, http_client_mod)
 
 
 # ---------------------------------------------------------------------------
@@ -286,24 +354,19 @@ async def handle_money_cargo(
 ) -> None:
     """Side effects for Money deliveries.
 
-    - Create or ensure active criminal record (refreshes [C] tag on first delivery)
+    - Accumulate criminal_score (rap sheet counts the full payment) + boss cut
     - Debounced laundering announcement (15s window)
     - Record 20% treasury cost
     - Zero out wallet payment if delivered with a modded vehicle
     """
-    # --- Accumulate laundered total for criminal level ---
     money_payment = sum(log.payment for log in logs)
-    if money_payment > 0:
-        character.criminal_laundered_total = (
-            F("criminal_laundered_total") + money_payment
-        )
-        await character.asave(update_fields=["criminal_laundered_total"])
-        await character.arefresh_from_db(fields=["criminal_laundered_total"])
 
     # --- Zero out wallet payment for modded vehicle or invalid delivery (DeliveryId == -1) ---
     delivery_ids = [log.data.get("Net_DeliveryId") for log in logs if log.data]
     is_invalid_delivery = any(did == -1 for did in delivery_ids)
+    payment_nullified = False
     if (is_modded or is_invalid_delivery) and money_payment > 0 and http_client_mod:
+        payment_nullified = True
         message = "Invalid Delivery" if is_invalid_delivery else "Modded Vehicle Confiscation"
         await transfer_money(
             http_client_mod,
@@ -323,14 +386,16 @@ async def handle_money_cargo(
                 )
             )
 
-    # --- Criminal record (refresh tag if newly created) ---
-    await ensure_criminal_record(character, reason="Money delivery", http_client_mod=http_client_mod)
+    # --- Criminal score: the full payment counts toward the rap sheet even
+    # when the wallet was nullified; the boss tax only fires when the wallet
+    # actually received the money ---
     if money_payment > 0:
-        await accumulate_criminal_record_amount(character, money_payment)
-
-    # --- Refresh name to show updated criminal level ---
-    if money_payment > 0 and http_client_mod:
-        await refresh_player_name(character, http_client_mod)
+        await accumulate_criminal_score(
+            character,
+            money_payment,
+            http_client_mod,
+            collect_tax=not payment_nullified,
+        )
 
     # --- Treasury cost ---
     if money_payment > 0:
@@ -368,24 +433,16 @@ async def handle_contraband_cargo(
 ) -> None:
     """Side effects for contraband deliveries (Ganja, Cocaine, etc.).
 
-    - Create or ensure active criminal record (refreshes [C] tag on first delivery)
-    - Accumulate confiscatable amount
-    - Increment criminal_laundered_total for criminal level progression
+    - Accumulate criminal_score (rap sheet counts the full payment) + boss cut
     - Zero out wallet payment if delivered with a modded vehicle
     """
-    # --- Accumulate laundered total for criminal level ---
-    delivery_payment = sum(log.payment for log in logs)
-    if delivery_payment > 0:
-        character.criminal_laundered_total = (
-            F("criminal_laundered_total") + delivery_payment
-        )
-        await character.asave(update_fields=["criminal_laundered_total"])
-        await character.arefresh_from_db(fields=["criminal_laundered_total"])
-
     # --- Zero out wallet payment for modded vehicle or invalid delivery (DeliveryId == -1) ---
+    delivery_payment = sum(log.payment for log in logs)
     delivery_ids = [log.data.get("Net_DeliveryId") for log in logs if log.data]
     is_invalid_delivery = any(did == -1 for did in delivery_ids)
+    payment_nullified = False
     if (is_modded or is_invalid_delivery) and delivery_payment > 0 and http_client_mod:
+        payment_nullified = True
         message = "Invalid Delivery" if is_invalid_delivery else "Modded Vehicle Confiscation"
         await transfer_money(
             http_client_mod,
@@ -405,17 +462,16 @@ async def handle_contraband_cargo(
                 )
             )
 
-    # --- Criminal record (refresh tag if newly created) ---
-    cargo_key = logs[0].cargo_key if logs else "Contraband"
-    await ensure_criminal_record(
-        character, reason=f"{cargo_key} delivery", http_client_mod=http_client_mod
-    )
+    # --- Criminal score: the full payment counts toward the rap sheet even
+    # when the wallet was nullified; the boss tax only fires when the wallet
+    # actually received the money ---
     if delivery_payment > 0:
-        await accumulate_criminal_record_amount(character, delivery_payment)
-
-    # --- Refresh name to show updated criminal level ---
-    if delivery_payment > 0 and http_client_mod:
-        await refresh_player_name(character, http_client_mod)
+        await accumulate_criminal_score(
+            character,
+            delivery_payment,
+            http_client_mod,
+            collect_tax=not payment_nullified,
+        )
 
 
 # ---------------------------------------------------------------------------
