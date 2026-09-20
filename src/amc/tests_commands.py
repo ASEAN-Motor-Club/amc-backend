@@ -22,7 +22,7 @@ from amc.commands.admin import (
     cmd_spawn_vehicle,
     cmd_tp_player,
 )
-from amc.commands.vehicles import cmd_check_mods, cmd_check_parts, cmd_rent
+from amc.commands.vehicles import cmd_check_mods, cmd_check_parts, cmd_rent, cmd_rental
 from amc.commands.decals import cmd_apply_decal, cmd_decals, cmd_save_decal
 from amc.commands.events import (
     cmd_auto_grid,
@@ -3508,17 +3508,20 @@ class RentGroupingTestCase(SimpleTestCase):
         mock_vehicle = MagicMock()
         mock_vehicle.config = {"VehicleName": "TestCar", "CompanyName": "Corp"}
 
+        mock_qs = MagicMock()
+        mock_qs.aget = AsyncMock(return_value=mock_vehicle)
         with (
             patch(
-                "amc.commands.vehicles.CharacterVehicle.objects.aget",
-                new=AsyncMock(return_value=mock_vehicle),
-            ),
+                "amc.commands.vehicles.CharacterVehicle.objects.select_related",
+                return_value=mock_qs,
+            ) as mock_select_related,
             patch(
                 "amc.commands.vehicles.spawn_registered_vehicle", new=AsyncMock()
             ) as mock_spawn,
         ):
             await cmd_rent(self.ctx, "42")
 
+            mock_select_related.assert_called_once_with("character")
             mock_spawn.assert_called_once()
             call_kwargs = mock_spawn.call_args
             self.assertEqual(call_kwargs[0][0], self.ctx.http_client_mod)
@@ -3526,6 +3529,27 @@ class RentGroupingTestCase(SimpleTestCase):
             self.ctx.reply.assert_called_once()
             output = self.ctx.reply.call_args[0][0]
             self.assertIn("Corp", output)
+
+    async def test_rent_spawn_personal_vehicle_shows_owner(self):
+        """Renting a personal vehicle should credit the owner's name."""
+        mock_vehicle = MagicMock()
+        mock_vehicle.config = {"VehicleName": "MyCar"}
+        mock_vehicle.character.name = "OwnerName"
+
+        mock_qs = MagicMock()
+        mock_qs.aget = AsyncMock(return_value=mock_vehicle)
+        with (
+            patch(
+                "amc.commands.vehicles.CharacterVehicle.objects.select_related",
+                return_value=mock_qs,
+            ),
+            patch("amc.commands.vehicles.spawn_registered_vehicle", new=AsyncMock()),
+        ):
+            await cmd_rent(self.ctx, "7")
+
+            self.ctx.reply.assert_called_once()
+            output = self.ctx.reply.call_args[0][0]
+            self.assertIn("OwnerName", output)
 
     async def test_rent_spawn_not_found(self):
         """Renting a nonexistent ID should show error."""
@@ -3540,6 +3564,69 @@ class RentGroupingTestCase(SimpleTestCase):
             self.ctx.reply.assert_called_once()
             output = self.ctx.reply.call_args[0][0]
             self.assertIn("Rental not found", output)
+
+
+class RentalMarkTestCase(SimpleTestCase):
+    """/rental allows personal vehicles; company vehicles stay owner-only."""
+
+    def setUp(self):
+        self.ctx = MagicMock(spec=CommandContext)
+        self.ctx.reply = AsyncMock()
+        self.ctx.http_client_mod = MagicMock()
+        self.ctx.player_info = {
+            "Location": {"X": 0, "Y": 0, "Z": 0},
+            "OwnCompanyGuid": "company-guid-1",
+        }
+        self.ctx.character = MagicMock()
+        self.ctx.character.id = 7
+        self.ctx.character.guid = "test-guid"
+        self.ctx.character.name = "TestOwner"
+        self.ctx.player = MagicMock()
+
+    def _make_vehicle(self, **overrides):
+        v = MagicMock()
+        v.id = 1
+        v.rental = False
+        v.alias = None
+        v.asave = AsyncMock()
+        v.config = {"VehicleName": "TestCar"}
+        v.character_id = self.ctx.character.id
+        v.company_guid = None
+        for key, value in overrides.items():
+            setattr(v, key, value)
+        return v
+
+    async def _run_rental(self, vehicles):
+        with patch(
+            "amc.commands.vehicles.register_player_vehicles",
+            new=AsyncMock(return_value=vehicles),
+        ):
+            await cmd_rental(self.ctx)
+        return self.ctx.reply.call_args[0][0]
+
+    async def test_rental_marks_own_personal_vehicle(self):
+        output = await self._run_rental([self._make_vehicle()])
+        self.assertIn("Marked as rental", output)
+        self.assertIn("TestCar", output)
+
+    async def test_rental_marks_owned_company_vehicle(self):
+        v = self._make_vehicle(character_id=None, company_guid="company-guid-1")
+        v.config = {"VehicleName": "CorpCar", "CompanyName": "My Corp"}
+        output = await self._run_rental([v])
+        self.assertIn("Marked as rental", output)
+        self.assertIn("CorpCar", output)
+
+    async def test_rental_rejects_other_company_vehicle(self):
+        v = self._make_vehicle(character_id=None, company_guid="other-guid")
+        v.config = {"VehicleName": "Van", "CompanyName": "Other Corp"}
+        output = await self._run_rental([v])
+        self.assertIn("No rentable vehicle found", output)
+        self.assertFalse(v.rental)
+        v.asave.assert_not_awaited()
+
+    async def test_rental_no_registered_vehicle(self):
+        output = await self._run_rental(None)
+        self.assertIn("No rentable vehicle found", output)
 
 
 class AdminVehicleSaveTestCase(SimpleTestCase):

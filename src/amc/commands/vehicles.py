@@ -345,13 +345,22 @@ async def cmd_rental(ctx: CommandContext, alias: str = ""):
     vehicles = await register_player_vehicles(ctx.http_client_mod, ctx.character, ctx.player, active=True)
     own_company_guid = ctx.player_info.get("OwnCompanyGuid") if ctx.player_info else None
     vehicles = (
-        [v for v in vehicles if v.config.get("CompanyName") and v.company_guid == own_company_guid]
+        [
+            v
+            for v in vehicles
+            if v.character_id == ctx.character.id
+            or (v.company_guid and v.company_guid == own_company_guid)
+        ]
         if vehicles
         else []
     )
 
     if not vehicles:
-        await ctx.reply(_("<Title>Rental System</>\nOnly Corporation vehicles can be rented out."))
+        await ctx.reply(
+            _(
+                "<Title>Rental System</>\nNo rentable vehicle found. Sit in your vehicle and run /rental."
+            )
+        )
         return
 
     for v in vehicles:
@@ -387,11 +396,11 @@ async def cmd_rent(ctx: CommandContext, vehicle_id: str = ""):
             await ctx.reply(_("<Title>Rentals</>\nNo rentals found."))
             return
 
-        vehicles.sort(key=lambda v: v.config.get("CompanyName", "Independent"))
+        vehicles.sort(key=lambda v: v.config.get("CompanyName") or "Independent")
 
         lines: list[str] = []
         for company, group in itertools.groupby(
-            vehicles, key=lambda v: v.config.get("CompanyName", "Independent")
+            vehicles, key=lambda v: v.config.get("CompanyName") or "Independent"
         ):
             lines.append(f"<Bold>{company}</>")
             for v in group:
@@ -404,7 +413,9 @@ async def cmd_rent(ctx: CommandContext, vehicle_id: str = ""):
         )
     else:
         try:
-            v = await CharacterVehicle.objects.aget(pk=vehicle_id, rental=True)
+            v = await CharacterVehicle.objects.select_related("character").aget(
+                pk=vehicle_id, rental=True
+            )
             if not ctx.player_info:
                 await ctx.reply(_("Player info not found"))
                 return
@@ -418,7 +429,10 @@ async def cmd_rent(ctx: CommandContext, vehicle_id: str = ""):
                 tags=[ctx.character.name, "rental_vehicles", f"rental-{v.id}"],
             )
             await ctx.reply(
-                _("Brought to you by {company}").format(company=v.config.get("CompanyName"))
+                _("Brought to you by {company}").format(
+                    company=v.config.get("CompanyName")
+                    or (v.character.name if v.character else "")
+                )
             )
         except CharacterVehicle.DoesNotExist:
             await ctx.reply(_("Rental not found"))
