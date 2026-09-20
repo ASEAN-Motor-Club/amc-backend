@@ -2945,26 +2945,6 @@ class SetWantedTestCase(TestCase):
             )
         ]
 
-        class _MockAsyncIterable:
-            def __init__(self, items):
-                self.items = items
-
-            def __aiter__(self):
-                self._index = 0
-                return self
-
-            async def __anext__(self):
-                if self._index >= len(self.items):
-                    raise StopAsyncIteration
-                item = self.items[self._index]
-                self._index += 1
-                return item
-
-        async def _empty_police():
-            return _MockAsyncIterable([])
-
-        self.empty_police = _empty_police
-
         async def _mock_get_player(*args, **kwargs):
             return {"bAFK": False}
 
@@ -2997,10 +2977,6 @@ class SetWantedTestCase(TestCase):
             patch(
                 "amc.commands.police.create_or_refresh_wanted", new=AsyncMock()
             ) as mock_create,
-            patch(
-                "amc.commands.police.get_active_police_characters",
-                new=self.empty_police,
-            ),
             patch(
                 "amc.commands.police.get_player",
                 new=self.mock_get_player,
@@ -3070,10 +3046,6 @@ class SetWantedTestCase(TestCase):
             patch(
                 "amc.commands.police.create_or_refresh_wanted", new=AsyncMock()
             ) as mock_create,
-            patch(
-                "amc.commands.police.get_active_police_characters",
-                new=self.empty_police,
-            ),
             patch(
                 "amc.commands.police.get_player",
                 new=self.mock_get_player,

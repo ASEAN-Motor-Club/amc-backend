@@ -290,6 +290,39 @@ def test_build_display_name_rp_mode_default_false():
     )
 
 
+# --- police duty shares the R tag (teleport-locked server-side) ---
+
+
+def test_build_display_name_police_on_duty():
+    assert build_display_name("PlayerOne", police_on_duty=True) == "[R] PlayerOne"
+
+
+def test_build_display_name_police_on_duty_with_gov():
+    assert (
+        build_display_name("PlayerOne", police_on_duty=True, gov_level=3)
+        == "[RG3] PlayerOne"
+    )
+
+
+def test_build_display_name_police_on_duty_and_wanted_single_r():
+    """Duty and wanted both map to R — the tag must not duplicate the letter."""
+    assert (
+        build_display_name("PlayerOne", police_on_duty=True, wanted_stars=2)
+        == "[R**] PlayerOne"
+    )
+
+
+def test_build_display_name_police_on_duty_and_rp_mode_single_r():
+    assert (
+        build_display_name("PlayerOne", police_on_duty=True, rp_mode=True)
+        == "[R] PlayerOne"
+    )
+
+
+def test_build_display_name_police_off_duty_no_r():
+    assert build_display_name("PlayerOne", police_on_duty=False) == "PlayerOne"
+
+
 # --- mute (X) tag ---
 
 
@@ -635,12 +668,11 @@ async def test_get_player_singleflight(mock_cache_aget, mock_cache_aset):
     )
 
 
-@pytest.mark.skip(reason="player tags feature on hold")
 @pytest.mark.asyncio
 @pytest.mark.django_db
 @patch("amc.player_tags.set_character_name", new_callable=AsyncMock)
-async def test_refresh_player_name_police_suppresses_crim(mock_set_name):
-    """Police session → [P1] (criminal tag suppressed when absent)."""
+async def test_refresh_player_name_police_on_duty_gets_r_tag(mock_set_name):
+    """Active police session → R tag (on-duty officers are teleport-locked)."""
     from amc.factories import CharacterFactory, PlayerFactory
     from amc.models import PoliceSession
     from asgiref.sync import sync_to_async
@@ -658,7 +690,45 @@ async def test_refresh_player_name_police_suppresses_crim(mock_set_name):
     await refresh_player_name(character, session)
 
     await character.arefresh_from_db()
-    assert character.custom_name == "[P1] TestPlayer"
+    assert character.custom_name == "[R] TestPlayer"
+    from amc.player_tags import set_character_name
+
+    set_character_name.assert_awaited_once_with(
+        session, "test-guid-police-2", "[R] TestPlayer"
+    )
+
+
+@pytest.mark.asyncio
+@pytest.mark.django_db
+@patch("amc.player_tags.set_character_name", new_callable=AsyncMock)
+async def test_refresh_player_name_police_off_duty_strips_r_tag(mock_set_name):
+    """Ended police session → R tag removed, clean name."""
+    from datetime import timedelta
+
+    from asgiref.sync import sync_to_async
+    from django.utils import timezone
+
+    from amc.factories import CharacterFactory, PlayerFactory
+    from amc.models import PoliceSession
+
+    player = await sync_to_async(PlayerFactory)()
+    character = await sync_to_async(CharacterFactory)(
+        player=player,
+        name="TestPlayer",
+        guid="test-guid-police-off",
+        custom_name="[R] TestPlayer",
+    )
+
+    await PoliceSession.objects.acreate(
+        character=character,
+        ended_at=timezone.now() - timedelta(minutes=1),
+    )
+
+    session = MagicMock()
+    await refresh_player_name(character, session)
+
+    await character.arefresh_from_db()
+    assert character.custom_name is None
 
 
 # --- log-line name resolution: runtime tags never poison character.name ---
