@@ -229,19 +229,20 @@ async def _show_police_popup(http_client_mod, character_guid, player_id):
         rules = """\
 <Title>Police Rules</>
 To begin your police shift, type <Highlight>/police</> in chat.
-This will activate your [Pn] tag and enable police commands.
+This will activate your [R] tag and enable police commands.
 
 <Bold>Commands (while on duty)</>
-- <Highlight>/tp vehicle</> — Teleport to your police car
 - <Highlight>/police</> — End your shift
 
 <Bold>Rules</>
-- Ramming and spike strips are allowed against suspected criminals <Highlight>[C]</>
+- Active police may chase wanted criminals — they carry asterisks (*) in their name
+- Ramming and spike strips are allowed against wanted criminals
 - <Warning>No ramming or spike strips against non-criminals without consent</>
+- No head-on collisions — this is a forbidden manoeuvre
 - Communicate with other players before conducting chases
 
-<Bold>Discord</Bold>
-Use <Highlight>/faction</Highlight> on Discord to join the Police faction and gain access to the police-only channel."""
+<Bold>Discord</>
+Use <Highlight>/faction</> on Discord to join the Police faction and gain access to the police-only channel."""
 
         # Get online players from mod server API
         from amc.mod_server import get_players as get_players_mod
