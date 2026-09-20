@@ -8,22 +8,30 @@ from __future__ import annotations
 import asyncio
 import itertools
 import logging
+from datetime import timedelta
 from operator import attrgetter
 
 from django.contrib.gis.geos import Point
 from django.db.models import F
+from django.utils import timezone
 
 from amc.handlers import register
 from amc.models import (
     Delivery,
     DeliveryJob,
     DeliveryPoint,
+    PendingWanted,
     PoliceSession,
     ServerCargoArrivedLog,
     SubsidyRule,
     Wanted,
 )
-from amc.criminals import create_or_refresh_wanted, nearest_effective_cop_distance_m
+from amc.criminals import (
+    WANTED_GRACE_POPUP,
+    WANTED_GRACE_SECONDS,
+    create_or_refresh_wanted,
+    nearest_effective_cop_distance_m,
+)
 from amc.special_cargo import (
     ILLICIT_CARGO_KEYS,
     accumulate_illicit_delivery,
@@ -304,9 +312,13 @@ async def handle_cargo_arrived(event, player, character, ctx):
             accumulated_amount = await accumulate_illicit_delivery(
                 character.guid, delivery_amount
             )
-            # Check if already wanted (always refresh) or roll probability
+            # Check if already wanted (always refresh) or already inside a
+            # grace window (pending — no second roll), else roll probability
             already_wanted = await Wanted.objects.filter(
                 character=character, expired_at__isnull=True
+            ).aexists()
+            already_pending = await PendingWanted.objects.filter(
+                character=character
             ).aexists()
             # Random wanted trigger — restored 2026-09-20 (#154; freeman design).
             # Ratio-driven chance, attenuated by distance to the nearest
@@ -314,8 +326,14 @@ async def handle_cargo_arrived(event, player, character, ctx):
             # dormant rule is enforced by nearest_effective_cop_distance_m:
             # zero effective cops → no roll (same effective-cop filter as
             # active_police_present()).
+            #
+            # Grace period (freeman 2026-09-20): a rolled trigger does NOT
+            # create the Wanted immediately — the criminal gets a private
+            # warning popup and WANTED_GRACE_SECONDS to switch to a suitable
+            # vehicle; tick_wanted_countdown applies the wanted (bounty +
+            # laundered announce + compass) once the window elapses.
             trigger = False
-            if not already_wanted:
+            if not already_wanted and not already_pending:
                 cops_present, cop_distance_m = await nearest_effective_cop_distance_m(
                     ctx.http_client, ctx.http_client_mod, character
                 )
@@ -323,7 +341,7 @@ async def handle_cargo_arrived(event, player, character, ctx):
                     trigger = should_trigger_wanted(
                         accumulated_amount, pre_delivery_score, cop_distance_m
                     )
-            if already_wanted or trigger:
+            if already_wanted:
                 # Bounty: system-triggered CREATIONS auto-set 10% of the
                 # criminal score inside create_or_refresh_wanted (chase-
                 # frozen); this path is a REFRESH (already wanted), so
@@ -349,6 +367,19 @@ async def handle_cargo_arrived(event, player, character, ctx):
                         _announce_laundered_after_delay(
                             character.guid, ctx.http_client, delay=15
                         )
+                    )
+            elif trigger:
+                await PendingWanted.objects.acreate(
+                    character=character,
+                    apply_at=timezone.now()
+                    + timedelta(seconds=WANTED_GRACE_SECONDS),
+                    trigger_amount=accumulated_amount,
+                )
+                if ctx.http_client_mod:
+                    await show_popup(
+                        ctx.http_client_mod,
+                        WANTED_GRACE_POPUP,
+                        character_guid=character.guid,
                     )
 
         # Discord notification — suppressed for illicit cargo to avoid revealing

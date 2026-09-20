@@ -634,6 +634,43 @@ class Wanted(models.Model):
         return f"Wanted: {self.character.name} ({self.wanted_remaining}s remaining)"
 
 
+@final
+class PendingWanted(models.Model):
+    """A wanted trigger currently inside its warning grace period.
+
+    When an illicit delivery rolls a wanted trigger, the Wanted row is NOT
+    created immediately: the criminal first gets a private popup warning and
+    a ``WANTED_GRACE_SECONDS`` head start before the police learn anything
+    (freeman 2026-09-20).  At ``apply_at`` the wanted status is applied
+    (bounty + laundered announce + compass) by ``tick_wanted_countdown``.
+
+    Between trigger and apply the criminal is NOT wanted — no stars, no
+    compass, no portal/logout arrest.  Logging out during the window is
+    treated as an arrest (``escalate_heat_on_logout``), and the pending row
+    is dropped while the wanted system is dormant (zero effective cops).
+    """
+
+    character = models.ForeignKey(
+        Character, on_delete=models.CASCADE, related_name="pending_wanted_records"
+    )
+    created_at = models.DateTimeField(auto_now_add=True)
+    apply_at = models.DateTimeField()
+    trigger_amount = models.BigIntegerField(
+        default=0,
+        help_text=(
+            "Accumulated illicit delivery amount that fired the trigger "
+            "(used for the laundered announce when the wanted applies)."
+        ),
+    )
+
+    class Meta:
+        verbose_name_plural = "pending wants"
+
+    @override
+    def __str__(self):
+        return f"PendingWanted: {self.character.name} (applies at {self.apply_at})"
+
+
 class FactionChoice(models.TextChoices):
     COP = "cop", "Cop"
     CRIMINAL = "criminal", "Criminal"

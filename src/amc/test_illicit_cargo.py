@@ -1,16 +1,19 @@
 """Tests for illicit cargo: Wanted trigger, Delivery↔Wanted link, contraband handler."""
 
 import time
+from datetime import timedelta
 from unittest.mock import patch, AsyncMock
 
 from asgiref.sync import sync_to_async
 from django.contrib.gis.geos import Point
 from django.test import TestCase
+from django.utils import timezone
 
 from amc.factories import PlayerFactory, CharacterFactory
 from amc.models import (
     CharacterLocation,
     DeliveryPoint,
+    PendingWanted,
     Wanted,
 )
 from amc.special_cargo import ILLICIT_CARGO_KEYS
@@ -816,12 +819,18 @@ class WantedTriggerRestoreTests(TestCase):
             character=character, expired_at__isnull=True
         ).aexists()
         self.assertFalse(exists)
+        pending_exists = await PendingWanted.objects.filter(
+            character=character
+        ).aexists()
+        self.assertFalse(pending_exists)
         mock_cops.assert_awaited_once()
 
-    async def test_roll_hit_creates_wanted(
+    async def test_roll_hit_schedules_pending_wanted(
         self, mock_accumulate, mock_cops, mock_get_treasury, mock_get_rp_mode,
         mock_send_system, mock_refresh_crim,
     ):
+        """Grace period (freeman 2026-09-20): a rolled trigger does not create
+        the Wanted — it schedules a PendingWanted and warns the criminal."""
         mock_get_rp_mode.return_value = False
         mock_get_treasury.return_value = 100_000
         mock_cops.return_value = (True, None)
@@ -835,12 +844,10 @@ class WantedTriggerRestoreTests(TestCase):
         wanted = await Wanted.objects.filter(
             character=character, expired_at__isnull=True
         ).afirst()
-        self.assertIsNotNone(wanted)
-        # Score-world bounty: the trigger CREATION auto-sets 10% of the
-        # criminal score (the 5k ganja payment accrued before the roll);
-        # chase-frozen from here on.
-        self.assertEqual(wanted.amount, 500)
-        self.assertEqual(wanted.wanted_remaining, Wanted.INITIAL_WANTED_LEVEL)
+        self.assertIsNone(wanted)
+        pending = await PendingWanted.objects.filter(character=character).afirst()
+        self.assertIsNotNone(pending)
+        self.assertEqual(pending.trigger_amount, 100_000)
 
     async def test_roll_miss_does_not_create_wanted(
         self, mock_accumulate, mock_cops, mock_get_treasury, mock_get_rp_mode,
@@ -860,6 +867,35 @@ class WantedTriggerRestoreTests(TestCase):
             character=character, expired_at__isnull=True
         ).aexists()
         self.assertFalse(exists)
+        pending_exists = await PendingWanted.objects.filter(
+            character=character
+        ).aexists()
+        self.assertFalse(pending_exists)
+
+    async def test_pending_suppresses_second_roll(
+        self, mock_accumulate, mock_cops, mock_get_treasury, mock_get_rp_mode,
+        mock_send_system, mock_refresh_crim,
+    ):
+        """A delivery landing inside an open grace window neither rolls again
+        nor schedules a second pending trigger."""
+        mock_get_rp_mode.return_value = False
+        mock_get_treasury.return_value = 100_000
+        player, character = await self._setup_character()
+        pending = await PendingWanted.objects.acreate(
+            character=character,
+            apply_at=timezone.now() + timedelta(seconds=20),
+            trigger_amount=100_000,
+        )
+
+        with patch("amc.special_cargo.random") as mock_rng:
+            mock_rng.random.return_value = 0.0  # would pass any chance
+            event = self._cargo_event(character, "Ganja", payment=5000)
+            await process_event(event, player, character)
+
+        mock_cops.assert_not_awaited()  # no roll — pending counts as wanted
+        count = await PendingWanted.objects.filter(character=character).acount()
+        self.assertEqual(count, 1)
+        await pending.arefresh_from_db()  # untouched — same window continues
 
     async def test_roll_receives_debounce_total_pre_accrual_score_and_distance(
         self, mock_accumulate, mock_cops, mock_get_treasury, mock_get_rp_mode,
