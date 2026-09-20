@@ -2906,12 +2906,13 @@ class ArrestCommandTestCase(TestCase):
 
 
 # ---------------------------------------------------------------------------
-# SetWantedCooldownTestCase
+# SetWantedTestCase
 # ---------------------------------------------------------------------------
 
 
-class SetWantedCooldownTestCase(TestCase):
-    """Tests for /setwanted: admin-only gate + cooldown after Wanted expiry."""
+class SetWantedTestCase(TestCase):
+    """Tests for /setwanted: admin-only gate; allowed whenever the target is
+    not currently wanted (no post-expiry cooldown)."""
 
     def setUp(self):
         from amc.commands.police import cmd_setwanted
@@ -2978,8 +2979,8 @@ class SetWantedCooldownTestCase(TestCase):
         self.ctx.reply = AsyncMock()
         self.ctx.announce = AsyncMock()
 
-    async def test_cooldown_blocks_within_one_hour(self):
-        """Target arrested 30m ago -> setwanted blocked with remaining minutes shown."""
+    async def test_recently_expired_wanted_can_be_set_again(self):
+        """Target's wanted expired 30m ago -> no cooldown, setwanted allowed."""
         from amc.models import Wanted
 
         await Wanted.objects.acreate(
@@ -2994,52 +2995,12 @@ class SetWantedCooldownTestCase(TestCase):
                 new=AsyncMock(return_value=self.mock_players),
             ),
             patch(
-                "amc.commands.police.get_active_police_characters",
-                new=self.empty_police,
-            ),
-            # Pin the cooldown (env-tunable default is 30m) so the block is deterministic
-            patch("amc.commands.police.SETWANTED_COOLDOWN", timedelta(minutes=60)),
-            patch(
-                "amc.commands.police.show_popup",
-                new=AsyncMock(),
-            ) as mock_popup,
-        ):
-            await self.cmd_setwanted(self.ctx, "CooldownTarget")
-
-        # Cooldown notice goes out as a popup, not a chat reply
-        self.ctx.reply.assert_not_called()
-        self.assertEqual(mock_popup.await_count, 1)
-        popup_msg = mock_popup.await_args[0][1]
-        self.assertIn("Cooldown", popup_msg)
-        self.assertIn("CooldownTarget", popup_msg)
-        # Remaining is ~30 minutes (+/- rounding); just verify a countdown is present
-        self.assertIn("as wanted again in", popup_msg)
-        self.assertIn("m ", popup_msg)
-
-    async def test_cooldown_allows_after_one_hour(self):
-        """Target arrested 61m ago -> setwanted allowed."""
-        from amc.models import Wanted
-
-        await Wanted.objects.acreate(
-            character=self.target_char,
-            wanted_remaining=0,
-            expired_at=timezone.now() - timedelta(minutes=61),
-        )
-
-        with (
-            patch(
-                "amc.commands.police.get_players",
-                new=AsyncMock(return_value=self.mock_players),
-            ),
-            patch(
                 "amc.commands.police.create_or_refresh_wanted", new=AsyncMock()
             ) as mock_create,
             patch(
                 "amc.commands.police.get_active_police_characters",
                 new=self.empty_police,
             ),
-            # Pin the cooldown (env-tunable default is 30m) so the allow is deterministic
-            patch("amc.commands.police.SETWANTED_COOLDOWN", timedelta(minutes=60)),
             patch(
                 "amc.commands.police.get_player",
                 new=self.mock_get_player,
@@ -3054,6 +3015,32 @@ class SetWantedCooldownTestCase(TestCase):
             amount=0,
             set_by=self.admin_char,
         )
+
+    async def test_currently_wanted_target_is_blocked(self):
+        """Target with an active Wanted -> blocked with no wanted created."""
+        from amc.models import Wanted
+
+        await Wanted.objects.acreate(
+            character=self.target_char,
+            wanted_remaining=600,
+            expired_at=None,
+        )
+
+        with (
+            patch(
+                "amc.commands.police.get_players",
+                new=AsyncMock(return_value=self.mock_players),
+            ),
+            patch(
+                "amc.commands.police.create_or_refresh_wanted", new=AsyncMock()
+            ) as mock_create,
+        ):
+            await self.cmd_setwanted(self.ctx, "CooldownTarget")
+
+        self.ctx.reply.assert_called()
+        args, _ = self.ctx.reply.call_args
+        self.assertIn("Already Wanted", args[0])
+        mock_create.assert_not_called()
 
     async def test_non_admin_cannot_set_wanted(self):
         """Non-admin caller -> silent early return, no wanted created."""
@@ -3073,8 +3060,8 @@ class SetWantedCooldownTestCase(TestCase):
             ).aexists()
         )
 
-    async def test_no_previous_wanted_no_cooldown(self):
-        """Target never wanted before -> setwanted always allowed."""
+    async def test_no_previous_wanted_can_be_set(self):
+        """Target never wanted before -> setwanted allowed."""
         with (
             patch(
                 "amc.commands.police.get_players",

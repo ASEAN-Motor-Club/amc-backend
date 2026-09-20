@@ -1,15 +1,9 @@
-from datetime import timedelta
-
 from amc.command_framework import registry, CommandContext
 from amc.game_server import get_players
 from amc.models import Character, PoliceSession, Wanted
 from amc.special_cargo import calculate_criminal_level
 from amc.criminals import _compute_stars
-from django.conf import settings
-from django.utils import timezone
 from django.utils.translation import gettext_lazy
-
-SETWANTED_COOLDOWN = timedelta(minutes=settings.SETWANTED_COOLDOWN_MINUTES)
 
 
 
@@ -25,8 +19,6 @@ def _stars(n: int) -> str:
     deprecated=True,
 )
 async def cmd_wanted(ctx: CommandContext):
-    timezone.now()
-
     # --- Online player GUIDs ---
     online_guids: set[str] = set()
     players = await get_players(ctx.http_client)
@@ -67,37 +59,6 @@ async def cmd_wanted(ctx: CommandContext):
     # Sort active bounties: online first, then by bounty desc within each group
     active_bounties.sort(key=lambda e: (not e["online"], -e["bounty"]))
 
-    # --- Section 1.5: Recently expired wanteds (on cooldown) ---
-    cooldown_entries: list[dict] = []
-    cooldown_character_ids: set[int] = set()
-    cutoff = timezone.now() - SETWANTED_COOLDOWN
-    async for wanted in (
-        Wanted.objects.filter(expired_at__isnull=False, expired_at__gte=cutoff)
-        .select_related("character", "set_by")
-        .order_by("-expired_at")
-    ):
-        if wanted.character_id in active_character_ids or wanted.character_id in active_cop_ids:
-            continue
-        if wanted.character_id in cooldown_character_ids:
-            continue
-        cooldown_character_ids.add(wanted.character_id)
-        remaining = (wanted.expired_at + SETWANTED_COOLDOWN) - timezone.now()
-        remaining_mins = int(remaining.total_seconds() / 60)
-        remaining_secs = int(remaining.total_seconds()) % 60
-        cooldown_entries.append(
-            {
-                "name": wanted.character.name,
-                "online": wanted.character.guid in online_guids,
-                "remaining_mins": remaining_mins,
-                "remaining_secs": remaining_secs,
-                "set_by_name": wanted.set_by.name if wanted.set_by else None,
-            }
-        )
-    # Sort: online first, then by remaining cooldown (ascending)
-    cooldown_entries.sort(
-        key=lambda e: (not e["online"], e["remaining_mins"], e["remaining_secs"])
-    )
-
     # --- Section 2: Criminal scores without an active Wanted ---
     other_criminals = [
         c
@@ -105,10 +66,9 @@ async def cmd_wanted(ctx: CommandContext):
         .order_by("-criminal_score")
         .exclude(pk__in=active_character_ids)
         .exclude(pk__in=active_cop_ids)
-        .exclude(pk__in=cooldown_character_ids)
     ]
 
-    if not active_bounties and not cooldown_entries and not other_criminals:
+    if not active_bounties and not other_criminals:
         await ctx.reply("No wanted criminals")
         return
 
@@ -149,13 +109,6 @@ async def cmd_wanted(ctx: CommandContext):
             f" <Secondary>{score_str}</>\n"
         )
 
-    def _row_cooldown(e: dict) -> str:
-        return (
-            f"{e['name']} <Secondary>"
-            f"Cooldown: {e['remaining_mins']}m {e['remaining_secs']}s"
-            f"</>\n"
-        )
-
     if active_bounties:
         bounties_online = [e for e in active_bounties if e["online"]]
         bounties_offline = [e for e in active_bounties if not e["online"]]
@@ -168,20 +121,6 @@ async def cmd_wanted(ctx: CommandContext):
             msg += "<Warning>Offline</>\n"
             for e in bounties_offline:
                 msg += _row_bounty(e)
-        msg += "\n"
-
-    if cooldown_entries:
-        cooldown_online = [e for e in cooldown_entries if e["online"]]
-        cooldown_offline = [e for e in cooldown_entries if not e["online"]]
-        msg += "<Title>Recently Wanted</>\n"
-        if cooldown_online:
-            msg += "<EffectGood>Online</>\n"
-            for e in cooldown_online:
-                msg += _row_cooldown(e)
-        if cooldown_offline:
-            msg += "<Warning>Offline</>\n"
-            for e in cooldown_offline:
-                msg += _row_cooldown(e)
         msg += "\n"
 
     if other_online or other_offline:

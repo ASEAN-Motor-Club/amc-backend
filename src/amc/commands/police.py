@@ -22,12 +22,10 @@ from amc.police import (
 from amc.criminals import create_or_refresh_wanted
 from amc.utils import fuzzy_find_player
 from django.conf import settings
-from django.utils import timezone
 from django.utils.translation import gettext as _, gettext_lazy
 
 from amc.commands.faction import parse_location_string
 
-SETWANTED_COOLDOWN = timezone.timedelta(minutes=settings.SETWANTED_COOLDOWN_MINUTES)
 SETWANTED_MIN_DISTANCE = 100_000  # 1km = 100,000 units (1m = 100 units)
 
 
@@ -219,35 +217,6 @@ async def cmd_setwanted(ctx: CommandContext, target_player_name: str):
             )
         )
         return
-
-    # Cooldown: 1 hour since last Wanted expiry
-    last_expired = (
-        await Wanted.objects.filter(
-            character=target_character, expired_at__isnull=False
-        )
-        .order_by("-expired_at")
-        .afirst()
-    )
-    if last_expired:
-        cooldown_end = last_expired.expired_at + SETWANTED_COOLDOWN
-        now = timezone.now()
-        if now < cooldown_end:
-            remaining = cooldown_end - now
-            remaining_mins = int(remaining.total_seconds() / 60)
-            remaining_secs = int(remaining.total_seconds()) % 60
-            countdown_msg = _(
-                "<Title>Cooldown Active</>\n\n"
-                "You can set {name} as wanted again in "
-                "{mins}m {secs}s."
-            ).format(
-                name=target_character.name, mins=remaining_mins, secs=remaining_secs
-            )
-            await show_popup(
-                ctx.http_client_mod,
-                countdown_msg,
-                character_guid=ctx.character.guid,
-            )
-            return
 
     # Distance check: target must be at least 1km away from any police officer.
     # Officers within range are despawned and teleported to the nearest station outside the radius.
