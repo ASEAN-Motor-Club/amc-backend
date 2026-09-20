@@ -104,8 +104,8 @@ def wanted_accrual_multiplier(dist_units: float) -> float:
 #   interval = 1 / ((D - 500 m) * (S + 20 km/h) * COMPASS_C), clamped
 #   [5 s, 120 s]; an officer inside the suspect's 500 m ring gets no updates.
 COMPASS_C = 1.5e-6                # Hz per (metre * km/h)
-COMPASS_MIN_INTERVAL = 5.0        # seconds — hot far-range routing intel
-COMPASS_MAX_INTERVAL = 120.0      # seconds — slow near-ring pulses
+COMPASS_MIN_INTERVAL = 5.0        # seconds — SOLO floor; effective floor 5×N (N receiving cops)
+COMPASS_MAX_INTERVAL = 120.0      # seconds — SOLO ceiling; effective ceiling 120×N
 COMPASS_HIDE_DISTANCE = 50_000    # 500 m in game units — per-officer silence ring
 
 
@@ -984,12 +984,18 @@ async def tick_police_suspect_locations(http_client, http_client_mod, http_clien
     Update cadence is per-officer, keyed on THAT officer's distance to the
     suspect and the suspect's speed:
 
-        interval = 1 / ((D - 500 m) * (S + 20 km/h) * COMPASS_C)
+        solo = 1 / ((D - 500 m) * (S + 20 km/h) * COMPASS_C)
 
-    clamped to [5 s, 120 s]. An officer inside the suspect's 500 m silence
-    ring gets no updates for that suspect at all; officers farther out get
-    progressively faster updates (far-range routing intel). Missing speed
-    telemetry degrades to the stationary cadence.
+    clamped to [5 s, 120 s], then scaled by the FORCE BUDGET: the interval is
+    multiplied by N, the number of on-duty officers beyond their own 500 m
+    ring for that suspect. The force's total flash rate for one suspect stays
+    at ONE cop's rate no matter how many are watching — extra cops split the
+    budget instead of multiplying it (freeman, 2026-09-20). Effective range
+    [5N, 120N] s; cross-officer flashes land ~N× further apart in time, so a
+    moving suspect de-correlates between officers instead of being
+    triangulated. An officer inside the suspect's 500 m silence ring gets no
+    updates for that suspect at all. Missing speed telemetry degrades to the
+    stationary cadence.
     """
     wanted_list = [
         w
@@ -1053,6 +1059,20 @@ async def tick_police_suspect_locations(http_client, http_client_mod, http_clien
     if not officer_entries:
         return
 
+    # Force-level budget (freeman, 2026-09-20): count the officers who would
+    # RECEIVE flashes for each suspect (on-duty cops beyond their own 500 m
+    # ring). Every receiving officer's interval is multiplied by N below, so
+    # N cops share one cop's cadence instead of each running their own.
+    receiving_counts: dict[str, int] = {}
+    for character, suspect_loc in online_suspects:
+        count = 0
+        for officer, officer_loc in officer_entries:
+            if officer.guid == character.guid:
+                continue
+            if _distance_3d(officer_loc, suspect_loc) > COMPASS_HIDE_DISTANCE:
+                count += 1
+        receiving_counts[character.guid] = count
+
     now = time.monotonic()
     for officer, officer_loc in officer_entries:
         officer_guid = officer.guid
@@ -1070,6 +1090,9 @@ async def tick_police_suspect_locations(http_client, http_client_mod, http_clien
             if interval is None:
                 # This officer is inside the suspect's 500 m silence ring
                 continue
+            # Force budget: split one cop's cadence across every receiving
+            # officer instead of letting each run their own stream.
+            interval *= receiving_counts.get(character.guid, 1)
             key = (officer_guid, character.guid)
             if now - _last_compass_sent.get(key, 0.0) < interval:
                 continue

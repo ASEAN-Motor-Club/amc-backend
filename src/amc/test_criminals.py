@@ -2346,11 +2346,13 @@ class CompassTickTests(TestCase):
     """Tests for tick_police_suspect_locations under the per-officer
     speed-and-distance cadence:
 
-        interval = 1 / ((D - 500 m) * (S + 20 km/h) * COMPASS_C)
+        solo = 1 / ((D - 500 m) * (S + 20 km/h) * COMPASS_C)
         clamped to [COMPASS_MIN_INTERVAL, COMPASS_MAX_INTERVAL]
+        effective = solo × N   (N = officers beyond their own ring)
 
     An officer inside the suspect's 500 m silence ring receives nothing for
-    that suspect; each officer's cadence is keyed on their own distance.
+    that suspect; each officer's cadence is keyed on their own distance and
+    split across the receiving force (force budget).
     """
 
     def setUp(self):
@@ -2631,8 +2633,9 @@ class CompassTickTests(TestCase):
         self, mock_get_players, mock_get_locations, mock_police, mock_sys_msg,
     ):
         """Two officers, both >500 m: pair keys throttle independently —
-        the 1 km officer (67 s interval) stays quiet at t-20 while the
-        3 km officer (13.3 s interval) receives."""
+        with the force budget each interval is solo × N(=2): the 1 km
+        officer (133 s effective) stays quiet at t-30 while the 3 km
+        officer (26.6 s effective) receives."""
         criminal = await self._setup_criminal()
         officer_1km = await self._setup_police()
         officer_3km = await self._setup_police()
@@ -2649,13 +2652,95 @@ class CompassTickTests(TestCase):
         mock_http_mgmt = AsyncMock()
 
         now = time.monotonic()
-        _last_compass_sent[(officer_1km.guid, criminal.guid)] = now - 20
-        _last_compass_sent[(officer_3km.guid, criminal.guid)] = now - 20
+        _last_compass_sent[(officer_1km.guid, criminal.guid)] = now - 30
+        _last_compass_sent[(officer_3km.guid, criminal.guid)] = now - 30
 
         await tick_police_suspect_locations(mock_http, mock_http_mod, mock_http_mgmt)
 
         mock_sys_msg.assert_awaited_once()
         self.assertEqual(mock_sys_msg.await_args.kwargs.get("character_guid"), officer_3km.guid)
+
+    # -------------------------------------------------------------------
+    # Force budget — N receiving cops split one cop's cadence
+    # -------------------------------------------------------------------
+
+    async def test_two_cops_share_one_budget(
+        self, mock_get_players, mock_get_locations, mock_police, mock_sys_msg,
+    ):
+        """Two officers both at 1 km, stationary suspect: solo 66.7 s × N(=2)
+        → each waits 133 s. Both fire on first contact, then neither until
+        the effective interval elapses."""
+        criminal = await self._setup_criminal()
+        officer_a = await self._setup_police()
+        officer_b = await self._setup_police()
+
+        mock_get_players.return_value = _make_players_list([
+            _make_player_data(criminal.player.unique_id, criminal.guid, *_COMPASS_SUSPECT_LOC),
+            _make_player_data(officer_a.player.unique_id, officer_a.guid, *_COMPASS_COP_1KM),
+            _make_player_data(officer_b.player.unique_id, officer_b.guid, *_COMPASS_COP_1KM),
+        ])
+        mock_get_locations.return_value = []
+        mock_police.return_value = _AsyncList([officer_a, officer_b])
+        mock_http = AsyncMock()
+        mock_http_mod = AsyncMock()
+        mock_http_mgmt = AsyncMock()
+
+        # First tick — both receive (no prior state)
+        await tick_police_suspect_locations(mock_http, mock_http_mod, mock_http_mgmt)
+        self.assertEqual(mock_sys_msg.await_count, 2)
+
+        # 120 s since last send: past the SOLO 67 s but inside 2 × 67 = 133 s
+        now = time.monotonic()
+        _last_compass_sent[(officer_a.guid, criminal.guid)] = now - 120
+        _last_compass_sent[(officer_b.guid, criminal.guid)] = now - 120
+        mock_sys_msg.reset_mock()
+        await tick_police_suspect_locations(mock_http, mock_http_mod, mock_http_mgmt)
+        mock_sys_msg.assert_not_called()
+
+        # 135 s since last send: past the effective 133 s → both fire again
+        now = time.monotonic()
+        _last_compass_sent[(officer_a.guid, criminal.guid)] = now - 135
+        _last_compass_sent[(officer_b.guid, criminal.guid)] = now - 135
+        await tick_police_suspect_locations(mock_http, mock_http_mod, mock_http_mgmt)
+        self.assertEqual(mock_sys_msg.await_count, 2)
+
+    async def test_ring_cop_excluded_from_budget(
+        self, mock_get_players, mock_get_locations, mock_police, mock_sys_msg,
+    ):
+        """A cop inside the 500 m ring is silent AND doesn't shrink the
+        budget: the 1 km cop's effective interval stays solo × 1 (67 s),
+        not ×2."""
+        criminal = await self._setup_criminal()
+        officer_near = await self._setup_police()
+        officer_far = await self._setup_police()
+
+        mock_get_players.return_value = _make_players_list([
+            _make_player_data(criminal.player.unique_id, criminal.guid, *_COMPASS_SUSPECT_LOC),
+            _make_player_data(officer_near.player.unique_id, officer_near.guid, *_COMPASS_COP_CLOSE),
+            _make_player_data(officer_far.player.unique_id, officer_far.guid, *_COMPASS_COP_1KM),
+        ])
+        mock_get_locations.return_value = []
+        mock_police.return_value = _AsyncList([officer_near, officer_far])
+        mock_http = AsyncMock()
+        mock_http_mod = AsyncMock()
+        mock_http_mgmt = AsyncMock()
+
+        # First tick — far cop receives, near cop silent
+        await tick_police_suspect_locations(mock_http, mock_http_mod, mock_http_mgmt)
+        mock_sys_msg.assert_awaited_once()
+        self.assertEqual(
+            mock_sys_msg.await_args.kwargs.get("character_guid"), officer_far.guid
+        )
+
+        # t-100: past solo 67 s (N=1) — receives. With a wrongly-counted
+        # ring cop (N=2 → 133 s) this would stay silent.
+        _last_compass_sent[(officer_far.guid, criminal.guid)] = time.monotonic() - 100
+        mock_sys_msg.reset_mock()
+        await tick_police_suspect_locations(mock_http, mock_http_mod, mock_http_mgmt)
+        mock_sys_msg.assert_awaited_once()
+        self.assertEqual(
+            mock_sys_msg.await_args.kwargs.get("character_guid"), officer_far.guid
+        )
 
     async def test_two_officers_both_far_both_receive(
         self, mock_get_players, mock_get_locations, mock_police, mock_sys_msg,
