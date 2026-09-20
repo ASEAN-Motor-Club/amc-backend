@@ -23,11 +23,12 @@ from amc.models import (
     SubsidyRule,
     Wanted,
 )
-from amc.criminals import create_or_refresh_wanted
+from amc.criminals import create_or_refresh_wanted, nearest_effective_cop_distance_m
 from amc.special_cargo import (
     ILLICIT_CARGO_KEYS,
     accumulate_illicit_delivery,
     link_delivery_to_criminal_record,
+    should_trigger_wanted,
 )
 from amc.mod_detection import detect_custom_parts, POLICE_DUTY_WHITELIST
 from amc.mod_server import (
@@ -232,6 +233,10 @@ async def handle_cargo_arrived(event, player, character, ctx):
                 character, ctx.http_client_mod
             )
 
+        # Capture the lifetime illicit total BEFORE this group's special-cargo
+        # handler accrues the delivery into it — the trigger ratio measures
+        # this delivery against the history that existed before it.
+        pre_delivery_score = character.criminal_laundered_total
         # Special cargo side effects (criminal level, criminal record, modded penalty)
         await run_special_cargo_handlers(
             group_list, character, ctx.http_client, ctx.http_client_mod,
@@ -297,19 +302,30 @@ async def handle_cargo_arrived(event, player, character, ctx):
             delivery_amount = payment * quantity
             # Accumulate within the debounce window so splitting across multiple
             # small deliveries (~5 s apart) is treated the same as one big one.
-            await accumulate_illicit_delivery(
+            accumulated_amount = await accumulate_illicit_delivery(
                 character.guid, delivery_amount
             )
             # Check if already wanted (always refresh) or roll probability
             already_wanted = await Wanted.objects.filter(
                 character=character, expired_at__isnull=True
             ).aexists()
-            # DEPRECATED: random wanted trigger — may be restored in the future.
-            # NOTE: any restored trigger MUST be gated on active_police_present()
-            # (amc.criminals) — no effective cops on duty means the wanted
-            # system is dormant and must not create wanted records.
-            # if already_wanted or should_trigger_wanted(accumulated_amount):
-            if already_wanted:
+            # Random wanted trigger — restored 2026-09-20 (freeman design; see
+            # .hermes/plans/2026-09-20_095637-wanted-trigger-restore.md).
+            # Ratio-driven chance, attenuated by distance to the nearest
+            # effective cop so camping a delivery site farms nothing. The
+            # dormant rule is enforced by nearest_effective_cop_distance_m:
+            # zero effective cops → no roll (same effective-cop filter as
+            # active_police_present()).
+            trigger = False
+            if not already_wanted:
+                cops_present, cop_distance_m = await nearest_effective_cop_distance_m(
+                    ctx.http_client, ctx.http_client_mod, character
+                )
+                if cops_present:
+                    trigger = should_trigger_wanted(
+                        accumulated_amount, pre_delivery_score, cop_distance_m
+                    )
+            if already_wanted or trigger:
                 # Bounty (Wanted.amount) starts at 0 — it only grows from police
                 # proximity during chase, tracked in tick_wanted_countdown.
                 # Delivery payments are confiscated via CriminalRecord.confiscatable_amount.

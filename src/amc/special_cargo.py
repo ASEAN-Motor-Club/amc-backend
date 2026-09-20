@@ -42,9 +42,18 @@ ILLICIT_CARGO_KEYS: set[str] = {
     "CocaineBricks",
 }
 
-# Wanted trigger probability constants
-WANTED_MIN_CHANCE = 0.10  # 10% floor for small deliveries
-WANTED_FULL_CHANCE_AMOUNT = 100_000  # $100k+ = 100% chance
+# Wanted trigger chance (freeman design 2026-09-20 — ratio-driven, 5% floor →
+# 50% ceiling with a quadratic knee, attenuated by distance to the nearest
+# effective cop). Spec of record:
+#   amc-server/.hermes/plans/2026-09-20_095637-wanted-trigger-restore.md
+#   YouTrack KB 183-4 "Wanted trigger chance formula"
+WANTED_TRIGGER_FLOOR_CHANCE = 0.05  # ambient risk on every illicit delivery, all ranks
+WANTED_TRIGGER_CEILING_CHANCE = 0.50  # asymptotic ceiling of the ratio sweep
+WANTED_TRIGGER_KNEE_RATIO = 0.3  # ratio at the sweep midpoint (P = 27.5%)
+WANTED_YARDSTICK_FLOOR = 100_000  # lifetime-total reference for fresh records
+WANTED_YARDSTICK_EXPONENT = 0.75  # sub-linear yardstick growth (rank protection)
+WANTED_COP_ATTENUATION_METRES = 1000.0  # ramp length to the nearest effective cop
+WANTED_COP_ATTENUATION_EXPONENT = 2.0  # ramp shape: sweep scales with (d/range)^γ
 # Minimum bounty placed on a Wanted record (creation or per-delivery increment).
 # Bounty starts at 0 and only grows from police proximity (chase) in tick_wanted_countdown.
 WANTED_MIN_BOUNTY = 0
@@ -58,20 +67,59 @@ def calculate_criminal_level(laundered_total: int) -> int:
     return (laundered_total // CRIMINAL_LEVEL_STEP) + 1
 
 
-def should_trigger_wanted(accumulated_amount: int) -> bool:
-    """Determine whether illicit deliveries should trigger a Wanted level.
+def cop_attenuation_multiplier(cop_distance_m: float | None) -> float:
+    """Sweep multiplier for the distance to the nearest effective cop.
 
-    Uses the *accumulated* delivery total within the current debounce window
-    so that splitting deliveries (e.g. one cargo at a time) is equivalent to
-    a single large delivery.
-
-    Probability scales linearly with accumulated_amount:
-    - Any amount: 10% floor
-    - $50k: 50% chance
-    - $100k+: 100% chance
+    1.0 beyond WANTED_COP_ATTENUATION_METRES (no attenuation), →0 point-blank.
+    ``None`` (no distance known) fails open to 1.0 — the attenuation is
+    anti-abuse, not a safety interlock.
     """
-    chance = max(WANTED_MIN_CHANCE, min(1.0, accumulated_amount / WANTED_FULL_CHANCE_AMOUNT))
-    return random.random() < chance
+    if cop_distance_m is None:
+        return 1.0
+    x = cop_distance_m / WANTED_COP_ATTENUATION_METRES
+    x = max(0.0, min(1.0, x))
+    return x**WANTED_COP_ATTENUATION_EXPONENT
+
+
+def wanted_trigger_chance(pay: int, score: int, cop_distance_m: float | None) -> float:
+    """Chance (0..1) that one illicit delivery creates a Wanted record.
+
+    Ratio-driven (freeman 2026-09-20): *pay* is measured against the
+    criminal's yardstick — their lifetime illicit total *score* (measured
+    before this delivery), floored at WANTED_YARDSTICK_FLOOR so fresh records
+    are not auto-maxed. The ratio sweep saturates between the floor and
+    ceiling chances through a quadratic knee; the cop-proximity attenuation
+    then scales everything above the floor by distance to the nearest
+    effective cop, so camping a delivery site farms nothing.
+    """
+    ref = (
+        WANTED_YARDSTICK_FLOOR
+        * max(score / WANTED_YARDSTICK_FLOOR, 1.0) ** WANTED_YARDSTICK_EXPONENT
+    )
+    ratio = pay / ref
+    ratio_sq = ratio * ratio
+    knee_sq = WANTED_TRIGGER_KNEE_RATIO * WANTED_TRIGGER_KNEE_RATIO
+    sweep = ratio_sq / (ratio_sq + knee_sq)
+    base = WANTED_TRIGGER_FLOOR_CHANCE + (
+        WANTED_TRIGGER_CEILING_CHANCE - WANTED_TRIGGER_FLOOR_CHANCE
+    ) * sweep
+    return WANTED_TRIGGER_FLOOR_CHANCE + cop_attenuation_multiplier(cop_distance_m) * (
+        base - WANTED_TRIGGER_FLOOR_CHANCE
+    )
+
+
+def should_trigger_wanted(pay: int, score: int, cop_distance_m: float | None) -> bool:
+    """Roll whether this illicit delivery triggers a Wanted level.
+
+    *pay* is the accumulated delivery total within the current debounce
+    window, so splitting deliveries (e.g. one cargo at a time) is equivalent
+    to a single large delivery. *score* is the criminal's lifetime illicit
+    total measured BEFORE this delivery accrues. *cop_distance_m* is the
+    distance in metres to the nearest effective cop (None = unknown →
+    unattenuated). Callers must not roll at all when there is NO effective
+    cop — the wanted system is dormant then (see amc.criminals).
+    """
+    return random.random() < wanted_trigger_chance(pay, score, cop_distance_m)
 
 
 async def accumulate_illicit_delivery(character_guid: str, amount: int) -> int:
