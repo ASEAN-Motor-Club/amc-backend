@@ -40,8 +40,6 @@ def _mock_nearby_police(distance_units):
 @patch("amc.player_tags.refresh_player_name", new_callable=AsyncMock)
 @patch("amc.mod_server.send_system_message", new_callable=AsyncMock)
 @patch("amc.game_server.announce", new_callable=AsyncMock)
-# Default: no police nearby (get_players returns None)
-@patch("amc.handlers.teleport.get_players", new_callable=AsyncMock, return_value=None)
 class TeleportHeatEscalationTests(TestCase):
     """Tests for _handle_teleport_or_respawn — proximity-based heat escalation."""
 
@@ -74,7 +72,6 @@ class TeleportHeatEscalationTests(TestCase):
 
     async def test_teleport_no_police_no_heat(
         self,
-        mock_get_players,
         mock_announce,
         mock_system_msg,
         mock_refresh,
@@ -94,7 +91,6 @@ class TeleportHeatEscalationTests(TestCase):
 
     async def test_teleport_without_wanted_no_effect(
         self,
-        mock_get_players,
         mock_announce,
         mock_system_msg,
         mock_refresh,
@@ -113,7 +109,6 @@ class TeleportHeatEscalationTests(TestCase):
 
     async def test_teleport_logs_always_created(
         self,
-        mock_get_players,
         mock_announce,
         mock_system_msg,
         mock_refresh,
@@ -139,7 +134,6 @@ class TeleportHeatEscalationTests(TestCase):
     async def test_teleport_near_police_adds_heat(
         self,
         mock_distance,
-        mock_get_players,
         mock_announce,
         mock_system_msg,
         mock_refresh,
@@ -163,7 +157,6 @@ class TeleportHeatEscalationTests(TestCase):
     async def test_teleport_police_beyond_2km_no_heat(
         self,
         mock_distance,
-        mock_get_players,
         mock_announce,
         mock_system_msg,
         mock_refresh,
@@ -187,7 +180,6 @@ class TeleportHeatEscalationTests(TestCase):
     async def test_teleport_point_blank_max_heat(
         self,
         mock_distance,
-        mock_get_players,
         mock_announce,
         mock_system_msg,
         mock_refresh,
@@ -215,7 +207,6 @@ class TeleportHeatEscalationTests(TestCase):
     async def test_teleport_heat_capped_at_max(
         self,
         mock_distance,
-        mock_get_players,
         mock_announce,
         mock_system_msg,
         mock_refresh,
@@ -241,7 +232,6 @@ class TeleportHeatEscalationTests(TestCase):
     async def test_star_level_change_triggers_name_refresh(
         self,
         mock_distance,
-        mock_get_players,
         mock_announce,
         mock_system_msg,
         mock_refresh,

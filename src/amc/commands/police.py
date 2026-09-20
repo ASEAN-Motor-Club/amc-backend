@@ -4,7 +4,6 @@ from amc.command_framework import registry, CommandContext
 from amc.game_server import get_players
 from amc.models import Character, Wanted
 from amc.mod_server import (
-    despawn_player_vehicle,
     get_player,
     get_player_customization,
     make_suspect,
@@ -15,7 +14,6 @@ from amc.mod_server import (
 from amc.police import (
     activate_police,
     deactivate_police,
-    get_active_police_characters,
     is_police,
     POLICE_STATIONS,
 )
@@ -236,8 +234,12 @@ async def cmd_setwanted(ctx: CommandContext, target_player_name: str):
         )
         return
 
-    # Distance check: target must be at least 1km away from any police officer.
-    # Officers within range are despawned and teleported to the nearest station outside the radius.
+    # Require a readable target location — the flag is anchored to a live
+    # in-game player. Officers near the target are NOT relocated: on-duty
+    # officers are teleport-locked server-side via the R tag, so a
+    # relocate-to-station teleport can no longer be enforced. Proximity at
+    # flag time is organic — officers can only be close by having driven
+    # there.
     target_location_str = target_player_data.get("location")
     if not target_location_str:
         await ctx.reply(
@@ -248,7 +250,7 @@ async def cmd_setwanted(ctx: CommandContext, target_player_name: str):
         return
 
     try:
-        target_loc = parse_location_string(target_location_str)
+        parse_location_string(target_location_str)
     except ValueError:
         await ctx.reply(
             _(
@@ -256,68 +258,6 @@ async def cmd_setwanted(ctx: CommandContext, target_player_name: str):
             ).format(name=target_character.name)
         )
         return
-
-    officers_to_move = []
-    police_chars = await get_active_police_characters()
-    async for police_char in police_chars:
-        police_player_data = next(
-            (
-                p
-                for pid, p in players
-                if p.get("character_guid") == str(police_char.guid)
-            ),
-            None,
-        )
-        if not police_player_data:
-            continue
-        police_location_str = police_player_data.get("location")
-        if not police_location_str:
-            continue
-        try:
-            police_loc = parse_location_string(police_location_str)
-        except ValueError:
-            continue
-
-        dist = _distance_3d(target_loc, police_loc)
-        if dist < SETWANTED_MIN_DISTANCE:
-            officers_to_move.append((police_char, police_player_data, police_loc))
-
-    for police_char, police_player_data, police_loc in officers_to_move:
-        police_uid = police_player_data.get("unique_id")
-        if not police_uid:
-            continue
-
-        try:
-            await despawn_player_vehicle(
-                ctx.http_client_mod,
-                str(police_char.guid),
-                category="current",
-            )
-        except Exception:
-            pass  # Best effort — proceed even if despawn fails
-
-        # Find the police station closest to the officer that is outside the 2km radius from the suspect
-        nearest_station = None
-        min_officer_dist = float("inf")
-        for name, tx, ty, tz in POLICE_STATIONS:
-            station_dist_from_suspect = _distance_3d(target_loc, (tx, ty, tz))
-            if station_dist_from_suspect >= SETWANTED_MIN_DISTANCE:
-                officer_dist = _distance_3d(police_loc, (tx, ty, tz))
-                if officer_dist < min_officer_dist:
-                    min_officer_dist = officer_dist
-                    nearest_station = (name, tx, ty, tz)
-
-        if nearest_station:
-            _station_name, tx, ty, tz = nearest_station
-            try:
-                await teleport_player(
-                    ctx.http_client_mod,
-                    str(police_uid),
-                    {"X": tx, "Y": ty, "Z": tz},
-                    no_vehicles=True,
-                )
-            except Exception:
-                pass  # Best effort — proceed even if teleport fails
 
     # AFK check: police may not set AFK players as wanted
     target_live = await get_player(ctx.http_client, str(target_pid), force_refresh=True)

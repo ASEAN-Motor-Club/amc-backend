@@ -55,6 +55,7 @@ def build_display_name(
     gov_level: int = 0,
     wanted_stars: int = 0,
     rp_mode: bool = False,
+    police_on_duty: bool = False,
     guild_abbreviation: str | None = None,
     muted: bool = False,
 ) -> str:
@@ -62,7 +63,8 @@ def build_display_name(
 
     Tag format: [XRMP1*****C1G3] BaseName[ABV]  (order: X, R, M, P, stars, C, G; guild suffix at end)
       X = Muted (persisted mute active — cannot chat)
-      R = RP mode toggled on OR wanted (forced onto all wanted players)
+      R = RP mode toggled on OR wanted OR on police duty (all three are
+          teleport-locked server-side via the R-name hook match)
       M = Modded vehicle parts
       P1 = Police level (active session)
       ***** = Wanted level (1–5 stars, based on wanted_remaining heat)
@@ -78,6 +80,7 @@ def build_display_name(
         gov_level: Government employee level (0 = not a gov employee)
         wanted_stars: Wanted level (0–5, 0 = not wanted)
         rp_mode: Whether the character is currently in RP mode
+        police_on_duty: Whether the character has an active police session
         guild_abbreviation: Active guild abbreviation (e.g. "GOP"), or None
         muted: Whether the player is currently muted
     """
@@ -87,7 +90,7 @@ def build_display_name(
     if muted:
         tag += "X"
 
-    if rp_mode or wanted_stars > 0:
+    if rp_mode or wanted_stars > 0 or police_on_duty:
         tag += "R"
 
     if has_custom_parts:
@@ -173,6 +176,14 @@ async def refresh_player_name(
     #     police_level = calculate_police_level(character.police_confiscated_total)
     police_level = 0
 
+    # Police duty shares the R tag: an on-duty officer is teleport-locked
+    # server-side exactly like RP players and wanted suspects.
+    from amc.models import PoliceSession
+
+    police_on_duty = await PoliceSession.objects.filter(
+        character=character, ended_at__isnull=True
+    ).aexists()
+
     # Determine GUILD state
     from amc.models import GuildSession
 
@@ -223,6 +234,7 @@ async def refresh_player_name(
         gov_level=gov_level,
         wanted_stars=wanted_stars,
         rp_mode=character.rp_mode,
+        police_on_duty=police_on_duty,
         guild_abbreviation=guild_abbreviation,
         muted=muted,
     )
