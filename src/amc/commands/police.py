@@ -69,17 +69,13 @@ async def cmd_police(ctx: CommandContext):
             )
             return
 
-        # Active criminal record blocks police duty
-        from amc.models import CriminalRecord
-
-        has_active_record = await CriminalRecord.objects.filter(
-            character=ctx.character, cleared_at__isnull=True
-        ).aexists()
-        if has_active_record:
+        # Criminal score blocks police duty (any illicit activity on the
+        # ledger — the score decays to zero over time, which re-opens duty)
+        if ctx.character.criminal_score > 0:
             await send_system_message(
                 ctx.http_client_mod,
                 _(
-                    "You cannot go on police duty while you have an active criminal record."
+                    "You cannot go on police duty while you have a criminal score."
                 ),
                 character_guid=ctx.character.guid,
             )
@@ -175,8 +171,6 @@ async def cmd_police(ctx: CommandContext):
     category="Admin",
 )
 async def cmd_setwanted(ctx: CommandContext, target_player_name: str):
-    from amc.models import CriminalRecord
-
     # Only game admins can use this command
     if not ctx.player_info or not ctx.player_info.get("bIsAdmin"):
         return
@@ -349,13 +343,11 @@ async def cmd_setwanted(ctx: CommandContext, target_player_name: str):
         )
         return
 
-    # Innocence check: CriminalRecord is the single source of truth.
-    # A NULL cleared_at means the character has an active criminal record.
-    has_criminal_record = await CriminalRecord.objects.filter(
-        character=target_character, cleared_at__isnull=True
-    ).aexists()
+    # Innocence check: criminal_score is the single source of truth.
+    # A score of 0 means no illicit activity on the ledger.
+    has_criminal_score = target_character.criminal_score > 0
 
-    if has_criminal_record:
+    if has_criminal_score:
         # Legitimate wanted — standard minimum bounty applied inside create_or_refresh_wanted
         bounty_amount = 0
         warning_note = ""

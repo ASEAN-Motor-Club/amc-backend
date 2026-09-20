@@ -6,12 +6,11 @@ import time
 from datetime import timedelta
 
 from django.conf import settings
-from django.db.models import F
 from django.utils import timezone
 
 from amc.commands.faction import _build_player_locations, _distance_3d, execute_arrest
 from amc.game_server import announce, get_players, get_players_locations
-from amc.models import CriminalRecord, PoliceSession, Wanted
+from amc.models import Character, PoliceSession, Wanted
 from amc.mod_detection import detect_custom_parts, POLICE_DUTY_WHITELIST
 from amc.mod_server import clear_suspect, despawn_player_vehicle, force_exit_vehicle, get_player, get_player_customization, get_player_last_vehicle, get_player_last_vehicle_parts, make_suspect, send_system_message, show_popup
 from amc.player_tags import refresh_player_name
@@ -181,10 +180,10 @@ async def escalate_heat_on_logout(character, http_client, http_client_mod=None) 
     """Auto-arrest when a Wanted player logs out near police.
 
     If the player is within LOGOUT_PROXIMITY_RANGE of any on-duty police officer,
-    treats the logout as an arrest: expires Wanted, confiscates bounty + delivery
-    earnings, clears CriminalRecord, and marks the character for jailing on next
-    login.  If no police are nearby or the player is too far, falls back to the
-    original heat escalation behaviour.
+    treats the logout as an arrest: expires Wanted, confiscates the bounty,
+    negates it from the criminal score, and marks the character for jailing on
+    next login.  If no police are nearby or the player is too far, falls back
+    to the original heat escalation behaviour.
     """
     wanted = await Wanted.objects.filter(
         character=character,
@@ -397,17 +396,17 @@ async def create_or_refresh_wanted(
     Args:
         character: The Character model instance.
         http_client_mod: Mod server HTTP client.
-        amount: Additional bounty to accumulate on the Wanted record.
-            Typically 0 — bounty grows from police proximity in tick_wanted_countdown.
-            Values are floored at WANTED_MIN_BOUNTY.
+        amount: Additional bounty to accumulate on the Wanted record. Typically 0 —
+            a system-triggered wanted (illicit-cargo trigger, fugitive passenger)
+            auto-sets the bounty to 10% of the criminal score at creation, frozen
+            for the life of the chase (freeman 2026-09-20); police-set wanted
+            (/setwanted, set_by present) stay flag-only with amount 0.
         wanted_remaining: Initial wanted_remaining value for new or reset records.
             Defaults to 600 seconds (10 minutes).
         set_by: The Character model instance of the police officer who set
             this wanted status (police commands only).
     """
 
-    # Enforce minimum bounty per event.
-    effective_amount = max(amount, WANTED_MIN_BOUNTY)
     initial_wanted = wanted_remaining
 
     created = False
@@ -416,15 +415,27 @@ async def create_or_refresh_wanted(
         expired_at__isnull=True,
     ).afirst()
     if active_wanted:
+        # Refresh (delivery while already wanted, or police re-flag): reset
+        # the countdown only. The bounty is FROZEN at its trigger-time value
+        # for the whole chase — score growth mid-chase never re-prices it.
         active_wanted.wanted_remaining = initial_wanted
-        active_wanted.amount = F("amount") + effective_amount
-        await active_wanted.asave(update_fields=["wanted_remaining", "amount"])
-        await active_wanted.arefresh_from_db(fields=["amount"])
+        await active_wanted.asave(update_fields=["wanted_remaining"])
     else:
+        if set_by is None:
+            # Fresh system trigger (illicit-cargo / fugitive): the bounty is
+            # 10% of the criminal score at the moment of the trigger (exact
+            # integer math, floored). WANTED_MIN_BOUNTY (0) can only raise it.
+            bounty = max(
+                amount, WANTED_MIN_BOUNTY, character.criminal_score // 10
+            )
+        else:
+            # Police-set wanted (/setwanted) is a FLAG ONLY — jail enforcement
+            # needs no bounty (plan §8.3).
+            bounty = 0
         active_wanted = await Wanted.objects.acreate(
             character=character,
             wanted_remaining=initial_wanted,
-            amount=effective_amount,
+            amount=bounty,
             set_by=set_by,
         )
         created = True
@@ -855,18 +866,14 @@ async def _finalize_expired_wanted(
             # refresh_suspect_tags would also clear this on its next 30 s
             # pass, but we want instant feedback when a chase ends.
             #
-            # However, if the player is still wearing a suspect costume
-            # (active CriminalRecord + wearing_costume=True), the costume
-            # pass of refresh_suspect_tags will re-flag them within 30 s —
-            # clearing here would cause a visible gap in the blue overlay.
+            # However, if the player is still wearing a suspect costume,
+            # the costume pass of refresh_suspect_tags will re-flag them
+            # within 30 s — clearing here would cause a visible gap in the
+            # blue overlay.
             # Reapply make_suspect instead to reset the 60 s cap cleanly
             # and keep them as a suspect.
             if http_client_mod:
-                still_costume_suspect = await CriminalRecord.objects.filter(
-                    character=char,
-                    cleared_at__isnull=True,
-                    character__wearing_costume=True,
-                ).aexists()
+                still_costume_suspect = char.wearing_costume
                 if still_costume_suspect:
                     try:
                         await make_suspect(
@@ -894,14 +901,24 @@ async def _finalize_expired_wanted(
 
 
 # ---------------------------------------------------------------------------
-# Criminal Record decay
+# Criminal score decay
 # ---------------------------------------------------------------------------
 
-CRIMINAL_RECORD_HALF_LIFE_MINUTES = 120  # 2 hours of online time
-CRIMINAL_RECORD_DECAY_FACTOR = 0.5 ** (1 / CRIMINAL_RECORD_HALF_LIFE_MINUTES)
-CRIMINAL_RECORD_DECAY_FLOOR = 5000  # confiscatable amounts below this are zeroed out and record is closed
 ONLINE_THRESHOLD_SECONDS = 60  # character considered online if last_online < 60s ago
 CRIMINAL_SUSPECT_DURATION = 70  # seconds — mod clamps to 60s; refresh_suspect_tags reapplies every 30s for overlap
+
+# Criminal-score decay (freeman 2026-09-20): REAL time, including offline.
+# Decay only begins after the grace window has passed since the last illicit
+# delivery, then halves the score every half-life via an hourly cron tick.
+# Below the floor the score is zeroed (clean slate; also the eventual unlock
+# path for the /police score gate).
+SCORE_DECAY_GRACE_MINUTES = 48 * 60  # 48h since the last illicit delivery
+SCORE_DECAY_HALF_LIFE_MINUTES = 7 * 24 * 60  # 7-day half-life
+SCORE_DECAY_FLOOR = 5000
+SCORE_DECAY_TICK_MINUTES = 60  # cron cadence
+SCORE_DECAY_FACTOR_PER_TICK = 0.5 ** (
+    SCORE_DECAY_TICK_MINUTES / SCORE_DECAY_HALF_LIFE_MINUTES
+)
 
 
 async def refresh_suspect_tags(http_client_mod) -> None:
@@ -914,7 +931,7 @@ async def refresh_suspect_tags(http_client_mod) -> None:
     less than 60 s to prevent the status from lapsing between ticks.
 
     Gating is driven entirely off DB state (``character.last_online`` +
-    ``wearing_costume`` + active ``Wanted``/``CriminalRecord``) — not the
+    ``wearing_costume`` + active ``Wanted``) — not the
     mod server's transient ``/players`` snapshot.  This avoids dropping
     legitimate suspects when the mod's player list momentarily misses a
     GUID (2 s cache miss, brief API hiccup, missing ``location`` field
@@ -964,21 +981,21 @@ async def refresh_suspect_tags(http_client_mod) -> None:
             logger.warning("Failed to make suspect for %s", wanted.character.name)
 
     # --- Costume criminal pass ---
-    # DB-gated: active CriminalRecord + wearing_costume=True + online.
+    # DB-gated: wearing_costume=True + online. Costume-only suspects are
+    # cosmetic post-rework (no arrest hook without a wanted or score).
     # Note: costume GUIDs are NOT added to _last_suspect_guids (see the
     # module-level comment on that set).  They ARE collected into
     # costume_guids for use by the transition-out pass below, which
     # consults the combined wanted|costume set to decide whether to clear.
     costume_guids: set[str] = set()
-    costume_criminals = CriminalRecord.objects.filter(
-        cleared_at__isnull=True,
-        character__wearing_costume=True,
-        character__guid__isnull=False,
-        character__last_online__gte=online_cutoff,
-    ).select_related("character")
+    costume_criminals = Character.objects.filter(
+        wearing_costume=True,
+        guid__isnull=False,
+        last_online__gte=online_cutoff,
+    )
 
     async for rec in costume_criminals:
-        guid = rec.character.guid
+        guid = rec.guid
         costume_guids.add(guid)
         if guid in wanted_guids:
             # Already refreshed via the wanted pass with the wanted-derived
@@ -991,19 +1008,18 @@ async def refresh_suspect_tags(http_client_mod) -> None:
                 http_client_mod, guid, duration_seconds=CRIMINAL_SUSPECT_DURATION,
             )
         except Exception:
-            logger.warning("costume make_suspect failed for %s", rec.character.name)
+            logger.warning("costume make_suspect failed for %s", rec.name)
 
-    # --- Reconciliation: one-shot costume hydration for online criminals ---
-    unreconciled_criminals = CriminalRecord.objects.filter(
-        cleared_at__isnull=True,
-        character__guid__isnull=False,
-        character__last_online__gte=online_cutoff,
+    # --- Reconciliation: one-shot costume hydration for online characters ---
+    unreconciled_criminals = Character.objects.filter(
+        guid__isnull=False,
+        last_online__gte=online_cutoff,
     ).exclude(
-        character__guid__in=_costume_reconciled_guids,
-    ).select_related("character")
+        guid__in=_costume_reconciled_guids,
+    )
 
     async for rec in unreconciled_criminals:
-        guid = rec.character.guid
+        guid = rec.guid
         _costume_reconciled_guids.add(guid)
         try:
             customization = await get_player_customization(http_client_mod, guid)
@@ -1011,10 +1027,10 @@ async def refresh_suspect_tags(http_client_mod) -> None:
                 continue
             costume_key = customization.get("Costume") or None
             wearing = costume_key in SUSPECT_COSTUMES
-            if wearing != rec.character.wearing_costume or costume_key != rec.character.costume_item_key:
-                rec.character.wearing_costume = wearing
-                rec.character.costume_item_key = costume_key
-                await rec.character.asave(update_fields=["wearing_costume", "costume_item_key"])
+            if wearing != rec.wearing_costume or costume_key != rec.costume_item_key:
+                rec.wearing_costume = wearing
+                rec.costume_item_key = costume_key
+                await rec.asave(update_fields=["wearing_costume", "costume_item_key"])
                 if wearing and guid not in wanted_guids and guid not in costume_guids:
                     try:
                         await make_suspect(
@@ -1022,9 +1038,9 @@ async def refresh_suspect_tags(http_client_mod) -> None:
                         )
                         costume_guids.add(guid)
                     except Exception:
-                        logger.warning("reconciliation make_suspect failed for %s", rec.character.name)
+                        logger.warning("reconciliation make_suspect failed for %s", rec.name)
         except Exception:
-            logger.debug("reconciliation poll failed for %s", rec.character.name)
+            logger.debug("reconciliation poll failed for %s", rec.name)
 
     # --- Transition-out pass ---
     # A GUID only transitions out when it is NEITHER wanted nor wearing a
@@ -1209,126 +1225,41 @@ async def tick_police_suspect_locations(http_client, http_client_mod, http_clien
         del _last_compass_sent[stale]
 
 
-async def tick_criminal_record_decay(http_client_mod=None) -> None:
-    """Decay confiscatable_amount for ONLINE characters only.
+async def tick_criminal_score_decay() -> None:
+    """Decay Character.criminal_score in REAL time, including offline.
 
-    Called every minute via arq cron. Applies exponential decay with a
-    2-hour half-life of *online time*. Offline criminals preserve their
-    confiscatable amount so they cannot escape punishment by logging off.
-
-    Players currently in a modded vehicle are excluded from decay —
-    their confiscatable amount is preserved as long as they remain in
-    a modified vehicle.
-
-    Players who are AFK (bAFK=true) are also excluded from decay.
-
-    The `amount` field is NEVER decayed — it is a permanent audit trail.
+    Replaces the old CriminalRecord.confiscatable_amount decay: the score is a
+    progression stat, not a confiscatable pot, so the old AFK/modded-vehicle
+    freeze logic does not apply. Decay only begins after
+    SCORE_DECAY_GRACE_MINUTES (48h) have passed since the character's last
+    illicit delivery ("decays over time, depending on the last illicit
+    delivery" — freeman 2026-09-20), then an hourly cron tick applies an
+    exponential half-life (7 days). Below SCORE_DECAY_FLOOR the score is
+    zeroed — clean slate, and the eventual unlock path for the /police
+    score gate.
     """
-    online_cutoff = timezone.now() - timedelta(seconds=ONLINE_THRESHOLD_SECONDS)
+    grace_cutoff = timezone.now() - timedelta(minutes=SCORE_DECAY_GRACE_MINUTES)
 
-    records = [
-        r
-        async for r in CriminalRecord.objects.filter(
-            cleared_at__isnull=True,
-            character__last_online__gte=online_cutoff,
-        ).select_related("character__player")
+    characters = [
+        c
+        async for c in Character.objects.filter(
+            criminal_score__gt=0,
+            last_illicit_delivery_at__lt=grace_cutoff,
+        ).only("id", "criminal_score")
     ]
-    if not records:
+    if not characters:
         return
 
-    modded_guids: set[str] = set()
-    afk_player_ids: set[str] = set()
-    if http_client_mod:
-        from amc.mod_server import get_player, get_player_last_vehicle, get_player_last_vehicle_parts
-        from amc.mod_detection import detect_custom_parts
+    changed = []
+    for char in characters:
+        new_score = int(char.criminal_score * SCORE_DECAY_FACTOR_PER_TICK)
+        if new_score < SCORE_DECAY_FLOOR:
+            new_score = 0
+        if new_score != char.criminal_score:
+            char.criminal_score = new_score
+            changed.append(char)
 
-        for record in records:
-            player_id = str(record.character.player.unique_id)
-
-            # AFK check
-            try:
-                player_data = await get_player(http_client_mod, player_id)
-                if player_data and player_data.get("bAFK"):
-                    afk_player_ids.add(player_id)
-                    continue
-            except Exception:
-                logger.debug(
-                    "tick_criminal_record_decay: afk check failed for %s, skipping",
-                    record.character.name,
-                )
-
-            # Modded vehicle check
-            guid = record.character.guid
-            if not guid:
-                continue
-            try:
-                last_vehicle, parts_data = await asyncio.gather(
-                    get_player_last_vehicle(http_client_mod, guid),
-                    get_player_last_vehicle_parts(http_client_mod, guid, complete=False),
-                )
-                main_vehicle = last_vehicle.get("vehicle")
-                if not main_vehicle:
-                    modded_guids.add(guid)
-                    continue
-                whitelist = None
-                is_on_duty = await PoliceSession.objects.filter(
-                    character=record.character, ended_at__isnull=True
-                ).aexists()
-                if is_on_duty:
-                    whitelist = POLICE_DUTY_WHITELIST
-                custom_parts = detect_custom_parts(
-                    parts_data.get("parts", []), whitelist=whitelist
-                )
-                if custom_parts:
-                    modded_guids.add(guid)
-            except Exception:
-                logger.debug(
-                    "tick_criminal_record_decay: mod check failed for %s, skipping",
-                    record.character.name,
-                )
-
-    decayed = []
-    closed_records = []
-    for record in records:
-        preserve_amount = (
-            record.character.guid in modded_guids
-            or str(record.character.player.unique_id) in afk_player_ids
-        )
-        if not preserve_amount:
-            record.confiscatable_amount = int(
-                record.confiscatable_amount * CRIMINAL_RECORD_DECAY_FACTOR
-            )
-        # Close when below floor, unless the character is wearing a criminal
-        # costume (the C tag must persist for the full duration of wear).
-        # Closure runs even for modded/AFK players — the preservation above
-        # keeps their amount intact, but once it's below floor there is
-        # nothing left to preserve and the record has served its purpose.
-        if record.confiscatable_amount < CRIMINAL_RECORD_DECAY_FLOOR and not record.character.wearing_costume:
-            record.confiscatable_amount = 0
-            record.cleared_at = timezone.now()
-            closed_records.append(record)
-        decayed.append(record)
-
-    if not decayed:
+    if not changed:
         return
-    await CriminalRecord.objects.abulk_update(decayed, ["confiscatable_amount", "cleared_at"])
-    if closed_records:
-        logger.info(
-            "tick_criminal_record_decay: closed %d record(s) that decayed below floor",
-            len(closed_records),
-        )
-        if http_client_mod:
-            for record in closed_records:
-                try:
-                    await refresh_player_name(record.character, http_client_mod)
-                except Exception:
-                    logger.warning(
-                        "Failed to refresh name for %s after criminal record closed",
-                        record.character.name,
-                    )
-    logger.debug(
-        "tick_criminal_record_decay: decayed %d record(s) (skipped %d modded, %d afk)",
-        len(decayed),
-        len(modded_guids),
-        len(afk_player_ids),
-    )
+    await Character.objects.abulk_update(changed, ["criminal_score"])
+    logger.info("tick_criminal_score_decay: decayed %d character(s)", len(changed))

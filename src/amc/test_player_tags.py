@@ -640,9 +640,9 @@ async def test_get_player_singleflight(mock_cache_aget, mock_cache_aset):
 @pytest.mark.django_db
 @patch("amc.player_tags.set_character_name", new_callable=AsyncMock)
 async def test_refresh_player_name_police_suppresses_crim(mock_set_name):
-    """Police session + criminal record → [P1] (criminal suppressed)."""
+    """Police session → [P1] (criminal tag suppressed when absent)."""
     from amc.factories import CharacterFactory, PlayerFactory
-    from amc.models import CriminalRecord, PoliceSession
+    from amc.models import PoliceSession
     from asgiref.sync import sync_to_async
 
     player = await sync_to_async(PlayerFactory)()
@@ -653,11 +653,6 @@ async def test_refresh_player_name_police_suppresses_crim(mock_set_name):
     )
 
     await PoliceSession.objects.acreate(character=character)
-    await CriminalRecord.objects.acreate(
-        character=character,
-        reason="Money delivery",
-        cleared_at=None,  # active record
-    )
 
     session = MagicMock()
     await refresh_player_name(character, session)

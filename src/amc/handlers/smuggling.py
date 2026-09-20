@@ -16,7 +16,7 @@ from amc.mod_detection import detect_custom_parts, POLICE_DUTY_WHITELIST
 from amc.mod_server import get_player_last_vehicle, get_player_last_vehicle_parts, show_popup
 from amc.game_server import announce
 from amc.models import PoliceSession
-from amc.special_cargo import ILLICIT_CARGO_KEYS, ensure_criminal_record
+from amc.special_cargo import ILLICIT_CARGO_KEYS
 
 logger = logging.getLogger("amc.webhook.handlers.smuggling")
 
@@ -43,14 +43,8 @@ async def handle_load_cargo(event, player, character, ctx):
         character=character, ended_at__isnull=True
     ).aexists()
 
-    # Mark as criminal when loading illicit cargo (unless active police)
-    if not is_on_duty:
-        await ensure_criminal_record(
-            character,
-            reason=f"{cargo_key} cargo loaded",
-            http_client_mod=ctx.http_client_mod,
-        )
-
+    # Mark-as-criminal on LOAD is gone: the criminal score (and thus any
+    # suspect/criminal status) accumulates only on DELIVERY.
     # Throttled smuggling tip-off announcement
     if SMUGGLING_TIPOFF_ENABLED and ctx.http_client:
         tipoff_cache_key = f"smuggling_tipoff:{character.guid}"

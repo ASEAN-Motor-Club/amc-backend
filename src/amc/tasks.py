@@ -41,7 +41,6 @@ from amc.models import (
     WorldText,
     WorldObject,
     NewsItem,
-    CriminalRecord,
     FactionMembership,
     PoliceSession,
     TeleportPoint,
@@ -247,9 +246,9 @@ Use <Highlight>/faction</Highlight> on Discord to join the Police faction and ga
         # Get online players from mod server API
         from amc.mod_server import get_players as get_players_mod
 
-        active_records = CriminalRecord.objects.filter(
-            cleared_at__isnull=True
-        ).select_related("character")
+        scored_criminals = Character.objects.filter(
+            criminal_score__gt=0
+        ).order_by("-criminal_score")
 
         # Filter to online characters only
         online_players = await get_players_mod(http_client_mod)
@@ -259,13 +258,12 @@ Use <Highlight>/faction</Highlight> on Discord to join the Police faction and ga
                 for p in online_players
                 if p.get("CharacterGuid")
             }
-            active_records = active_records.filter(character__guid__in=online_guids)
+            scored_criminals = scored_criminals.filter(guid__in=online_guids)
 
         wanted_lines = []
-        async for record in active_records:
-            amount_str = f"${record.amount:,}" if record.amount > 0 else "no deliveries"
+        async for criminal in scored_criminals:
             wanted_lines.append(
-                f"- {record.character.name} ({record.reason}) — {amount_str}"
+                f"- {criminal.name} — ${criminal.criminal_score:,} criminal score"
             )
 
         if wanted_lines:
@@ -1156,11 +1154,7 @@ async def process_log_event(
             )
             if action == PlayerVehicleLog.Action.ENTERED:
                 if is_police_vehicle(vehicle_name):
-                    has_active_record = await CriminalRecord.objects.filter(
-                        character=character, cleared_at__isnull=True
-                    ).aexists()
-
-                    if has_active_record:
+                    if character.criminal_score > 0:
                         asyncio.create_task(
                             _despawn_police_vehicle_for_criminal(
                                 http_client_mod, character, player, vehicle_name

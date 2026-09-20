@@ -17,7 +17,7 @@ POLICE_ONLINE_THRESHOLD_SECONDS = 60
 
 
 def _get_hidden_player_unique_ids_sync():
-    from amc.models import CriminalRecord, PoliceSession, Wanted
+    from amc.models import Character, PoliceSession, Wanted
 
     wanted_ids: set[int] = set(
         Wanted.objects.filter(
@@ -33,11 +33,10 @@ def _get_hidden_player_unique_ids_sync():
     )
 
     costume_ids: set[int] = set(
-        CriminalRecord.objects.filter(
-            cleared_at__isnull=True,
-            character__wearing_costume=True,
-            character__last_online__gte=online_threshold,
-        ).values_list("character__player__unique_id", flat=True)
+        Character.objects.filter(
+            wearing_costume=True,
+            last_online__gte=online_threshold,
+        ).values_list("player__unique_id", flat=True)
     )
 
     return wanted_ids, police_ids, costume_ids

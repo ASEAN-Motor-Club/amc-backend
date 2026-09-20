@@ -146,19 +146,8 @@ async def refresh_player_name(
 
         gov_level = calculate_gov_level(character.gov_employee_contributions)
 
-    # DEPRECATED: C tag — may be restored in the future
-    # from amc.models import CriminalRecord
-    #
-    # has_criminal_record = await CriminalRecord.objects.filter(
-    #     character=character, cleared_at__isnull=True
-    # ).aexists()
-    #
-    # # Compute criminal level from cumulative laundered total
-    # criminal_level = 0
-    # if has_criminal_record:
-    #     from amc.special_cargo import calculate_criminal_level
-    #
-    #     criminal_level = calculate_criminal_level(character.criminal_laundered_total)
+    # DEPRECATED: C tag — may be restored in the future; level would derive
+    # from Character.criminal_score (floor(score / 50_000) + 1).
     criminal_level = 0
 
     # Determine WANTED state (W-level based on wanted_remaining heat)

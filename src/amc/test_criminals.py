@@ -26,8 +26,8 @@ from django.utils import timezone
 
 from amc.criminals import (
     BASE_DECAY_PER_TICK,
-    CRIMINAL_RECORD_DECAY_FACTOR,
     CRIMINAL_SUSPECT_DURATION,
+    SCORE_DECAY_FACTOR_PER_TICK,
     TICK_INTERVAL,
     WANTED_NEAR_CAP_UNITS,
     _compute_stars,
@@ -39,13 +39,13 @@ from amc.criminals import (
     hide_decay_multiplier,
     nearest_effective_cop_distance_m,
     refresh_suspect_tags,
-    tick_criminal_record_decay,
+    tick_criminal_score_decay,
     tick_police_suspect_locations,
     tick_wanted_countdown,
     wanted_accrual_multiplier,
 )
 from amc.factories import CharacterFactory, PlayerFactory
-from amc.models import CriminalRecord, PoliceSession, Wanted
+from amc.models import PoliceSession, Wanted
 
 
 def _make_player_data(unique_id, character_guid, x, y, z):
@@ -1458,6 +1458,17 @@ class RefreshSuspectTagsTests(TestCase):
     def setUp(self):
         _last_suspect_guids.clear()
         _costume_reconciled_guids.clear()
+        # The costume-reconciliation pass inside refresh_suspect_tags polls
+        # get_player_customization for every online criminal; tests that don't
+        # stage costume state get a None (clean skip). Costume-specific tests
+        # override this with their own narrower patch.
+        reconciliation = patch(
+            "amc.criminals.get_player_customization",
+            new_callable=AsyncMock,
+            return_value=None,
+        )
+        self.reconciliation_mock = reconciliation.start()
+        self.addCleanup(reconciliation.stop)
 
     async def _setup_criminal(self, wanted_remaining=300):
         player = await sync_to_async(PlayerFactory)()
@@ -1559,7 +1570,6 @@ class RefreshSuspectTagsTests(TestCase):
             costume_item_key="Costume_Police_01" if wearing_costume else None,
         )
         await character.asave(update_fields=["last_online", "wearing_costume", "costume_item_key"])
-        await CriminalRecord.objects.acreate(character=character, reason="Test", confiscatable_amount=1000)
         return character
 
     async def test_costume_criminal_online_gets_suspect(
@@ -1641,7 +1651,6 @@ class RefreshSuspectTagsTests(TestCase):
             costume_item_key="Costume_Police_01",
         )
         await character.asave(update_fields=["last_online", "wearing_costume", "costume_item_key"])
-        await CriminalRecord.objects.acreate(character=character, reason="Test", confiscatable_amount=1000)
         await Wanted.objects.acreate(character=character, wanted_remaining=300)
 
         players = _make_players_list(
@@ -1704,9 +1713,6 @@ class RefreshSuspectTagsTests(TestCase):
         await character.asave(
             update_fields=["last_online", "wearing_costume", "costume_item_key"]
         )
-        await CriminalRecord.objects.acreate(
-            character=character, reason="Test", confiscatable_amount=1000,
-        )
         await Wanted.objects.acreate(character=character, wanted_remaining=300)
 
         players = _make_players_list([
@@ -1763,9 +1769,6 @@ class RefreshSuspectTagsTests(TestCase):
         await character.asave(
             update_fields=["last_online", "wearing_costume", "costume_item_key"]
         )
-        await CriminalRecord.objects.acreate(
-            character=character, reason="Test", confiscatable_amount=1000,
-        )
         await Wanted.objects.acreate(character=character, wanted_remaining=300)
         mock_http_mod = AsyncMock()
 
@@ -1790,7 +1793,6 @@ class RefreshSuspectTagsTests(TestCase):
             costume_item_key=None,
         )
         await character.asave(update_fields=["last_online", "wearing_costume", "costume_item_key"])
-        await CriminalRecord.objects.acreate(character=character, reason="Test", confiscatable_amount=1000)
 
         players = _make_players_list(
             [_make_player_data(character.player.unique_id, character.guid, *_SUSPECT_LOC)]
@@ -1949,158 +1951,152 @@ class PoliceSuspectLocationsTests(TestCase):
 
 
 @patch("amc.criminals.make_suspect", new_callable=AsyncMock)
-class CriminalRecordDecayTests(TestCase):
-    """Tests for tick_criminal_record_decay."""
+class CriminalScoreDecayTests(TestCase):
+    """Tests for tick_criminal_score_decay (real-time decay, incl. offline).
+
+    Post-rework there is no AFK/modded-vehicle freeze: the score is a
+    progression stat and decays in real time after the grace window.
+    """
 
     def setUp(self):
         _last_suspect_guids.clear()
         _costume_reconciled_guids.clear()
 
-    async def _setup_criminal_record(self, confiscatable_amount=10000):
-        """Create a character with an active criminal record."""
+    async def _setup_score(self, score=10000, idle_minutes=None, last_online_min_ago=0):
+        """Create a character with a criminal score.
+
+        idle_minutes backdates last_illicit_delivery_at (None = now, inside
+        the grace window).
+        """
+        player = await sync_to_async(PlayerFactory)()
+        last_delivery = (
+            timezone.now() - timedelta(minutes=idle_minutes)
+            if idle_minutes is not None
+            else timezone.now()
+        )
+        character = await sync_to_async(CharacterFactory)(
+            player=player,
+            last_online=timezone.now() - timedelta(minutes=last_online_min_ago),
+        )
+        character.criminal_score = score
+        character.last_illicit_delivery_at = last_delivery
+        await character.asave(
+            update_fields=["last_online", "criminal_score", "last_illicit_delivery_at"]
+        )
+        return character
+
+    async def test_score_inside_grace_window_does_not_decay(
+        self,
+        mock_make_suspect,
+    ):
+        """Scores with a recent illicit delivery (within 48h) are untouched."""
+        character = await self._setup_score(score=10000)
+
+        await tick_criminal_score_decay()
+
+        await character.arefresh_from_db(fields=["criminal_score"])
+        self.assertEqual(character.criminal_score, 10000)
+
+    async def test_score_decays_after_grace_window(
+        self,
+        mock_make_suspect,
+    ):
+        """Scores past the 48h grace decay by the hourly half-life factor."""
+        character = await self._setup_score(score=10000, idle_minutes=48 * 60 + 1)
+
+        await tick_criminal_score_decay()
+
+        await character.arefresh_from_db(fields=["criminal_score"])
+        self.assertEqual(
+            character.criminal_score, int(10000 * SCORE_DECAY_FACTOR_PER_TICK)
+        )
+
+    async def test_offline_player_decays(
+        self,
+        mock_make_suspect,
+    ):
+        """Decay is real time — offline players decay too."""
+        character = await self._setup_score(
+            score=10000, idle_minutes=48 * 60 + 1, last_online_min_ago=60
+        )
+
+        await tick_criminal_score_decay()
+
+        await character.arefresh_from_db(fields=["criminal_score"])
+        self.assertEqual(
+            character.criminal_score, int(10000 * SCORE_DECAY_FACTOR_PER_TICK)
+        )
+
+    async def test_afk_player_decays(
+        self,
+        mock_make_suspect,
+    ):
+        """No AFK freeze post-rework — the score decays regardless."""
+        character = await self._setup_score(score=10000, idle_minutes=48 * 60 + 1)
+
+        with patch("amc.mod_server.get_player", new_callable=AsyncMock, return_value={"bAFK": True}):
+            await tick_criminal_score_decay()
+
+        await character.arefresh_from_db(fields=["criminal_score"])
+        self.assertEqual(
+            character.criminal_score, int(10000 * SCORE_DECAY_FACTOR_PER_TICK)
+        )
+
+    async def test_modded_vehicle_player_decays(
+        self,
+        mock_make_suspect,
+    ):
+        """No modded-vehicle freeze post-rework — the score decays."""
+        character = await self._setup_score(score=10000, idle_minutes=48 * 60 + 1)
+
+        await tick_criminal_score_decay()
+
+        await character.arefresh_from_db(fields=["criminal_score"])
+        self.assertEqual(
+            character.criminal_score, int(10000 * SCORE_DECAY_FACTOR_PER_TICK)
+        )
+
+    async def test_score_zeroed_below_floor(
+        self,
+        mock_make_suspect,
+    ):
+        """Scores below the decay floor are zeroed (clean slate)."""
+        character = await self._setup_score(score=5000, idle_minutes=48 * 60 + 1)
+
+        await tick_criminal_score_decay()
+
+        await character.arefresh_from_db(fields=["criminal_score"])
+        self.assertEqual(character.criminal_score, 0)
+
+    async def test_zero_score_is_untouched(
+        self,
+        mock_make_suspect,
+    ):
+        """Zero scores stay zero and don't error."""
+        character = await self._setup_score(score=0, idle_minutes=48 * 60 + 1)
+
+        await tick_criminal_score_decay()
+
+        await character.arefresh_from_db(fields=["criminal_score"])
+        self.assertEqual(character.criminal_score, 0)
+
+    async def test_applies_suspect_to_online_costume_wearers_via_refresh_suspect_tags(
+        self,
+        mock_make_suspect,
+    ):
+        """Online costume wearers get make_suspect called via refresh_suspect_tags."""
+        _costume_reconciled_guids.clear()
         player = await sync_to_async(PlayerFactory)()
         character = await sync_to_async(CharacterFactory)(
             player=player,
             last_online=timezone.now(),
+            wearing_costume=True,
+            costume_item_key="Costume_Police_01",
         )
-        await character.asave(update_fields=["last_online"])
-        record = await CriminalRecord.objects.acreate(
-            character=character,
-            reason="Test",
-            confiscatable_amount=confiscatable_amount,
-        )
-        return record
-
-    async def test_afk_player_does_not_decay(
-        self,
-        mock_make_suspect,
-    ):
-        """AFK players are excluded from criminal record decay."""
-        record = await self._setup_criminal_record(confiscatable_amount=10000)
-        mock_http_mod = AsyncMock()
-
-        with patch("amc.mod_server.get_player", new_callable=AsyncMock, return_value={"bAFK": True}):
-            await tick_criminal_record_decay(mock_http_mod)
-
-        record = await CriminalRecord.objects.aget(pk=record.pk)
-        self.assertEqual(record.confiscatable_amount, 10000)
-
-    async def test_non_afk_player_decays(
-        self,
-        mock_make_suspect,
-    ):
-        """Non-AFK online players have their confiscatable amount decayed."""
-        record = await self._setup_criminal_record(confiscatable_amount=10000)
-        mock_http_mod = AsyncMock()
-
-        with patch("amc.mod_server.get_player", new_callable=AsyncMock, return_value={"bAFK": False}), \
-             patch("amc.mod_server.get_player_last_vehicle", new_callable=AsyncMock, return_value={"vehicle": {"id": 1}}), \
-             patch("amc.mod_server.get_player_last_vehicle_parts", new_callable=AsyncMock, return_value={"parts": []}), \
-             patch("amc.mod_detection.detect_custom_parts", return_value=[]):
-            await tick_criminal_record_decay(mock_http_mod)
-
-        record = await CriminalRecord.objects.aget(pk=record.pk)
-        expected = int(10000 * CRIMINAL_RECORD_DECAY_FACTOR)
-        self.assertEqual(record.confiscatable_amount, expected)
-
-    async def test_offline_player_does_not_decay(
-        self,
-        mock_make_suspect,
-    ):
-        """Offline players are not included in the decay at all."""
-        player = await sync_to_async(PlayerFactory)()
-        character = await sync_to_async(CharacterFactory)(
-            player=player,
-            last_online=timezone.now() - timedelta(minutes=5),
-        )
-        await character.asave(update_fields=["last_online"])
-        record = await CriminalRecord.objects.acreate(
-            character=character,
-            reason="Test",
-            confiscatable_amount=10000,
-        )
-        mock_http_mod = AsyncMock()
-
-        with patch("amc.criminals.make_suspect", new_callable=AsyncMock):
-            await tick_criminal_record_decay(mock_http_mod)
-
-        record = await CriminalRecord.objects.aget(pk=record.pk)
-        self.assertEqual(record.confiscatable_amount, 10000)
-
-    async def test_modded_vehicle_player_does_not_decay(
-        self,
-        mock_make_suspect,
-    ):
-        """Players in modded vehicles are excluded from decay."""
-        record = await self._setup_criminal_record(confiscatable_amount=10000)
-        mock_http_mod = AsyncMock()
-
-        with patch("amc.mod_server.get_player", new_callable=AsyncMock, return_value={"bAFK": False}), \
-             patch("amc.mod_server.get_player_last_vehicle", new_callable=AsyncMock, return_value={"vehicle": {"id": 1}}), \
-             patch("amc.mod_server.get_player_last_vehicle_parts", new_callable=AsyncMock, return_value={"parts": [{"Key": "mod_part", "Slot": 0}]}), \
-             patch("amc.mod_detection.detect_custom_parts", return_value=[{"key": "mod_part"}]):
-            await tick_criminal_record_decay(mock_http_mod)
-
-        record = await CriminalRecord.objects.aget(pk=record.pk)
-        self.assertEqual(record.confiscatable_amount, 10000)
-
-    async def test_modded_vehicle_closes_record_at_zero(
-        self,
-        mock_make_suspect,
-    ):
-        """Modded-vehicle players still have records closed when already below floor.
-
-        Regression test: previously the modded-vehicle ``continue`` skipped
-        both decay AND closure, so a record that had already decayed to 0
-        (or was created at 0 via a costume equip) would stay open forever
-        as long as the player was in a vehicle with any custom parts.
-        """
-        record = await self._setup_criminal_record(confiscatable_amount=0)
-        mock_http_mod = AsyncMock()
-
-        with patch("amc.mod_server.get_player", new_callable=AsyncMock, return_value={"bAFK": False}), \
-             patch("amc.mod_server.get_player_last_vehicle", new_callable=AsyncMock, return_value={"vehicle": {"id": 1}}), \
-             patch("amc.mod_server.get_player_last_vehicle_parts", new_callable=AsyncMock, return_value={"parts": [{"Key": "mod_part", "Slot": 0}]}), \
-             patch("amc.mod_detection.detect_custom_parts", return_value=[{"key": "mod_part"}]):
-            await tick_criminal_record_decay(mock_http_mod)
-
-        record = await CriminalRecord.objects.aget(pk=record.pk)
-        self.assertEqual(record.confiscatable_amount, 0)
-        self.assertIsNotNone(record.cleared_at)
-
-    async def test_modded_costume_wearer_record_stays_open_at_zero(
-        self,
-        mock_make_suspect,
-    ):
-        """Costume wearers in modded vehicles keep the record open even at 0."""
-        record = await self._setup_criminal_record(confiscatable_amount=0)
-        record.character.wearing_costume = True
-        await record.character.asave(update_fields=["wearing_costume"])
-        mock_http_mod = AsyncMock()
-
-        with patch("amc.mod_server.get_player", new_callable=AsyncMock, return_value={"bAFK": False}), \
-             patch("amc.mod_server.get_player_last_vehicle", new_callable=AsyncMock, return_value={"vehicle": {"id": 1}}), \
-             patch("amc.mod_server.get_player_last_vehicle_parts", new_callable=AsyncMock, return_value={"parts": [{"Key": "mod_part", "Slot": 0}]}), \
-             patch("amc.mod_detection.detect_custom_parts", return_value=[{"key": "mod_part"}]):
-            await tick_criminal_record_decay(mock_http_mod)
-
-        record = await CriminalRecord.objects.aget(pk=record.pk)
-        self.assertEqual(record.confiscatable_amount, 0)
-        self.assertIsNone(record.cleared_at)
-
-    async def test_applies_suspect_to_online_criminals_via_refresh_suspect_tags(
-        self,
-        mock_make_suspect,
-    ):
-        """Online active criminals wearing a costume get make_suspect called via refresh_suspect_tags."""
-        _costume_reconciled_guids.clear()
-        record = await self._setup_criminal_record(confiscatable_amount=10000)
-        record.character.wearing_costume = True
-        record.character.costume_item_key = "Costume_Police_01"
-        await record.character.asave(update_fields=["wearing_costume", "costume_item_key"])
+        await character.asave(update_fields=["last_online", "wearing_costume", "costume_item_key"])
 
         players = _make_players_list(
-            [_make_player_data(record.character.player.unique_id, record.character.guid, *_SUSPECT_LOC)]
+            [_make_player_data(character.player.unique_id, character.guid, *_SUSPECT_LOC)]
         )
         mock_http_mod = AsyncMock()
 
@@ -2109,14 +2105,14 @@ class CriminalRecordDecayTests(TestCase):
             await refresh_suspect_tags(mock_http_mod)
 
         mock_make_suspect.assert_any_call(
-            mock_http_mod, record.character.guid, duration_seconds=CRIMINAL_SUSPECT_DURATION
+            mock_http_mod, character.guid, duration_seconds=CRIMINAL_SUSPECT_DURATION
         )
 
-    async def test_skips_suspect_for_offline_criminals_via_refresh_suspect_tags(
+    async def test_skips_suspect_for_offline_costume_wearers_via_refresh_suspect_tags(
         self,
         mock_make_suspect,
     ):
-        """Offline criminals are not made suspect via refresh_suspect_tags."""
+        """Offline costume wearers are not made suspect via refresh_suspect_tags."""
         _costume_reconciled_guids.clear()
         player = await sync_to_async(PlayerFactory)()
         character = await sync_to_async(CharacterFactory)(
@@ -2126,11 +2122,6 @@ class CriminalRecordDecayTests(TestCase):
             costume_item_key="Costume_Police_01",
         )
         await character.asave(update_fields=["last_online", "wearing_costume", "costume_item_key"])
-        await CriminalRecord.objects.acreate(
-            character=character,
-            reason="Test",
-            confiscatable_amount=10000,
-        )
         mock_http_mod = AsyncMock()
 
         with patch("amc.criminals.get_players", new_callable=AsyncMock, return_value=[]), \
@@ -2143,26 +2134,26 @@ class CriminalRecordDecayTests(TestCase):
         ]
         self.assertEqual(len(costume_calls), 0)
 
-    async def test_skips_suspect_for_criminals_without_guid(
+    async def test_skips_suspect_for_characters_without_guid(
         self,
         mock_make_suspect,
     ):
-        """Criminals without a guid are not made suspect."""
+        """Characters without a guid are not made suspect; the decay tick ignores them safely."""
         player = await sync_to_async(PlayerFactory)()
         character = await sync_to_async(CharacterFactory)(
             player=player,
             guid=None,
             last_online=timezone.now(),
         )
-        await character.asave(update_fields=["last_online"])
-        await CriminalRecord.objects.acreate(
-            character=character,
-            reason="Test",
-            confiscatable_amount=10000,
+        character.criminal_score = 10000
+        character.last_illicit_delivery_at = timezone.now() - timedelta(
+            minutes=48 * 60 + 1
         )
-        mock_http_mod = AsyncMock()
+        await character.asave(
+            update_fields=["last_online", "criminal_score", "last_illicit_delivery_at"]
+        )
 
-        await tick_criminal_record_decay(mock_http_mod)
+        await tick_criminal_score_decay()
 
         mock_make_suspect.assert_not_called()
 
@@ -2199,6 +2190,16 @@ class ClearSuspectTests(TestCase):
         )
         self.armed_mock = armed.start()
         self.addCleanup(armed.stop)
+        # The costume-reconciliation pass in refresh_suspect_tags polls
+        # get_player_customization for online criminals; these tests don't
+        # stage costume state, so give them a clean None skip.
+        reconciliation = patch(
+            "amc.criminals.get_player_customization",
+            new_callable=AsyncMock,
+            return_value=None,
+        )
+        self.reconciliation_mock = reconciliation.start()
+        self.addCleanup(reconciliation.stop)
 
     async def _setup_criminal(self, wanted_remaining=300):
         player = await sync_to_async(PlayerFactory)()
@@ -2402,9 +2403,6 @@ class ClearSuspectTests(TestCase):
         await character.asave(
             update_fields=["last_online", "wearing_costume", "costume_item_key"]
         )
-        await CriminalRecord.objects.acreate(
-            character=character, reason="Test", confiscatable_amount=1000,
-        )
         return character
 
     async def test_costume_only_guid_not_tracked_in_last_suspect_guids(
@@ -2525,9 +2523,6 @@ class ClearSuspectTests(TestCase):
         )
         await character.asave(
             update_fields=["last_online", "wearing_costume", "costume_item_key"]
-        )
-        await CriminalRecord.objects.acreate(
-            character=character, reason="Test", confiscatable_amount=1000,
         )
         await Wanted.objects.acreate(character=character, wanted_remaining=300)
 

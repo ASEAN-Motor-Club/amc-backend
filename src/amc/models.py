@@ -359,7 +359,17 @@ class Character(models.Model):
     gov_employee_contributions = models.PositiveBigIntegerField(default=0)
 
     # Criminal
-    criminal_laundered_total = models.PositiveBigIntegerField(default=0)
+    # criminal_score: the single tracking ledger for criminal activity.
+    # Cumulative illicit delivery payments; level = floor(score / 50_000) + 1.
+    # Decays in real time after 48h without an illicit delivery (see
+    # criminals.tick_criminal_score_decay); an arrest negates the wanted
+    # bounty from it (see commands.faction.execute_arrest).
+    criminal_score = models.PositiveBigIntegerField(default=0)
+    last_illicit_delivery_at = models.DateTimeField(
+        null=True,
+        blank=True,
+        help_text="Decay clock anchor — set on every illicit cargo delivery.",
+    )
 
     # Costume tracking (updated by ServerSetEquipmentInventory webhook)
     wearing_costume = models.BooleanField(
@@ -525,61 +535,6 @@ class NameWhitelist(models.Model):
             )
         ]
         ordering = ["-created_at"]
-
-
-@final
-class CriminalRecord(models.Model):
-    character = models.ForeignKey(
-        Character, on_delete=models.CASCADE, related_name="criminal_records"
-    )
-    reason = models.CharField(max_length=200)
-    created_at = models.DateTimeField(auto_now_add=True)
-    cleared_at = models.DateTimeField(
-        null=True,
-        blank=True,
-        help_text="NULL = active record. Set on arrest to close the record.",
-    )
-    amount = models.BigIntegerField(
-        default=0,
-        help_text="Permanent total of illicit delivery payments during this record.",
-    )
-    confiscatable_amount = models.BigIntegerField(
-        default=0,
-        help_text="Decaying sum of illicit delivery payments. Reduced by cron when online (half-life 4h).",
-    )
-    cleared_by_arrest = models.ForeignKey(
-        "Confiscation",
-        on_delete=models.SET_NULL,
-        null=True,
-        blank=True,
-        related_name="cleared_records",
-    )
-
-    class Meta:
-        indexes = [models.Index(fields=["character", "cleared_at"])]
-        constraints = [
-            models.UniqueConstraint(
-                fields=["character"],
-                condition=Q(cleared_at__isnull=True),
-                name="unique_active_criminal_record_per_character",
-            )
-        ]
-
-    @override
-    def __str__(self):
-        status = (
-            "active"
-            if self.cleared_at is None
-            else f"cleared {self.cleared_at:%Y-%m-%d}"
-        )
-        return f"{self.character.name} — {self.reason} ({status})"
-
-    @classmethod
-    async def aget_active(cls, character=None):
-        qs = cls.objects.filter(cleared_at__isnull=True)
-        if character:
-            qs = qs.filter(character=character)
-        return [r async for r in qs.select_related("character")]
 
 
 @final
@@ -1881,13 +1836,6 @@ class Delivery(models.Model):
     )
     job = models.ForeignKey(
         "DeliveryJob", models.SET_NULL, null=True, blank=True, related_name="deliveries"
-    )
-    criminal_record = models.ForeignKey(
-        "CriminalRecord",
-        models.SET_NULL,
-        null=True,
-        blank=True,
-        related_name="deliveries",
     )
 
 

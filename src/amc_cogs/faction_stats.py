@@ -8,7 +8,7 @@ import discord
 from discord.ext import tasks, commands
 from django.conf import settings
 
-from amc.models import Delivery, Confiscation, Wanted, CriminalRecord, PoliceSession
+from amc.models import Delivery, Confiscation, Wanted, Character, PoliceSession
 from amc.special_cargo import ILLICIT_CARGO_KEYS
 
 logger = logging.getLogger(__name__)
@@ -97,10 +97,10 @@ class FactionStatsCog(commands.Cog):
             await active_wanted_qs.aaggregate(max_bounty=Sum("amount"))
         )["max_bounty"] or 0
 
-        # --- New Criminal Records ---
-        new_records = await CriminalRecord.objects.filter(
-            created_at__gte=yesterday,
-            created_at__lte=now,
+        # --- Criminals active yesterday (last illicit delivery in window) ---
+        active_criminals = await Character.objects.filter(
+            last_illicit_delivery_at__gte=yesterday,
+            last_illicit_delivery_at__lte=now,
         ).acount()
 
         # --- Build embed ---
@@ -136,7 +136,7 @@ class FactionStatsCog(commands.Cog):
 
         embed.add_field(
             name="Criminal Records",
-            value=f"**{new_records}** new criminals entered the underworld today",
+            value=f"**{active_criminals}** criminals moved illicit cargo today",
             inline=False,
         )
 
