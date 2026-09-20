@@ -304,7 +304,10 @@ async def handle_cargo_arrived(event, player, character, ctx):
             already_wanted = await Wanted.objects.filter(
                 character=character, expired_at__isnull=True
             ).aexists()
-            # DEPRECATED: random wanted trigger — may be restored in the future
+            # DEPRECATED: random wanted trigger — may be restored in the future.
+            # NOTE: any restored trigger MUST be gated on active_police_present()
+            # (amc.criminals) — no effective cops on duty means the wanted
+            # system is dormant and must not create wanted records.
             # if already_wanted or should_trigger_wanted(accumulated_amount):
             if already_wanted:
                 # Bounty (Wanted.amount) starts at 0 — it only grows from police

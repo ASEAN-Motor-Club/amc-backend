@@ -1,14 +1,18 @@
 """Tests for the wanted countdown tick (amc.criminals).
 
-Hybrid mechanic:
-  - Online suspects always decay at BASE_DECAY_PER_TICK (1.0/tick).
-    Clears in BASE_WANTED_DURATION (e.g. 900 s = 15 min) with no police.
-  - Police proximity SLOWS decay via 1/r² law:
-      effective_decay = BASE_DECAY_PER_TICK / (1 + proximity_factor)
-    Closer police → larger factor → slower decay. Decay never reverses.
-  - Escape gate: cannot expire while any cop is within ESCAPE_DISTANCE (500m).
-    Clamped at ESCAPE_FLOOR. Clears freely once all cops are beyond 500m.
-  - Offline suspects: no decay, wanted persists indefinitely.
+Speed-based wanted law (2026-09 rework, corrected 2026-09-20):
+  - Running (>= 50 km/h): wanted GROWS at (S - 50)/50 * A(D) s/s, capped at 5★.
+    A(D) = 1.0 at the 500 m near cap, falling to 1/3 far away (speeding far
+    builds wanted slower).
+  - Hiding (< 50 km/h): wanted DECAYS at (50 - S)/50 * F(D) s/s. F(D) = 1.0 at
+    the 500 m near cap, rising to 3.0 far away. Distance NEVER slows or
+    freezes decay (the old escape gate is gone): hiding next to a cop clears
+    at the plain speed-driven rate.
+  - Dormant rule: with zero effective cops on duty (on-duty + online +
+    non-AFK) the wanted system is off — every active Wanted record is
+    cleared (online suspects via the normal expiry flow, offline silently)
+    and organic triggers must not fire.
+  - Offline suspects (while armed): no decay, wanted persists indefinitely.
 """
 
 import math
@@ -22,23 +26,22 @@ from django.utils import timezone
 
 from amc.criminals import (
     BASE_DECAY_PER_TICK,
-    BASE_WANTED_DURATION,
     CRIMINAL_RECORD_DECAY_FACTOR,
     CRIMINAL_SUSPECT_DURATION,
-    ESCAPE_DISTANCE,
-    ESCAPE_FLOOR,
-    ESCAPE_MESSAGE,
     TICK_INTERVAL,
+    WANTED_NEAR_CAP_UNITS,
     _compute_stars,
     _costume_reconciled_guids,
     _last_compass_sent,
-    _last_escape_msg_sent,
     _last_star_notified,
     _last_suspect_guids,
+    active_police_present,
+    hide_decay_multiplier,
     refresh_suspect_tags,
     tick_criminal_record_decay,
     tick_police_suspect_locations,
     tick_wanted_countdown,
+    wanted_accrual_multiplier,
 )
 from amc.factories import CharacterFactory, PlayerFactory
 from amc.models import CriminalRecord, PoliceSession, Wanted
@@ -62,11 +65,12 @@ def _make_players_list(player_datas):
 # Cop and criminal coordinates used across tests
 # ---------------------------------------------------------------------------
 _SUSPECT_LOC = (5000, 5000, 0)
-_COP_CLOSE    = (5000 + 1000, 5000, 0)    # 1000 units = 10m  (clamped to MIN_DISTANCE=50m → factor=10)
-_COP_MED      = (5000 + 10_000, 5000, 0)  # 10_000 units = 100m (factor=4.0 with REF_DISTANCE=200m)
-_COP_REF      = (5000 + Wanted.REF_DISTANCE, 5000, 0)  # at REF_DISTANCE → factor=1.0 → decay = BASE/2
-_COP_ESCAPED  = (5000 + ESCAPE_DISTANCE + 1000, 5000, 0)  # > ESCAPE_DISTANCE away
-_COP_FAR      = (5000 + 100_000, 5000, 0)  # 1000m — well beyond escape distance
+_COP_CLOSE    = (5000 + 1000, 5000, 0)    # 1000 units = 10m  — inside the 500 m near cap
+_COP_MED      = (5000 + 10_000, 5000, 0)  # 10_000 units = 100m — inside the near cap
+_COP_REF      = (5000 + Wanted.REF_DISTANCE, 5000, 0)  # at REF_DISTANCE → inside the near cap
+_COP_ESCAPED  = (5000 + WANTED_NEAR_CAP_UNITS + 1000, 5000, 0)  # 510m — just past the near cap
+_COP_FAR      = (5000 + 100_000, 5000, 0)  # 1000m — past the near cap (F ≈ 1.4)
+_COP_3KM      = (5000 + 300_000, 5000, 0)  # 3km — deep in the far band
 
 
 class ComputeStarsTests(TestCase):
@@ -118,8 +122,8 @@ class ComputeStarsTests(TestCase):
         self.assertEqual(_compute_stars(-10), 0)
 
     def test_floor_is_1_star(self):
-        """ESCAPE_FLOOR (0.1) is above 0 so still counts as 1 star."""
-        self.assertEqual(_compute_stars(ESCAPE_FLOOR), 1)
+        """A tiny remainder (old escape floor 0.1) still counts as 1 star."""
+        self.assertEqual(_compute_stars(0.1), 1)
 
 
 @patch("amc.criminals.refresh_player_name", new_callable=AsyncMock)
@@ -129,8 +133,16 @@ class WantedCountdownTickTests(TestCase):
 
     def setUp(self):
         _last_star_notified.clear()
-        _last_escape_msg_sent.clear()
         _last_suspect_guids.clear()
+        # Default to ARMED (cops present) so law tests don't trip the dormant
+        # amnesty. Dormant tests set self.armed_mock.return_value = False.
+        armed = patch(
+            "amc.criminals.active_police_present",
+            new_callable=AsyncMock,
+            return_value=True,
+        )
+        self.armed_mock = armed.start()
+        self.addCleanup(armed.stop)
 
     async def _setup_criminal(self, wanted_remaining=300):
         """Create a criminal with wanted status."""
@@ -158,15 +170,16 @@ class WantedCountdownTickTests(TestCase):
         return officer
 
     # -----------------------------------------------------------------------
-    # Base time-based decay — always ticks without police
+    # Dormant rule — no effective cops on duty clears everything
     # -----------------------------------------------------------------------
 
-    async def test_no_cops_online_decays_at_base_rate(
+    async def test_dormant_no_cops_clears_online_suspect(
         self,
         mock_sys_msg,
         mock_refresh,
     ):
-        """Online suspect decays at BASE_DECAY_PER_TICK even with no police online."""
+        """No effective cops on duty -> wanted is cleared in one tick."""
+        self.armed_mock.return_value = False
         criminal = await self._setup_criminal(wanted_remaining=300)
         players = _make_players_list(
             [_make_player_data(criminal.player.unique_id, criminal.guid, *_SUSPECT_LOC)]
@@ -175,34 +188,56 @@ class WantedCountdownTickTests(TestCase):
         mock_http_mod = AsyncMock()
 
         with patch("amc.criminals.get_players", new_callable=AsyncMock, return_value=players):
-            for _ in range(10):
-                await tick_wanted_countdown(mock_http, mock_http_mod)
+            await tick_wanted_countdown(mock_http, mock_http_mod)
 
         wanted = await Wanted.objects.aget(character=criminal)
-        # 10 ticks × 1.0/tick = 10 units decay → 290
-        self.assertAlmostEqual(wanted.wanted_remaining, 300 - 10 * BASE_DECAY_PER_TICK, delta=0.1)
-        self.assertIsNone(wanted.expired_at)
+        self.assertEqual(wanted.wanted_remaining, 0)
+        self.assertIsNotNone(wanted.expired_at)
 
-    async def test_no_cops_online_expires_after_base_duration(
+    async def test_dormant_clears_offline_suspects_too(
         self,
         mock_sys_msg,
         mock_refresh,
     ):
-        """Wanted expires after BASE_WANTED_DURATION ticks with no police."""
-        criminal = await self._setup_criminal(wanted_remaining=BASE_WANTED_DURATION)
+        """Dormant amnesty also expires records of suspects who are offline."""
+        self.armed_mock.return_value = False
+        criminal = await self._setup_criminal(wanted_remaining=300)
+
+        # Nobody online at all — the suspect is not in the player list
+        players = _make_players_list([])
+        mock_http = AsyncMock()
+        mock_http_mod = AsyncMock()
+
+        with patch("amc.criminals.get_players", new_callable=AsyncMock, return_value=players):
+            await tick_wanted_countdown(mock_http, mock_http_mod)
+
+        wanted = await Wanted.objects.aget(character=criminal)
+        self.assertEqual(wanted.wanted_remaining, 0)
+        self.assertIsNotNone(wanted.expired_at)
+        # Offline suspects are expired silently — no name refresh, no announce
+        mock_refresh.assert_not_called()
+
+    async def test_dormant_online_suspect_gets_expiry_flow(
+        self,
+        mock_sys_msg,
+        mock_refresh,
+    ):
+        """Dormant amnesty: online suspects get the normal expiry flow."""
+        self.armed_mock.return_value = False
+        criminal = await self._setup_criminal(wanted_remaining=300)
         players = _make_players_list(
             [_make_player_data(criminal.player.unique_id, criminal.guid, *_SUSPECT_LOC)]
         )
         mock_http = AsyncMock()
         mock_http_mod = AsyncMock()
 
-        with patch("amc.criminals.get_players", new_callable=AsyncMock, return_value=players):
-            for _ in range(BASE_WANTED_DURATION):
-                await tick_wanted_countdown(mock_http, mock_http_mod)
+        with patch("amc.criminals.get_players", new_callable=AsyncMock, return_value=players), \
+             patch("amc.criminals.announce", new_callable=AsyncMock) as mock_announce:
+            await tick_wanted_countdown(mock_http, mock_http_mod)
 
-        wanted = await Wanted.objects.aget(character=criminal)
-        self.assertEqual(wanted.wanted_remaining, 0)
-        self.assertIsNotNone(wanted.expired_at)
+        mock_refresh.assert_called_once_with(criminal, mock_http_mod)
+        mock_announce.assert_awaited_once()
+        self.assertIn("no longer wanted", mock_announce.call_args.args[0])
 
     async def test_offline_suspect_no_decay(
         self,
@@ -241,56 +276,62 @@ class WantedCountdownTickTests(TestCase):
         mock_refresh.assert_not_called()
 
     # -----------------------------------------------------------------------
-    # Police proximity — slows decay (1/r²)
+    # Distance modifiers — far = faster decay (F(D) ≥ 1 everywhere)
     # -----------------------------------------------------------------------
 
-    async def test_close_cop_decays_slower_than_no_police(
+    async def test_cop_distance_accelerates_hiding_decay(
         self,
         mock_sys_msg,
         mock_refresh,
     ):
-        """Close cop slows decay: wanted_remaining is higher with cop than without."""
-        # Criminal A: cop nearby (slows decay)
-        criminal_a = await self._setup_criminal(wanted_remaining=200)
-        officer = await self._setup_police()
+        """Hiding with a cop 3 km away decays FASTER than with a cop at 100 m."""
+        criminal_near = await self._setup_criminal(wanted_remaining=200)
+        officer_near = await self._setup_police()
 
-        # Criminal B: no cop (full decay rate)
-        criminal_b = await self._setup_criminal(wanted_remaining=200)
+        criminal_far = await self._setup_criminal(wanted_remaining=200)
+        officer_far = await self._setup_police()
 
         mock_http = AsyncMock()
         mock_http_mod = AsyncMock()
-
         sx, sy, sz = _SUSPECT_LOC
-        cx, cy, cz = _COP_CLOSE  # 10m → factor=10 → effective_decay = 1.0/(1+10) ≈ 0.09/tick
 
-        # Scenario A: cop at 10m slows decay
-        players_a = _make_players_list([
-            _make_player_data(officer.player.unique_id, officer.guid, cx, cy, cz),
-            _make_player_data(criminal_a.player.unique_id, criminal_a.guid, sx, sy, sz),
+        # Scenario A: cop at 100 m — inside the near cap, base rate
+        players_near = _make_players_list([
+            _make_player_data(officer_near.player.unique_id, officer_near.guid, *_COP_MED),
+            _make_player_data(criminal_near.player.unique_id, criminal_near.guid, sx, sy, sz),
         ])
-        with patch("amc.criminals.get_players", new_callable=AsyncMock, return_value=players_a):
+        with patch("amc.criminals.get_players", new_callable=AsyncMock, return_value=players_near):
             for _ in range(10):
                 await tick_wanted_countdown(mock_http, mock_http_mod)
-        wanted_a = await Wanted.objects.aget(character=criminal_a)
+        wanted_near = await Wanted.objects.aget(character=criminal_near)
 
-        # Scenario B: no cops — full decay
-        players_b = _make_players_list([
-            _make_player_data(criminal_b.player.unique_id, criminal_b.guid, sx, sy, sz),
+        # Scenario B: cop at 3 km — F(D) > 1 accelerates decay
+        players_far = _make_players_list([
+            _make_player_data(officer_far.player.unique_id, officer_far.guid, *_COP_3KM),
+            _make_player_data(criminal_far.player.unique_id, criminal_far.guid, sx, sy, sz),
         ])
-        with patch("amc.criminals.get_players", new_callable=AsyncMock, return_value=players_b):
+        with patch("amc.criminals.get_players", new_callable=AsyncMock, return_value=players_far):
             for _ in range(10):
                 await tick_wanted_countdown(mock_http, mock_http_mod)
-        wanted_b = await Wanted.objects.aget(character=criminal_b)
+        wanted_far = await Wanted.objects.aget(character=criminal_far)
 
-        # Cop nearby → slower decay → higher remaining
-        self.assertGreater(wanted_a.wanted_remaining, wanted_b.wanted_remaining)
+        # Far cop → faster decay → LOWER remaining
+        self.assertLess(wanted_far.wanted_remaining, wanted_near.wanted_remaining)
+        # Near cop (inside cap) decays at exactly the base rate
+        self.assertAlmostEqual(wanted_near.wanted_remaining, 190, delta=0.1)
+        # Far cop matches F(3 km)
+        self.assertAlmostEqual(
+            wanted_far.wanted_remaining,
+            200 - 10 * hide_decay_multiplier(300_000),
+            delta=0.5,
+        )
 
-    async def test_close_cop_decays_slower_than_medium_cop(
+    async def test_hiding_point_blank_decays_at_base_rate(
         self,
         mock_sys_msg,
         mock_refresh,
     ):
-        """Closer cop = more slowing: 10m decays slower than 100m."""
+        """NO gate: a cop at 10 m does not slow decay at all — base rate."""
         criminal_close = await self._setup_criminal(wanted_remaining=200)
         officer_close = await self._setup_police()
 
@@ -301,7 +342,7 @@ class WantedCountdownTickTests(TestCase):
         mock_http_mod = AsyncMock()
         sx, sy, sz = _SUSPECT_LOC
 
-        # Close cop (10m): factor=10, effective_decay ≈ 0.09/tick
+        # Cop at 10 m
         players_close = _make_players_list([
             _make_player_data(officer_close.player.unique_id, officer_close.guid, *_COP_CLOSE),
             _make_player_data(criminal_close.player.unique_id, criminal_close.guid, sx, sy, sz),
@@ -309,9 +350,8 @@ class WantedCountdownTickTests(TestCase):
         with patch("amc.criminals.get_players", new_callable=AsyncMock, return_value=players_close):
             for _ in range(10):
                 await tick_wanted_countdown(mock_http, mock_http_mod)
-        wanted_close = await Wanted.objects.aget(character=criminal_close)
 
-        # Medium cop (100m): factor=1, effective_decay = 0.5/tick
+        # Cop at 100 m
         players_med = _make_players_list([
             _make_player_data(officer_med.player.unique_id, officer_med.guid, *_COP_MED),
             _make_player_data(criminal_med.player.unique_id, criminal_med.guid, sx, sy, sz),
@@ -319,22 +359,27 @@ class WantedCountdownTickTests(TestCase):
         with patch("amc.criminals.get_players", new_callable=AsyncMock, return_value=players_med):
             for _ in range(10):
                 await tick_wanted_countdown(mock_http, mock_http_mod)
+
+        wanted_close = await Wanted.objects.aget(character=criminal_close)
         wanted_med = await Wanted.objects.aget(character=criminal_med)
 
-        # Closer cop → slower decay → higher remaining
-        self.assertGreater(wanted_close.wanted_remaining, wanted_med.wanted_remaining)
+        # Both decay at the base rate — distance is clamped inside the cap
+        self.assertAlmostEqual(wanted_close.wanted_remaining, 190, delta=0.1)
+        self.assertAlmostEqual(wanted_med.wanted_remaining, 190, delta=0.1)
+        self.assertIsNone(wanted_close.expired_at)
+        self.assertIsNone(wanted_med.expired_at)
 
-    async def test_med_cop_decays_at_half_base_rate(
+    async def test_hiding_just_past_cap_barely_accelerates(
         self,
         mock_sys_msg,
         mock_refresh,
     ):
-        """Cop at REF_DISTANCE: factor=1.0, effective_decay = BASE_DECAY_PER_TICK / 2."""
+        """Cop just past the near cap (510 m): F ≈ 1.01, nearly base rate."""
         criminal = await self._setup_criminal(wanted_remaining=200)
         officer = await self._setup_police()
 
         sx, sy, sz = _SUSPECT_LOC
-        cx, cy, cz = _COP_REF  # at REF_DISTANCE → factor=1.0 → decay = BASE_DECAY_PER_TICK / 2
+        cx, cy, cz = _COP_ESCAPED  # 510 m
         players = _make_players_list([
             _make_player_data(officer.player.unique_id, officer.guid, cx, cy, cz),
             _make_player_data(criminal.player.unique_id, criminal.guid, sx, sy, sz),
@@ -347,37 +392,8 @@ class WantedCountdownTickTests(TestCase):
                 await tick_wanted_countdown(mock_http, mock_http_mod)
 
         wanted = await Wanted.objects.aget(character=criminal)
-        # 10 ticks × (BASE_DECAY_PER_TICK / 2) × TICK_INTERVAL
-        expected = 200 - 10 * (BASE_DECAY_PER_TICK / 2.0) * TICK_INTERVAL
-        self.assertAlmostEqual(wanted.wanted_remaining, expected, delta=0.5)
-        self.assertIsNone(wanted.expired_at)
-
-    async def test_cop_beyond_escape_distance_uses_full_rate(
-        self,
-        mock_sys_msg,
-        mock_refresh,
-    ):
-        """Cop beyond ESCAPE_DISTANCE: no proximity effect, full BASE_DECAY_PER_TICK applies."""
-        criminal = await self._setup_criminal(wanted_remaining=200)
-        officer = await self._setup_police()
-
-        sx, sy, sz = _SUSPECT_LOC
-        cx, cy, cz = _COP_ESCAPED  # > 200m
-        players = _make_players_list([
-            _make_player_data(officer.player.unique_id, officer.guid, cx, cy, cz),
-            _make_player_data(criminal.player.unique_id, criminal.guid, sx, sy, sz),
-        ])
-        mock_http = AsyncMock()
-        mock_http_mod = AsyncMock()
-
-        with patch("amc.criminals.get_players", new_callable=AsyncMock, return_value=players):
-            for _ in range(10):
-                await tick_wanted_countdown(mock_http, mock_http_mod)
-
-        wanted = await Wanted.objects.aget(character=criminal)
-        # Full decay: 10 × BASE_DECAY_PER_TICK × TICK_INTERVAL
-        expected = 200 - 10 * BASE_DECAY_PER_TICK * TICK_INTERVAL
-        self.assertAlmostEqual(wanted.wanted_remaining, expected, delta=0.5)
+        expected = 200 - 10 * hide_decay_multiplier(51_000)
+        self.assertAlmostEqual(wanted.wanted_remaining, expected, delta=0.1)
         self.assertIsNone(wanted.expired_at)
 
     async def test_bounty_does_not_grow_without_police(
@@ -401,20 +417,20 @@ class WantedCountdownTickTests(TestCase):
         self.assertEqual(wanted.amount, 0)
 
     # -----------------------------------------------------------------------
-    # Escape gate — cannot expire while near police
+    # Expiry — no floor, wanted can always reach zero
     # -----------------------------------------------------------------------
 
-    async def test_near_cop_clamps_at_escape_floor(
+    async def test_low_wanted_expires_near_cop(
         self,
         mock_sys_msg,
         mock_refresh,
     ):
-        """Wanted cannot drop below ESCAPE_FLOOR while police are within ESCAPE_DISTANCE."""
+        """No floor: wanted at 1.0 s expires while a cop sits at 100 m."""
         criminal = await self._setup_criminal(wanted_remaining=1.0)
         officer = await self._setup_police()
 
         sx, sy, sz = _SUSPECT_LOC
-        cx, cy, cz = _COP_MED  # within 200m
+        cx, cy, cz = _COP_MED  # 100 m — inside the near cap
         players = _make_players_list([
             _make_player_data(officer.player.unique_id, officer.guid, cx, cy, cz),
             _make_player_data(criminal.player.unique_id, criminal.guid, sx, sy, sz),
@@ -423,50 +439,23 @@ class WantedCountdownTickTests(TestCase):
         mock_http_mod = AsyncMock()
 
         with patch("amc.criminals.get_players", new_callable=AsyncMock, return_value=players):
-            for _ in range(20):
-                await tick_wanted_countdown(mock_http, mock_http_mod)
+            await tick_wanted_countdown(mock_http, mock_http_mod)
 
         wanted = await Wanted.objects.aget(character=criminal)
-        self.assertGreaterEqual(wanted.wanted_remaining, ESCAPE_FLOOR)
-        self.assertIsNone(wanted.expired_at)
+        self.assertEqual(wanted.wanted_remaining, 0)
+        self.assertIsNotNone(wanted.expired_at)
 
-    async def test_cannot_expire_near_police(
+    async def test_beyond_near_cap_expires_normally(
         self,
         mock_sys_msg,
         mock_refresh,
     ):
-        """Wanted at ESCAPE_FLOOR near police never expires."""
-        criminal = await self._setup_criminal(wanted_remaining=ESCAPE_FLOOR)
-        officer = await self._setup_police()
-
-        sx, sy, sz = _SUSPECT_LOC
-        cx, cy, cz = _COP_MED
-        players = _make_players_list([
-            _make_player_data(officer.player.unique_id, officer.guid, cx, cy, cz),
-            _make_player_data(criminal.player.unique_id, criminal.guid, sx, sy, sz),
-        ])
-        mock_http = AsyncMock()
-        mock_http_mod = AsyncMock()
-
-        with patch("amc.criminals.get_players", new_callable=AsyncMock, return_value=players):
-            for _ in range(20):
-                await tick_wanted_countdown(mock_http, mock_http_mod)
-
-        wanted = await Wanted.objects.aget(character=criminal)
-        self.assertEqual(wanted.wanted_remaining, ESCAPE_FLOOR)
-        self.assertIsNone(wanted.expired_at)
-
-    async def test_beyond_escape_distance_expires_normally(
-        self,
-        mock_sys_msg,
-        mock_refresh,
-    ):
-        """Suspect beyond ESCAPE_DISTANCE decays at full rate and can expire."""
+        """Suspect past the near cap decays and can expire."""
         criminal = await self._setup_criminal(wanted_remaining=5.0)
         officer = await self._setup_police()
 
         sx, sy, sz = _SUSPECT_LOC
-        ex, ey, ez = _COP_ESCAPED  # > 200m
+        ex, ey, ez = _COP_ESCAPED  # 510 m
         players = _make_players_list([
             _make_player_data(officer.player.unique_id, officer.guid, ex, ey, ez),
             _make_player_data(criminal.player.unique_id, criminal.guid, sx, sy, sz),
@@ -475,26 +464,24 @@ class WantedCountdownTickTests(TestCase):
         mock_http_mod = AsyncMock()
 
         with patch("amc.criminals.get_players", new_callable=AsyncMock, return_value=players):
-            for _ in range(10):  # 10 × 1.0/tick = 10 > 5 → expires
+            for _ in range(10):  # 10 ticks × ~1.0/tick > 5 → expires
                 await tick_wanted_countdown(mock_http, mock_http_mod)
 
         wanted = await Wanted.objects.aget(character=criminal)
         self.assertEqual(wanted.wanted_remaining, 0)
         self.assertIsNotNone(wanted.expired_at)
 
-    async def test_full_lifecycle_near_then_escape(
+    async def test_full_lifecycle_near_then_far(
         self,
         mock_sys_msg,
         mock_refresh,
     ):
-        """Full lifecycle: runs down near police (slowed) then expires quickly once beyond 200m."""
-        # With INITIAL=300, cop at 100m → 0.5/tick, so from 300 needs 600 ticks to clear
-        # Start low to keep test fast
-        criminal = await self._setup_criminal(wanted_remaining=2.0)
+        """Full lifecycle: base-rate decay near cops, faster decay once far."""
+        criminal = await self._setup_criminal(wanted_remaining=15.0)
         officer = await self._setup_police()
 
         sx, sy, sz = _SUSPECT_LOC
-        cx, cy, cz = _COP_MED  # 100m → 0.5/tick → 4 ticks to drain 2.0 to floor
+        cx, cy, cz = _COP_MED  # 100 m — inside the near cap
 
         near_players = _make_players_list([
             _make_player_data(officer.player.unique_id, officer.guid, cx, cy, cz),
@@ -503,41 +490,82 @@ class WantedCountdownTickTests(TestCase):
         mock_http = AsyncMock()
         mock_http_mod = AsyncMock()
 
-        # Phase 1: near police — slows down, floors at ESCAPE_FLOOR
+        # Phase 1: near police — base rate (1.0/tick)
         with patch("amc.criminals.get_players", new_callable=AsyncMock, return_value=near_players):
             for _ in range(10):
                 await tick_wanted_countdown(mock_http, mock_http_mod)
 
         wanted = await Wanted.objects.aget(character=criminal)
-        self.assertEqual(wanted.wanted_remaining, ESCAPE_FLOOR)
+        self.assertAlmostEqual(wanted.wanted_remaining, 5.0, delta=0.1)
         self.assertIsNone(wanted.expired_at)
 
-        # Phase 2: escape beyond ESCAPE_DISTANCE → full rate, clears in 1 tick
-        ex, ey, ez = _COP_ESCAPED
-        escaped_players = _make_players_list([
-            _make_player_data(officer.player.unique_id, officer.guid, ex, ey, ez),
+        # Phase 2: cop moves to 3 km → decay accelerates, clears fast
+        far_players = _make_players_list([
+            _make_player_data(officer.player.unique_id, officer.guid, *_COP_3KM),
             _make_player_data(criminal.player.unique_id, criminal.guid, sx, sy, sz),
         ])
-        with patch("amc.criminals.get_players", new_callable=AsyncMock, return_value=escaped_players):
-            await tick_wanted_countdown(mock_http, mock_http_mod)
+        with patch("amc.criminals.get_players", new_callable=AsyncMock, return_value=far_players):
+            for _ in range(10):
+                await tick_wanted_countdown(mock_http, mock_http_mod)
 
         wanted = await Wanted.objects.aget(character=criminal)
         self.assertEqual(wanted.wanted_remaining, 0)
         self.assertIsNotNone(wanted.expired_at)
 
     # -----------------------------------------------------------------------
-    # Escape popup messages
+    # Speed-based wanted law — growth, F(D) distance acceleration, cap
     # -----------------------------------------------------------------------
 
-    async def test_escape_popup_sent_when_at_floor_near_police(
-        self,
-        mock_sys_msg,
-        mock_refresh,
+    @patch("amc.criminals.get_players_locations", new_callable=AsyncMock)
+    async def test_running_at_100kmh_grows_wanted(
+        self, mock_locs, mock_sys_msg, mock_refresh,
     ):
-        """Escape popup is sent when suspect heat is clamped at ESCAPE_FLOOR near police."""
-        criminal = await self._setup_criminal(wanted_remaining=ESCAPE_FLOOR)
-        officer = await self._setup_police()
+        """Suspect moving at 100 km/h → +1.0 s of wanted per tick."""
+        criminal = await self._setup_criminal(wanted_remaining=300)
+        mock_locs.return_value = [_make_mgmt_entry(criminal.guid, 2778)]  # ≈100 km/h
+        players = _make_players_list(
+            [_make_player_data(criminal.player.unique_id, criminal.guid, *_SUSPECT_LOC)]
+        )
+        mock_http = AsyncMock()
+        mock_http_mod = AsyncMock()
 
+        with patch("amc.criminals.get_players", new_callable=AsyncMock, return_value=players):
+            for _ in range(10):
+                await tick_wanted_countdown(mock_http, mock_http_mod, AsyncMock())
+
+        wanted = await Wanted.objects.aget(character=criminal)
+        # 10 ticks × (100 - 50)/50 = +10
+        self.assertAlmostEqual(wanted.wanted_remaining, 310, delta=0.5)
+        self.assertIsNone(wanted.expired_at)
+
+    @patch("amc.criminals.get_players_locations", new_callable=AsyncMock)
+    async def test_growth_capped_at_five_stars(
+        self, mock_locs, mock_sys_msg, mock_refresh,
+    ):
+        """Wanted growth caps at INITIAL_WANTED_LEVEL (5 stars = 600 s)."""
+        criminal = await self._setup_criminal(wanted_remaining=595)
+        mock_locs.return_value = [_make_mgmt_entry(criminal.guid, 2778)]  # ≈100 km/h
+        players = _make_players_list(
+            [_make_player_data(criminal.player.unique_id, criminal.guid, *_SUSPECT_LOC)]
+        )
+        mock_http = AsyncMock()
+        mock_http_mod = AsyncMock()
+
+        with patch("amc.criminals.get_players", new_callable=AsyncMock, return_value=players):
+            for _ in range(10):
+                await tick_wanted_countdown(mock_http, mock_http_mod, AsyncMock())
+
+        wanted = await Wanted.objects.aget(character=criminal)
+        self.assertEqual(wanted.wanted_remaining, Wanted.INITIAL_WANTED_LEVEL)
+
+    @patch("amc.criminals.get_players_locations", new_callable=AsyncMock)
+    async def test_running_near_cop_still_accrues(
+        self, mock_locs, mock_sys_msg, mock_refresh,
+    ):
+        """The 500 m gate freezes DECAY only — running still accrues near cops."""
+        criminal = await self._setup_criminal(wanted_remaining=300)
+        officer = await self._setup_police()
+        mock_locs.return_value = [_make_mgmt_entry(criminal.guid, 2778)]  # ≈100 km/h
         sx, sy, sz = _SUSPECT_LOC
         players = _make_players_list([
             _make_player_data(officer.player.unique_id, officer.guid, *_COP_MED),
@@ -547,22 +575,97 @@ class WantedCountdownTickTests(TestCase):
         mock_http_mod = AsyncMock()
 
         with patch("amc.criminals.get_players", new_callable=AsyncMock, return_value=players):
-            await tick_wanted_countdown(mock_http, mock_http_mod)
+            for _ in range(10):
+                await tick_wanted_countdown(mock_http, mock_http_mod, AsyncMock())
 
-        escape_calls = [
-            c for c in mock_sys_msg.call_args_list
-            if len(c.args) > 1 and c.args[1] == ESCAPE_MESSAGE
-        ]
-        self.assertEqual(len(escape_calls), 1)
-        self.assertEqual(escape_calls[0].kwargs["character_guid"], criminal.guid)
+        wanted = await Wanted.objects.aget(character=criminal)
+        self.assertAlmostEqual(wanted.wanted_remaining, 310, delta=0.5)
 
-    async def test_escape_popup_throttled(
+    @patch("amc.criminals.get_players_locations", new_callable=AsyncMock)
+    async def test_running_far_cop_accrues_slower(
+        self, mock_locs, mock_sys_msg, mock_refresh,
+    ):
+        """Speeding far away builds wanted SLOWER: running at 100 km/h with
+        the nearest cop 3 km away accrues at A(3 km) ≈ 0.63× the near rate."""
+        criminal = await self._setup_criminal(wanted_remaining=300)
+        officer = await self._setup_police()
+        mock_locs.return_value = [_make_mgmt_entry(criminal.guid, 2778)]  # ≈100 km/h
+        sx, sy, sz = _SUSPECT_LOC
+        players_far = _make_players_list([
+            _make_player_data(officer.player.unique_id, officer.guid, *_COP_3KM),
+            _make_player_data(criminal.player.unique_id, criminal.guid, sx, sy, sz),
+        ])
+        mock_http = AsyncMock()
+        mock_http_mod = AsyncMock()
+
+        with patch("amc.criminals.get_players", new_callable=AsyncMock, return_value=players_far):
+            for _ in range(10):
+                await tick_wanted_countdown(mock_http, mock_http_mod, AsyncMock())
+
+        wanted = await Wanted.objects.aget(character=criminal)
+        # 10 ticks × 1.0 × A(3 km) — clearly below the +10 near rate
+        expected = 300 + 10 * wanted_accrual_multiplier(300_000)
+        self.assertAlmostEqual(wanted.wanted_remaining, expected, delta=0.5)
+        self.assertLess(wanted.wanted_remaining, 309)
+
+    @patch("amc.criminals.get_players_locations", new_callable=AsyncMock)
+    async def test_far_cop_accelerates_hiding_decay(
+        self, mock_locs, mock_sys_msg, mock_refresh,
+    ):
+        """Cop at 3 km, suspect parked → F(3 km) ≈ 2.11× base decay."""
+        criminal = await self._setup_criminal(wanted_remaining=200)
+        officer = await self._setup_police()
+        mock_locs.return_value = []  # no telemetry → parked
+        sx, sy, sz = _SUSPECT_LOC
+        far_cop = (5000 + 300_000, 5000, 0)  # 3 km away
+        players = _make_players_list([
+            _make_player_data(officer.player.unique_id, officer.guid, *far_cop),
+            _make_player_data(criminal.player.unique_id, criminal.guid, sx, sy, sz),
+        ])
+        mock_http = AsyncMock()
+        mock_http_mod = AsyncMock()
+
+        with patch("amc.criminals.get_players", new_callable=AsyncMock, return_value=players):
+            for _ in range(10):
+                await tick_wanted_countdown(mock_http, mock_http_mod, AsyncMock())
+
+        wanted = await Wanted.objects.aget(character=criminal)
+        # 10 ticks × 1.0 × F(2500 m past gate) = 10 × (1 + 2*2500/4500)
+        expected = 200 - 10 * hide_decay_multiplier(300_000)
+        self.assertAlmostEqual(wanted.wanted_remaining, expected, delta=0.5)
+
+    @patch("amc.criminals.get_players_locations", new_callable=AsyncMock)
+    async def test_creep_at_45kmh_decays_slowly(
+        self, mock_locs, mock_sys_msg, mock_refresh,
+    ):
+        """Creeping at 45 km/h decays at (50-45)/50 = 0.1 s/s (no cops)."""
+        criminal = await self._setup_criminal(wanted_remaining=300)
+        mock_locs.return_value = [_make_mgmt_entry(criminal.guid, 1250)]  # 45 km/h
+        players = _make_players_list(
+            [_make_player_data(criminal.player.unique_id, criminal.guid, *_SUSPECT_LOC)]
+        )
+        mock_http = AsyncMock()
+        mock_http_mod = AsyncMock()
+
+        with patch("amc.criminals.get_players", new_callable=AsyncMock, return_value=players):
+            for _ in range(10):
+                await tick_wanted_countdown(mock_http, mock_http_mod, AsyncMock())
+
+        wanted = await Wanted.objects.aget(character=criminal)
+        # 10 ticks × 0.1 × F(no cops = 1.0) = 1.0
+        self.assertAlmostEqual(wanted.wanted_remaining, 299, delta=0.5)
+
+    # -----------------------------------------------------------------------
+    # Dormant amnesty flow details
+    # -----------------------------------------------------------------------
+
+    async def test_no_escape_popup_exists_anymore(
         self,
         mock_sys_msg,
         mock_refresh,
     ):
-        """Escape popup is not sent again within ESCAPE_MSG_COOLDOWN seconds."""
-        criminal = await self._setup_criminal(wanted_remaining=ESCAPE_FLOOR)
+        """The gate is gone: hiding near cops just decays, no popups, no stall."""
+        criminal = await self._setup_criminal(wanted_remaining=300)
         officer = await self._setup_police()
 
         sx, sy, sz = _SUSPECT_LOC
@@ -577,64 +680,32 @@ class WantedCountdownTickTests(TestCase):
             for _ in range(5):
                 await tick_wanted_countdown(mock_http, mock_http_mod)
 
-        escape_calls = [
-            c for c in mock_sys_msg.call_args_list
-            if len(c.args) > 1 and c.args[1] == ESCAPE_MESSAGE
-        ]
-        self.assertEqual(len(escape_calls), 1)
+        wanted = await Wanted.objects.aget(character=criminal)
+        self.assertAlmostEqual(wanted.wanted_remaining, 295, delta=0.1)
+        # No system messages fired at all (no escape hints in the new law)
+        mock_sys_msg.assert_not_called()
 
-    async def test_escape_popup_not_sent_when_above_floor(
+    async def test_armed_copless_world_decays_at_base_rate(
         self,
         mock_sys_msg,
         mock_refresh,
     ):
-        """Escape popup is not sent while wanted_remaining is well above floor."""
+        """Armed but no cop visible in the world snapshot -> base rate decay."""
         criminal = await self._setup_criminal(wanted_remaining=300)
-        officer = await self._setup_police()
-
-        sx, sy, sz = _SUSPECT_LOC
-        cx, cy, cz = _COP_MED
-        players = _make_players_list([
-            _make_player_data(officer.player.unique_id, officer.guid, cx, cy, cz),
-            _make_player_data(criminal.player.unique_id, criminal.guid, sx, sy, sz),
-        ])
+        players = _make_players_list(
+            [_make_player_data(criminal.player.unique_id, criminal.guid, *_SUSPECT_LOC)]
+        )
         mock_http = AsyncMock()
         mock_http_mod = AsyncMock()
 
         with patch("amc.criminals.get_players", new_callable=AsyncMock, return_value=players):
-            for _ in range(3):
+            for _ in range(10):
                 await tick_wanted_countdown(mock_http, mock_http_mod)
 
-        escape_calls = [
-            c for c in mock_sys_msg.call_args_list
-            if len(c.args) > 1 and c.args[1] == ESCAPE_MESSAGE
-        ]
-        self.assertEqual(len(escape_calls), 0)
-
-    async def test_escape_msg_state_cleaned_on_expiry(
-        self,
-        mock_sys_msg,
-        mock_refresh,
-    ):
-        """_last_escape_msg_sent is cleaned up when wanted expires."""
-        criminal = await self._setup_criminal(wanted_remaining=0.5)
-        officer = await self._setup_police()
-
-        _last_escape_msg_sent[criminal.guid] = time.monotonic()
-
-        sx, sy, sz = _SUSPECT_LOC
-        ex, ey, ez = _COP_ESCAPED
-        players = _make_players_list([
-            _make_player_data(officer.player.unique_id, officer.guid, ex, ey, ez),
-            _make_player_data(criminal.player.unique_id, criminal.guid, sx, sy, sz),
-        ])
-        mock_http = AsyncMock()
-        mock_http_mod = AsyncMock()
-
-        with patch("amc.criminals.get_players", new_callable=AsyncMock, return_value=players):
-            await tick_wanted_countdown(mock_http, mock_http_mod)
-
-        self.assertNotIn(criminal.guid, _last_escape_msg_sent)
+        wanted = await Wanted.objects.aget(character=criminal)
+        # F/A fall back to 1.0 when no cop distance is known
+        self.assertAlmostEqual(wanted.wanted_remaining, 290, delta=0.1)
+        self.assertIsNone(wanted.expired_at)
 
     # -----------------------------------------------------------------------
     # Star transitions and name refresh
@@ -711,11 +782,8 @@ class WantedCountdownTickTests(TestCase):
         with patch("amc.criminals.get_players", new_callable=AsyncMock, return_value=players):
             await tick_wanted_countdown(mock_http, mock_http_mod)
 
-        star_calls = [
-            c for c in mock_sys_msg.call_args_list
-            if len(c.args) > 1 and c.args[1] != ESCAPE_MESSAGE
-        ]
-        self.assertEqual(len(star_calls), 0)
+        # Still W5 → no star-change message at all
+        mock_sys_msg.assert_not_called()
 
     async def test_last_star_notified_cleaned_on_expiry(
         self,
@@ -1049,6 +1117,68 @@ class WantedCountdownTickTests(TestCase):
         wanted = await Wanted.objects.aget(character=criminal)
         self.assertLess(wanted.wanted_remaining, 200)
         self.assertIsNone(wanted.expired_at)
+
+
+class ActivePolicePresentTests(TestCase):
+    """Unit tests for the dormant-rule gate (active_police_present)."""
+
+    async def _setup_officer(self, last_online_offset=0):
+        player = await sync_to_async(PlayerFactory)()
+        officer = await sync_to_async(CharacterFactory)(
+            player=player,
+            last_online=timezone.now() - timedelta(seconds=last_online_offset),
+        )
+        await officer.asave(update_fields=["last_online"])
+        await PoliceSession.objects.acreate(character=officer)
+        return officer
+
+    async def test_no_sessions_is_not_present(self):
+        self.assertFalse(await active_police_present(AsyncMock()))
+
+    async def test_stale_session_is_not_present(self):
+        await self._setup_officer(last_online_offset=120)
+        self.assertFalse(await active_police_present(AsyncMock()))
+
+    async def test_online_non_afk_cop_is_present(self):
+        await self._setup_officer()
+        mock_mod = AsyncMock()
+        with patch("amc.criminals.get_player", new_callable=AsyncMock,
+                   return_value={"bAFK": False}):
+            self.assertTrue(await active_police_present(mock_mod))
+
+    async def test_afk_only_cops_are_not_present(self):
+        await self._setup_officer()
+        mock_mod = AsyncMock()
+        with patch("amc.criminals.get_player", new_callable=AsyncMock,
+                   return_value={"bAFK": True}):
+            self.assertFalse(await active_police_present(mock_mod))
+
+    async def test_afk_check_failure_fails_open(self):
+        await self._setup_officer()
+        mock_mod = AsyncMock()
+        with patch("amc.criminals.get_player", new_callable=AsyncMock,
+                   side_effect=Exception("mod api down")):
+            self.assertTrue(await active_police_present(mock_mod))
+
+    async def test_mixed_afk_state_is_present(self):
+        """One AFK cop + one active cop -> still armed."""
+        await self._setup_officer()
+        player2 = await sync_to_async(PlayerFactory)()
+        officer2 = await sync_to_async(CharacterFactory)(
+            player=player2,
+            last_online=timezone.now(),
+        )
+        await officer2.asave(update_fields=["last_online"])
+        await PoliceSession.objects.acreate(character=officer2)
+
+        mock_mod = AsyncMock()
+
+        async def fake_get_player(session, player_id, force_refresh=False):
+            # One cop reports AFK, the other doesn't — order-independent
+            return {"bAFK": str(player_id).endswith("0")}
+
+        with patch("amc.criminals.get_player", new=fake_get_player):
+            self.assertTrue(await active_police_present(mock_mod))
 
 
 @patch("amc.criminals.make_suspect", new_callable=AsyncMock)
@@ -1788,9 +1918,17 @@ class ClearSuspectTests(TestCase):
 
     def setUp(self):
         _last_star_notified.clear()
-        _last_escape_msg_sent.clear()
         _last_suspect_guids.clear()
         _costume_reconciled_guids.clear()
+        # These tests exercise the suspect-GE cleanup while ARMED; the
+        # dormant amnesty is covered in WantedCountdownTickTests.
+        armed = patch(
+            "amc.criminals.active_police_present",
+            new_callable=AsyncMock,
+            return_value=True,
+        )
+        self.armed_mock = armed.start()
+        self.addCleanup(armed.stop)
 
     async def _setup_criminal(self, wanted_remaining=300):
         player = await sync_to_async(PlayerFactory)()
@@ -2193,10 +2331,11 @@ class _AsyncList:
 
 # Suspect at (50000, 50000, 0) — ~707m from origin
 _COMPASS_SUSPECT_LOC = (50000, 50000, 0)
-# Officer at origin — well beyond 500m proximity hide
-_COMPASS_COP_FAR = (0, 0, 0)
-# Officer very close to suspect — within 500m proximity hide
-_COMPASS_COP_CLOSE = (50000 + 1000, 50000, 0)  # 10m away
+# Officer placements at exact distances from the suspect (positive X axis):
+_COMPASS_COP_CLOSE = (50000 + 10_000, 50000, 0)    # 100 m — inside the silence ring
+_COMPASS_COP_600M = (50000 + 60_000, 50000, 0)    # 600 m
+_COMPASS_COP_1KM = (50000 + 100_000, 50000, 0)    # 1 km
+_COMPASS_COP_3KM = (50000 + 300_000, 50000, 0)    # 3 km
 
 
 @patch("amc.criminals.send_system_message", new_callable=AsyncMock)
@@ -2204,8 +2343,17 @@ _COMPASS_COP_CLOSE = (50000 + 1000, 50000, 0)  # 10m away
 @patch("amc.criminals.get_players_locations", new_callable=AsyncMock)
 @patch("amc.criminals.get_players", new_callable=AsyncMock)
 class CompassTickTests(TestCase):
-    """Exhaustive tests for tick_police_suspect_locations speed-based
-    throttle and proximity filtering."""
+    """Tests for tick_police_suspect_locations under the per-officer
+    speed-and-distance cadence:
+
+        solo = 1 / ((D - 500 m) * (S + 20 km/h) * COMPASS_C)
+        clamped to [COMPASS_MIN_INTERVAL, COMPASS_MAX_INTERVAL]
+        effective = solo × N   (N = officers beyond their own ring)
+
+    An officer inside the suspect's 500 m silence ring receives nothing for
+    that suspect; each officer's cadence is keyed on their own distance and
+    split across the receiving force (force budget).
+    """
 
     def setUp(self):
         _last_compass_sent.clear()
@@ -2241,7 +2389,7 @@ class CompassTickTests(TestCase):
         self, mock_get_players, mock_get_locations, mock_police, mock_sys_msg,
     ):
         """No wanted records → early return, _last_compass_sent cleared."""
-        _last_compass_sent["some-guid"] = 999.0
+        _last_compass_sent[("cop", "suspect")] = 999.0
         mock_http = AsyncMock()
         mock_http_mod = AsyncMock()
         mock_http_mgmt = AsyncMock()
@@ -2287,12 +2435,10 @@ class CompassTickTests(TestCase):
         await self._setup_criminal()
         officer = await self._setup_police()
 
+        # Only the officer is in the native player list
         mock_get_players.return_value = _make_players_list([
-            _make_player_data(officer.player.unique_id, officer.guid, *_COMPASS_COP_FAR),
+            _make_player_data(officer.player.unique_id, officer.guid, *_COMPASS_COP_1KM),
         ])
-        mock_get_locations.return_value = [
-            _make_mgmt_entry(officer.guid, 0),
-        ]
         mock_police.return_value = _AsyncList([officer])
         mock_http = AsyncMock()
         mock_http_mod = AsyncMock()
@@ -2310,10 +2456,8 @@ class CompassTickTests(TestCase):
         mock_get_players.return_value = _make_players_list([
             _make_player_data(criminal.player.unique_id, criminal.guid, *_COMPASS_SUSPECT_LOC),
         ])
-        mock_get_locations.return_value = [
-            _make_mgmt_entry(criminal.guid, 3000),
-        ]
         mock_police.return_value = _AsyncList([])
+        mock_get_locations.return_value = []
         mock_http = AsyncMock()
         mock_http_mod = AsyncMock()
         mock_http_mgmt = AsyncMock()
@@ -2323,131 +2467,88 @@ class CompassTickTests(TestCase):
         mock_sys_msg.assert_not_called()
 
     # -------------------------------------------------------------------
-    # Speed-based throttle — stationary / walking cutoff
+    # Cadence law — interval values at representative D x S points
     # -------------------------------------------------------------------
 
-    async def test_walking_speed_suspect_sends_at_15s_interval(
+    async def test_stationary_600m_clamped_to_120s(
         self, mock_get_players, mock_get_locations, mock_police, mock_sys_msg,
     ):
-        """Walking speed (300 game units/s = 3 m/s) → compass sent at 15s interval."""
+        """Stationary suspect at 600 m: raw interval 333 s → clamped 120 s."""
         criminal = await self._setup_criminal()
         officer = await self._setup_police()
 
         mock_get_players.return_value = _make_players_list([
             _make_player_data(criminal.player.unique_id, criminal.guid, *_COMPASS_SUSPECT_LOC),
-            _make_player_data(officer.player.unique_id, officer.guid, *_COMPASS_COP_FAR),
+            _make_player_data(officer.player.unique_id, officer.guid, *_COMPASS_COP_600M),
         ])
-        mock_get_locations.return_value = [
-            _make_mgmt_entry(criminal.guid, 300),
-        ]
+        mock_get_locations.return_value = []
         mock_police.return_value = _AsyncList([officer])
         mock_http = AsyncMock()
         mock_http_mod = AsyncMock()
         mock_http_mgmt = AsyncMock()
 
-        # First tick — sends compass
+        # First tick — sends (last_sent = 0)
         await tick_police_suspect_locations(mock_http, mock_http_mod, mock_http_mgmt)
         mock_sys_msg.assert_awaited_once()
 
-        # Backdate to 14s → not yet 15s
-        _last_compass_sent[criminal.guid] = time.monotonic() - 14
+        # 119 s since last send → not yet
+        _last_compass_sent[(officer.guid, criminal.guid)] = time.monotonic() - 119
         mock_sys_msg.reset_mock()
         await tick_police_suspect_locations(mock_http, mock_http_mod, mock_http_mgmt)
         mock_sys_msg.assert_not_called()
 
-        # Backdate to 16s → past 15s
-        _last_compass_sent[criminal.guid] = time.monotonic() - 16
+        # 121 s since last send → sends again
+        _last_compass_sent[(officer.guid, criminal.guid)] = time.monotonic() - 121
         mock_sys_msg.reset_mock()
         await tick_police_suspect_locations(mock_http, mock_http_mod, mock_http_mgmt)
         mock_sys_msg.assert_awaited_once()
 
-    async def test_slow_speed_sends_at_15s_interval(
+    async def test_stationary_1km_interval_67s(
         self, mock_get_players, mock_get_locations, mock_police, mock_sys_msg,
     ):
-        """Slow speed (499 game units/s = 4.99 m/s) → compass at 15s interval."""
+        """Stationary suspect at 1 km → interval = 1/(500*20*C) ≈ 66.7 s."""
         criminal = await self._setup_criminal()
         officer = await self._setup_police()
 
         mock_get_players.return_value = _make_players_list([
             _make_player_data(criminal.player.unique_id, criminal.guid, *_COMPASS_SUSPECT_LOC),
-            _make_player_data(officer.player.unique_id, officer.guid, *_COMPASS_COP_FAR),
+            _make_player_data(officer.player.unique_id, officer.guid, *_COMPASS_COP_1KM),
         ])
-        mock_get_locations.return_value = [
-            _make_mgmt_entry(criminal.guid, 499),
-        ]
+        mock_get_locations.return_value = []
         mock_police.return_value = _AsyncList([officer])
         mock_http = AsyncMock()
         mock_http_mod = AsyncMock()
         mock_http_mgmt = AsyncMock()
 
-        # First tick — sends compass
+        # First tick — sends
         await tick_police_suspect_locations(mock_http, mock_http_mod, mock_http_mgmt)
         mock_sys_msg.assert_awaited_once()
 
-        # Backdate to 14s → not yet 15s
-        _last_compass_sent[criminal.guid] = time.monotonic() - 14
-        mock_sys_msg.reset_mock()
-        await tick_police_suspect_locations(mock_http, mock_http_mod, mock_http_mgmt)
-        mock_sys_msg.assert_not_called()
-
-        # Backdate to 16s → past 15s
-        _last_compass_sent[criminal.guid] = time.monotonic() - 16
-        mock_sys_msg.reset_mock()
-        await tick_police_suspect_locations(mock_http, mock_http_mod, mock_http_mgmt)
-        mock_sys_msg.assert_awaited_once()
-
-    async def test_zero_speed_sends_at_15s_interval(
-        self, mock_get_players, mock_get_locations, mock_police, mock_sys_msg,
-    ):
-        """Zero speed (stationary) → compass sent at 15s interval."""
-        criminal = await self._setup_criminal()
-        officer = await self._setup_police()
-
-        mock_get_players.return_value = _make_players_list([
-            _make_player_data(criminal.player.unique_id, criminal.guid, *_COMPASS_SUSPECT_LOC),
-            _make_player_data(officer.player.unique_id, officer.guid, *_COMPASS_COP_FAR),
-        ])
-        mock_get_locations.return_value = [
-            _make_mgmt_entry(criminal.guid, 0),
-        ]
-        mock_police.return_value = _AsyncList([officer])
-        mock_http = AsyncMock()
-        mock_http_mod = AsyncMock()
-        mock_http_mgmt = AsyncMock()
-
-        # First tick — sends compass
-        await tick_police_suspect_locations(mock_http, mock_http_mod, mock_http_mgmt)
-        mock_sys_msg.assert_awaited_once()
-
-        # Backdate to 14s → not yet 15s
-        _last_compass_sent[criminal.guid] = time.monotonic() - 14
+        # 65 s since last send → not yet
+        _last_compass_sent[(officer.guid, criminal.guid)] = time.monotonic() - 65
         mock_sys_msg.reset_mock()
         await tick_police_suspect_locations(mock_http, mock_http_mod, mock_http_mgmt)
         mock_sys_msg.assert_not_called()
 
-        # Backdate to 16s → past 15s
-        _last_compass_sent[criminal.guid] = time.monotonic() - 16
+        # 68 s since last send → sends again
+        _last_compass_sent[(officer.guid, criminal.guid)] = time.monotonic() - 68
         mock_sys_msg.reset_mock()
         await tick_police_suspect_locations(mock_http, mock_http_mod, mock_http_mgmt)
         mock_sys_msg.assert_awaited_once()
 
-    # -------------------------------------------------------------------
-    # Speed-based throttle — vehicle speed sends compass
-    # -------------------------------------------------------------------
-
-    async def test_driving_speed_sends_compass(
+    async def test_fast_far_clamped_to_5s(
         self, mock_get_players, mock_get_locations, mock_police, mock_sys_msg,
     ):
-        """Driving speed (3000 game units/s = 30 m/s) → compass sent."""
+        """3 km + 200 km/h → raw 1.2 s → clamped to 5 s floor."""
         criminal = await self._setup_criminal()
         officer = await self._setup_police()
 
         mock_get_players.return_value = _make_players_list([
             _make_player_data(criminal.player.unique_id, criminal.guid, *_COMPASS_SUSPECT_LOC),
-            _make_player_data(officer.player.unique_id, officer.guid, *_COMPASS_COP_FAR),
+            _make_player_data(officer.player.unique_id, officer.guid, *_COMPASS_COP_3KM),
         ])
         mock_get_locations.return_value = [
-            _make_mgmt_entry(criminal.guid, 3000),
+            _make_mgmt_entry(criminal.guid, 5556),  # ≈200 km/h
         ]
         mock_police.return_value = _AsyncList([officer])
         mock_http = AsyncMock()
@@ -2455,305 +2556,58 @@ class CompassTickTests(TestCase):
         mock_http_mgmt = AsyncMock()
 
         await tick_police_suspect_locations(mock_http, mock_http_mod, mock_http_mgmt)
-
-        mock_sys_msg.assert_awaited_once()
-        msg = mock_sys_msg.call_args.args[1]
-        self.assertIn(criminal.name, msg)
-
-    async def test_minimum_vehicle_speed_sends_compass(
-        self, mock_get_players, mock_get_locations, mock_police, mock_sys_msg,
-    ):
-        """Just above cutoff (500 game units/s = 5 m/s) → compass sent."""
-        criminal = await self._setup_criminal()
-        officer = await self._setup_police()
-
-        mock_get_players.return_value = _make_players_list([
-            _make_player_data(criminal.player.unique_id, criminal.guid, *_COMPASS_SUSPECT_LOC),
-            _make_player_data(officer.player.unique_id, officer.guid, *_COMPASS_COP_FAR),
-        ])
-        mock_get_locations.return_value = [
-            _make_mgmt_entry(criminal.guid, 500),
-        ]
-        mock_police.return_value = _AsyncList([officer])
-        mock_http = AsyncMock()
-        mock_http_mod = AsyncMock()
-        mock_http_mgmt = AsyncMock()
-
-        await tick_police_suspect_locations(mock_http, mock_http_mod, mock_http_mgmt)
-
         mock_sys_msg.assert_awaited_once()
 
-    async def test_fast_driving_sends_compass(
-        self, mock_get_players, mock_get_locations, mock_police, mock_sys_msg,
-    ):
-        """Fast driving (6000 game units/s = 60 m/s) → compass sent."""
-        criminal = await self._setup_criminal()
-        officer = await self._setup_police()
-
-        mock_get_players.return_value = _make_players_list([
-            _make_player_data(criminal.player.unique_id, criminal.guid, *_COMPASS_SUSPECT_LOC),
-            _make_player_data(officer.player.unique_id, officer.guid, *_COMPASS_COP_FAR),
-        ])
-        mock_get_locations.return_value = [
-            _make_mgmt_entry(criminal.guid, 6000),
-        ]
-        mock_police.return_value = _AsyncList([officer])
-        mock_http = AsyncMock()
-        mock_http_mod = AsyncMock()
-        mock_http_mgmt = AsyncMock()
-
-        await tick_police_suspect_locations(mock_http, mock_http_mod, mock_http_mgmt)
-
-        mock_sys_msg.assert_awaited_once()
-
-    # -------------------------------------------------------------------
-    # Throttle interval — not yet elapsed → skipped
-    # -------------------------------------------------------------------
-
-    async def test_interval_not_elapsed_skips_suspect(
-        self, mock_get_players, mock_get_locations, mock_police, mock_sys_msg,
-    ):
-        """Suspect sent recently (within interval) → skipped on next tick."""
-        criminal = await self._setup_criminal()
-        officer = await self._setup_police()
-
-        mock_get_players.return_value = _make_players_list([
-            _make_player_data(criminal.player.unique_id, criminal.guid, *_COMPASS_SUSPECT_LOC),
-            _make_player_data(officer.player.unique_id, officer.guid, *_COMPASS_COP_FAR),
-        ])
-        # 3000 game units/s = 30 m/s → interval = 300/30 = 10s
-        mock_get_locations.return_value = [
-            _make_mgmt_entry(criminal.guid, 3000),
-        ]
-        mock_police.return_value = _AsyncList([officer])
-        mock_http = AsyncMock()
-        mock_http_mod = AsyncMock()
-        mock_http_mgmt = AsyncMock()
-
-        # First tick — sends compass
-        await tick_police_suspect_locations(mock_http, mock_http_mod, mock_http_mgmt)
-        self.assertEqual(mock_sys_msg.await_count, 1)
-
-        # Second tick immediately (0s elapsed) — should NOT send again
+        # 4 s since last send → not yet
+        _last_compass_sent[(officer.guid, criminal.guid)] = time.monotonic() - 4
         mock_sys_msg.reset_mock()
         await tick_police_suspect_locations(mock_http, mock_http_mod, mock_http_mgmt)
         mock_sys_msg.assert_not_called()
 
-    async def test_interval_elapsed_sends_again(
-        self, mock_get_players, mock_get_locations, mock_police, mock_sys_msg,
-    ):
-        """Suspect sent > interval ago → sent again on next tick."""
-        criminal = await self._setup_criminal()
-        officer = await self._setup_police()
-
-        mock_get_players.return_value = _make_players_list([
-            _make_player_data(criminal.player.unique_id, criminal.guid, *_COMPASS_SUSPECT_LOC),
-            _make_player_data(officer.player.unique_id, officer.guid, *_COMPASS_COP_FAR),
-        ])
-        # 3000 game units/s = 30 m/s → interval = 10s
-        mock_get_locations.return_value = [
-            _make_mgmt_entry(criminal.guid, 3000),
-        ]
-        mock_police.return_value = _AsyncList([officer])
-        mock_http = AsyncMock()
-        mock_http_mod = AsyncMock()
-        mock_http_mgmt = AsyncMock()
-
-        # First tick — sends compass
-        await tick_police_suspect_locations(mock_http, mock_http_mod, mock_http_mgmt)
-        self.assertEqual(mock_sys_msg.await_count, 1)
-
-        # Simulate interval elapsed by backdating _last_compass_sent
-        _last_compass_sent[criminal.guid] = time.monotonic() - 11  # 11s ago > 10s interval
-
+        # 6 s since last send → sends again
+        _last_compass_sent[(officer.guid, criminal.guid)] = time.monotonic() - 6
         mock_sys_msg.reset_mock()
         await tick_police_suspect_locations(mock_http, mock_http_mod, mock_http_mgmt)
         mock_sys_msg.assert_awaited_once()
 
-    async def test_interval_boundary_not_yet_elapsed(
+    async def test_speed_speeds_up_updates_at_same_distance(
         self, mock_get_players, mock_get_locations, mock_police, mock_sys_msg,
     ):
-        """Just before interval boundary → not sent."""
+        """1 km out: stationary waits 67 s, an 80 km/h suspect updates in 13 s."""
         criminal = await self._setup_criminal()
         officer = await self._setup_police()
 
         mock_get_players.return_value = _make_players_list([
             _make_player_data(criminal.player.unique_id, criminal.guid, *_COMPASS_SUSPECT_LOC),
-            _make_player_data(officer.player.unique_id, officer.guid, *_COMPASS_COP_FAR),
+            _make_player_data(officer.player.unique_id, officer.guid, *_COMPASS_COP_1KM),
         ])
-        # 3000 game units/s = 30 m/s → interval = 10s
-        mock_get_locations.return_value = [
-            _make_mgmt_entry(criminal.guid, 3000),
-        ]
         mock_police.return_value = _AsyncList([officer])
         mock_http = AsyncMock()
         mock_http_mod = AsyncMock()
         mock_http_mgmt = AsyncMock()
 
-        # First tick
-        await tick_police_suspect_locations(mock_http, mock_http_mod, mock_http_mgmt)
-
-        # Backdate to 9.9s ago — just under 10s interval
-        _last_compass_sent[criminal.guid] = time.monotonic() - 9.9
-
-        mock_sys_msg.reset_mock()
+        # Stationary: 20 s since last send → within the 66.7 s interval
+        mock_get_locations.return_value = []
+        _last_compass_sent[(officer.guid, criminal.guid)] = time.monotonic() - 20
         await tick_police_suspect_locations(mock_http, mock_http_mod, mock_http_mgmt)
         mock_sys_msg.assert_not_called()
 
-    # -------------------------------------------------------------------
-    # Interval clamping — 5s min, 60s max
-    # -------------------------------------------------------------------
-
-    async def test_fast_speed_clamped_to_5s_interval(
-        self, mock_get_players, mock_get_locations, mock_police, mock_sys_msg,
-    ):
-        """Very fast speed → interval clamped to 5s minimum."""
-        criminal = await self._setup_criminal()
-        officer = await self._setup_police()
-
-        mock_get_players.return_value = _make_players_list([
-            _make_player_data(criminal.player.unique_id, criminal.guid, *_COMPASS_SUSPECT_LOC),
-            _make_player_data(officer.player.unique_id, officer.guid, *_COMPASS_COP_FAR),
-        ])
-        # 60000 game units/s = 600 m/s → interval = 300/600 = 0.5 → clamped to 5s
+        # 80 km/h: same 20 s since last send → past the 13.3 s interval
         mock_get_locations.return_value = [
-            _make_mgmt_entry(criminal.guid, 60000),
+            _make_mgmt_entry(criminal.guid, 2222),  # ≈80 km/h
         ]
-        mock_police.return_value = _AsyncList([officer])
-        mock_http = AsyncMock()
-        mock_http_mod = AsyncMock()
-        mock_http_mgmt = AsyncMock()
-
-        # First tick
-        await tick_police_suspect_locations(mock_http, mock_http_mod, mock_http_mgmt)
-
-        # Backdate to 4.9s → not yet 5s
-        _last_compass_sent[criminal.guid] = time.monotonic() - 4.9
-        mock_sys_msg.reset_mock()
-        await tick_police_suspect_locations(mock_http, mock_http_mod, mock_http_mgmt)
-        mock_sys_msg.assert_not_called()
-
-        # Backdate to 5.1s → past 5s
-        _last_compass_sent[criminal.guid] = time.monotonic() - 5.1
-        mock_sys_msg.reset_mock()
-        await tick_police_suspect_locations(mock_http, mock_http_mod, mock_http_mgmt)
-        mock_sys_msg.assert_awaited_once()
-
-    async def test_slow_speed_clamped_to_15s_interval(
-        self, mock_get_players, mock_get_locations, mock_police, mock_sys_msg,
-    ):
-        """Slow vehicle speed → interval clamped to 15s maximum."""
-        criminal = await self._setup_criminal()
-        officer = await self._setup_police()
-
-        mock_get_players.return_value = _make_players_list([
-            _make_player_data(criminal.player.unique_id, criminal.guid, *_COMPASS_SUSPECT_LOC),
-            _make_player_data(officer.player.unique_id, officer.guid, *_COMPASS_COP_FAR),
-        ])
-        # 500 game units/s = 5 m/s → raw interval = 300/5 = 60 → clamped to 15s
-        mock_get_locations.return_value = [
-            _make_mgmt_entry(criminal.guid, 500),
-        ]
-        mock_police.return_value = _AsyncList([officer])
-        mock_http = AsyncMock()
-        mock_http_mod = AsyncMock()
-        mock_http_mgmt = AsyncMock()
-
-        # First tick
-        await tick_police_suspect_locations(mock_http, mock_http_mod, mock_http_mgmt)
-
-        # Backdate to 14s → not yet 15s
-        _last_compass_sent[criminal.guid] = time.monotonic() - 14
-        mock_sys_msg.reset_mock()
-        await tick_police_suspect_locations(mock_http, mock_http_mod, mock_http_mgmt)
-        mock_sys_msg.assert_not_called()
-
-        # Backdate to 16s → past 15s
-        _last_compass_sent[criminal.guid] = time.monotonic() - 16
-        mock_sys_msg.reset_mock()
         await tick_police_suspect_locations(mock_http, mock_http_mod, mock_http_mgmt)
         mock_sys_msg.assert_awaited_once()
 
     # -------------------------------------------------------------------
-    # Mod management API unavailable — graceful degradation
+    # Per-officer silence ring and per-officer cadence
     # -------------------------------------------------------------------
 
-    async def test_mgmt_api_unavailable_sends_all_unthrottled(
+    async def test_officer_inside_ring_silent_far_officer_receives(
         self, mock_get_players, mock_get_locations, mock_police, mock_sys_msg,
     ):
-        """get_players_locations returns None → all suspects sent unthrottled."""
-        criminal = await self._setup_criminal()
-        officer = await self._setup_police()
-
-        mock_get_players.return_value = _make_players_list([
-            _make_player_data(criminal.player.unique_id, criminal.guid, *_COMPASS_SUSPECT_LOC),
-            _make_player_data(officer.player.unique_id, officer.guid, *_COMPASS_COP_FAR),
-        ])
-        mock_get_locations.return_value = None
-        mock_police.return_value = _AsyncList([officer])
-        mock_http = AsyncMock()
-        mock_http_mod = AsyncMock()
-        mock_http_mgmt = AsyncMock()
-
-        await tick_police_suspect_locations(mock_http, mock_http_mod, mock_http_mgmt)
-
-        # Walking suspect would be throttled normally, but API unavailable → sent
-        mock_sys_msg.assert_awaited_once()
-        self.assertIn(criminal.guid, _last_compass_sent)
-
-    async def test_mgmt_api_unavailable_sends_walking_suspects(
-        self, mock_get_players, mock_get_locations, mock_police, mock_sys_msg,
-    ):
-        """API unavailable → walking-speed suspects also sent (no throttle)."""
-        criminal = await self._setup_criminal()
-        officer = await self._setup_police()
-
-        mock_get_players.return_value = _make_players_list([
-            _make_player_data(criminal.player.unique_id, criminal.guid, *_COMPASS_SUSPECT_LOC),
-            _make_player_data(officer.player.unique_id, officer.guid, *_COMPASS_COP_FAR),
-        ])
-        mock_get_locations.return_value = None
-        mock_police.return_value = _AsyncList([officer])
-        mock_http = AsyncMock()
-        mock_http_mod = AsyncMock()
-        mock_http_mgmt = AsyncMock()
-
-        await tick_police_suspect_locations(mock_http, mock_http_mod, mock_http_mgmt)
-
-        mock_sys_msg.assert_awaited_once()
-
-    async def test_mgmt_api_unavailable_sends_repeatedly(
-        self, mock_get_players, mock_get_locations, mock_police, mock_sys_msg,
-    ):
-        """API unavailable → suspects sent every tick (no throttle)."""
-        criminal = await self._setup_criminal()
-        officer = await self._setup_police()
-
-        mock_get_players.return_value = _make_players_list([
-            _make_player_data(criminal.player.unique_id, criminal.guid, *_COMPASS_SUSPECT_LOC),
-            _make_player_data(officer.player.unique_id, officer.guid, *_COMPASS_COP_FAR),
-        ])
-        mock_get_locations.return_value = None
-        mock_police.return_value = _AsyncList([officer])
-        mock_http = AsyncMock()
-        mock_http_mod = AsyncMock()
-        mock_http_mgmt = AsyncMock()
-
-        await tick_police_suspect_locations(mock_http, mock_http_mod, mock_http_mgmt)
-        self.assertEqual(mock_sys_msg.await_count, 1)
-
-        mock_sys_msg.reset_mock()
-        await tick_police_suspect_locations(mock_http, mock_http_mod, mock_http_mgmt)
-        self.assertEqual(mock_sys_msg.await_count, 1)
-
-    # -------------------------------------------------------------------
-    # Proximity filter — 500m hide
-    # -------------------------------------------------------------------
-
-    async def test_officer_within_500m_hides_suspect_from_all(
-        self, mock_get_players, mock_get_locations, mock_police, mock_sys_msg,
-    ):
-        """Officer within 500m of suspect → hidden from ALL officers."""
+        """Officer at 100 m gets NOTHING; officer at 3 km still receives —
+        per-officer silence (old behavior hid the suspect from everyone)."""
         criminal = await self._setup_criminal()
         officer_near = await self._setup_police()
         officer_far = await self._setup_police()
@@ -2761,11 +2615,9 @@ class CompassTickTests(TestCase):
         mock_get_players.return_value = _make_players_list([
             _make_player_data(criminal.player.unique_id, criminal.guid, *_COMPASS_SUSPECT_LOC),
             _make_player_data(officer_near.player.unique_id, officer_near.guid, *_COMPASS_COP_CLOSE),
-            _make_player_data(officer_far.player.unique_id, officer_far.guid, *_COMPASS_COP_FAR),
+            _make_player_data(officer_far.player.unique_id, officer_far.guid, *_COMPASS_COP_3KM),
         ])
-        mock_get_locations.return_value = [
-            _make_mgmt_entry(criminal.guid, 3000),
-        ]
+        mock_get_locations.return_value = []
         mock_police.return_value = _AsyncList([officer_near, officer_far])
         mock_http = AsyncMock()
         mock_http_mod = AsyncMock()
@@ -2773,347 +2625,137 @@ class CompassTickTests(TestCase):
 
         await tick_police_suspect_locations(mock_http, mock_http_mod, mock_http_mgmt)
 
-        mock_sys_msg.assert_not_called()
-        self.assertNotIn(criminal.guid, _last_compass_sent)
+        # Exactly one message — to the far officer only
+        mock_sys_msg.assert_awaited_once()
+        self.assertEqual(mock_sys_msg.await_args.kwargs.get("character_guid"), officer_far.guid)
 
-    async def test_officer_beyond_500m_shows_suspect(
+    async def test_per_officer_cadence_independent(
         self, mock_get_players, mock_get_locations, mock_police, mock_sys_msg,
     ):
-        """All officers beyond 500m → suspect visible."""
+        """Two officers, both >500 m: pair keys throttle independently —
+        with the force budget each interval is solo × N(=2): the 1 km
+        officer (133 s effective) stays quiet at t-30 while the 3 km
+        officer (26.6 s effective) receives."""
         criminal = await self._setup_criminal()
-        officer = await self._setup_police()
+        officer_1km = await self._setup_police()
+        officer_3km = await self._setup_police()
 
         mock_get_players.return_value = _make_players_list([
             _make_player_data(criminal.player.unique_id, criminal.guid, *_COMPASS_SUSPECT_LOC),
-            _make_player_data(officer.player.unique_id, officer.guid, *_COMPASS_COP_FAR),
+            _make_player_data(officer_1km.player.unique_id, officer_1km.guid, *_COMPASS_COP_1KM),
+            _make_player_data(officer_3km.player.unique_id, officer_3km.guid, *_COMPASS_COP_3KM),
         ])
-        mock_get_locations.return_value = [
-            _make_mgmt_entry(criminal.guid, 3000),
-        ]
-        mock_police.return_value = _AsyncList([officer])
+        mock_get_locations.return_value = []
+        mock_police.return_value = _AsyncList([officer_1km, officer_3km])
         mock_http = AsyncMock()
         mock_http_mod = AsyncMock()
         mock_http_mgmt = AsyncMock()
+
+        now = time.monotonic()
+        _last_compass_sent[(officer_1km.guid, criminal.guid)] = now - 30
+        _last_compass_sent[(officer_3km.guid, criminal.guid)] = now - 30
 
         await tick_police_suspect_locations(mock_http, mock_http_mod, mock_http_mgmt)
 
         mock_sys_msg.assert_awaited_once()
-        self.assertIn(criminal.guid, _last_compass_sent)
-
-    async def test_mixed_proximity_some_near_some_far(
-        self, mock_get_players, mock_get_locations, mock_police, mock_sys_msg,
-    ):
-        """One suspect near officer, one far → only far suspect sent."""
-        criminal_near = await self._setup_criminal()
-        criminal_far = await self._setup_criminal()
-        officer = await self._setup_police()
-
-        # officer at origin; near suspect within 500m (200m), far suspect beyond (2km)
-        near_loc = (20000, 0, 0)  # 200m from officer — within 500m proximity
-        far_loc = (200000, 0, 0)  # 2km from officer — beyond proximity
-
-        mock_get_players.return_value = _make_players_list([
-            _make_player_data(criminal_near.player.unique_id, criminal_near.guid, *near_loc),
-            _make_player_data(criminal_far.player.unique_id, criminal_far.guid, *far_loc),
-            _make_player_data(officer.player.unique_id, officer.guid, *_COMPASS_COP_FAR),
-        ])
-        mock_get_locations.return_value = [
-            _make_mgmt_entry(criminal_near.guid, 3000),
-            _make_mgmt_entry(criminal_far.guid, 3000),
-        ]
-        mock_police.return_value = _AsyncList([officer])
-        mock_http = AsyncMock()
-        mock_http_mod = AsyncMock()
-        mock_http_mgmt = AsyncMock()
-
-        await tick_police_suspect_locations(mock_http, mock_http_mod, mock_http_mgmt)
-
-        msg = mock_sys_msg.call_args.args[1]
-        self.assertIn(criminal_far.name, msg)
-        self.assertNotIn(criminal_near.name, msg)
-        self.assertNotIn(criminal_near.guid, _last_compass_sent)
-        self.assertIn(criminal_far.guid, _last_compass_sent)
-
-    async def test_proximity_does_not_consume_interval_slot(
-        self, mock_get_players, mock_get_locations, mock_police, mock_sys_msg,
-    ):
-        """Suspect filtered by proximity → interval NOT consumed →
-        appears immediately when officer moves away."""
-        criminal = await self._setup_criminal()
-        officer = await self._setup_police()
-
-        # Phase 1: officer close → suspect hidden
-        mock_get_players.return_value = _make_players_list([
-            _make_player_data(criminal.player.unique_id, criminal.guid, *_COMPASS_SUSPECT_LOC),
-            _make_player_data(officer.player.unique_id, officer.guid, *_COMPASS_COP_CLOSE),
-        ])
-        mock_get_locations.return_value = [
-            _make_mgmt_entry(criminal.guid, 3000),
-        ]
-        mock_police.return_value = _AsyncList([officer])
-        mock_http = AsyncMock()
-        mock_http_mod = AsyncMock()
-        mock_http_mgmt = AsyncMock()
-
-        await tick_police_suspect_locations(mock_http, mock_http_mod, mock_http_mgmt)
-        mock_sys_msg.assert_not_called()
-        self.assertNotIn(criminal.guid, _last_compass_sent)
-
-        # Phase 2: officer moves away → suspect should appear IMMEDIATELY
-        mock_get_players.return_value = _make_players_list([
-            _make_player_data(criminal.player.unique_id, criminal.guid, *_COMPASS_SUSPECT_LOC),
-            _make_player_data(officer.player.unique_id, officer.guid, *_COMPASS_COP_FAR),
-        ])
-        mock_sys_msg.reset_mock()
-        await tick_police_suspect_locations(mock_http, mock_http_mod, mock_http_mgmt)
-
-        mock_sys_msg.assert_awaited_once()
-        msg = mock_sys_msg.call_args.args[1]
-        self.assertIn(criminal.name, msg)
+        self.assertEqual(mock_sys_msg.await_args.kwargs.get("character_guid"), officer_3km.guid)
 
     # -------------------------------------------------------------------
-    # GUID normalization — uppercase lookup
+    # Force budget — N receiving cops split one cop's cadence
     # -------------------------------------------------------------------
 
-    async def test_lowercase_guid_in_wanted_matches_uppercase_speed_map(
+    async def test_two_cops_share_one_budget(
         self, mock_get_players, mock_get_locations, mock_police, mock_sys_msg,
     ):
-        """Character GUID in DB is lowercase, speed map has uppercase → match."""
-        criminal = await self._setup_criminal()
-        officer = await self._setup_police()
-
-        lower_guid = criminal.guid.lower()
-        criminal.guid = lower_guid
-        await criminal.asave(update_fields=["guid"])
-
-        mock_get_players.return_value = _make_players_list([
-            _make_player_data(criminal.player.unique_id, lower_guid, *_COMPASS_SUSPECT_LOC),
-            _make_player_data(officer.player.unique_id, officer.guid, *_COMPASS_COP_FAR),
-        ])
-        mock_get_locations.return_value = [
-            _make_mgmt_entry(lower_guid, 3000),
-        ]
-        mock_police.return_value = _AsyncList([officer])
-        mock_http = AsyncMock()
-        mock_http_mod = AsyncMock()
-        mock_http_mgmt = AsyncMock()
-
-        await tick_police_suspect_locations(mock_http, mock_http_mod, mock_http_mgmt)
-
-        mock_sys_msg.assert_awaited_once()
-        msg = mock_sys_msg.call_args.args[1]
-        self.assertIn(criminal.name, msg)
-
-    async def test_guid_not_in_speed_map_sends_at_15s_interval(
-        self, mock_get_players, mock_get_locations, mock_police, mock_sys_msg,
-    ):
-        """Suspect GUID missing from speed_map → treated as 0 speed → 15s interval."""
-        criminal = await self._setup_criminal()
-        officer = await self._setup_police()
-
-        mock_get_players.return_value = _make_players_list([
-            _make_player_data(criminal.player.unique_id, criminal.guid, *_COMPASS_SUSPECT_LOC),
-            _make_player_data(officer.player.unique_id, officer.guid, *_COMPASS_COP_FAR),
-        ])
-        # Speed map has entries but NOT for this suspect
-        mock_get_locations.return_value = [
-            _make_mgmt_entry("some-other-guid", 3000),
-        ]
-        mock_police.return_value = _AsyncList([officer])
-        mock_http = AsyncMock()
-        mock_http_mod = AsyncMock()
-        mock_http_mgmt = AsyncMock()
-
-        # First tick — sent at 15s interval (0 speed → clamped)
-        await tick_police_suspect_locations(mock_http, mock_http_mod, mock_http_mgmt)
-        mock_sys_msg.assert_awaited_once()
-        self.assertIn(criminal.guid, _last_compass_sent)
-
-    # -------------------------------------------------------------------
-    # Stale GUID cleanup
-    # -------------------------------------------------------------------
-
-    async def test_stale_compass_state_cleaned_when_no_wanted(
-        self, mock_get_players, mock_get_locations, mock_police, mock_sys_msg,
-    ):
-        """_last_compass_sent cleared when no wanted records exist."""
-        _last_compass_sent["dead-guid-1"] = 100.0
-        _last_compass_sent["dead-guid-2"] = 200.0
-
-        mock_http = AsyncMock()
-        mock_http_mod = AsyncMock()
-        mock_http_mgmt = AsyncMock()
-
-        await tick_police_suspect_locations(mock_http, mock_http_mod, mock_http_mgmt)
-
-        self.assertEqual(_last_compass_sent, {})
-
-    async def test_stale_guid_purged_when_suspect_no_longer_wanted(
-        self, mock_get_players, mock_get_locations, mock_police, mock_sys_msg,
-    ):
-        """GUIDs in _last_compass_sent but not in current wanted set are purged."""
-        criminal = await self._setup_criminal()
-        officer = await self._setup_police()
-
-        _last_compass_sent["stale-guid"] = 100.0
-        _last_compass_sent[criminal.guid] = time.monotonic() - 60
-
-        mock_get_players.return_value = _make_players_list([
-            _make_player_data(criminal.player.unique_id, criminal.guid, *_COMPASS_SUSPECT_LOC),
-            _make_player_data(officer.player.unique_id, officer.guid, *_COMPASS_COP_FAR),
-        ])
-        mock_get_locations.return_value = [
-            _make_mgmt_entry(criminal.guid, 3000),
-        ]
-        mock_police.return_value = _AsyncList([officer])
-        mock_http = AsyncMock()
-        mock_http_mod = AsyncMock()
-        mock_http_mgmt = AsyncMock()
-
-        await tick_police_suspect_locations(mock_http, mock_http_mod, mock_http_mgmt)
-
-        self.assertNotIn("stale-guid", _last_compass_sent)
-        self.assertIn(criminal.guid, _last_compass_sent)
-
-    # -------------------------------------------------------------------
-    # Multiple suspects — independent throttle
-    # -------------------------------------------------------------------
-
-    async def test_two_suspects_different_speeds_independent_throttle(
-        self, mock_get_players, mock_get_locations, mock_police, mock_sys_msg,
-    ):
-        """Two suspects at different speeds → fast updates more frequently."""
-        criminal_fast = await self._setup_criminal()
-        criminal_slow = await self._setup_criminal()
-        officer = await self._setup_police()
-
-        loc_fast = (100000, 100000, 0)
-        loc_slow = (50000, 50000, 0)
-
-        mock_get_players.return_value = _make_players_list([
-            _make_player_data(criminal_fast.player.unique_id, criminal_fast.guid, *loc_fast),
-            _make_player_data(criminal_slow.player.unique_id, criminal_slow.guid, *loc_slow),
-            _make_player_data(officer.player.unique_id, officer.guid, *_COMPASS_COP_FAR),
-        ])
-        mock_get_locations.return_value = [
-            _make_mgmt_entry(criminal_fast.guid, 3000),   # 30 m/s → 10s interval
-            _make_mgmt_entry(criminal_slow.guid, 300),    # 3 m/s → 15s interval (clamped)
-        ]
-        mock_police.return_value = _AsyncList([officer])
-        mock_http = AsyncMock()
-        mock_http_mod = AsyncMock()
-        mock_http_mgmt = AsyncMock()
-
-        # First tick — both sent
-        await tick_police_suspect_locations(mock_http, mock_http_mod, mock_http_mgmt)
-        msg = mock_sys_msg.call_args.args[1]
-        self.assertIn(criminal_fast.name, msg)
-        self.assertIn(criminal_slow.name, msg)
-
-        # After 11s — fast's interval (10s) elapsed, slow's (15s) not yet
-        _last_compass_sent[criminal_fast.guid] = time.monotonic() - 11
-        _last_compass_sent[criminal_slow.guid] = time.monotonic() - 11
-        mock_sys_msg.reset_mock()
-        await tick_police_suspect_locations(mock_http, mock_http_mod, mock_http_mgmt)
-        msg = mock_sys_msg.call_args.args[1]
-        self.assertIn(criminal_fast.name, msg)
-        self.assertNotIn(criminal_slow.name, msg)
-
-    async def test_two_fast_suspects_both_sent(
-        self, mock_get_players, mock_get_locations, mock_police, mock_sys_msg,
-    ):
-        """Two fast suspects → both sent in same message."""
-        criminal_a = await self._setup_criminal()
-        criminal_b = await self._setup_criminal()
-        officer = await self._setup_police()
-
-        loc_a = (100000, 0, 0)
-        loc_b = (0, 100000, 0)
-
-        mock_get_players.return_value = _make_players_list([
-            _make_player_data(criminal_a.player.unique_id, criminal_a.guid, *loc_a),
-            _make_player_data(criminal_b.player.unique_id, criminal_b.guid, *loc_b),
-            _make_player_data(officer.player.unique_id, officer.guid, *_COMPASS_COP_FAR),
-        ])
-        mock_get_locations.return_value = [
-            _make_mgmt_entry(criminal_a.guid, 3000),
-            _make_mgmt_entry(criminal_b.guid, 3000),
-        ]
-        mock_police.return_value = _AsyncList([officer])
-        mock_http = AsyncMock()
-        mock_http_mod = AsyncMock()
-        mock_http_mgmt = AsyncMock()
-
-        await tick_police_suspect_locations(mock_http, mock_http_mod, mock_http_mgmt)
-
-        msg = mock_sys_msg.call_args.args[1]
-        self.assertIn(criminal_a.name, msg)
-        self.assertIn(criminal_b.name, msg)
-
-    async def test_two_suspects_one_throttled_one_not(
-        self, mock_get_players, mock_get_locations, mock_police, mock_sys_msg,
-    ):
-        """Two fast suspects: one was just sent (within interval), one hasn't →
-        only the un-throttled one appears."""
-        criminal_a = await self._setup_criminal()
-        criminal_b = await self._setup_criminal()
-        officer = await self._setup_police()
-
-        loc_a = (100000, 0, 0)
-        loc_b = (0, 100000, 0)
-
-        mock_get_players.return_value = _make_players_list([
-            _make_player_data(criminal_a.player.unique_id, criminal_a.guid, *loc_a),
-            _make_player_data(criminal_b.player.unique_id, criminal_b.guid, *loc_b),
-            _make_player_data(officer.player.unique_id, officer.guid, *_COMPASS_COP_FAR),
-        ])
-        mock_get_locations.return_value = [
-            _make_mgmt_entry(criminal_a.guid, 3000),
-            _make_mgmt_entry(criminal_b.guid, 3000),
-        ]
-        mock_police.return_value = _AsyncList([officer])
-        mock_http = AsyncMock()
-        mock_http_mod = AsyncMock()
-        mock_http_mgmt = AsyncMock()
-
-        # First tick — both sent
-        await tick_police_suspect_locations(mock_http, mock_http_mod, mock_http_mgmt)
-        self.assertIn(criminal_a.guid, _last_compass_sent)
-        self.assertIn(criminal_b.guid, _last_compass_sent)
-
-        # Backdate only criminal_b so its interval elapsed
-        _last_compass_sent[criminal_b.guid] = time.monotonic() - 11
-
-        mock_sys_msg.reset_mock()
-        await tick_police_suspect_locations(mock_http, mock_http_mod, mock_http_mgmt)
-
-        msg = mock_sys_msg.call_args.args[1]
-        self.assertNotIn(criminal_a.name, msg)
-        self.assertIn(criminal_b.name, msg)
-
-    # -------------------------------------------------------------------
-    # Multiple officers — each gets compass
-    # -------------------------------------------------------------------
-
-    async def test_two_officers_both_receive_compass(
-        self, mock_get_players, mock_get_locations, mock_police, mock_sys_msg,
-    ):
-        """Two officers both beyond 500m → both receive compass messages."""
+        """Two officers both at 1 km, stationary suspect: solo 66.7 s × N(=2)
+        → each waits 133 s. Both fire on first contact, then neither until
+        the effective interval elapses."""
         criminal = await self._setup_criminal()
         officer_a = await self._setup_police()
         officer_b = await self._setup_police()
 
-        cop_a_loc = (0, 0, 0)
-        cop_b_loc = (10000, 0, 0)
+        mock_get_players.return_value = _make_players_list([
+            _make_player_data(criminal.player.unique_id, criminal.guid, *_COMPASS_SUSPECT_LOC),
+            _make_player_data(officer_a.player.unique_id, officer_a.guid, *_COMPASS_COP_1KM),
+            _make_player_data(officer_b.player.unique_id, officer_b.guid, *_COMPASS_COP_1KM),
+        ])
+        mock_get_locations.return_value = []
+        mock_police.return_value = _AsyncList([officer_a, officer_b])
+        mock_http = AsyncMock()
+        mock_http_mod = AsyncMock()
+        mock_http_mgmt = AsyncMock()
+
+        # First tick — both receive (no prior state)
+        await tick_police_suspect_locations(mock_http, mock_http_mod, mock_http_mgmt)
+        self.assertEqual(mock_sys_msg.await_count, 2)
+
+        # 120 s since last send: past the SOLO 67 s but inside 2 × 67 = 133 s
+        now = time.monotonic()
+        _last_compass_sent[(officer_a.guid, criminal.guid)] = now - 120
+        _last_compass_sent[(officer_b.guid, criminal.guid)] = now - 120
+        mock_sys_msg.reset_mock()
+        await tick_police_suspect_locations(mock_http, mock_http_mod, mock_http_mgmt)
+        mock_sys_msg.assert_not_called()
+
+        # 135 s since last send: past the effective 133 s → both fire again
+        now = time.monotonic()
+        _last_compass_sent[(officer_a.guid, criminal.guid)] = now - 135
+        _last_compass_sent[(officer_b.guid, criminal.guid)] = now - 135
+        await tick_police_suspect_locations(mock_http, mock_http_mod, mock_http_mgmt)
+        self.assertEqual(mock_sys_msg.await_count, 2)
+
+    async def test_ring_cop_excluded_from_budget(
+        self, mock_get_players, mock_get_locations, mock_police, mock_sys_msg,
+    ):
+        """A cop inside the 500 m ring is silent AND doesn't shrink the
+        budget: the 1 km cop's effective interval stays solo × 1 (67 s),
+        not ×2."""
+        criminal = await self._setup_criminal()
+        officer_near = await self._setup_police()
+        officer_far = await self._setup_police()
 
         mock_get_players.return_value = _make_players_list([
             _make_player_data(criminal.player.unique_id, criminal.guid, *_COMPASS_SUSPECT_LOC),
-            _make_player_data(officer_a.player.unique_id, officer_a.guid, *cop_a_loc),
-            _make_player_data(officer_b.player.unique_id, officer_b.guid, *cop_b_loc),
+            _make_player_data(officer_near.player.unique_id, officer_near.guid, *_COMPASS_COP_CLOSE),
+            _make_player_data(officer_far.player.unique_id, officer_far.guid, *_COMPASS_COP_1KM),
         ])
-        mock_get_locations.return_value = [
-            _make_mgmt_entry(criminal.guid, 3000),
-        ]
+        mock_get_locations.return_value = []
+        mock_police.return_value = _AsyncList([officer_near, officer_far])
+        mock_http = AsyncMock()
+        mock_http_mod = AsyncMock()
+        mock_http_mgmt = AsyncMock()
+
+        # First tick — far cop receives, near cop silent
+        await tick_police_suspect_locations(mock_http, mock_http_mod, mock_http_mgmt)
+        mock_sys_msg.assert_awaited_once()
+        self.assertEqual(
+            mock_sys_msg.await_args.kwargs.get("character_guid"), officer_far.guid
+        )
+
+        # t-100: past solo 67 s (N=1) — receives. With a wrongly-counted
+        # ring cop (N=2 → 133 s) this would stay silent.
+        _last_compass_sent[(officer_far.guid, criminal.guid)] = time.monotonic() - 100
+        mock_sys_msg.reset_mock()
+        await tick_police_suspect_locations(mock_http, mock_http_mod, mock_http_mgmt)
+        mock_sys_msg.assert_awaited_once()
+        self.assertEqual(
+            mock_sys_msg.await_args.kwargs.get("character_guid"), officer_far.guid
+        )
+
+    async def test_two_officers_both_far_both_receive(
+        self, mock_get_players, mock_get_locations, mock_police, mock_sys_msg,
+    ):
+        """Two officers beyond 500 m → both receive compass messages."""
+        criminal = await self._setup_criminal()
+        officer_a = await self._setup_police()
+        officer_b = await self._setup_police()
+
+        mock_get_players.return_value = _make_players_list([
+            _make_player_data(criminal.player.unique_id, criminal.guid, *_COMPASS_SUSPECT_LOC),
+            _make_player_data(officer_a.player.unique_id, officer_a.guid, *_COMPASS_COP_1KM),
+            _make_player_data(officer_b.player.unique_id, officer_b.guid, *_COMPASS_COP_3KM),
+        ])
+        mock_get_locations.return_value = []
         mock_police.return_value = _AsyncList([officer_a, officer_b])
         mock_http = AsyncMock()
         mock_http_mod = AsyncMock()
@@ -3122,70 +2764,136 @@ class CompassTickTests(TestCase):
         await tick_police_suspect_locations(mock_http, mock_http_mod, mock_http_mgmt)
 
         self.assertEqual(mock_sys_msg.await_count, 2)
-        for call in mock_sys_msg.call_args_list:
-            msg = call.args[1]
-            self.assertIn(criminal.name, msg)
+        received = {c.kwargs.get("character_guid") for c in mock_sys_msg.await_args_list}
+        self.assertEqual(received, {officer_a.guid, officer_b.guid})
+        # Pair keys recorded for both
+        self.assertIn((officer_a.guid, criminal.guid), _last_compass_sent)
+        self.assertIn((officer_b.guid, criminal.guid), _last_compass_sent)
 
-    async def test_two_officers_one_near_hides_from_both(
+    async def test_mgmt_api_unavailable_degrades_to_stationary_cadence(
         self, mock_get_players, mock_get_locations, mock_police, mock_sys_msg,
     ):
-        """One officer near suspect, one far → suspect hidden from BOTH."""
+        """API unavailable → stationary cadence (1 km: 67 s), NOT unthrottled."""
         criminal = await self._setup_criminal()
-        officer_near = await self._setup_police()
-        officer_far = await self._setup_police()
+        officer = await self._setup_police()
 
         mock_get_players.return_value = _make_players_list([
             _make_player_data(criminal.player.unique_id, criminal.guid, *_COMPASS_SUSPECT_LOC),
-            _make_player_data(officer_near.player.unique_id, officer_near.guid, *_COMPASS_COP_CLOSE),
-            _make_player_data(officer_far.player.unique_id, officer_far.guid, *_COMPASS_COP_FAR),
+            _make_player_data(officer.player.unique_id, officer.guid, *_COMPASS_COP_1KM),
+        ])
+        mock_get_locations.return_value = None
+        mock_police.return_value = _AsyncList([officer])
+        mock_http = AsyncMock()
+        mock_http_mod = AsyncMock()
+        mock_http_mgmt = AsyncMock()
+
+        # First tick — sends
+        await tick_police_suspect_locations(mock_http, mock_http_mod, mock_http_mgmt)
+        mock_sys_msg.assert_awaited_once()
+
+        # 65 s since last send → still within the stationary interval
+        _last_compass_sent[(officer.guid, criminal.guid)] = time.monotonic() - 65
+        mock_sys_msg.reset_mock()
+        await tick_police_suspect_locations(mock_http, mock_http_mod, mock_http_mgmt)
+        mock_sys_msg.assert_not_called()
+
+    async def test_lowercase_guid_matches_uppercase_speed_map(
+        self, mock_get_players, mock_get_locations, mock_police, mock_sys_msg,
+    ):
+        """Character GUID in DB lowercase, speed map uppercase → matched."""
+        criminal = await self._setup_criminal()
+        officer = await self._setup_police()
+
+        mock_get_players.return_value = _make_players_list([
+            _make_player_data(criminal.player.unique_id, criminal.guid, *_COMPASS_SUSPECT_LOC),
+            _make_player_data(officer.player.unique_id, officer.guid, *_COMPASS_COP_3KM),
         ])
         mock_get_locations.return_value = [
-            _make_mgmt_entry(criminal.guid, 3000),
+            _make_mgmt_entry(criminal.guid, 5556),  # uppercase in speed map
         ]
-        mock_police.return_value = _AsyncList([officer_near, officer_far])
+        mock_police.return_value = _AsyncList([officer])
+        mock_http = AsyncMock()
+        mock_http_mod = AsyncMock()
+        mock_http_mgmt = AsyncMock()
+
+        await tick_police_suspect_locations(mock_http, mock_http_mod, mock_http_mgmt)
+        mock_sys_msg.assert_awaited_once()
+
+    async def test_stale_pair_keys_purged_when_suspect_no_longer_wanted(
+        self, mock_get_players, mock_get_locations, mock_police, mock_sys_msg,
+    ):
+        """Pair keys whose suspect is no longer wanted are purged."""
+        criminal = await self._setup_criminal()
+        officer = await self._setup_police()
+
+        _last_compass_sent[(officer.guid, "gone-suspect")] = 999.0
+        _last_compass_sent[(officer.guid, criminal.guid)] = 999.0
+
+        mock_get_players.return_value = _make_players_list([
+            _make_player_data(criminal.player.unique_id, criminal.guid, *_COMPASS_SUSPECT_LOC),
+            _make_player_data(officer.player.unique_id, officer.guid, *_COMPASS_COP_1KM),
+        ])
+        mock_get_locations.return_value = []
+        mock_police.return_value = _AsyncList([officer])
         mock_http = AsyncMock()
         mock_http_mod = AsyncMock()
         mock_http_mgmt = AsyncMock()
 
         await tick_police_suspect_locations(mock_http, mock_http_mod, mock_http_mgmt)
 
-        mock_sys_msg.assert_not_called()
+        self.assertNotIn((officer.guid, "gone-suspect"), _last_compass_sent)
+        self.assertIn((officer.guid, criminal.guid), _last_compass_sent)
+
+    async def test_keys_for_offline_officers_purged(
+        self, mock_get_players, mock_get_locations, mock_police, mock_sys_msg,
+    ):
+        """Pair keys belonging to officers no longer on duty are purged."""
+        criminal = await self._setup_criminal()
+        officer = await self._setup_police()
+
+        _last_compass_sent[("offline-cop", criminal.guid)] = 999.0
+
+        mock_get_players.return_value = _make_players_list([
+            _make_player_data(criminal.player.unique_id, criminal.guid, *_COMPASS_SUSPECT_LOC),
+            _make_player_data(officer.player.unique_id, officer.guid, *_COMPASS_COP_1KM),
+        ])
+        mock_get_locations.return_value = []
+        mock_police.return_value = _AsyncList([officer])
+        mock_http = AsyncMock()
+        mock_http_mod = AsyncMock()
+        mock_http_mgmt = AsyncMock()
+
+        await tick_police_suspect_locations(mock_http, mock_http_mod, mock_http_mgmt)
+
+        self.assertNotIn(("offline-cop", criminal.guid), _last_compass_sent)
 
     # -------------------------------------------------------------------
-    # Officer-suspect same GUID guard
+    # Message content and robustness
     # -------------------------------------------------------------------
 
     async def test_officer_and_suspect_same_guid_skipped(
         self, mock_get_players, mock_get_locations, mock_police, mock_sys_msg,
     ):
         """If an officer has the same GUID as a suspect, that entry is skipped."""
-        player = await sync_to_async(PlayerFactory)()
-        character = await sync_to_async(CharacterFactory)(
-            player=player,
-            last_online=timezone.now(),
-        )
-        await character.asave(update_fields=["last_online"])
-        await Wanted.objects.acreate(character=character, wanted_remaining=300)
-        await PoliceSession.objects.acreate(character=character)
+        criminal = await self._setup_criminal()
+        officer = await self._setup_police()
 
         mock_get_players.return_value = _make_players_list([
-            _make_player_data(player.unique_id, character.guid, *_COMPASS_SUSPECT_LOC),
+            _make_player_data(criminal.player.unique_id, criminal.guid, *_COMPASS_SUSPECT_LOC),
+            # Officer shares the suspect's guid → same location → silent
+            _make_player_data(officer.player.unique_id, criminal.guid, *_COMPASS_COP_1KM),
         ])
-        mock_get_locations.return_value = [
-            _make_mgmt_entry(character.guid, 3000),
-        ]
-        mock_police.return_value = _AsyncList([character])
+        mock_get_locations.return_value = []
+        mock_police.return_value = _AsyncList([officer])
         mock_http = AsyncMock()
         mock_http_mod = AsyncMock()
         mock_http_mgmt = AsyncMock()
 
         await tick_police_suspect_locations(mock_http, mock_http_mod, mock_http_mgmt)
 
+        # Officer entry resolves to the suspect location (500 m away → 1 km cop
+        # coordinates unused); officer's own pair is skipped by the guid guard
         mock_sys_msg.assert_not_called()
-
-    # -------------------------------------------------------------------
-    # Message content format
-    # -------------------------------------------------------------------
 
     async def test_message_contains_distance_and_direction(
         self, mock_get_players, mock_get_locations, mock_police, mock_sys_msg,
@@ -3194,16 +2902,11 @@ class CompassTickTests(TestCase):
         criminal = await self._setup_criminal()
         officer = await self._setup_police()
 
-        officer_loc = (0, 0, 0)
-        suspect_loc = (100000, 0, 0)  # 1000m east
-
         mock_get_players.return_value = _make_players_list([
-            _make_player_data(criminal.player.unique_id, criminal.guid, *suspect_loc),
-            _make_player_data(officer.player.unique_id, officer.guid, *officer_loc),
+            _make_player_data(criminal.player.unique_id, criminal.guid, *_COMPASS_SUSPECT_LOC),
+            _make_player_data(officer.player.unique_id, officer.guid, *_COMPASS_COP_1KM),
         ])
-        mock_get_locations.return_value = [
-            _make_mgmt_entry(criminal.guid, 3000),
-        ]
+        mock_get_locations.return_value = []
         mock_police.return_value = _AsyncList([officer])
         mock_http = AsyncMock()
         mock_http_mod = AsyncMock()
@@ -3211,72 +2914,43 @@ class CompassTickTests(TestCase):
 
         await tick_police_suspect_locations(mock_http, mock_http_mod, mock_http_mgmt)
 
-        msg = mock_sys_msg.call_args.args[1]
-        self.assertIn(criminal.name, msg)
-        self.assertIn("E", msg)
+        mock_sys_msg.assert_awaited_once()
+        message = mock_sys_msg.await_args.args[1]
+        self.assertIn(criminal.name, message)
+        self.assertIn("1.0km", message)
+        self.assertIn("270°W", message)  # suspect is due west of the officer
 
-    async def test_message_within_100m(
+    async def test_two_suspects_independent_pair_throttles(
         self, mock_get_players, mock_get_locations, mock_police, mock_sys_msg,
     ):
-        """Suspect within 100m of an officer is hidden by proximity filter (500m).
-
-        The "within 100m" message path in the code is unreachable in practice
-        because proximity_hide (500m) > display threshold (100m). This test
-        verifies that a close suspect is correctly hidden.
-        """
-        criminal = await self._setup_criminal()
+        """Two suspects: one within its interval, one past → only the stale
+        one appears in the officer's message."""
+        criminal_a = await self._setup_criminal()
+        criminal_b = await self._setup_criminal()
         officer = await self._setup_police()
 
-        officer_loc = (0, 0, 0)
-        suspect_loc = (5000, 0, 0)  # 50m — within proximity hide (500m)
-
         mock_get_players.return_value = _make_players_list([
-            _make_player_data(criminal.player.unique_id, criminal.guid, *suspect_loc),
-            _make_player_data(officer.player.unique_id, officer.guid, *officer_loc),
+            _make_player_data(criminal_a.player.unique_id, criminal_a.guid, *_COMPASS_SUSPECT_LOC),
+            _make_player_data(criminal_b.player.unique_id, criminal_b.guid, *_COMPASS_SUSPECT_LOC),
+            _make_player_data(officer.player.unique_id, officer.guid, *_COMPASS_COP_1KM),
         ])
-        mock_get_locations.return_value = [
-            _make_mgmt_entry(criminal.guid, 3000),
-        ]
+        mock_get_locations.return_value = []
         mock_police.return_value = _AsyncList([officer])
         mock_http = AsyncMock()
         mock_http_mod = AsyncMock()
         mock_http_mgmt = AsyncMock()
 
-        await tick_police_suspect_locations(mock_http, mock_http_mod, mock_http_mgmt)
-
-        # Hidden by proximity — no message sent
-        mock_sys_msg.assert_not_called()
-
-    async def test_message_km_format_for_large_distances(
-        self, mock_get_players, mock_get_locations, mock_police, mock_sys_msg,
-    ):
-        """Distance > 1000m shows km format."""
-        criminal = await self._setup_criminal()
-        officer = await self._setup_police()
-
-        officer_loc = (0, 0, 0)
-        suspect_loc = (200000, 0, 0)  # 2000m = 2.0km
-
-        mock_get_players.return_value = _make_players_list([
-            _make_player_data(criminal.player.unique_id, criminal.guid, *suspect_loc),
-            _make_player_data(officer.player.unique_id, officer.guid, *officer_loc),
-        ])
-        mock_get_locations.return_value = [
-            _make_mgmt_entry(criminal.guid, 3000),
-        ]
-        mock_police.return_value = _AsyncList([officer])
-        mock_http = AsyncMock()
-        mock_http_mod = AsyncMock()
-        mock_http_mgmt = AsyncMock()
+        # Both sent 20 s ago; 1 km stationary interval is 67 s → both skipped?
+        # No: first tick has no history for these pair keys unless seeded —
+        # seed A as recently sent, leave B unseeded.
+        _last_compass_sent[(officer.guid, criminal_a.guid)] = time.monotonic() - 20
 
         await tick_police_suspect_locations(mock_http, mock_http_mod, mock_http_mgmt)
 
-        msg = mock_sys_msg.call_args.args[1]
-        self.assertIn("km", msg)
-
-    # -------------------------------------------------------------------
-    # send_system_message failure is graceful
-    # -------------------------------------------------------------------
+        mock_sys_msg.assert_awaited_once()
+        message = mock_sys_msg.await_args.args[1]
+        self.assertNotIn(criminal_a.name, message)
+        self.assertIn(criminal_b.name, message)
 
     async def test_send_failure_does_not_crash(
         self, mock_get_players, mock_get_locations, mock_police, mock_sys_msg,
@@ -3287,17 +2961,14 @@ class CompassTickTests(TestCase):
 
         mock_get_players.return_value = _make_players_list([
             _make_player_data(criminal.player.unique_id, criminal.guid, *_COMPASS_SUSPECT_LOC),
-            _make_player_data(officer.player.unique_id, officer.guid, *_COMPASS_COP_FAR),
+            _make_player_data(officer.player.unique_id, officer.guid, *_COMPASS_COP_1KM),
         ])
-        mock_get_locations.return_value = [
-            _make_mgmt_entry(criminal.guid, 3000),
-        ]
+        mock_get_locations.return_value = []
         mock_police.return_value = _AsyncList([officer])
-        mock_sys_msg.side_effect = Exception("connection lost")
+        mock_sys_msg.side_effect = Exception("send failed")
         mock_http = AsyncMock()
         mock_http_mod = AsyncMock()
         mock_http_mgmt = AsyncMock()
 
+        # Must not raise
         await tick_police_suspect_locations(mock_http, mock_http_mod, mock_http_mgmt)
-
-        self.assertIn(criminal.guid, _last_compass_sent)
