@@ -9,10 +9,10 @@ import asyncio
 import logging
 import random
 
-from amc.handlers import register
-from amc.models import ServerPassengerArrivedLog
-from amc.mod_server import show_popup, transfer_money
 from amc.fraud_detection import validate_passenger_payment
+from amc.handlers import register
+from amc.mod_server import show_popup, transfer_money
+from amc.models import ServerPassengerArrivedLog
 from amc.pipeline.discord import post_discord_fraud_alert
 from amc.subsidies import get_passenger_subsidy
 
@@ -134,22 +134,28 @@ async def handle_passenger_arrived(event, player, character, ctx):
 
         if session.guild.passenger_requirement.fugitive_chance > 0:
             if random.random() < session.guild.passenger_requirement.fugitive_chance:
-                from amc.criminals import create_or_refresh_wanted
-
-                wanted, created = await create_or_refresh_wanted(
-                    character,
-                    ctx.http_client_mod,
-                    amount=log.payment,
+                from amc.criminals import (
+                    active_police_present,
+                    create_or_refresh_wanted,
                 )
-                if ctx.http_client_mod:
-                    asyncio.create_task(
-                        show_popup(
-                            ctx.http_client_mod,
-                            "You picked up a fugitive! The police are after you.",
-                            character_guid=str(character.guid),
-                            player_id=str(character.player.unique_id),
-                        )
+
+                # Dormant rule (freeman 2026-09-20): no effective cops on
+                # duty -> the wanted system is off, no organic triggers.
+                if await active_police_present(ctx.http_client_mod):
+                    wanted, created = await create_or_refresh_wanted(
+                        character,
+                        ctx.http_client_mod,
+                        amount=log.payment,
                     )
+                    if ctx.http_client_mod:
+                        asyncio.create_task(
+                            show_popup(
+                                ctx.http_client_mod,
+                                "You picked up a fugitive! The police are after you.",
+                                character_guid=str(character.guid),
+                                player_id=str(character.player.unique_id),
+                            )
+                        )
 
         if ctx.http_client_mod:
             asyncio.create_task(

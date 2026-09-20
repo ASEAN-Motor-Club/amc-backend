@@ -13,7 +13,7 @@ from amc.commands.faction import _build_player_locations, _distance_3d, execute_
 from amc.game_server import announce, get_players, get_players_locations
 from amc.models import CriminalRecord, PoliceSession, Wanted
 from amc.mod_detection import detect_custom_parts, POLICE_DUTY_WHITELIST
-from amc.mod_server import clear_suspect, despawn_player_vehicle, force_exit_vehicle, get_player_customization, get_player_last_vehicle, get_player_last_vehicle_parts, make_suspect, send_system_message, show_popup
+from amc.mod_server import clear_suspect, despawn_player_vehicle, force_exit_vehicle, get_player, get_player_customization, get_player_last_vehicle, get_player_last_vehicle_parts, make_suspect, send_system_message, show_popup
 from amc.player_tags import refresh_player_name
 from amc.special_cargo import announce_money_secured, WANTED_MIN_BOUNTY
 
@@ -23,26 +23,17 @@ logger = logging.getLogger("amc.criminals")
 
 TICK_INTERVAL = 1.0  # seconds between ticks (matches cron cadence)
 
-# Escape gate constants
-ESCAPE_DISTANCE = 50_000  # 500m (game units) — suspect must be beyond all cops to clear
-ESCAPE_FLOOR = 0.1        # minimum wanted_remaining while near police (cannot expire)
-ESCAPE_MSG_COOLDOWN = 30  # seconds between "escape the police" popup messages
-
 # Underwater auto-arrest threshold (game units)
 UNDERWATER_Z_THRESHOLD = -22455
 
 
-# Time-based decay — online suspects always decay; clears in BASE_WANTED_DURATION seconds.
+# Time-based decay reference — online suspects clear in BASE_WANTED_DURATION
+# seconds at the base rate (a stationary suspect at the 500 m near cap).
 BASE_WANTED_DURATION = Wanted.INITIAL_WANTED_LEVEL  # e.g. 900 s = 15 min
 BASE_DECAY_PER_TICK = Wanted.INITIAL_WANTED_LEVEL / BASE_WANTED_DURATION  # = 1.0/tick
 
-# Police proximity SLOWS decay (1/r² law).
-# effective_decay = BASE_DECAY_PER_TICK / (1 + proximity_factor)
-# At no police (factor=0):      1.0/tick  (clears in 5 min)
-# At REF_DISTANCE (100m, f=1):  0.5/tick  (clears in 10 min)
-# At MIN_DISTANCE  (10m,  f=10): ≈0.09/tick (clears in ~55 min)
-# Escape gate ensures it cannot expire while within ESCAPE_DISTANCE regardless.
-
+# Bounty growth is DISABLED (WANTED_MIN_BOUNTY = 0) — Wanted.amount stays 0.
+# The growth spec below is retained as an unexercised code path description.
 # Bounty growth — amount ($) added per second while police are nearby (within ESCAPE_DISTANCE).
 # Uses 1/r proximity factor (flatter than decay's 1/r²), capped at 1.0 ($100/s).
 # At 200m (factor=0.5): growth = $50/s → ~$15k over 5 min chase.
@@ -55,18 +46,58 @@ LOGOUT_HEAT_MAX = 300     # max heat added when police are point-blank
 LOGOUT_PROXIMITY_RANGE = 200_000  # 2km in game units — no effect beyond this
 
 # --- Speed & distance wanted law + compass cadence (2026-09 rework) ---
-# Wanted level is driven by SUSPECT SPEED with a 50 km/h pivot:
-#   running (S >= 50 km/h):  dW/dt = +(S - 50) / 50   [s of wanted per second]
-#   hiding (S < 50 km/h):    dW/dt = -(50 - S) / 50 * F(D)
-#   gate (any cop <= 500 m): no decay while hiding (running still accrues)
-# F(D) accelerates far-from-police hiding, saturating at HIDE_DECAY_MAX_MULT:
-#   1.0x at 500 m, ~1.4x at 1 km, ~2.1x at 3 km, 3.0x ceiling.
+# Wanted level is driven by SUSPECT SPEED with a 50 km/h pivot. Distance to
+# the nearest on-duty cop only ever HELPS the suspect when FAR away:
+#   running (S >= 50 km/h):  dW/dt = +(S - 50) / 50 * A(D)   [s of wanted per s]
+#   hiding  (S < 50 km/h):   dW/dt = -(50 - S) / 50 * F(D)
+# F(D) accelerates far-from-police hiding (1.0x at the cap -> 3.0x ceiling);
+# A(D) slows far-from-police speeding (1.0x at the cap -> 1/3x floor), so
+# speeding far away grows wanted slower than speeding next to cops.
+# Distance is CLAMPED at the 500 m near cap: inside the ring both multipliers
+# are exactly 1.0 — hiding next to a cop decays at the plain speed-driven
+# rate. There is NO freeze and NO floor: decay never stalls (the old escape
+# gate is gone; freeman correction 2026-09-20).
+# Both multipliers share one saturating weight w in [0, 1):
+#   w = x/(1+x),  x = max(D - 500 m, 0) / 2000 m
+#   F = 1 + 2w    (half the swing at 2.5 km)
+#   A = 1 - (2/3)w
+# No effective cops on duty (zero on-duty + online + non-AFK): the wanted
+# system is DORMANT — organic triggers are blocked and every active Wanted
+# record is cleared (see active_police_present + tick_wanted_countdown).
 WANTED_SPEED_PIVOT_KMH = 50.0     # above: wanted grows; below: wanted decays
 WANTED_LAW_RATE = 1.0 / 50.0      # s of wanted per (km/h from pivot) per second
 HIDE_DECAY_MAX_MULT = 3.0         # F(D) ceiling — far-parked decay multiplier
-HIDE_DECAY_KM = 2000.0            # metres past the gate for half the bonus
-WANTED_ESCAPE_HINT_STARS = 120.0  # remaining seconds under which gated suspects
-                                  # get the "escape the police" hint popup
+WANTED_ACCRUAL_MIN_MULT = 1 / 3   # A(D) floor — far-speeding growth multiplier
+WANTED_DISTANCE_SCALE_M = 2000.0  # metres past the cap for half the swing
+WANTED_NEAR_CAP_UNITS = 50_000    # 500 m in game units — distance clamp
+
+
+def _distance_weight(dist_units: float) -> float:
+    """Saturating weight w in [0, 1) for distance past the 500 m near cap."""
+    d_m = max(dist_units - WANTED_NEAR_CAP_UNITS, 0.0) / 100.0
+    x = d_m / WANTED_DISTANCE_SCALE_M
+    return x / (1.0 + x)
+
+
+def hide_decay_multiplier(dist_units: float) -> float:
+    """F(D): decay multiplier for a hiding suspect, by distance to nearest cop.
+
+    1.0x at the 500 m near cap (and everywhere inside it — the input is
+    clamped), rising hyperbolically to HIDE_DECAY_MAX_MULT (3.0x) far away
+    (half the bonus WANTED_DISTANCE_SCALE_M past the cap). Never below 1.0:
+    decay NEVER slows or stalls because police are close.
+    """
+    return 1.0 + (HIDE_DECAY_MAX_MULT - 1.0) * _distance_weight(dist_units)
+
+
+def wanted_accrual_multiplier(dist_units: float) -> float:
+    """A(D): growth multiplier for a running suspect, by distance to nearest cop.
+
+    1.0x at the 500 m near cap (and everywhere inside it), falling to
+    WANTED_ACCRUAL_MIN_MULT (1/3x) far away — speeding far away grows wanted
+    slower than speeding under a cop's nose (freeman correction 2026-09-20).
+    """
+    return 1.0 - (1.0 - WANTED_ACCRUAL_MIN_MULT) * _distance_weight(dist_units)
 
 # Compass cadence — per-officer interval from THAT officer's distance to the
 # suspect and the suspect's speed:
@@ -76,16 +107,6 @@ COMPASS_C = 1.5e-6                # Hz per (metre * km/h)
 COMPASS_MIN_INTERVAL = 5.0        # seconds — hot far-range routing intel
 COMPASS_MAX_INTERVAL = 120.0      # seconds — slow near-ring pulses
 COMPASS_HIDE_DISTANCE = 50_000    # 500 m in game units — per-officer silence ring
-
-
-def hide_decay_multiplier(dist_units: float) -> float:
-    """F(D): decay multiplier for a hiding suspect, by distance to nearest cop.
-
-    1.0x at the escape gate (500 m), rising hyperbolically to
-    HIDE_DECAY_MAX_MULT (3.0x) far away (half the bonus at HIDE_DECAY_KM).
-    """
-    d_m = max((dist_units - ESCAPE_DISTANCE) / 100.0, 0.0)
-    return 1.0 + (HIDE_DECAY_MAX_MULT - 1.0) * d_m / (d_m + HIDE_DECAY_KM)
 
 
 def compass_interval_seconds(dist_units: float, speed_kmh: float) -> float | None:
@@ -103,9 +124,6 @@ def compass_interval_seconds(dist_units: float, speed_kmh: float) -> float | Non
 
 # Tracks the last notified star level per character guid
 _last_star_notified: dict[str, int] = {}
-
-# Tracks when the last escape popup was sent per character guid (monotonic clock)
-_last_escape_msg_sent: dict[str, float] = {}
 
 # Tracks GUIDs that have had costume state reconciled against the mod server
 # (one-shot per backend process to self-heal stale DB state on restart).
@@ -270,7 +288,45 @@ STAR_MESSAGES = {
     0: "Your wanted status has expired.",
 }
 
-ESCAPE_MESSAGE = "Escape the police to clear your wanted status!"
+
+async def active_police_present(http_client_mod) -> bool:
+    """True if at least one EFFECTIVE cop is on duty right now.
+
+    'Effective' = active PoliceSession, online (last_online within 60 s) and
+    not AFK (mod ``bAFK`` flag). One parked/AFK cop must not keep the wanted
+    system armed overnight (freeman rule 2026-09-20).
+
+    With zero effective cops the wanted system is DORMANT:
+      - organic wanted triggers must not fire (gate call sites with this), and
+      - every active Wanted record is cleared (dormant amnesty in the tick).
+
+    Fail-open: if the mod API cannot confirm a cop's AFK state, the cop
+    counts as present — wanted is never amnestied on uncertain data.
+    """
+    online_threshold = timezone.now() - timedelta(seconds=60)
+    sessions = [
+        ps
+        async for ps in PoliceSession.objects.filter(
+            ended_at__isnull=True,
+            character__last_online__gte=online_threshold,
+        ).select_related("character__player")
+    ]
+    if not sessions:
+        return False
+    for ps in sessions:
+        player_id = str(ps.character.player.unique_id)
+        try:
+            player_data = await get_player(http_client_mod, player_id)
+        except Exception:
+            logger.debug(
+                "active_police_present: AFK check failed for %s, assuming present",
+                player_id,
+            )
+            return True  # fail open — never amnesty on uncertain data
+        if player_data and player_data.get("bAFK") is True:
+            continue  # AFK cop doesn't keep the system armed
+        return True
+    return False
 
 
 async def create_or_refresh_wanted(
@@ -384,21 +440,26 @@ _compute_stars = compute_stars
 async def tick_wanted_countdown(http_client, http_client_mod, http_client_mgmt=None) -> None:
     """Single tick of the wanted countdown. Called from an arq cron.
 
-    Speed-based wanted law (2026-09 rework):
-        running (S >= 50 km/h):  wanted GROWS at (S - 50)/50 s per second
-                                 (capped at INITIAL_WANTED_LEVEL — 5 stars)
+    Speed-based wanted law (2026-09 rework, corrected 2026-09-20):
+        running (S >= 50 km/h):  wanted GROWS at (S - 50)/50 * A(D) s per
+                                 second, capped at INITIAL_WANTED_LEVEL (5★);
+                                 A(D) falls from 1.0x at the 500 m near cap
+                                 to 1/3x far away (speeding far builds slower)
         hiding  (S < 50 km/h):   wanted DECAYS at (50 - S)/50 * F(D) s per
-                                 second, where D is the distance to the
-                                 nearest on-duty cop and F(D) rises from 1.0x
-                                 at the escape gate to 3.0x far away
-        gate:                    NO decay while any on-duty cop is within
-                                 ESCAPE_DISTANCE (500 m) — running still accrues
+                                 second; F(D) rises from 1.0x at the 500 m
+                                 near cap to 3.0x far away
 
-    Replaces the former 1/r² proximity-slowed decay: cops now slow a hider's
-    clock only by standing inside the 500 m ring, and hiding far from police
-    is explicitly rewarded.
+    Distance NEVER slows or freezes decay — the old escape gate is gone.
+    Inside the 500 m cap both multipliers are exactly 1.0: hiding next to a
+    cop clears at the plain speed-driven rate.
 
-    Offline suspects: no decay, wanted persists indefinitely.
+    Dormant rule (freeman 2026-09-20): with zero effective cops on duty
+    (on-duty + online + non-AFK — see active_police_present) the wanted
+    system is off. No decay, no growth, no underwater arrests, no modded
+    despawns, and every active Wanted record is cleared: online suspects get
+    the normal expiry flow, offline suspects are expired silently.
+
+    Offline suspects (while armed): no decay, wanted persists indefinitely.
     """
     # Batch-load all active wanted records
     wanted_list = [
@@ -411,6 +472,28 @@ async def tick_wanted_countdown(http_client, http_client_mod, http_client_mgmt=N
     if not wanted_list:
         return
     logger.info("wanted tick: %d active records", len(wanted_list))
+
+    # --- Dormant amnesty: no effective cops on duty -> clear everything ---
+    if not await active_police_present(http_client_mod):
+        await Wanted.objects.filter(
+            id__in=[w.id for w in wanted_list]
+        ).aupdate(wanted_remaining=0, expired_at=timezone.now())
+        # Online suspects get the normal expiry flow; offline suspects are
+        # expired silently (their suspect GE is only maintained while an
+        # active Wanted row exists, so nothing to undo game-side).
+        players = await get_players(http_client)
+        locations = _build_player_locations(players) if players else {}
+        online_chars = [
+            w.character for w in wanted_list if w.character.guid in locations
+        ]
+        logger.info(
+            "wanted tick: no effective cops on duty — dormant amnesty "
+            "cleared %d records (%d online)",
+            len(wanted_list),
+            len(online_chars),
+        )
+        await _finalize_expired_wanted(online_chars, http_client, http_client_mod)
+        return
 
     # Fetch player locations (best-effort; empty is fine)
     players = await get_players(http_client)
@@ -449,7 +532,6 @@ async def tick_wanted_countdown(http_client, http_client_mod, http_client_mgmt=N
 
     expired_characters = []
     star_change_notifications = []  # (wanted, message) for deferred processing
-    escape_popups = []              # guids to send escape popup to
     _current_modded_guids: set[str] = set()  # modded vehicle state this tick
 
     for wanted in wanted_list:
@@ -498,7 +580,6 @@ async def tick_wanted_countdown(http_client, http_client_mod, http_client_mgmt=N
                         wanted.character.name,
                     )
             _last_star_notified.pop(sus_guid, None)
-            _last_escape_msg_sent.pop(sus_guid, None)
             continue
 
         # Modded-vehicle despawn for wanted players
@@ -554,46 +635,35 @@ async def tick_wanted_countdown(http_client, http_client_mod, http_client_mgmt=N
         if currently_in_modded:
             _current_modded_guids.add(sus_guid)
 
-        # --- Speed-based wanted law ---
-        # Running (>= 50 km/h): grow, capped at 5 stars.
-        # Hiding (< 50 km/h): decay, accelerated by distance from the nearest
-        # on-duty cop (F(D)), frozen entirely while any cop is within 500 m.
+        # --- Speed-based wanted law (corrected 2026-09-20) ---
+        # Running (>= 50 km/h): grow, scaled by A(D) — speeding far builds
+        # wanted SLOWER (1/3x floor), never faster (near cap = 1.0x).
+        # Hiding (< 50 km/h): decay, scaled by F(D) — hiding far clears
+        # FASTER (3x ceiling), and near cops decay runs at the base rate.
+        # No gate, no floor: the meter always moves with the suspect's speed.
         speed_units = speed_map.get(sus_guid.upper(), 0.0)
         speed_kmh = speed_units * 0.036  # game units/s -> km/h
 
         min_dist = None
-        near_police = False
         if cop_locations:
             min_dist = min(_distance_3d(sus_loc, cop_loc) for cop_loc in cop_locations)
-            near_police = min_dist <= ESCAPE_DISTANCE
 
         if speed_kmh >= WANTED_SPEED_PIVOT_KMH:
-            # Accrual is DISTANCE-BLIND by design: running at a given speed
-            # costs the same everywhere. Fast driving far from police must not
-            # accrue faster than fast driving close to police — only the
-            # compass cadence punishes far+fast (live 5 s feed), never the
-            # wanted meter itself.
             growth = (
                 (speed_kmh - WANTED_SPEED_PIVOT_KMH)
                 * WANTED_LAW_RATE
                 * TICK_INTERVAL
             )
+            if min_dist is not None:
+                growth *= wanted_accrual_multiplier(min_dist)
             wanted.wanted_remaining = min(
                 float(Wanted.INITIAL_WANTED_LEVEL),
                 wanted.wanted_remaining + growth,
             )
-        elif near_police:
-            # Gate: no decay while any on-duty cop is within 500 m.
-            # Throttled hint for suspects whose clear is being held up.
-            if wanted.wanted_remaining < WANTED_ESCAPE_HINT_STARS:
-                now = time.monotonic()
-                last_sent = _last_escape_msg_sent.get(sus_guid, 0.0)
-                if now - last_sent >= ESCAPE_MSG_COOLDOWN:
-                    _last_escape_msg_sent[sus_guid] = now
-                    escape_popups.append(sus_guid)
         else:
-            # No cops on duty at all -> base rate (F applies to distance from
-            # actual police; a cop-less server is not "infinitely far").
+            # Distance never slows decay: F(D) >= 1.0 everywhere (clamped
+            # at the 500 m near cap), so point-blank hiding decays at the
+            # plain speed-driven rate and hiding far clears faster.
             if min_dist is not None:
                 mult = hide_decay_multiplier(min_dist)
             else:
@@ -639,17 +709,6 @@ async def tick_wanted_countdown(http_client, http_client_mod, http_client_mgmt=N
             expired_at=timezone.now(),
         )
 
-    # Send escape popups (throttled)
-    for sus_guid in escape_popups:
-        try:
-            await send_system_message(
-                http_client_mod,
-                ESCAPE_MESSAGE,
-                character_guid=sus_guid,
-            )
-        except Exception:
-            logger.warning("Failed to send escape popup to %s", sus_guid)
-
     # Send star-change messages and refresh names (DB is now up-to-date)
     refreshed_guids = set()
     for wanted, msg in star_change_notifications:
@@ -673,11 +732,32 @@ async def tick_wanted_countdown(http_client, http_client_mod, http_client_mgmt=N
                 f"Failed to refresh name for {wanted.character.name} after star change"
             )
 
-    # Refresh names and announce money secured for characters whose wanted just expired
-    for char in expired_characters:
+    # Refresh names + announcements + suspect-GE cleanup for expired suspects
+    await _finalize_expired_wanted(
+        expired_characters, http_client, http_client_mod,
+        skip_name_refresh=refreshed_guids,
+    )
+
+
+async def _finalize_expired_wanted(
+    characters,
+    http_client,
+    http_client_mod,
+    *,
+    skip_name_refresh: set[str] | None = None,
+) -> None:
+    """Shared expiry flow for characters whose Wanted record just ended.
+
+    Used by the normal tick expiry AND the dormant amnesty (no cops on duty).
+    Offline characters are skipped entirely (nothing to undo game-side).
+    """
+    if not characters:
+        return
+    if skip_name_refresh is None:
+        skip_name_refresh = set()
+    for char in characters:
         _last_star_notified.pop(char.guid, None)
-        _last_escape_msg_sent.pop(char.guid, None)
-        if char.guid not in refreshed_guids:
+        if char.guid not in skip_name_refresh:
             try:
                 await refresh_player_name(char, http_client_mod)
             except Exception:
@@ -795,7 +875,7 @@ async def refresh_suspect_tags(http_client_mod) -> None:
         if not sus_guid:
             continue
         # Pass at least CRIMINAL_SUSPECT_DURATION so the duration never
-        # collapses to 1 s at the escape floor (wanted_remaining=0.1).  The
+        # collapses to 1 s for a nearly-cleared suspect.  The
         # mod currently clamps to 60 s anyway, but this future-proofs the
         # call for when it honours the passed value.
         duration_seconds = math.ceil(
