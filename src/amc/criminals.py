@@ -11,7 +11,7 @@ from django.utils import timezone
 
 from amc.commands.faction import _build_player_locations, _distance_3d, execute_arrest
 from amc.game_server import announce, get_players, get_players_locations
-from amc.models import Character, PoliceSession, Wanted
+from amc.models import Character, PendingWanted, PoliceSession, Wanted
 from amc.mod_detection import detect_custom_parts, POLICE_DUTY_WHITELIST
 from amc.mod_server import clear_suspect, despawn_player_vehicle, force_exit_vehicle, get_player, get_player_customization, get_player_last_vehicle, get_player_last_vehicle_parts, make_suspect, send_system_message, show_popup
 from amc.player_tags import refresh_player_name
@@ -71,6 +71,20 @@ HIDE_DECAY_MAX_MULT = 3.0         # F(D) ceiling — far-parked decay multiplier
 WANTED_ACCRUAL_MIN_MULT = 1 / 3   # A(D) floor — far-speeding growth multiplier
 WANTED_DISTANCE_SCALE_M = 2000.0  # metres past the cap for half the swing
 WANTED_NEAR_CAP_UNITS = 50_000    # 500 m in game units — distance clamp
+
+# --- Wanted-trigger grace period (freeman 2026-09-20) ---
+# A rolled trigger does NOT create the Wanted row immediately. The criminal
+# first gets a private warning popup and WANTED_GRACE_SECONDS to switch to a
+# suitable vehicle; only after that does the wanted status apply and the
+# police get noticed (laundered announce + compass). Logging out during the
+# window is an arrest (see escalate_heat_on_logout); the pending row is
+# dropped while the wanted system is dormant.
+WANTED_GRACE_SECONDS = 30
+WANTED_GRACE_POPUP = (
+    "You are being flagged as WANTED!\n\n"
+    "Change to a suitable vehicle — the police will be notified and will "
+    "pursue you in 30 seconds."
+)
 
 
 def _distance_weight(dist_units: float) -> float:
@@ -182,8 +196,74 @@ def _calculate_logout_heat(min_police_distance: float) -> float:
     return (proximity_factor / Wanted.MAX_DECAY) * LOGOUT_HEAT_MAX
 
 
+async def _arrest_pending_logout(character, http_client, http_client_mod, pending) -> None:
+    """Convert a grace-period wanted trigger into a full arrest on logout.
+
+    The criminal was privately warned; logging out during the window must
+    not dodge the flag (freeman 2026-09-20). The pending row is promoted to
+    an active Wanted first so execute_arrest confiscates the trigger bounty
+    — the same money a caught player would lose — then the standard arrest
+    flow runs (jail TP on next login, score negation, treasury split).
+    """
+    guid = character.guid or str(character.pk)
+    await Wanted.objects.aget_or_create(
+        character=character,
+        expired_at__isnull=True,
+        defaults={
+            "wanted_remaining": Wanted.INITIAL_WANTED_LEVEL,
+            "amount": max(WANTED_MIN_BOUNTY, character.criminal_score // 10),
+            "set_by": None,
+        },
+    )
+    await pending.adelete()
+    if not http_client_mod:
+        logger.warning(
+            "pending-logout: no mod client for %s — wanted stays active",
+            character.name,
+        )
+        return
+    try:
+        # Async-safe refetch: the FK caches must be populated here or
+        # character.player would sync-query inside the event loop.
+        character = await Character.objects.select_related("player").aget(
+            pk=character.pk
+        )
+        guid = character.guid or str(character.pk)
+        targets = {guid: (str(character.player.unique_id), None, False)}
+        target_chars = {guid: character}
+        _arrested, total_confiscated = await execute_arrest(
+            officer_character=None,
+            targets=targets,
+            target_chars=target_chars,
+            http_client=http_client,
+            http_client_mod=http_client_mod,
+            reason="Arrested for logging out while being flagged as wanted.",
+        )
+        logger.info(
+            "pending-logout arrest: %s — confiscated=$%d",
+            character.name,
+            total_confiscated,
+        )
+    except ValueError as exc:
+        logger.warning(
+            "pending-logout arrest failed (jail not configured?) for %s: %s "
+            "— wanted stays active",
+            character.name,
+            exc,
+        )
+    except Exception:
+        logger.exception(
+            "pending-logout arrest failed unexpectedly for %s — wanted stays active",
+            character.name,
+        )
+
+
 async def escalate_heat_on_logout(character, http_client, http_client_mod=None) -> None:
     """Auto-arrest when a Wanted player logs out near police.
+
+    Grace-period triggers are handled first: a player with a PENDING wanted
+    who logs out is arrested unconditionally — no proximity gate, no heat
+    fallback.
 
     If the player is within LOGOUT_PROXIMITY_RANGE of any on-duty police officer,
     treats the logout as an arrest: expires Wanted, confiscates the bounty,
@@ -191,11 +271,18 @@ async def escalate_heat_on_logout(character, http_client, http_client_mod=None) 
     next login.  If no police are nearby or the player is too far, falls back
     to the original heat escalation behaviour.
     """
+    pending = await PendingWanted.objects.filter(character=character).afirst()
+    if pending:
+        await _arrest_pending_logout(character, http_client, http_client_mod, pending)
+        return
+
+    # select_related: sus_guid = wanted.character.guid below must not
+    # sync-query inside the event loop (async-safety).
     wanted = await Wanted.objects.filter(
         character=character,
         expired_at__isnull=True,
         wanted_remaining__gt=0,
-    ).afirst()
+    ).select_related("character").afirst()
     if not wanted:
         return
 
@@ -494,6 +581,44 @@ async def create_or_refresh_wanted(
     return active_wanted, created
 
 
+async def apply_pending_wanted(pending, http_client, http_client_mod) -> None:
+    """Apply a grace-period trigger: create the Wanted and notify the police.
+
+    Consumes the PendingWanted row. The bounty is computed by the normal
+    creation path of create_or_refresh_wanted (10% of the criminal score,
+    frozen for the chase). The laundered announce — the police-facing
+    "notice" — fires immediately at apply time (the debounce window is long
+    past; the frozen trigger amount is announced).
+    """
+    character = pending.character
+    wanted, created = await create_or_refresh_wanted(
+        character,
+        http_client_mod,
+        amount=0,
+        wanted_remaining=Wanted.INITIAL_WANTED_LEVEL,
+    )
+    await pending.adelete()
+    if created and http_client:
+        from django.core.cache import cache
+
+        from amc.special_cargo import _announce_laundered_after_delay
+
+        await cache.aset(
+            f"money_laundered:{character.guid}",
+            {"total": pending.trigger_amount, "name": character.name},
+            timeout=60,
+        )
+        asyncio.create_task(
+            _announce_laundered_after_delay(character.guid, http_client, delay=0)
+        )
+    logger.info(
+        "pending wanted applied: %s (bounty=$%d, created=%s)",
+        character.name,
+        wanted.amount,
+        created,
+    )
+
+
 def compute_stars(wanted_remaining: float) -> int:
     """Compute the star level (1–5) from remaining wanted heat."""
     if wanted_remaining <= 0:
@@ -532,6 +657,13 @@ async def tick_wanted_countdown(http_client, http_client_mod, http_client_mgmt=N
 
     Offline suspects (while armed): no decay, wanted persists indefinitely.
     """
+    # Due grace-period triggers (warning window elapsed)
+    due_pendings = [
+        p
+        async for p in PendingWanted.objects.filter(
+            apply_at__lte=timezone.now()
+        ).select_related("character__player")
+    ]
     # Batch-load all active wanted records
     wanted_list = [
         w
@@ -540,9 +672,13 @@ async def tick_wanted_countdown(http_client, http_client_mod, http_client_mgmt=N
             wanted_remaining__gt=0,
         ).select_related("character__player")
     ]
-    if not wanted_list:
+    if not wanted_list and not due_pendings:
         return
-    logger.info("wanted tick: %d active records", len(wanted_list))
+    logger.info(
+        "wanted tick: %d active records, %d pending trigger(s) due",
+        len(wanted_list),
+        len(due_pendings),
+    )
 
     # --- Dormant amnesty: no effective cops on duty -> clear ORGANIC heat ---
     # Admin /setwanted flags (set_by set) are deliberate and cop-independent:
@@ -553,6 +689,17 @@ async def tick_wanted_countdown(http_client, http_client_mod, http_client_mgmt=N
     if not await active_police_present(http_client_mod):
         organic = [w for w in wanted_list if w.set_by_id is None]
         admin_flags = [w for w in wanted_list if w.set_by_id is not None]
+        if due_pendings:
+            # Pending triggers are organic work in flight — the dormant rule
+            # applies to them too: they never apply with zero effective cops
+            # on duty (freeman 2026-09-20).
+            await PendingWanted.objects.filter(
+                id__in=[p.id for p in due_pendings]
+            ).adelete()
+            logger.info(
+                "wanted tick: dormant — dropped %d pending trigger(s)",
+                len(due_pendings),
+            )
         if organic:
             await Wanted.objects.filter(
                 id__in=[w.id for w in organic]
@@ -582,6 +729,28 @@ async def tick_wanted_countdown(http_client, http_client_mod, http_client_mgmt=N
                 "wanted tick: dormant — %d admin flag(s) preserved",
                 len(admin_flags),
             )
+        return
+
+    # --- Apply due grace-period triggers (warning window elapsed) ---
+    for pending in due_pendings:
+        try:
+            await apply_pending_wanted(pending, http_client, http_client_mod)
+        except Exception:
+            logger.exception(
+                "pending wanted apply failed for %s", pending.character.name
+            )
+    if due_pendings:
+        # The applies create/refresh wanted rows directly — reload so the
+        # decay loop and its trailing bulk_update work on post-apply state
+        # instead of clobbering the fresh values with the stale snapshot.
+        wanted_list = [
+            w
+            async for w in Wanted.objects.filter(
+                expired_at__isnull=True,
+                wanted_remaining__gt=0,
+            ).select_related("character__player")
+        ]
+    if not wanted_list:
         return
 
     # Fetch player locations (best-effort; empty is fine)
