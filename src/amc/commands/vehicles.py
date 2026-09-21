@@ -397,6 +397,25 @@ async def cmd_rental(ctx: CommandContext, name: str = ""):
             v.alias = rental_name
         await v.asave()
 
+        # Also place a drivable copy in the world at the vehicle's registered
+        # position (same mechanism as /spawn_displays: no driver, config
+        # location/rotation). Despawn first so re-marking refreshes the copy
+        # instead of stacking; the existing /unrental despawn targets the
+        # rental-<id> tag either way.
+        await despawn_by_tag(ctx.http_client_mod, f"rental-{v.id}")
+        try:
+            await spawn_registered_vehicle(
+                ctx.http_client_mod,
+                v,
+                tag="rental_vehicles",
+                tags=[f"rental-{v.id}"],
+                extra_data={"drivable": True},
+            )
+        except Exception:
+            logger.warning(
+                "Failed to spawn in-place rental copy for vehicle #%s", v.id, exc_info=True
+            )
+
     names = "\n".join(
         [f"<Small>#{v.id} - {v.config['VehicleName']}</>" for v in vehicles if v.rental]
     )

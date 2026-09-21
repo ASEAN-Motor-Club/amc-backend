@@ -3688,11 +3688,24 @@ class RentalMarkTestCase(SimpleTestCase):
             setattr(v, key, value)
         return v
 
-    async def _run_rental(self, vehicles, mod_player=None, mod_player_error=False):
+    async def _run_rental(
+        self,
+        vehicles,
+        mod_player=None,
+        mod_player_error=False,
+        spawn_error=False,
+        name="",
+    ):
         get_player_mock = (
             AsyncMock(side_effect=Exception("mod api down"))
             if mod_player_error
             else AsyncMock(return_value=mod_player)
+        )
+        self.despawn_mock = AsyncMock()
+        self.spawn_mock = (
+            AsyncMock(side_effect=Exception("spawn failed"))
+            if spawn_error
+            else AsyncMock()
         )
         with (
             patch(
@@ -3700,8 +3713,12 @@ class RentalMarkTestCase(SimpleTestCase):
                 new=AsyncMock(return_value=vehicles),
             ),
             patch("amc.commands.vehicles.get_player", new=get_player_mock),
+            patch("amc.commands.vehicles.despawn_by_tag", new=self.despawn_mock),
+            patch(
+                "amc.commands.vehicles.spawn_registered_vehicle", new=self.spawn_mock
+            ),
         ):
-            await cmd_rental(self.ctx)
+            await cmd_rental(self.ctx, name)
         return self.ctx.reply.call_args[0][0]
 
     async def test_rental_marks_own_personal_vehicle(self):
@@ -3757,29 +3774,48 @@ class RentalMarkTestCase(SimpleTestCase):
     async def test_rental_no_registered_vehicle(self):
         output = await self._run_rental(None)
         self.assertIn("No rentable vehicle found", output)
+        self.spawn_mock.assert_not_awaited()
+        self.despawn_mock.assert_not_awaited()
+
+    async def test_rental_spawns_in_place_copy(self):
+        v = self._make_vehicle()
+        output = await self._run_rental([v])
+        self.assertIn("Marked as rental", output)
+        self.despawn_mock.assert_awaited_once_with(
+            self.ctx.http_client_mod, "rental-1"
+        )
+        self.spawn_mock.assert_awaited_once()
+        kwargs = self.spawn_mock.call_args.kwargs
+        self.assertEqual(kwargs["tag"], "rental_vehicles")
+        self.assertIn("rental-1", kwargs["tags"])
+        self.assertEqual(kwargs["extra_data"].get("drivable"), True)
+
+    async def test_rental_denial_spawns_nothing(self):
+        # Employee marking a company vehicle: denied, no in-place copy placed.
+        v = self._make_vehicle(character_id=None, company_guid="company-guid-1")
+        v.config = {"VehicleName": "CorpCar", "CompanyName": "My Corp"}
+        output = await self._run_rental(
+            [v], mod_player={"OwnCompanyGuid": "0000", "JoinedCompanyGuid": "company-guid-1"}
+        )
+        self.assertIn("Only the company owner", output)
+        self.spawn_mock.assert_not_awaited()
+        self.despawn_mock.assert_not_awaited()
+
+    async def test_rental_spawn_failure_still_reports_marked(self):
+        v = self._make_vehicle()
+        output = await self._run_rental([v], spawn_error=True)
+        self.assertIn("Marked as rental", output)
+        self.assertTrue(v.rental)
+        v.asave.assert_awaited()
 
     async def test_rental_name_truncated_to_30(self):
         v = self._make_vehicle()
-        with (
-            patch(
-                "amc.commands.vehicles.register_player_vehicles",
-                new=AsyncMock(return_value=[v]),
-            ),
-            patch("amc.commands.vehicles.get_player", new=AsyncMock(return_value=None)),
-        ):
-            await cmd_rental(self.ctx, "x" * 40)
+        await self._run_rental([v], name="x" * 40)
         self.assertEqual(v.alias, "x" * 30)
 
     async def test_rental_blank_name_keeps_existing_alias(self):
         v = self._make_vehicle(alias="Old Name")
-        with (
-            patch(
-                "amc.commands.vehicles.register_player_vehicles",
-                new=AsyncMock(return_value=[v]),
-            ),
-            patch("amc.commands.vehicles.get_player", new=AsyncMock(return_value=None)),
-        ):
-            await cmd_rental(self.ctx, "   ")
+        await self._run_rental([v], name="   ")
         self.assertEqual(v.alias, "Old Name")
 
 
