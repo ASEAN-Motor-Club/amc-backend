@@ -2395,16 +2395,18 @@ class CommandsTestCase(TestCase):
         self.assertNotIn("SmallBlock_240HP", labels)
 
     def test_load_known_mod_parts_amc_tires(self):
-        """The AMC tire pack ships its own registry entry covering its FULL
-        inventory: 10 part keys (VehicleParts0 rows) + 25 tire physics
-        assets, so /check_parts labels club tires [AMC Tires] purely from
-        the registry (design: not gated on the pak being an installed
-        server mod)."""
+        """GATE's AMC Parts (formerly AMC Tires) ships its own registry entry
+        covering its FULL inventory: 10 part keys (VehicleParts0 rows) + 25
+        tire physics assets + the 49 unsuffixed tuning keys from the
+        2026-09-21 superset pak (FD0-FD40, Dampers; Spring900 stays in the
+        More Tuning entry where it was live-observed first), so
+        /check_parts labels them [GATE's AMC Parts] purely from the registry
+        (design: not gated on the pak being an installed server mod)."""
         registry = load_known_mod_parts()
         self.assertIn("amc-tires", registry)
         amc = registry["amc-tires"]
-        self.assertEqual(amc["label"], "AMC Tires")
-        self.assertEqual(len(amc["keys"]), 35)
+        self.assertEqual(amc["label"], "GATE's AMC Parts")
+        self.assertEqual(len(amc["keys"]), 84)
         for key in (
             "amc_bike",
             "amc_sport",
@@ -2424,21 +2426,50 @@ class CommandsTestCase(TestCase):
         self.assertEqual(amc["prefixes"], ("amc_",))
 
     def test_match_known_mod_parts_amc_tires(self):
-        """An AMC tire (exact key) and a pressure-tuned variant (AMC_<x>_NN,
-        caught by the amc_ prefix because the stock catalogue can't strip the
-        suffix on mod keys) label as [AMC Tires]; stock keys stay unlabeled."""
+        """An AMC tire (exact key), a pressure-tuned variant (AMC_<x>_NN,
+        caught by the amc_ prefix), and an unsuffixed tuning key (FD25) all
+        label as [GATE's AMC Parts]; stock keys stay unlabeled."""
         parts = [
             {"key": "AMC_Sport", "slot": "Wheel0Front", "slot_value": 14},
             {"key": "AMC_Bike_65", "slot": "Wheel0Front", "slot_value": 14},
             {"key": "BasicTire_65", "slot": "Wheel0Front", "slot_value": 14},
             {"key": "AMC_Truck_88-DRW", "slot": "Wheel0Rear", "slot_value": 15},
+            {"key": "FD25", "slot": "FinalDrive", "slot_value": 20},
         ]
         matched = match_known_mod_parts(parts)
         labels = {p["key"]: label for p, label in matched}
-        self.assertEqual(labels.get("AMC_Sport"), "AMC Tires")
-        self.assertEqual(labels.get("AMC_Bike_65"), "AMC Tires")
-        self.assertEqual(labels.get("AMC_Truck_88-DRW"), "AMC Tires")
+        self.assertEqual(labels.get("AMC_Sport"), "GATE's AMC Parts")
+        self.assertEqual(labels.get("AMC_Bike_65"), "GATE's AMC Parts")
+        self.assertEqual(labels.get("AMC_Truck_88-DRW"), "GATE's AMC Parts")
+        self.assertEqual(labels.get("FD25"), "GATE's AMC Parts")
         self.assertNotIn("BasicTire_65", labels)
+
+    def test_load_known_mod_parts_asean_police_force(self):
+        """The ASEAN Police Force pack ships its own registry entry: 9 APF
+        tire keys + 3 PD_SC superchargers + PoliceTire label as
+        [ASEAN Police Force] instead of [unknown] (Yuuka's split decision
+        2026-09-21: PD_SC rides with APF, not with GATE's AMC Parts)."""
+        registry = load_known_mod_parts()
+        self.assertIn("asean-police-force", registry)
+        apf = registry["asean-police-force"]
+        self.assertEqual(apf["label"], "ASEAN Police Force")
+        self.assertEqual(len(apf["keys"]), 13)
+        for key in ("apf_78a", "apf_cruiser_78s", "pd_sc_mkii", "policetire"):
+            self.assertIn(key, apf["keys"])
+
+    def test_match_known_mod_parts_asean_police_force(self):
+        """APF tires and PD_SC superchargers label [ASEAN Police Force];
+        an MT tire key stays under More Tuning (no cross-entry grab)."""
+        parts = [
+            {"key": "APF_79A", "slot": "Wheel0Front", "slot_value": 14},
+            {"key": "PD_SC_Pursuit", "slot": "Turbocharger", "slot_value": 7},
+            {"key": "RallyTire", "slot": "Wheel0Rear", "slot_value": 15},
+        ]
+        matched = match_known_mod_parts(parts)
+        labels = {p["key"]: label for p, label in matched}
+        self.assertEqual(labels.get("APF_79A"), "ASEAN Police Force")
+        self.assertEqual(labels.get("PD_SC_Pursuit"), "ASEAN Police Force")
+        self.assertEqual(labels.get("RallyTire"), "More Tuning")
 
     def test_match_known_mod_parts_case_insensitive(self):
         """Matching lowercases both sides; non-registry unknowns stay out."""
