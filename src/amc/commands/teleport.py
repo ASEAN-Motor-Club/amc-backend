@@ -15,7 +15,7 @@ from amc.mod_server import (
 )
 from amc.game_server import get_players
 from amc.police import is_police_vehicle
-from amc.utils import with_verification_code
+from amc.utils import fuzzy_find_player, with_verification_code
 from amc_finance.loans import get_player_bank_balance
 from amc_finance.services import (
     refund_player_teleport_fee,
@@ -259,6 +259,190 @@ async def cmd_tp_coords(ctx: CommandContext, x: int, y: int, z: int):
         ctx.player.unique_id,
         {"X": x, "Y": y, "Z": z},
         no_vehicles=False,
+    )
+
+
+@registry.register(
+    ["/teleport", "/tp"],
+    description=gettext_lazy("Teleport another player to coordinates (Admin Only)"),
+    category="Admin",
+)
+async def cmd_tp_player_to_coords(
+    ctx: CommandContext, target_player_name: str, x: int, y: int, z: int
+):
+    if not (ctx.player_info and ctx.player_info.get("bIsAdmin")):
+        await ctx.reply(_("Admin Only"))
+        return
+
+    players = await get_players(ctx.http_client)
+    target_pid = fuzzy_find_player(players, target_player_name)
+
+    if not target_pid:
+        asyncio.create_task(
+            show_popup(
+                ctx.http_client_mod,
+                _(
+                    "<Title>Player not found</>\n\nPlease make sure you typed the name correctly."
+                ),
+                character_guid=ctx.character.guid,
+                player_id=str(ctx.player.unique_id),
+            )
+        )
+        return
+
+    location = {"X": x, "Y": y, "Z": z}
+
+    if str(target_pid) == str(ctx.player.unique_id):
+        await teleport_player(
+            ctx.http_client_mod,
+            str(ctx.player.unique_id),
+            location,
+            no_vehicles=False,
+        )
+        return
+
+    await teleport_player(
+        ctx.http_client_mod,
+        str(target_pid),
+        location,
+        reset_trailers=False,
+        reset_carried_vehicles=False,
+    )
+    await show_popup(
+        ctx.http_client_mod,
+        _(
+            "<Title>Teleported</>\n\nYou have been teleported to coordinates "
+            "{x}, {y}, {z} by {admin}."
+        ).format(x=x, y=y, z=z, admin=ctx.character.name),
+        player_id=str(target_pid),
+    )
+    await ctx.reply(
+        _("Teleported {player} to coordinates {x}, {y}, {z}").format(
+            player=target_player_name, x=x, y=y, z=z
+        )
+    )
+
+
+@registry.register(
+    ["/teleport", "/tp"],
+    description=gettext_lazy("Teleport another player to a location (Admin Only)"),
+    category="Admin",
+)
+async def cmd_tp_player_to_point(
+    ctx: CommandContext, target_player_name: str, location: str
+):
+    from amc.commands.admin import teleport_player_to_point
+
+    await teleport_player_to_point(ctx, target_player_name, location)
+
+
+async def _find_player_location(
+    players: list, player_name: str
+) -> tuple[str | None, tuple[float, float, float] | None]:
+    """Resolve a player by (fuzzy) name → (unique_id, (x, y, z)) or (None, None)."""
+    from amc.commands.faction import parse_location_string
+
+    pid = fuzzy_find_player(players, player_name)
+    if not pid:
+        return None, None
+
+    pdata = next((p for uid, p in players if str(uid) == str(pid)), None)
+    if not pdata or not pdata.get("location"):
+        return str(pid), None
+
+    try:
+        return str(pid), parse_location_string(pdata["location"])
+    except ValueError:
+        return str(pid), None
+
+
+def _player_not_found_message(target_name: str) -> str:
+    return _(
+        "<Title>Player not found</>\n\n"
+        "Could not find a player named {name}."
+    ).format(name=target_name)
+
+
+@registry.register(
+    ["/tpto"],
+    description=gettext_lazy(
+        "Teleport to a player (/tpto <player>). Admins may teleport one player "
+        "to another (/tpto <player> <player>)"
+    ),
+    category="Teleportation",
+)
+async def cmd_tpto(ctx: CommandContext, player_a: str, player_b: str = ""):
+    is_admin = bool(ctx.player_info and ctx.player_info.get("bIsAdmin"))
+    players = await get_players(ctx.http_client)
+
+    if player_b:
+        # Admin-only: teleport player_a to player_b
+        if not is_admin:
+            await ctx.reply(_("Admin Only"))
+            return
+
+        pid_a, loc_a = await _find_player_location(players, player_a)
+        if not pid_a:
+            await ctx.reply(_player_not_found_message(player_a))
+            return
+
+        pid_b, loc_b = await _find_player_location(players, player_b)
+        if not pid_b or loc_b is None:
+            await ctx.reply(_player_not_found_message(player_b))
+            return
+
+        location = {"X": loc_b[0], "Y": loc_b[1], "Z": loc_b[2] + 100}
+        await teleport_player(
+            ctx.http_client_mod,
+            pid_a,
+            location,
+            reset_trailers=False,
+            reset_carried_vehicles=False,
+        )
+        await show_popup(
+            ctx.http_client_mod,
+            _(
+                "<Title>Teleported</>\n\nYou have been teleported to {name} by {admin}."
+            ).format(name=player_b, admin=ctx.character.name),
+            player_id=pid_a,
+        )
+        await ctx.reply(
+            _("Teleported {player_a} to {player_b}").format(
+                player_a=player_a, player_b=player_b
+            )
+        )
+        return
+
+    # Self: teleport the caller to player_a
+    if ctx.character.rp_mode:
+        await ctx.reply(_("Teleporting is disabled while in RP mode."))
+        return
+
+    is_on_duty = await PoliceSession.objects.filter(
+        character=ctx.character, ended_at__isnull=True
+    ).aexists()
+    if is_on_duty:
+        await ctx.reply(
+            _("Teleporting to a player is restricted while on police duty.")
+        )
+        return
+
+    pid_a, loc_a = await _find_player_location(players, player_a)
+    if not pid_a:
+        await ctx.reply(_player_not_found_message(player_a))
+        return
+    if loc_a is None:
+        await ctx.reply(_("Could not determine {name}'s position.").format(name=player_a))
+        return
+
+    location = {"X": loc_a[0], "Y": loc_a[1], "Z": loc_a[2] + 100}
+    await teleport_player(
+        ctx.http_client_mod,
+        str(ctx.player.unique_id),
+        location,
+        no_vehicles=not is_admin,
+        reset_trailers=not is_admin,
+        reset_carried_vehicles=not is_admin,
     )
 
 

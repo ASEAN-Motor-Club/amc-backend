@@ -26,6 +26,9 @@ async def cmd_help(ctx: CommandContext):
         if cat == "Admin" and not is_admin:
             continue
 
+        if cmd.get("deprecated", False):
+            continue
+
         if cat not in categories:
             categories[cat] = []
         categories[cat].append(cmd)
