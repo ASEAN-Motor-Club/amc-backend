@@ -3548,3 +3548,52 @@ class QuestionnaireResponse(models.Model):
     @override
     def __str__(self):
         return f"{self.questionnaire_id} - {self.discord_username}"
+
+
+class Exam(models.Model):
+    """A scored exam created via /exam create.
+
+    questions is the questionnaire-style JSON list; every graded question
+    additionally carries an ``answer`` key (the correct option string for
+    single/radio, a list of option strings for multi/check). ``text``
+    questions are recorded but ungraded.
+    """
+
+    title = models.CharField(max_length=200)
+    description = models.TextField(blank=True)
+    questions = models.JSONField()
+    pass_mark = models.PositiveSmallIntegerField(default=80)
+    max_attempts = models.PositiveSmallIntegerField(default=1)
+    created_by_discord_id = models.CharField(max_length=32)
+    created_at = models.DateTimeField(auto_now_add=True, db_index=True)
+    closed = models.BooleanField(default=False)
+    channel_id = models.CharField(max_length=32, blank=True)
+    message_id = models.CharField(max_length=32, blank=True)
+
+    class Meta:
+        ordering = ["-created_at"]
+
+    @override
+    def __str__(self):
+        return self.title
+
+
+@final
+class ExamAttempt(models.Model):
+    """One graded submission of an exam by a Discord user."""
+
+    exam = models.ForeignKey(
+        Exam, on_delete=models.CASCADE, related_name="attempts"
+    )
+    discord_user_id = models.CharField(max_length=32)
+    discord_username = models.CharField(max_length=100)
+    answers = models.JSONField(help_text="List of submitted answers, per question.")
+    correct = models.PositiveSmallIntegerField()
+    graded = models.PositiveSmallIntegerField()
+    score = models.PositiveSmallIntegerField(help_text="Percent 0-100.")
+    passed = models.BooleanField()
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    @override
+    def __str__(self):
+        return f"{self.exam_id} - {self.discord_username} - {self.score}%"
