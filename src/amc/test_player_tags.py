@@ -44,12 +44,10 @@ def test_build_display_name_mod_and_gov():
     )
 
 
-@pytest.mark.skip(reason="player tags feature on hold")
 def test_build_display_name_police_only():
     assert build_display_name("PlayerOne", police_level=1) == "[P1] PlayerOne"
 
 
-@pytest.mark.skip(reason="player tags feature on hold")
 def test_build_display_name_police_and_mods():
     assert (
         build_display_name("PlayerOne", police_level=1, has_custom_parts=True)
@@ -57,7 +55,6 @@ def test_build_display_name_police_and_mods():
     )
 
 
-@pytest.mark.skip(reason="player tags feature on hold")
 def test_build_display_name_police_and_gov():
     assert (
         build_display_name("PlayerOne", police_level=1, gov_level=3)
@@ -65,7 +62,6 @@ def test_build_display_name_police_and_gov():
     )
 
 
-@pytest.mark.skip(reason="player tags feature on hold")
 def test_build_display_name_police_mods_and_gov():
     assert (
         build_display_name(
@@ -75,7 +71,6 @@ def test_build_display_name_police_mods_and_gov():
     )
 
 
-@pytest.mark.skip(reason="player tags feature on hold")
 def test_build_display_name_police_suppresses_crim():
     """Police membership suppresses criminal tag."""
     assert (
@@ -84,7 +79,6 @@ def test_build_display_name_police_suppresses_crim():
     )
 
 
-@pytest.mark.skip(reason="player tags feature on hold")
 def test_build_display_name_police_suppresses_crim_with_gov():
     """Police suppresses criminal tag (gov does not)."""
     assert (
@@ -672,7 +666,7 @@ async def test_get_player_singleflight(mock_cache_aget, mock_cache_aset):
 @pytest.mark.django_db
 @patch("amc.player_tags.set_character_name", new_callable=AsyncMock)
 async def test_refresh_player_name_police_on_duty_gets_r_tag(mock_set_name):
-    """Active police session → R tag (on-duty officers are teleport-locked)."""
+    """Active police session → R tag (teleport-locked) + P1 badge."""
     from amc.factories import CharacterFactory, PlayerFactory
     from amc.models import PoliceSession
     from asgiref.sync import sync_to_async
@@ -690,11 +684,11 @@ async def test_refresh_player_name_police_on_duty_gets_r_tag(mock_set_name):
     await refresh_player_name(character, session)
 
     await character.arefresh_from_db()
-    assert character.custom_name == "[R] TestPlayer"
+    assert character.custom_name == "[RP1] TestPlayer"
     from amc.player_tags import set_character_name
 
     set_character_name.assert_awaited_once_with(
-        session, "test-guid-police-2", "[R] TestPlayer"
+        session, "test-guid-police-2", "[RP1] TestPlayer"
     )
 
 
@@ -722,6 +716,61 @@ async def test_refresh_player_name_police_off_duty_strips_r_tag(mock_set_name):
     await PoliceSession.objects.acreate(
         character=character,
         ended_at=timezone.now() - timedelta(minutes=1),
+    )
+
+    session = MagicMock()
+    await refresh_player_name(character, session)
+
+    await character.arefresh_from_db()
+    assert character.custom_name is None
+
+
+@pytest.mark.asyncio
+@pytest.mark.django_db
+@patch("amc.player_tags.set_character_name", new_callable=AsyncMock)
+async def test_refresh_player_name_police_level_scales_with_confiscations(
+    mock_set_name,
+):
+    """Lifetime confiscations ≥ POLICE_LEVEL_STEP raise the P badge (P2)."""
+    from asgiref.sync import sync_to_async
+
+    from amc.factories import CharacterFactory, PlayerFactory
+    from amc.models import PoliceSession
+
+    player = await sync_to_async(PlayerFactory)()
+    character = await sync_to_async(CharacterFactory)(
+        player=player,
+        name="TestPlayer",
+        guid="test-guid-police-p2",
+        police_confiscated_total=50_000,
+    )
+
+    await PoliceSession.objects.acreate(character=character)
+
+    session = MagicMock()
+    await refresh_player_name(character, session)
+
+    await character.arefresh_from_db()
+    assert character.custom_name == "[RP2] TestPlayer"
+
+
+@pytest.mark.asyncio
+@pytest.mark.django_db
+@patch("amc.player_tags.set_character_name", new_callable=AsyncMock)
+async def test_refresh_player_name_police_off_duty_confiscations_no_p_tag(
+    mock_set_name,
+):
+    """P requires an ACTIVE session — off-duty veterans stay untagged."""
+    from asgiref.sync import sync_to_async
+
+    from amc.factories import CharacterFactory, PlayerFactory
+
+    player = await sync_to_async(PlayerFactory)()
+    character = await sync_to_async(CharacterFactory)(
+        player=player,
+        name="TestPlayer",
+        guid="test-guid-police-retired",
+        police_confiscated_total=150_000,
     )
 
     session = MagicMock()
