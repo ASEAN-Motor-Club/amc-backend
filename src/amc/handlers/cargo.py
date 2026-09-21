@@ -203,6 +203,7 @@ async def handle_cargo_arrived(event, player, character, ctx):
     # --- 6. Per-cargo-group: subsidy, delivery, job, supply chain ---
     total_subsidy = 0
     total_payment = sum(log.payment for log in logs)
+    illicit_payment = 0
     vehicle_key = character.last_vehicle_key or "" if character else ""
 
     key_by_cargo = attrgetter("cargo_key")
@@ -216,6 +217,8 @@ async def handle_cargo_arrived(event, player, character, ctx):
         delivery_destination = group_list[0].destination_point
 
         is_illicit = cargo_key in ILLICIT_CARGO_KEYS
+        if is_illicit:
+            illicit_payment += payment * quantity
 
         cargo_subsidy = 0
         if not is_illicit:
@@ -414,6 +417,14 @@ async def handle_cargo_arrived(event, player, character, ctx):
                         risk_premium, character, ctx.http_client_mod,
                         message="Risk Premium",
                     )
+
+    # Gov employees: exclude illicit cargo payments from the returned base
+    # payment so on_player_profit's gov redirect neither confiscates them as
+    # "Government Service – Earnings" nor credits them toward
+    # gov_employee_contributions. Illicit income stays in the wallet and is
+    # handled by the criminal machinery (records, confiscation, wanted).
+    if character and character.is_gov_employee and illicit_payment > 0:
+        total_payment -= illicit_payment
 
     # Contract: base_pay includes the clawback amount; process_events claws
     # total_fraud_excess from the wallet and subtracts it from the batch
