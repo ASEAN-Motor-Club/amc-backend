@@ -22,6 +22,7 @@ from .models import (
     Ticket,
     Character,
     Company,
+    CompassTuningConfig,
     PlayerChatLog,
     PlayerRestockDepotLog,
     PlayerVehicleLog,
@@ -1167,6 +1168,25 @@ class JobPostingConfigAdmin(admin.ModelAdmin):
     def has_add_permission(self, request):
         # Only allow add if no instance exists yet
         return not JobPostingConfig.objects.exists()
+
+    def has_delete_permission(self, request, obj=None):
+        return False
+
+
+@admin.register(CompassTuningConfig)
+class CompassTuningConfigAdmin(admin.ModelAdmin):
+    list_display = [
+        "config_name",
+        "c",
+        "min_interval",
+        "max_interval",
+        "ring_distance",
+        "budget_cap",
+    ]
+
+    def has_add_permission(self, request):
+        # Only allow add if no instance exists yet
+        return not CompassTuningConfig.objects.exists()
 
     def has_delete_permission(self, request, obj=None):
         return False
