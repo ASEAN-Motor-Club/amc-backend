@@ -3,6 +3,7 @@
 from unittest.mock import AsyncMock, MagicMock, patch
 
 from django.test import TestCase
+from django.utils import timezone
 
 from amc.command_framework import CommandContext, registry
 from amc.commands.general import cmd_help
@@ -29,7 +30,7 @@ def make_ctx(character, player_info):
     ctx.player_info = player_info
     ctx.http_client = MagicMock()
     ctx.http_client_mod = MagicMock()
-    ctx.timestamp = MagicMock()
+    ctx.timestamp = timezone.now()
     return ctx
 
 
