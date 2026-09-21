@@ -4,7 +4,10 @@ import logging
 import aiohttp
 from django.conf import settings
 
-from amc.api.player_positions_common import POSITION_UPDATE_SLEEP, get_players_mod
+from amc.api.player_positions_common import (
+    POSITION_UPDATE_SLEEP,
+    get_players_mod_masked,
+)
 from amc.api.player_positions_pb2 import PlayerPositions, VehicleKey
 
 logger = logging.getLogger(__name__)
@@ -24,16 +27,23 @@ def serialize_players(players: list[dict]) -> bytes:
         pos = positions.players.add()
         pos.unique_id = int(p.get("UniqueID", 0))
         pos.player_name = str(p.get("PlayerName", ""))
-        pos.x = float(loc.get("X", 0))
-        pos.y = float(loc.get("Y", 0))
-        pos.z = float(loc.get("Z", 0))
+        hidden = bool(p.get("hidden", False))
+        if hidden:
+            pos.x = 0.0
+            pos.y = 0.0
+            pos.z = 0.0
+        else:
+            pos.x = float(loc.get("X", 0))
+            pos.y = float(loc.get("Y", 0))
+            pos.z = float(loc.get("Z", 0))
 
         raw_key = str(p.get("VehicleKey", ""))
         enum_val = _VEHICLE_KEY_MAP.get(raw_key)
-        if enum_val is not None:
+        if not hidden and enum_val is not None:
             pos.vehicle_key_enum = enum_val
-        else:
+        elif not hidden:
             pos.vehicle_key_unknown = raw_key
+        pos.hidden = hidden
     return positions.SerializeToString()
 
 
@@ -54,7 +64,7 @@ async def _websocket_handler(scope, receive, send):
                 pass
 
             try:
-                players = await get_players_mod(session, filter_hidden=True)
+                players = await get_players_mod_masked(session)
                 data = serialize_players(players)
                 await send({"type": "websocket.send", "bytes": data})
             except Exception:

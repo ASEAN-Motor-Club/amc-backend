@@ -14,13 +14,16 @@ from unittest.mock import AsyncMock, patch
 
 from asgiref.sync import sync_to_async
 from django.core.cache import cache
-from django.test import TestCase
+from django.test import SimpleTestCase, TestCase
 from django.utils import timezone
 
 from amc.api.player_positions_common import (
     _should_hide_player,
     get_players_mod,
+    get_players_mod_masked,
 )
+from amc.api.player_positions_pb2 import PlayerPositions
+from amc.api.player_positions_ws import _VEHICLE_KEY_MAP, serialize_players
 from amc.factories import CharacterFactory, PlayerFactory
 from amc.models import PoliceSession, Wanted
 
@@ -276,3 +279,152 @@ class GetPlayersModFilterTests(TestCase):
         session = _FakeSession([_make_mod_player(costume_player.unique_id)])
         result = await get_players_mod(session, filter_hidden=True)
         self.assertEqual(len(result), 1)
+
+
+class GetPlayersModMaskedTests(TestCase):
+    """get_players_mod_masked keeps hidden players in the list but zeroes
+    their location/vehicle and flags them hidden=True."""
+
+    def setUp(self):
+        cache.clear()
+
+    async def _setup_wanted_criminal(self):
+        player = await sync_to_async(PlayerFactory)()
+        character = await sync_to_async(CharacterFactory)(
+            player=player,
+            last_online=timezone.now(),
+        )
+        await character.asave(update_fields=["last_online"])
+        await Wanted.objects.acreate(
+            character=character,
+            wanted_remaining=300,
+        )
+        return player, character
+
+    async def _setup_police(self):
+        player = await sync_to_async(PlayerFactory)()
+        character = await sync_to_async(CharacterFactory)(
+            player=player,
+            last_online=timezone.now(),
+        )
+        await character.asave(update_fields=["last_online"])
+        await PoliceSession.objects.acreate(character=character)
+        return player, character
+
+    async def _setup_regular_player(self):
+        player = await sync_to_async(PlayerFactory)()
+        character = await sync_to_async(CharacterFactory)(
+            player=player,
+            last_online=timezone.now(),
+        )
+        await character.asave(update_fields=["last_online"])
+        return player, character
+
+    async def _setup_costume_criminal(self):
+        player = await sync_to_async(PlayerFactory)()
+        character = await sync_to_async(CharacterFactory)(
+            player=player,
+            last_online=timezone.now(),
+            wearing_costume=True,
+            costume_item_key="Costume_Butcher_01",
+        )
+        await character.asave(update_fields=["last_online", "wearing_costume", "costume_item_key"])
+        return player, character
+
+    def _by_uid(self, result):
+        return {int(p["UniqueID"]): p for p in result}
+
+    async def test_masked_wanted_player_zeroed_and_flagged(self):
+        criminal_player, _ = await self._setup_wanted_criminal()
+        session = _FakeSession(
+            [
+                _make_mod_player(
+                    criminal_player.unique_id, x=123, y=456, z=789, vehicle_key="DUKE"
+                ),
+            ]
+        )
+        result = await get_players_mod_masked(session)
+        entry = self._by_uid(result)[criminal_player.unique_id]
+        self.assertTrue(entry["hidden"])
+        self.assertEqual(entry["Location"], {"X": 0.0, "Y": 0.0, "Z": 0.0})
+        self.assertEqual(entry["VehicleKey"], "")
+
+    async def test_masked_regular_player_keeps_position(self):
+        regular_player, _ = await self._setup_regular_player()
+        session = _FakeSession(
+            [
+                _make_mod_player(
+                    regular_player.unique_id, x=123, y=456, z=789, vehicle_key="DUKE"
+                ),
+            ]
+        )
+        result = await get_players_mod_masked(session)
+        entry = self._by_uid(result)[regular_player.unique_id]
+        self.assertFalse(entry["hidden"])
+        self.assertEqual(entry["Location"], {"X": 123, "Y": 456, "Z": 789})
+        self.assertEqual(entry["VehicleKey"], "DUKE")
+
+    async def test_masked_police_hidden_when_wanted_exists(self):
+        criminal_player, _ = await self._setup_wanted_criminal()
+        police_player, _ = await self._setup_police()
+        session = _FakeSession(
+            [
+                _make_mod_player(criminal_player.unique_id, x=1, y=2, z=3),
+                _make_mod_player(police_player.unique_id, x=4, y=5, z=6),
+            ]
+        )
+        result = await get_players_mod_masked(session)
+        by_uid = self._by_uid(result)
+        self.assertTrue(by_uid[criminal_player.unique_id]["hidden"])
+        self.assertTrue(by_uid[police_player.unique_id]["hidden"])
+
+    async def test_masked_police_visible_when_no_wanted(self):
+        police_player, _ = await self._setup_police()
+        session = _FakeSession([_make_mod_player(police_player.unique_id)])
+        result = await get_players_mod_masked(session)
+        self.assertFalse(self._by_uid(result)[police_player.unique_id]["hidden"])
+
+    async def test_masked_keeps_every_player_in_list(self):
+        criminal_player, _ = await self._setup_wanted_criminal()
+        police_player, _ = await self._setup_police()
+        regular_player, _ = await self._setup_regular_player()
+        session = _FakeSession(
+            [
+                _make_mod_player(criminal_player.unique_id),
+                _make_mod_player(police_player.unique_id),
+                _make_mod_player(regular_player.unique_id),
+            ]
+        )
+        result = await get_players_mod_masked(session)
+        self.assertEqual(len(result), 3)
+
+    async def test_masked_costume_criminal_zeroed(self):
+        costume_player, _ = await self._setup_costume_criminal()
+        session = _FakeSession(
+            [_make_mod_player(costume_player.unique_id, x=1, y=2, z=3)]
+        )
+        result = await get_players_mod_masked(session)
+        entry = self._by_uid(result)[costume_player.unique_id]
+        self.assertTrue(entry["hidden"])
+        self.assertEqual(entry["Location"], {"X": 0.0, "Y": 0.0, "Z": 0.0})
+
+
+class SerializePlayersHiddenTests(SimpleTestCase):
+    def test_hidden_player_serializes_zeroed(self):
+        data = serialize_players(
+            [
+                _make_mod_player(42, x=123, y=456, z=789, vehicle_key="DUKE")
+                | {"hidden": True},
+                _make_mod_player(7, x=1, y=2, z=3, vehicle_key="DUKE"),
+            ]
+        )
+        positions = PlayerPositions.FromString(data)
+        hidden, visible = positions.players
+        self.assertTrue(hidden.hidden)
+        self.assertEqual((hidden.x, hidden.y, hidden.z), (0.0, 0.0, 0.0))
+        self.assertFalse(hidden.HasField("vehicle_key_enum"))
+        self.assertFalse(hidden.HasField("vehicle_key_unknown"))
+        self.assertEqual(hidden.unique_id, 42)
+        self.assertFalse(visible.hidden)
+        self.assertEqual((visible.x, visible.y, visible.z), (1.0, 2.0, 3.0))
+        self.assertEqual(visible.vehicle_key_enum, _VEHICLE_KEY_MAP["DUKE"])

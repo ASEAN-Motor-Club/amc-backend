@@ -55,6 +55,41 @@ async def _get_hidden_player_unique_ids():
     return await sync_to_async(_get_hidden_player_unique_ids_with_retry, thread_sensitive=True)()
 
 
+def _mask_hidden_player(player: dict) -> dict:
+    """Copy of `player` with the real position/vehicle removed (privacy)."""
+    masked = dict(player)
+    masked["Location"] = {"X": 0.0, "Y": 0.0, "Z": 0.0}
+    masked["VehicleKey"] = ""
+    masked["hidden"] = True
+    return masked
+
+
+def _visible_player_with_flag(player: dict) -> dict:
+    flagged = dict(player)
+    flagged.setdefault("hidden", False)
+    return flagged
+
+
+async def get_players_mod_masked(
+    session,
+    cache_key: str = "mod_players_list_all",
+    cache_ttl: int = MOD_PLAYERS_CACHE_TTL,
+):
+    """Full roster for position streaming: hidden players stay in the list but
+    carry hidden=True with their location/vehicle zeroed instead of being
+    dropped. Callers must still drop the location of hidden=True entries —
+    the zeroed Location here is defense in depth, not the contract."""
+    players = await get_players_mod(session, cache_key=cache_key, cache_ttl=cache_ttl)
+    wanted_ids, police_ids, costume_ids = await _get_hidden_player_unique_ids()
+    any_wanted = bool(wanted_ids)
+    return [
+        _mask_hidden_player(p)
+        if _should_hide_player(p, wanted_ids, police_ids, costume_ids, any_wanted)
+        else _visible_player_with_flag(p)
+        for p in players
+    ]
+
+
 def _should_hide_player(
     player: dict,
     wanted_ids: set[int],

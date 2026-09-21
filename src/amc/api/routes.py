@@ -92,6 +92,7 @@ from .player_positions_common import (
     POSITION_UPDATE_SLEEP,
     HEARTBEAT_INTERVAL,
     get_players_mod,
+    get_players_mod_masked,
 )
 
 app_router = Router()
@@ -405,7 +406,7 @@ async def streaming_player_positions(request):
 
     async def event_stream():
         while True:
-            players = await get_players_mod(session, filter_hidden=True)
+            players = await get_players_mod_masked(session)
             player_positions = {
                 player["PlayerName"]: {
                     **{
@@ -414,6 +415,7 @@ async def streaming_player_positions(request):
                     },
                     "vehicle_key": player["VehicleKey"],
                     "unique_id": player["UniqueID"],
+                    "hidden": bool(player.get("hidden", False)),
                 }
                 for player in players
             }
