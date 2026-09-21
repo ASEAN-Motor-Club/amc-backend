@@ -116,15 +116,15 @@ def wanted_accrual_multiplier(dist_units: float) -> float:
 
 # Compass cadence — per-officer interval from THAT officer's distance to the
 # suspect and the suspect's speed:
-#   interval = 1 / (D * (S + 20 km/h) * COMPASS_C), clamped [5 s, 60 s]
+#   interval = 1 / (D * (S + 20 km/h) * COMPASS_C), clamped [3 s, 15 s]
 # Distance no longer diverges near the ring (the old (D - 500 m) hyperbola
 # made the final approach blind — freeman 2026-09-20). The interval is driven
 # by bearing STALENESS (suspect speed); distance only shapes it through the
 # clamp. An officer inside the suspect's 200 m ring gets no updates at all —
 # the final-search phase, which doubles as the suspect-facing covert tell.
 COMPASS_C = 1.5e-6                # Hz per (metre * km/h)
-COMPASS_MIN_INTERVAL = 5.0        # seconds — SOLO floor; effective floor 5×min(N, 2)
-COMPASS_MAX_INTERVAL = 60.0       # seconds — SOLO ceiling; effective ceiling 60×min(N, 2)
+COMPASS_MIN_INTERVAL = 3.0        # seconds — SOLO floor; effective floor 3×min(N, 2)
+COMPASS_MAX_INTERVAL = 15.0       # seconds — SOLO ceiling; effective ceiling 15×min(N, 2)
 COMPASS_HIDE_DISTANCE = 20_000    # 200 m in game units — per-officer silence ring
 COMPASS_FORCE_BUDGET_CAP = 2      # max force-budget multiplier — more cops ≠ slower each
 
@@ -1273,14 +1273,14 @@ async def tick_police_suspect_locations(http_client, http_client_mod, http_clien
 
         solo = 1 / (D * (S + 20 km/h) * COMPASS_C)
 
-    clamped to [5 s, 60 s], then scaled by the FORCE BUDGET: the interval is
+    clamped to [3 s, 15 s], then scaled by the FORCE BUDGET: the interval is
     multiplied by min(N, COMPASS_FORCE_BUDGET_CAP), where N is the number of
     on-duty officers beyond their own 200 m ring for that suspect. The force's
     total flash rate for one suspect stays at ONE cop's rate up to the cap —
     extra cops split the budget instead of multiplying it, but a large force
     is never SLOWER per cop than a pair (the uncapped ×N made a 4-cop
     response 4× blinder per cop; freeman, 2026-09-20). Effective range
-    [5×min(N,2), 60×min(N,2)] s. An officer inside the suspect's 200 m
+    [3×min(N,2), 15×min(N,2)] s. An officer inside the suspect's 200 m
     silence ring gets no updates for that suspect at all. Missing speed
     telemetry degrades to the stationary cadence.
     """
