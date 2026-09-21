@@ -2,7 +2,8 @@ from typing import Optional
 from amc.command_framework import registry, CommandContext
 import asyncio
 import itertools
-from amc.mod_server import get_player_last_vehicle, get_player_last_vehicle_parts, despawn_by_tag
+import logging
+from amc.mod_server import get_player, get_player_last_vehicle, get_player_last_vehicle_parts, despawn_by_tag
 from amc.game_server import get_players
 from amc.vehicles import (
     format_vehicle_name,
@@ -29,6 +30,9 @@ from amc.player_tags import refresh_player_name
 from amc.utils import fuzzy_find_player
 from amc.vehicle_weight import weight_popup_lines
 from django.utils.translation import gettext as _, gettext_lazy
+
+
+logger = logging.getLogger(__name__)
 
 
 @registry.register(
@@ -341,25 +345,76 @@ async def cmd_unrental(ctx: CommandContext, category: str = ""):
     description=gettext_lazy("Mark vehicle as for rental"),
     category="Vehicle Management",
 )
-async def cmd_rental(ctx: CommandContext, alias: str = ""):
+async def cmd_rental(ctx: CommandContext, name: str = ""):
     vehicles = await register_player_vehicles(ctx.http_client_mod, ctx.character, ctx.player, active=True)
-    own_company_guid = ctx.player_info.get("OwnCompanyGuid") if ctx.player_info else None
-    vehicles = (
-        [v for v in vehicles if v.config.get("CompanyName") and v.company_guid == own_company_guid]
-        if vehicles
-        else []
-    )
 
     if not vehicles:
-        await ctx.reply(_("<Title>Rental System</>\nOnly Corporation vehicles can be rented out."))
+        await ctx.reply(
+            _(
+                "<Title>Rental System</>\nNo rentable vehicle found. Sit in your vehicle and run /rental."
+            )
+        )
         return
 
+    # Company-vehicle ownership proof must come from the MOD player payload:
+    # the chat command path carries the normalized game-API player_info,
+    # which never includes OwnCompanyGuid (it was read from there before,
+    # so company vehicles could never be marked). GuidToString serializes a
+    # null guid as the literal "0000".
+    own_company_guid = None
+    try:
+        mod_player = await get_player(ctx.http_client_mod, str(ctx.player.unique_id))
+    except Exception:
+        logger.debug("Failed to fetch mod player info for /rental", exc_info=True)
+        mod_player = None
+    if mod_player:
+        guid = mod_player.get("OwnCompanyGuid")
+        if guid and guid != "0000":
+            own_company_guid = guid
+
+    vehicles = [
+        v
+        for v in vehicles
+        if v.character_id == ctx.character.id
+        or (v.company_guid and v.company_guid == own_company_guid)
+    ]
+
+    if not vehicles:
+        # A vehicle was registered but it is not the caller's to rent out:
+        # a company vehicle driven by a non-owner (employee or other company).
+        await ctx.reply(
+            _(
+                "<Title>Rental System</>\nOnly the company owner can rent out corporation vehicles."
+            )
+        )
+        return
+
+    rental_name = name.strip()[:30]
     for v in vehicles:
         if not v.rental:
             v.rental = True
-        if alias.strip():
-            v.alias = alias.strip()
+        if rental_name:
+            v.alias = rental_name
         await v.asave()
+
+        # Also place a drivable copy in the world at the vehicle's registered
+        # position (same mechanism as /spawn_displays: no driver, config
+        # location/rotation). Despawn first so re-marking refreshes the copy
+        # instead of stacking; the existing /unrental despawn targets the
+        # rental-<id> tag either way.
+        await despawn_by_tag(ctx.http_client_mod, f"rental-{v.id}")
+        try:
+            await spawn_registered_vehicle(
+                ctx.http_client_mod,
+                v,
+                tag="rental_vehicles",
+                tags=[f"rental-{v.id}"],
+                extra_data={"drivable": True},
+            )
+        except Exception:
+            logger.warning(
+                "Failed to spawn in-place rental copy for vehicle #%s", v.id, exc_info=True
+            )
 
     names = "\n".join(
         [f"<Small>#{v.id} - {v.config['VehicleName']}</>" for v in vehicles if v.rental]
@@ -374,7 +429,12 @@ async def cmd_rental(ctx: CommandContext, alias: str = ""):
 )
 async def cmd_rent(ctx: CommandContext, vehicle_id: str = ""):
     if not vehicle_id or not vehicle_id.isdigit():
-        vehicles = [v async for v in CharacterVehicle.objects.filter(rental=True)]
+        vehicles = [
+            v
+            async for v in CharacterVehicle.objects.select_related("character").filter(
+                rental=True
+            )
+        ]
         if vehicle_id.strip():
             search = vehicle_id.strip().lower()
             vehicles = [
@@ -387,13 +447,20 @@ async def cmd_rent(ctx: CommandContext, vehicle_id: str = ""):
             await ctx.reply(_("<Title>Rentals</>\nNo rentals found."))
             return
 
-        vehicles.sort(key=lambda v: v.config.get("CompanyName", "Independent"))
+        def rental_label(v):
+            if v.alias:
+                return v.alias
+            if company := v.config.get("CompanyName"):
+                return company
+            if v.character:
+                return f"{v.character.name}'s rentals"
+            return "Independent"
+
+        vehicles.sort(key=rental_label)
 
         lines: list[str] = []
-        for company, group in itertools.groupby(
-            vehicles, key=lambda v: v.config.get("CompanyName", "Independent")
-        ):
-            lines.append(f"<Bold>{company}</>")
+        for label, group in itertools.groupby(vehicles, key=rental_label):
+            lines.append(f"<Bold>{label}</>")
             for v in group:
                 lines.append(f" <Small>#{v.id} - {v.config['VehicleName']}</>")
             lines.append("")
@@ -404,7 +471,9 @@ async def cmd_rent(ctx: CommandContext, vehicle_id: str = ""):
         )
     else:
         try:
-            v = await CharacterVehicle.objects.aget(pk=vehicle_id, rental=True)
+            v = await CharacterVehicle.objects.select_related("character").aget(
+                pk=vehicle_id, rental=True
+            )
             if not ctx.player_info:
                 await ctx.reply(_("Player info not found"))
                 return
@@ -418,7 +487,10 @@ async def cmd_rent(ctx: CommandContext, vehicle_id: str = ""):
                 tags=[ctx.character.name, "rental_vehicles", f"rental-{v.id}"],
             )
             await ctx.reply(
-                _("Brought to you by {company}").format(company=v.config.get("CompanyName"))
+                _("Brought to you by {company}").format(
+                    company=v.config.get("CompanyName")
+                    or (v.character.name if v.character else "")
+                )
             )
         except CharacterVehicle.DoesNotExist:
             await ctx.reply(_("Rental not found"))
