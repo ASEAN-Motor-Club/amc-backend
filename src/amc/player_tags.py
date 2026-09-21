@@ -96,9 +96,8 @@ def build_display_name(
     if has_custom_parts:
         tag += "M"
 
-    # DEPRECATED: P and C tags — may be restored in the future
-    # if police_level > 0:
-    #     tag += f"P{police_level}"
+    if police_level > 0:
+        tag += f"P{police_level}"
 
     if wanted_stars > 0:
         tag += "*" * wanted_stars
@@ -168,13 +167,13 @@ async def refresh_player_name(
     except Exception:
         pass
 
-    # DEPRECATED: P tag — may be restored in the future
-    # from amc.police import is_police as check_police, calculate_police_level
-    #
-    # police_level = 0
-    # if await check_police(character):
-    #     police_level = calculate_police_level(character.police_confiscated_total)
+    # P tag: active police session; level derives from lifetime confiscations
+    # (P1 minimum while on duty).
+    from amc.police import is_police as check_police, calculate_police_level
+
     police_level = 0
+    if await check_police(character):
+        police_level = calculate_police_level(character.police_confiscated_total)
 
     # Police duty shares the R tag: an on-duty officer is teleport-locked
     # server-side exactly like RP players and wanted suspects.
