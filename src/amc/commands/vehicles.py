@@ -3,7 +3,7 @@ from amc.command_framework import registry, CommandContext
 import asyncio
 import itertools
 import logging
-from amc.mod_server import get_player, get_player_last_vehicle, get_player_last_vehicle_parts, despawn_by_tag
+from amc.mod_server import get_player, get_player_last_vehicle, get_player_last_vehicle_parts, despawn_by_tag, despawn_player_vehicle
 from amc.game_server import get_players
 from amc.vehicles import (
     format_vehicle_name,
@@ -397,29 +397,50 @@ async def cmd_rental(ctx: CommandContext, name: str = ""):
             v.alias = rental_name
         await v.asave()
 
-        # Also place a drivable copy in the world at the vehicle's registered
-        # position (same mechanism as /spawn_displays: no driver, config
-        # location/rotation). Despawn first so re-marking refreshes the copy
-        # instead of stacking; the existing /unrental despawn targets the
-        # rental-<id> tag either way.
-        await despawn_by_tag(ctx.http_client_mod, f"rental-{v.id}")
-        try:
-            await spawn_registered_vehicle(
-                ctx.http_client_mod,
-                v,
-                tag="rental_vehicles",
-                tags=[f"rental-{v.id}"],
-                extra_data={"drivable": True},
-            )
-        except Exception:
-            logger.warning(
-                "Failed to spawn in-place rental copy for vehicle #%s", v.id, exc_info=True
-            )
+    # Convert in place like the display flow: despawn the player's current
+    # vehicle (the marked one they were sitting in), then place the drivable
+    # rental copy at its registered position. Despawn-first also refreshes the
+    # copy on re-mark instead of stacking. If there is no current vehicle to
+    # despawn (they already exited), skip the placement entirely so the copy
+    # never stacks on the parked original.
+    despawn_ok = True
+    try:
+        await despawn_player_vehicle(ctx.http_client_mod, str(ctx.character.guid))
+    except Exception:
+        logger.warning(
+            "Could not despawn %s's vehicle during /rental", ctx.character.name, exc_info=True
+        )
+        despawn_ok = False
 
+    if despawn_ok:
+        for v in vehicles:
+            await despawn_by_tag(ctx.http_client_mod, f"rental-{v.id}")
+            try:
+                await spawn_registered_vehicle(
+                    ctx.http_client_mod,
+                    v,
+                    tag="rental_vehicles",
+                    tags=[f"rental-{v.id}"],
+                    extra_data={"drivable": True},
+                )
+            except Exception:
+                logger.warning(
+                    "Failed to spawn in-place rental copy for vehicle #%s", v.id, exc_info=True
+                )
+
+    note = (
+        ""
+        if despawn_ok
+        else "\n\n<Small>Sit in the vehicle and run /rental to convert it in place.</>"
+    )
     names = "\n".join(
         [f"<Small>#{v.id} - {v.config['VehicleName']}</>" for v in vehicles if v.rental]
     )
-    await ctx.reply(_("<Title>Marked as rental</>\nPlayers can /rent these:\n\n{names}").format(names=names))
+    await ctx.reply(
+        _("<Title>Marked as rental</>\nPlayers can /rent these:\n\n{names}{note}").format(
+            names=names, note=note
+        )
+    )
 
 
 @registry.register(
