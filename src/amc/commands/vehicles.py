@@ -2,7 +2,8 @@ from typing import Optional
 from amc.command_framework import registry, CommandContext
 import asyncio
 import itertools
-from amc.mod_server import get_player_last_vehicle, get_player_last_vehicle_parts, despawn_by_tag
+import logging
+from amc.mod_server import get_player, get_player_last_vehicle, get_player_last_vehicle_parts, despawn_by_tag
 from amc.game_server import get_players
 from amc.vehicles import (
     format_vehicle_name,
@@ -29,6 +30,9 @@ from amc.player_tags import refresh_player_name
 from amc.utils import fuzzy_find_player
 from amc.vehicle_weight import weight_popup_lines
 from django.utils.translation import gettext as _, gettext_lazy
+
+
+logger = logging.getLogger(__name__)
 
 
 @registry.register(
@@ -343,22 +347,44 @@ async def cmd_unrental(ctx: CommandContext, category: str = ""):
 )
 async def cmd_rental(ctx: CommandContext, name: str = ""):
     vehicles = await register_player_vehicles(ctx.http_client_mod, ctx.character, ctx.player, active=True)
-    own_company_guid = ctx.player_info.get("OwnCompanyGuid") if ctx.player_info else None
-    vehicles = (
-        [
-            v
-            for v in vehicles
-            if v.character_id == ctx.character.id
-            or (v.company_guid and v.company_guid == own_company_guid)
-        ]
-        if vehicles
-        else []
-    )
 
     if not vehicles:
         await ctx.reply(
             _(
                 "<Title>Rental System</>\nNo rentable vehicle found. Sit in your vehicle and run /rental."
+            )
+        )
+        return
+
+    # Company-vehicle ownership proof must come from the MOD player payload:
+    # the chat command path carries the normalized game-API player_info,
+    # which never includes OwnCompanyGuid (it was read from there before,
+    # so company vehicles could never be marked). GuidToString serializes a
+    # null guid as the literal "0000".
+    own_company_guid = None
+    try:
+        mod_player = await get_player(ctx.http_client_mod, str(ctx.player.unique_id))
+    except Exception:
+        logger.debug("Failed to fetch mod player info for /rental", exc_info=True)
+        mod_player = None
+    if mod_player:
+        guid = mod_player.get("OwnCompanyGuid")
+        if guid and guid != "0000":
+            own_company_guid = guid
+
+    vehicles = [
+        v
+        for v in vehicles
+        if v.character_id == ctx.character.id
+        or (v.company_guid and v.company_guid == own_company_guid)
+    ]
+
+    if not vehicles:
+        # A vehicle was registered but it is not the caller's to rent out:
+        # a company vehicle driven by a non-owner (employee or other company).
+        await ctx.reply(
+            _(
+                "<Title>Rental System</>\nOnly the company owner can rent out corporation vehicles."
             )
         )
         return

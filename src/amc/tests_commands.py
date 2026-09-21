@@ -3657,15 +3657,17 @@ class RentGroupingTestCase(SimpleTestCase):
 
 
 class RentalMarkTestCase(SimpleTestCase):
-    """/rental allows personal vehicles; company vehicles stay owner-only."""
+    """Company vehicles stay owner-only; ownership comes from the MOD payload."""
 
     def setUp(self):
         self.ctx = MagicMock(spec=CommandContext)
         self.ctx.reply = AsyncMock()
         self.ctx.http_client_mod = MagicMock()
+        # Chat-path player_info is the normalized game-API payload: it has
+        # Location etc. but NEVER OwnCompanyGuid — ownership must come from
+        # the mod player payload (patched as amc.commands.vehicles.get_player).
         self.ctx.player_info = {
             "Location": {"X": 0, "Y": 0, "Z": 0},
-            "OwnCompanyGuid": "company-guid-1",
         }
         self.ctx.character = MagicMock()
         self.ctx.character.id = 7
@@ -3686,10 +3688,18 @@ class RentalMarkTestCase(SimpleTestCase):
             setattr(v, key, value)
         return v
 
-    async def _run_rental(self, vehicles):
-        with patch(
-            "amc.commands.vehicles.register_player_vehicles",
-            new=AsyncMock(return_value=vehicles),
+    async def _run_rental(self, vehicles, mod_player=None, mod_player_error=False):
+        get_player_mock = (
+            AsyncMock(side_effect=Exception("mod api down"))
+            if mod_player_error
+            else AsyncMock(return_value=mod_player)
+        )
+        with (
+            patch(
+                "amc.commands.vehicles.register_player_vehicles",
+                new=AsyncMock(return_value=vehicles),
+            ),
+            patch("amc.commands.vehicles.get_player", new=get_player_mock),
         ):
             await cmd_rental(self.ctx)
         return self.ctx.reply.call_args[0][0]
@@ -3702,16 +3712,46 @@ class RentalMarkTestCase(SimpleTestCase):
     async def test_rental_marks_owned_company_vehicle(self):
         v = self._make_vehicle(character_id=None, company_guid="company-guid-1")
         v.config = {"VehicleName": "CorpCar", "CompanyName": "My Corp"}
-        output = await self._run_rental([v])
+        output = await self._run_rental(
+            [v], mod_player={"OwnCompanyGuid": "company-guid-1"}
+        )
         self.assertIn("Marked as rental", output)
         self.assertIn("CorpCar", output)
 
     async def test_rental_rejects_other_company_vehicle(self):
         v = self._make_vehicle(character_id=None, company_guid="other-guid")
         v.config = {"VehicleName": "Van", "CompanyName": "Other Corp"}
-        output = await self._run_rental([v])
-        self.assertIn("No rentable vehicle found", output)
+        output = await self._run_rental(
+            [v], mod_player={"OwnCompanyGuid": "company-guid-1"}
+        )
+        self.assertIn("Only the company owner", output)
         self.assertFalse(v.rental)
+        v.asave.assert_not_awaited()
+
+    async def test_rental_employee_cannot_mark_company_vehicle(self):
+        # Employees have no OwnCompanyGuid (null guid serializes as "0000").
+        v = self._make_vehicle(character_id=None, company_guid="company-guid-1")
+        v.config = {"VehicleName": "CorpCar", "CompanyName": "My Corp"}
+        output = await self._run_rental(
+            [v], mod_player={"OwnCompanyGuid": "0000", "JoinedCompanyGuid": "company-guid-1"}
+        )
+        self.assertIn("Only the company owner", output)
+        self.assertFalse(v.rental)
+        v.asave.assert_not_awaited()
+
+    async def test_rental_mod_payload_failure_still_marks_personal(self):
+        # If the mod player fetch fails, personal vehicles still work —
+        # only company ownership proof is unavailable.
+        output = await self._run_rental(
+            [self._make_vehicle()], mod_player_error=True
+        )
+        self.assertIn("Marked as rental", output)
+
+    async def test_rental_mod_payload_failure_rejects_company_vehicle(self):
+        v = self._make_vehicle(character_id=None, company_guid="company-guid-1")
+        v.config = {"VehicleName": "CorpCar", "CompanyName": "My Corp"}
+        output = await self._run_rental([v], mod_player_error=True)
+        self.assertIn("Only the company owner", output)
         v.asave.assert_not_awaited()
 
     async def test_rental_no_registered_vehicle(self):
@@ -3720,18 +3760,24 @@ class RentalMarkTestCase(SimpleTestCase):
 
     async def test_rental_name_truncated_to_30(self):
         v = self._make_vehicle()
-        with patch(
-            "amc.commands.vehicles.register_player_vehicles",
-            new=AsyncMock(return_value=[v]),
+        with (
+            patch(
+                "amc.commands.vehicles.register_player_vehicles",
+                new=AsyncMock(return_value=[v]),
+            ),
+            patch("amc.commands.vehicles.get_player", new=AsyncMock(return_value=None)),
         ):
             await cmd_rental(self.ctx, "x" * 40)
         self.assertEqual(v.alias, "x" * 30)
 
     async def test_rental_blank_name_keeps_existing_alias(self):
         v = self._make_vehicle(alias="Old Name")
-        with patch(
-            "amc.commands.vehicles.register_player_vehicles",
-            new=AsyncMock(return_value=[v]),
+        with (
+            patch(
+                "amc.commands.vehicles.register_player_vehicles",
+                new=AsyncMock(return_value=[v]),
+            ),
+            patch("amc.commands.vehicles.get_player", new=AsyncMock(return_value=None)),
         ):
             await cmd_rental(self.ctx, "   ")
         self.assertEqual(v.alias, "Old Name")
