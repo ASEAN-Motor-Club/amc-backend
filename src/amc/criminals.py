@@ -13,7 +13,7 @@ from django.utils import timezone
 
 from amc.commands.faction import _build_player_locations, _distance_3d, execute_arrest
 from amc.game_server import announce, get_players, get_players_locations
-from amc.models import Character, PendingWanted, PoliceSession, Wanted
+from amc.models import Character, CompassTuningConfig, PendingWanted, PoliceSession, Wanted
 from amc.mod_detection import detect_custom_parts, POLICE_DUTY_WHITELIST
 from amc.mod_server import clear_suspect, despawn_player_vehicle, force_exit_vehicle, get_player, get_player_customization, get_player_last_vehicle, get_player_last_vehicle_parts, make_suspect, send_system_message, show_popup
 from amc.player_tags import refresh_player_name
@@ -164,15 +164,19 @@ if COMPASS.name != _compass_config_name:
     )
 
 
-def compass_interval_seconds(dist_units: float, speed_kmh: float) -> float:
+def compass_interval_seconds(
+    dist_units: float,
+    speed_kmh: float,
+    tuning: CompassConfig,
+) -> float:
     """Per-officer compass update interval for a suspect beyond the close
     ring (the caller handles ring distances with the fixed '<200m' ping)."""
     d_m = dist_units / 100.0
     base = min(
-        max(1.0 / (d_m * 20.0 * COMPASS.c), COMPASS.min_interval),
-        COMPASS.max_interval,
+        max(1.0 / (d_m * 20.0 * tuning.c), tuning.min_interval),
+        tuning.max_interval,
     )
-    return max(base * 20.0 / (speed_kmh + 20.0), COMPASS.min_interval)
+    return max(base * 20.0 / (speed_kmh + 20.0), tuning.min_interval)
 
 # Tracks the last notified star level per character guid
 _last_star_notified: dict[str, int] = {}
@@ -1384,6 +1388,10 @@ async def tick_police_suspect_locations(http_client, http_client_mod, http_clien
     if not officer_entries:
         return
 
+    # Live tuning: the admin-editable singleton (defaults mirror config "A").
+    # Fetched once per tick so admin edits apply without a restart.
+    tuning = await CompassTuningConfig.aget_config()
+
     # Force-level budget (freeman, 2026-09-20): count the officers who would
     # RECEIVE flashes for each suspect (on-duty cops beyond their own 200 m
     # ring). Every receiving officer's interval is multiplied by min(N, 2)
@@ -1395,7 +1403,7 @@ async def tick_police_suspect_locations(http_client, http_client_mod, http_clien
         for officer, officer_loc in officer_entries:
             if officer.guid == character.guid:
                 continue
-            if _distance_3d(officer_loc, suspect_loc) > COMPASS.ring_distance:
+            if _distance_3d(officer_loc, suspect_loc) > tuning.ring_distance:
                 count += 1
         receiving_counts[character.guid] = count
 
@@ -1411,22 +1419,22 @@ async def tick_police_suspect_locations(http_client, http_client_mod, http_clien
                 continue
 
             dist = _distance_3d(officer_loc, suspect_loc)
-            in_ring = dist <= COMPASS.ring_distance
+            in_ring = dist <= tuning.ring_distance
             speed_kmh = speed_map.get(character.guid.upper(), 0.0) * 0.036
             if in_ring:
                 # Inside the 200 m close ring: fixed "<200m" ping on the
                 # SOLO ceiling — no budget, no speed effect (freeman:
                 # "below 200m, make it say <200m every 15 seconds").
-                interval = COMPASS.max_interval
+                interval = tuning.max_interval
             else:
-                interval = compass_interval_seconds(dist, speed_kmh)
+                interval = compass_interval_seconds(dist, speed_kmh, tuning)
                 # Force budget: split one cop's cadence across every receiving
                 # officer instead of letting each run their own stream, CAPPED
                 # at COMPASS.budget_cap — more cops must not mean slower
                 # each (freeman, 2026-09-20).
                 interval *= min(
                     receiving_counts.get(character.guid, 1),
-                    COMPASS.budget_cap,
+                    tuning.budget_cap,
                 )
             key = (officer_guid, character.guid)
             if now - _last_compass_sent.get(key, 0.0) < interval:

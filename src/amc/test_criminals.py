@@ -45,7 +45,7 @@ from amc.criminals import (
     wanted_accrual_multiplier,
 )
 from amc.factories import CharacterFactory, PlayerFactory
-from amc.models import PoliceSession, Wanted
+from amc.models import Character, CompassTuningConfig, PoliceSession, Wanted
 
 
 def _make_player_data(unique_id, character_guid, x, y, z):
@@ -2907,6 +2907,39 @@ class CompassTickTests(TestCase):
         near_call = next(c for c in mock_sys_msg.await_args_list
                          if c.kwargs.get("character_guid") == officer_near.guid)
         self.assertIn("<200m", near_call.args[1])
+
+    async def test_live_tuning_override_changes_cadence(
+        self, mock_get_players, mock_get_locations, mock_police, mock_sys_msg,
+    ):
+        """Editing the admin singleton changes the cadence on the next tick:
+        max_interval 6 s → a parked 1 km suspect updates every 6 s."""
+        criminal = await self._setup_criminal()
+        officer = await self._setup_police()
+
+        mock_get_players.return_value = _make_players_list([
+            _make_player_data(criminal.player.unique_id, criminal.guid, *_COMPASS_SUSPECT_LOC),
+            _make_player_data(officer.player.unique_id, officer.guid, *_COMPASS_COP_1KM),
+        ])
+        mock_get_locations.return_value = []
+        mock_police.return_value = _AsyncList([officer])
+        mock_http = AsyncMock()
+        mock_http_mod = AsyncMock()
+        mock_http_mgmt = AsyncMock()
+
+        tuning = await CompassTuningConfig.aget_config()
+        tuning.max_interval = 6.0
+        await tuning.asave(update_fields=["max_interval"])
+
+        # t-5: within the live 6 s interval → silent
+        _last_compass_sent[(officer.guid, criminal.guid)] = time.monotonic() - 5
+        await tick_police_suspect_locations(mock_http, mock_http_mod, mock_http_mgmt)
+        mock_sys_msg.assert_not_awaited()
+
+        # t-7: past the live interval → sends
+        _last_compass_sent[(officer.guid, criminal.guid)] = time.monotonic() - 7
+        mock_sys_msg.reset_mock()
+        await tick_police_suspect_locations(mock_http, mock_http_mod, mock_http_mgmt)
+        mock_sys_msg.assert_awaited_once()
 
     async def test_per_officer_cadence_independent(
         self, mock_get_players, mock_get_locations, mock_police, mock_sys_msg,

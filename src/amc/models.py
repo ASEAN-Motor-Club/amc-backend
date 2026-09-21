@@ -3190,6 +3190,61 @@ class JobPostingConfig(models.Model):
 
 
 @final
+class CompassTuningConfig(models.Model):
+    """Live tuning for the police suspect compass. Singleton (pk=1 always).
+
+    Editable in Django admin; changes apply on the next worker tick
+    (no restart needed). Defaults mirror tuning config "A".
+    """
+
+    config_name = models.CharField(
+        max_length=8,
+        default="A",
+        help_text="Label of which tuning preset (A, B, ...) these values match.",
+    )
+    c = models.FloatField(
+        default=3.0e-6,
+        help_text="Compass frequency constant: Hz per (metre * km/h). Higher = faster everywhere.",
+    )
+    min_interval = models.FloatField(
+        default=3.0,
+        help_text="SOLO floor in seconds (fastest possible bearing per cop).",
+    )
+    max_interval = models.FloatField(
+        default=15.0,
+        help_text="SOLO ceiling in seconds (parked suspect); also the <200m close-ping interval.",
+    )
+    ring_distance = models.IntegerField(
+        default=20_000,
+        help_text="Close-ring distance in game units (100 units = 1 m; 20000 = 200 m). Inside: fixed '<200m' ping, no bearing.",
+    )
+    budget_cap = models.PositiveSmallIntegerField(
+        default=2,
+        validators=[MinValueValidator(1)],
+        help_text="Force-budget cap: interval is multiplied by min(N, cap).",
+    )
+
+    class Meta:
+        verbose_name = "Compass Tuning Configuration"
+        verbose_name_plural = "Compass Tuning Configuration"
+
+    def save(self, *args, **kwargs):
+        self.pk = 1
+        super().save(*args, **kwargs)
+
+    def delete(self, *args, **kwargs):
+        pass  # Prevent deletion of singleton
+
+    @classmethod
+    async def aget_config(cls) -> "CompassTuningConfig":
+        config, _ = await cls.objects.aget_or_create(pk=1)
+        return config
+
+    def __str__(self):
+        return f"Compass Tuning Configuration ({self.config_name})"
+
+
+@final
 class MinistryDashboard(models.Model):
     """
     Dummy model to expose the Ministry Dashboard in the Django Admin.
