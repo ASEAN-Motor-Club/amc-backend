@@ -115,11 +115,12 @@ async def _clear_wanted_on_pullover(officer_character, suspect_character, ctx):
             "Your wanted status has been cleared (traffic stop penalty).",
             character_guid=str(suspect_character.guid),
         )
-        await send_system_message(
-            ctx.http_client_mod,
-            f"{suspect_character.name}'s wanted status was cleared (traffic stop penalty).",
-            character_guid=officer_character.guid,
-        )
+        if officer_character is not None:
+            await send_system_message(
+                ctx.http_client_mod,
+                f"{suspect_character.name}'s wanted status was cleared (traffic stop penalty).",
+                character_guid=officer_character.guid,
+            )
 
 
 @register("ServerSelectPolicePullOverPenaltyResponse")
@@ -136,16 +137,24 @@ async def handle_police_penalty(event, player, character, ctx):
     if warning_only:
         return 0, 0, 0, 0
 
-    # Officer must be on duty to perform an arrest
+    suspect_data = event["data"].get("SuspectCharacter", {})
+    suspect_guid = suspect_data.get("CharacterGuid")
+
+    # AI-police pull-over: there is no officer player — the suspect answers
+    # the pull-over penalty UI from their own controller, so the caller's
+    # character guid equals the suspect's.  These arrests run system-side
+    # (no officer reward, reward still splits across on-duty police).
+    is_ai_pullover = bool(
+        suspect_guid and str(suspect_guid).upper() == str(character.guid).upper()
+    )
+
+    # A human officer must be on duty to perform an arrest
     is_on_duty = await PoliceSession.objects.filter(
         character=character, ended_at__isnull=True
     ).aexists()
-    if not is_on_duty:
+    if not is_on_duty and not is_ai_pullover:
         return 0, 0, 0, 0
 
-    # Auto-arrest suspects with an active criminal record during pull-over
-    suspect_data = event["data"].get("SuspectCharacter", {})
-    suspect_guid = suspect_data.get("CharacterGuid")
     if not suspect_guid:
         return 0, 0, 0, 0
 
@@ -168,7 +177,9 @@ async def handle_police_penalty(event, player, character, ctx):
         # Zero-score wanted flag (admin /setwanted, bounty-free by design) —
         # the penalty pull-over still ends the suspect's Wanted, just without
         # jail or confiscation.
-        await _clear_wanted_on_pullover(character, suspect_character, ctx)
+        await _clear_wanted_on_pullover(
+            character if is_on_duty else None, suspect_character, ctx
+        )
         return 0, 0, 0, 0
 
     # Suspect is wanted — execute arrest
@@ -184,8 +195,8 @@ async def handle_police_penalty(event, player, character, ctx):
     target_chars = {suspect_guid: suspect_character}
 
     try:
-        await perform_arrest(
-            officer_character=character,
+        arrested_names, total_confiscated = await perform_arrest(
+            officer_character=character if is_on_duty else None,
             targets=targets,
             target_chars=target_chars,
             http_client=ctx.http_client,
@@ -195,6 +206,15 @@ async def handle_police_penalty(event, player, character, ctx):
         )
     except ValueError as e:
         logger.warning("Pull-over arrest skipped: %s", e)
+        return 0, 0, 0, 0
+
+    # perform_arrest only announces with a human officer — announce AI
+    # arrests server-side so the chase gets a visible resolution.
+    if is_ai_pullover and arrested_names:
+        message = f"{', '.join(arrested_names)} was arrested by the police AI"
+        if total_confiscated > 0:
+            message += f" — ${total_confiscated:,} confiscated"
+        await announce(message + ".", ctx.http_client)
 
     return 0, 0, 0, 0
 
