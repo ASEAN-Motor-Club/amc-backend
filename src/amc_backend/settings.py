@@ -111,6 +111,14 @@ LOGGING = {
             "level": "INFO",
             "propagate": False,
         },
+        # Exam diagnostics: same breadcrumb pattern as the questionnaire
+        # (start-exam click, modal pages, submit, grade+save outcome) — the
+        # parent "amc" logger runs at ERROR and would swallow the INFO lines.
+        "amc.exam": {
+            "handlers": ["console"],
+            "level": "INFO",
+            "propagate": False,
+        },
     },
 }
 
