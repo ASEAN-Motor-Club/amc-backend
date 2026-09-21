@@ -116,13 +116,17 @@ def wanted_accrual_multiplier(dist_units: float) -> float:
 
 # Compass cadence — per-officer interval from THAT officer's distance to the
 # suspect and the suspect's speed:
-#   interval = 1 / (D * (S + 20 km/h) * COMPASS_C), clamped [3 s, 15 s]
+#   base = 1 / (D * 20 * COMPASS_C), clamped [3 s, 15 s]   (parked-suspect law)
+#   interval = max(base * 20 / (S + 20), 3 s)             (speed multiplier)
 # Distance no longer diverges near the ring (the old (D - 500 m) hyperbola
-# made the final approach blind — freeman 2026-09-20). The interval is driven
-# by bearing STALENESS (suspect speed); distance only shapes it through the
-# clamp. An officer inside the suspect's 200 m ring gets no updates at all —
-# the final-search phase, which doubles as the suspect-facing covert tell.
-COMPASS_C = 1.5e-6                # Hz per (metre * km/h)
+# made the final approach blind — freeman 2026-09-20). The parked-suspect
+# distance law sets the base; SPEED multiplies it after the clamp, so near
+# cops a runner breaks well below the parked ceiling (100 km/h: 5x faster,
+# straight to the floor) while a parked suspect's cadence is unchanged.
+# Speed can only ever speed updates up (20/(S+20) <= 1). An officer inside
+# the suspect's 200 m ring gets no updates at all — the final-search phase,
+# which doubles as the suspect-facing covert tell.
+COMPASS_C = 3.0e-6                # Hz per (metre * km/h) — 2x the 2026-09-20 value (freeman: faster in general)
 COMPASS_MIN_INTERVAL = 3.0        # seconds — SOLO floor; effective floor 3×min(N, 2)
 COMPASS_MAX_INTERVAL = 15.0       # seconds — SOLO ceiling; effective ceiling 15×min(N, 2)
 COMPASS_HIDE_DISTANCE = 20_000    # 200 m in game units — per-officer silence ring
@@ -134,13 +138,11 @@ def compass_interval_seconds(dist_units: float, speed_kmh: float) -> float | Non
     if dist_units <= COMPASS_HIDE_DISTANCE:
         return None
     d_m = dist_units / 100.0
-    prod = d_m * (speed_kmh + 20.0)
-    if prod <= 0:
-        return COMPASS_MAX_INTERVAL
-    return min(
-        max(1.0 / (prod * COMPASS_C), COMPASS_MIN_INTERVAL),
+    base = min(
+        max(1.0 / (d_m * 20.0 * COMPASS_C), COMPASS_MIN_INTERVAL),
         COMPASS_MAX_INTERVAL,
     )
+    return max(base * 20.0 / (speed_kmh + 20.0), COMPASS_MIN_INTERVAL)
 
 # Tracks the last notified star level per character guid
 _last_star_notified: dict[str, int] = {}
@@ -1271,9 +1273,13 @@ async def tick_police_suspect_locations(http_client, http_client_mod, http_clien
     Update cadence is per-officer, keyed on THAT officer's distance to the
     suspect and the suspect's speed:
 
-        solo = 1 / (D * (S + 20 km/h) * COMPASS_C)
+        base = 1 / (D * 20 * COMPASS_C), clamped [3 s, 15 s]  (parked law)
+        solo = max(base * 20 / (S + 20), 3 s)                 (speed multiplier)
 
-    clamped to [3 s, 15 s], then scaled by the FORCE BUDGET: the interval is
+    Speed multiplies AFTER the distance clamp, so near cops a runner breaks
+    well below the parked ceiling (100 km/h: 5x faster, to the floor) while
+    a parked suspect's cadence is distance-law only; speed never slows
+    updates. The result is then scaled by the FORCE BUDGET: the interval is
     multiplied by min(N, COMPASS_FORCE_BUDGET_CAP), where N is the number of
     on-duty officers beyond their own 200 m ring for that suspect. The force's
     total flash rate for one suspect stays at ONE cop's rate up to the cap —

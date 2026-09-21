@@ -2807,7 +2807,7 @@ class CompassTickTests(TestCase):
     async def test_fast_far_clamped_to_3s(
         self, mock_get_players, mock_get_locations, mock_police, mock_sys_msg,
     ):
-        """3 km + 200 km/h → raw 1/(3000*220*C) ≈ 1.0 s → clamped to 3 s floor."""
+        """3 km + 200 km/h → base 5.6 s × 20/220 ≈ 0.5 → floored at 3 s."""
         criminal = await self._setup_criminal()
         officer = await self._setup_police()
 
@@ -2841,7 +2841,7 @@ class CompassTickTests(TestCase):
     async def test_speed_speeds_up_updates_at_same_distance(
         self, mock_get_players, mock_get_locations, mock_police, mock_sys_msg,
     ):
-        """1 km out: stationary clamps to 15 s, an 80 km/h suspect updates in 6.7 s."""
+        """1 km out: stationary clamps to 15 s, an 80 km/h suspect updates in 3 s."""
         criminal = await self._setup_criminal()
         officer = await self._setup_police()
 
@@ -2860,7 +2860,7 @@ class CompassTickTests(TestCase):
         await tick_police_suspect_locations(mock_http, mock_http_mod, mock_http_mgmt)
         mock_sys_msg.assert_not_called()
 
-        # 80 km/h: same 10 s since last send → past the 6.7 s interval
+        # 80 km/h: same 10 s since last send → past the 3 s interval
         mock_get_locations.return_value = [
             _make_mgmt_entry(criminal.guid, 2222),  # ≈80 km/h
         ]
@@ -2903,7 +2903,7 @@ class CompassTickTests(TestCase):
         """Two officers, both >200 m: pair keys throttle independently —
         with the force budget each interval is solo × N(=2): the 1 km
         officer (30 s effective) stays quiet at t-25 while the 3 km
-        officer (22.2 s effective) receives."""
+        officer (11.1 s effective) receives."""
         criminal = await self._setup_criminal()
         officer_1km = await self._setup_police()
         officer_3km = await self._setup_police()
