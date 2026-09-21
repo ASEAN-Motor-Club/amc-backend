@@ -435,12 +435,7 @@ async def cmd_exit(ctx: CommandContext, target_player_name: str):
             await force_exit_vehicle(ctx.http_client_mod, target_guid)
 
 
-@registry.register(
-    "/tp_player",
-    description=gettext_lazy("Teleport a player to a location (Admin)"),
-    category="Admin",
-)
-async def cmd_tp_player(
+async def teleport_player_to_point(
     ctx: CommandContext, target_player_name: str, location_name: str
 ):
     if not ctx.player_info or not ctx.player_info.get("bIsAdmin"):
@@ -551,6 +546,21 @@ async def cmd_tp_player(
             player=target_player_name, location=location_name
         )
     )
+
+
+@registry.register(
+    "/tp_player",
+    description=gettext_lazy("Deprecated: use /tp <player> <location> (Admin)"),
+    category="Admin",
+    deprecated=True,
+    deprecated_message=gettext_lazy(
+        "<Title>Command Deprecated</>\nUse /tp <player_name> <location> instead."
+    ),
+)
+async def cmd_tp_player(
+    ctx: CommandContext, target_player_name: str, location_name: str
+):
+    await teleport_player_to_point(ctx, target_player_name, location_name)
 
 
 BILL_AMOUNT = 50_000
