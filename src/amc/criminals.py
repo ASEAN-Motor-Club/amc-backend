@@ -1,7 +1,9 @@
 import asyncio
 import logging
 import math
+import os
 import time
+from dataclasses import dataclass
 
 from datetime import timedelta
 
@@ -116,33 +118,61 @@ def wanted_accrual_multiplier(dist_units: float) -> float:
 
 # Compass cadence — per-officer interval from THAT officer's distance to the
 # suspect and the suspect's speed:
-#   base = 1 / (D * 20 * COMPASS_C), clamped [3 s, 15 s]   (parked-suspect law)
-#   interval = max(base * 20 / (S + 20), 3 s)             (speed multiplier)
+#   base = 1 / (D * 20 * COMPASS.c), clamped [min, max]   (parked-suspect law)
+#   interval = max(base * 20 / (S + 20), min)             (speed multiplier)
 # Distance no longer diverges near the ring (the old (D - 500 m) hyperbola
 # made the final approach blind — freeman 2026-09-20). The parked-suspect
 # distance law sets the base; SPEED multiplies it after the clamp, so near
-# cops a runner breaks well below the parked ceiling (100 km/h: 5x faster,
-# straight to the floor) while a parked suspect's cadence is unchanged.
-# Speed can only ever speed updates up (20/(S+20) <= 1). An officer inside
-# the suspect's 200 m ring gets no updates at all — the final-search phase,
-# which doubles as the suspect-facing covert tell.
-COMPASS_C = 3.0e-6                # Hz per (metre * km/h) — 2x the 2026-09-20 value (freeman: faster in general)
-COMPASS_MIN_INTERVAL = 3.0        # seconds — SOLO floor; effective floor 3×min(N, 2)
-COMPASS_MAX_INTERVAL = 15.0       # seconds — SOLO ceiling; effective ceiling 15×min(N, 2)
-COMPASS_HIDE_DISTANCE = 20_000    # 200 m in game units — per-officer silence ring
-COMPASS_FORCE_BUDGET_CAP = 2      # max force-budget multiplier — more cops ≠ slower each
+# cops a runner breaks well below the parked ceiling while a parked
+# suspect's cadence is unchanged. Speed can only ever speed updates up.
+# An officer inside the suspect's ring gets a fixed "<200m" proximity ping
+# every max_interval instead of a bearing — the final-search phase, which
+# doubles as the suspect-facing covert tell.
+#
+# Tuning configs (freeman 2026-09-21): named variants for A/B-testing
+# different cadence tunings in-game. The active config is selected with the
+# COMPASS_CONFIG env var (default "A"); add new variants to COMPASS_CONFIGS.
+@dataclass(frozen=True)
+class CompassConfig:
+    name: str
+    c: float                 # Hz per (metre * km/h)
+    min_interval: float      # seconds — SOLO floor; effective floor min×budget
+    max_interval: float      # seconds — SOLO ceiling; effective ceiling max×budget
+    ring_distance: int       # game units — close ring ("<200m" ping, no bearing)
+    budget_cap: int          # max force-budget multiplier — more cops ≠ slower each
 
 
-def compass_interval_seconds(dist_units: float, speed_kmh: float) -> float | None:
-    """Per-officer compass update interval; None = silent (inside 200 m ring)."""
-    if dist_units <= COMPASS_HIDE_DISTANCE:
-        return None
+COMPASS_CONFIGS: dict[str, CompassConfig] = {
+    "A": CompassConfig(
+        name="A",
+        c=3.0e-6,            # 2x the 2026-09-20 first-pass value
+        min_interval=3.0,
+        max_interval=15.0,
+        ring_distance=20_000,
+        budget_cap=2,
+    ),
+}
+
+_compass_config_name = os.environ.get("COMPASS_CONFIG", "A").strip().upper()
+COMPASS: CompassConfig = COMPASS_CONFIGS.get(
+    _compass_config_name, COMPASS_CONFIGS["A"]
+)
+if COMPASS.name != _compass_config_name:
+    logging.warning(
+        "COMPASS_CONFIG=%r not in %s — falling back to config %s",
+        _compass_config_name, sorted(COMPASS_CONFIGS), COMPASS.name,
+    )
+
+
+def compass_interval_seconds(dist_units: float, speed_kmh: float) -> float:
+    """Per-officer compass update interval for a suspect beyond the close
+    ring (the caller handles ring distances with the fixed '<200m' ping)."""
     d_m = dist_units / 100.0
     base = min(
-        max(1.0 / (d_m * 20.0 * COMPASS_C), COMPASS_MIN_INTERVAL),
-        COMPASS_MAX_INTERVAL,
+        max(1.0 / (d_m * 20.0 * COMPASS.c), COMPASS.min_interval),
+        COMPASS.max_interval,
     )
-    return max(base * 20.0 / (speed_kmh + 20.0), COMPASS_MIN_INTERVAL)
+    return max(base * 20.0 / (speed_kmh + 20.0), COMPASS.min_interval)
 
 # Tracks the last notified star level per character guid
 _last_star_notified: dict[str, int] = {}
@@ -1273,21 +1303,23 @@ async def tick_police_suspect_locations(http_client, http_client_mod, http_clien
     Update cadence is per-officer, keyed on THAT officer's distance to the
     suspect and the suspect's speed:
 
-        base = 1 / (D * 20 * COMPASS_C), clamped [3 s, 15 s]  (parked law)
+        base = 1 / (D * 20 * COMPASS.c), clamped [3 s, 15 s]  (parked law)
         solo = max(base * 20 / (S + 20), 3 s)                 (speed multiplier)
 
     Speed multiplies AFTER the distance clamp, so near cops a runner breaks
     well below the parked ceiling (100 km/h: 5x faster, to the floor) while
     a parked suspect's cadence is distance-law only; speed never slows
     updates. The result is then scaled by the FORCE BUDGET: the interval is
-    multiplied by min(N, COMPASS_FORCE_BUDGET_CAP), where N is the number of
+    multiplied by min(N, COMPASS.budget_cap), where N is the number of
     on-duty officers beyond their own 200 m ring for that suspect. The force's
     total flash rate for one suspect stays at ONE cop's rate up to the cap —
     extra cops split the budget instead of multiplying it, but a large force
     is never SLOWER per cop than a pair (the uncapped ×N made a 4-cop
     response 4× blinder per cop; freeman, 2026-09-20). Effective range
     [3×min(N,2), 15×min(N,2)] s. An officer inside the suspect's 200 m
-    silence ring gets no updates for that suspect at all. Missing speed
+    close ring gets a fixed "<200m" proximity ping every COMPASS.max_interval
+    (15 s) instead of a bearing — no budget, no speed effect, and ring cops
+    don't count into other officers' budgets. Missing speed
     telemetry degrades to the stationary cadence.
     """
     wanted_list = [
@@ -1363,7 +1395,7 @@ async def tick_police_suspect_locations(http_client, http_client_mod, http_clien
         for officer, officer_loc in officer_entries:
             if officer.guid == character.guid:
                 continue
-            if _distance_3d(officer_loc, suspect_loc) > COMPASS_HIDE_DISTANCE:
+            if _distance_3d(officer_loc, suspect_loc) > COMPASS.ring_distance:
                 count += 1
         receiving_counts[character.guid] = count
 
@@ -1379,24 +1411,34 @@ async def tick_police_suspect_locations(http_client, http_client_mod, http_clien
                 continue
 
             dist = _distance_3d(officer_loc, suspect_loc)
+            in_ring = dist <= COMPASS.ring_distance
             speed_kmh = speed_map.get(character.guid.upper(), 0.0) * 0.036
-            interval = compass_interval_seconds(dist, speed_kmh)
-            if interval is None:
-                # This officer is inside the suspect's 200 m silence ring
-                continue
-            # Force budget: split one cop's cadence across every receiving
-            # officer instead of letting each run their own stream, CAPPED
-            # at COMPASS_FORCE_BUDGET_CAP — more cops must not mean slower
-            # each (freeman, 2026-09-20).
-            interval *= min(
-                receiving_counts.get(character.guid, 1), COMPASS_FORCE_BUDGET_CAP
-            )
+            if in_ring:
+                # Inside the 200 m close ring: fixed "<200m" ping on the
+                # SOLO ceiling — no budget, no speed effect (freeman:
+                # "below 200m, make it say <200m every 15 seconds").
+                interval = COMPASS.max_interval
+            else:
+                interval = compass_interval_seconds(dist, speed_kmh)
+                # Force budget: split one cop's cadence across every receiving
+                # officer instead of letting each run their own stream, CAPPED
+                # at COMPASS.budget_cap — more cops must not mean slower
+                # each (freeman, 2026-09-20).
+                interval *= min(
+                    receiving_counts.get(character.guid, 1),
+                    COMPASS.budget_cap,
+                )
             key = (officer_guid, character.guid)
             if now - _last_compass_sent.get(key, 0.0) < interval:
                 continue
             _last_compass_sent[key] = now
 
             metres = game_units_to_metres(dist)
+
+            if in_ring:
+                # Close ring: no bearing, just the proximity callout
+                entries.append((dist, f"[{character.name}] <200m"))
+                continue
 
             dx = suspect_loc[0] - officer_x
             dy = suspect_loc[1] - officer_y

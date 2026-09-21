@@ -1851,10 +1851,10 @@ class PoliceSuspectLocationsTests(TestCase):
                 yield item
         return _iter()
 
-    async def test_within_100m_proximity_hides_suspect(
+    async def test_within_200m_close_ping(
         self,
     ):
-        """Suspect within 100m of an officer is hidden by the 500m proximity filter."""
+        """Suspect within 200m: fixed '<200m' proximity ping (no bearing)."""
         criminal = await self._setup_criminal(wanted_remaining=300)
         officer = await self._setup_police()
 
@@ -1876,8 +1876,10 @@ class PoliceSuspectLocationsTests(TestCase):
              patch("amc.criminals.send_system_message", new_callable=AsyncMock) as mock_sys_msg:
             await tick_police_suspect_locations(mock_http, mock_http_mod, mock_http_mgmt)
 
-        # Hidden by proximity — no message
-        mock_sys_msg.assert_not_called()
+        mock_sys_msg.assert_awaited_once()
+        message = mock_sys_msg.call_args.args[1]
+        self.assertIn("<200m", message)
+        self.assertNotIn("m W", message)  # no bearing line
 
     async def test_beyond_500m_shows_distance_and_direction(
         self,
@@ -1943,9 +1945,10 @@ class PoliceSuspectLocationsTests(TestCase):
 
         mock_sys_msg.assert_awaited_once()
         message = mock_sys_msg.call_args.args[1]
-        # Close suspect hidden by proximity
-        self.assertNotIn(criminal_close.name, message)
-        # Far suspect shown
+        # Close suspect shown as the fixed '<200m' proximity ping
+        self.assertIn(criminal_close.name, message)
+        self.assertIn("<200m", message)
+        # Far suspect shown with bearing
         self.assertIn(criminal_far.name, message)
         self.assertIn("600m", message)
 
@@ -2615,8 +2618,10 @@ class CompassTickTests(TestCase):
         clamped to [COMPASS_MIN_INTERVAL, COMPASS_MAX_INTERVAL]
         effective = solo × min(N, 2)   (N = officers beyond their own ring)
 
-    An officer inside the suspect's 200 m silence ring receives nothing for
-    that suspect; each officer's cadence is keyed on their own distance and
+    An officer inside the suspect's 200 m close ring receives a fixed
+    "<200m" proximity ping (every COMPASS_MAX_INTERVAL, no bearing, not
+    counted into the budget); each officer's cadence is keyed on their own
+    distance and
     split across the receiving force (force budget, capped at 2 so a large
     response is never slower per cop than a pair).
     """
@@ -2871,11 +2876,11 @@ class CompassTickTests(TestCase):
     # Per-officer silence ring and per-officer cadence
     # -------------------------------------------------------------------
 
-    async def test_officer_inside_ring_silent_far_officer_receives(
+    async def test_officer_inside_ring_close_ping_far_officer_receives(
         self, mock_get_players, mock_get_locations, mock_police, mock_sys_msg,
     ):
-        """Officer at 100 m gets NOTHING; officer at 3 km still receives —
-        per-officer silence (old behavior hid the suspect from everyone)."""
+        """Officer at 100 m gets the fixed '<200m' close ping (no bearing);
+        officer at 3 km still gets the normal bearing line."""
         criminal = await self._setup_criminal()
         officer_near = await self._setup_police()
         officer_far = await self._setup_police()
@@ -2893,9 +2898,15 @@ class CompassTickTests(TestCase):
 
         await tick_police_suspect_locations(mock_http, mock_http_mod, mock_http_mgmt)
 
-        # Exactly one message — to the far officer only
-        mock_sys_msg.assert_awaited_once()
-        self.assertEqual(mock_sys_msg.await_args.kwargs.get("character_guid"), officer_far.guid)
+        # Two messages — the close ping to the near officer, the bearing to
+        # the far one
+        self.assertEqual(mock_sys_msg.await_count, 2)
+        guids = {c.kwargs.get("character_guid")
+                 for c in mock_sys_msg.await_args_list}
+        self.assertEqual(guids, {officer_near.guid, officer_far.guid})
+        near_call = next(c for c in mock_sys_msg.await_args_list
+                         if c.kwargs.get("character_guid") == officer_near.guid)
+        self.assertIn("<200m", near_call.args[1])
 
     async def test_per_officer_cadence_independent(
         self, mock_get_players, mock_get_locations, mock_police, mock_sys_msg,
@@ -3011,9 +3022,9 @@ class CompassTickTests(TestCase):
     async def test_ring_cop_excluded_from_budget(
         self, mock_get_players, mock_get_locations, mock_police, mock_sys_msg,
     ):
-        """A cop inside the 200 m ring is silent AND doesn't shrink the
-        budget: the 1 km cop's effective interval stays solo × 1 (15 s),
-        not ×2 (30 s)."""
+        """A cop inside the 200 m ring gets the <200m ping but doesn't count
+        into the budget: the 1 km cop's effective interval stays solo × 1
+        (15 s), not ×2 (30 s)."""
         criminal = await self._setup_criminal()
         officer_near = await self._setup_police()
         officer_far = await self._setup_police()
@@ -3029,16 +3040,17 @@ class CompassTickTests(TestCase):
         mock_http_mod = AsyncMock()
         mock_http_mgmt = AsyncMock()
 
-        # First tick — far cop receives, near cop silent
+        # First tick — both receive (close ping + bearing)
         await tick_police_suspect_locations(mock_http, mock_http_mod, mock_http_mgmt)
-        mock_sys_msg.assert_awaited_once()
-        self.assertEqual(
-            mock_sys_msg.await_args.kwargs.get("character_guid"), officer_far.guid
-        )
+        self.assertEqual(mock_sys_msg.await_count, 2)
 
-        # t-20: past solo 15 s (N=1) — receives. With a wrongly-counted
-        # ring cop (N=2 → 30 s) this would stay silent.
-        _last_compass_sent[(officer_far.guid, criminal.guid)] = time.monotonic() - 20
+        # t-10 for the ring cop (within its fixed 15 s → silent) and t-20
+        # for the far cop: past solo 15 s (N=1) → receives. With a
+        # wrongly-counted ring cop (N=2 → 30 s) the far cop would stay
+        # silent here.
+        now = time.monotonic()
+        _last_compass_sent[(officer_near.guid, criminal.guid)] = now - 10
+        _last_compass_sent[(officer_far.guid, criminal.guid)] = now - 20
         mock_sys_msg.reset_mock()
         await tick_police_suspect_locations(mock_http, mock_http_mod, mock_http_mgmt)
         mock_sys_msg.assert_awaited_once()
