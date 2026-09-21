@@ -3694,6 +3694,7 @@ class RentalMarkTestCase(SimpleTestCase):
         mod_player=None,
         mod_player_error=False,
         spawn_error=False,
+        despawn_current_error=False,
         name="",
     ):
         get_player_mock = (
@@ -3707,6 +3708,11 @@ class RentalMarkTestCase(SimpleTestCase):
             if spawn_error
             else AsyncMock()
         )
+        self.despawn_current_mock = (
+            AsyncMock(side_effect=Exception("no vehicle"))
+            if despawn_current_error
+            else AsyncMock()
+        )
         with (
             patch(
                 "amc.commands.vehicles.register_player_vehicles",
@@ -3716,6 +3722,10 @@ class RentalMarkTestCase(SimpleTestCase):
             patch("amc.commands.vehicles.despawn_by_tag", new=self.despawn_mock),
             patch(
                 "amc.commands.vehicles.spawn_registered_vehicle", new=self.spawn_mock
+            ),
+            patch(
+                "amc.commands.vehicles.despawn_player_vehicle",
+                new=self.despawn_current_mock,
             ),
         ):
             await cmd_rental(self.ctx, name)
@@ -3781,6 +3791,10 @@ class RentalMarkTestCase(SimpleTestCase):
         v = self._make_vehicle()
         output = await self._run_rental([v])
         self.assertIn("Marked as rental", output)
+        self.assertNotIn("Sit in the vehicle", output)
+        self.despawn_current_mock.assert_awaited_once_with(
+            self.ctx.http_client_mod, "test-guid"
+        )
         self.despawn_mock.assert_awaited_once_with(
             self.ctx.http_client_mod, "rental-1"
         )
@@ -3789,6 +3803,16 @@ class RentalMarkTestCase(SimpleTestCase):
         self.assertEqual(kwargs["tag"], "rental_vehicles")
         self.assertIn("rental-1", kwargs["tags"])
         self.assertEqual(kwargs["extra_data"].get("drivable"), True)
+
+    async def test_rental_despawn_failure_skips_copy(self):
+        # No current vehicle to despawn (already exited): never place the
+        # copy — it would stack on the parked original.
+        v = self._make_vehicle()
+        output = await self._run_rental([v], despawn_current_error=True)
+        self.assertIn("Marked as rental", output)
+        self.assertIn("Sit in the vehicle", output)
+        self.spawn_mock.assert_not_awaited()
+        self.despawn_mock.assert_not_awaited()
 
     async def test_rental_denial_spawns_nothing(self):
         # Employee marking a company vehicle: denied, no in-place copy placed.
