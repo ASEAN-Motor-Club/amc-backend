@@ -2620,6 +2620,97 @@ class OnPlayerProfitTests(TestCase):
         mock_repay_loan.assert_not_called()
         mock_savings.assert_not_called()
 
+    @patch("amc.mod_server.send_system_message", new_callable=AsyncMock)
+    @patch("amc.player_tags.refresh_player_name", new_callable=AsyncMock)
+    @patch("amc.special_cargo.transfer_money", new_callable=AsyncMock)
+    @patch("amc.handlers.cargo.detect_custom_parts")
+    @patch("amc.handlers.cargo.get_player_last_vehicle_parts", new_callable=AsyncMock)
+    @patch("amc.handlers.cargo.get_player_last_vehicle", new_callable=AsyncMock)
+    @patch("amc.handlers.cargo.show_popup", new_callable=AsyncMock)
+    @patch("amc.special_cargo.show_popup", new_callable=AsyncMock)
+    @patch("amc.webhook.get_rp_mode", new_callable=AsyncMock)
+    @patch("amc.webhook.get_treasury_fund_balance", new_callable=AsyncMock)
+    async def test_gov_employee_illicit_cargo_not_in_base_payment(
+        self,
+        mock_get_treasury,
+        mock_get_rp_mode,
+        mock_sc_show_popup,
+        mock_cargo_show_popup,
+        mock_get_last_vehicle,
+        mock_get_last_parts,
+        mock_detect,
+        mock_sc_transfer,
+        mock_refresh,
+        mock_send_sys_msg,
+    ):
+        """Regression: illicit cargo earnings must not become gov-employee income.
+
+        A gov employee delivering Money (illicit) + oranges (legit) in one
+        event should have ONLY the legit payment reported as base payment, so
+        the gov redirect neither confiscates the illicit payment as
+        "Government Service – Earnings" nor credits it toward
+        gov_employee_contributions. Illicit income stays in the wallet and is
+        handled by the criminal machinery instead.
+        """
+        mock_get_rp_mode.return_value = False
+        mock_get_treasury.return_value = 100_000
+
+        mock_get_last_vehicle.return_value = {"vehicle": {"vehicleId": 123}}
+        mock_get_last_parts.return_value = {"vehicleId": 123, "parts": []}
+        mock_detect.return_value = []
+
+        player = await sync_to_async(PlayerFactory)()
+        character = await sync_to_async(CharacterFactory)(
+            player=player,
+            reject_ubi=False,
+            gov_employee_until=timezone.now() + timedelta(hours=24),
+        )
+        await CharacterLocation.objects.acreate(
+            character=character, location=Point(0, 0, 0), vehicle_key="TestVehicle"
+        )
+        await DeliveryPoint.objects.acreate(guid="1", name="mine", coord=Point(0, 0, 0))
+        await DeliveryPoint.objects.acreate(
+            guid="2", name="factory", coord=Point(1000, 1000, 0)
+        )
+
+        event = {
+            "hook": "ServerCargoArrived",
+            "timestamp": int(time.time()),
+            "data": {
+                "Cargos": [
+                    {
+                        "Net_CargoKey": "Money",
+                        "Net_Payment": 10_000,
+                        "Net_Weight": 100.0,
+                        "Net_Damage": 0.0,
+                        "Net_SenderAbsoluteLocation": {"X": 0, "Y": 0, "Z": 0},
+                        "Net_DestinationLocation": {"X": 1000, "Y": 1000, "Z": 0},
+                    },
+                    {
+                        "Net_CargoKey": "oranges",
+                        "Net_Payment": 2_000,
+                        "Net_Weight": 100.0,
+                        "Net_Damage": 0.0,
+                        "Net_SenderAbsoluteLocation": {"X": 0, "Y": 0, "Z": 0},
+                        "Net_DestinationLocation": {"X": 1000, "Y": 1000, "Z": 0},
+                    },
+                ],
+                "PlayerId": str(player.unique_id),
+                "CharacterGuid": str(character.guid),
+            },
+        }
+
+        base_pay, _, _, _ = await process_event(
+            event, player, character, http_client_mod=MagicMock()
+        )
+
+        # Only the legit cargo payment is reported as gov income.
+        self.assertEqual(base_pay, 2_000)
+
+        # The criminal machinery still sees the illicit payment.
+        await character.arefresh_from_db(fields=["criminal_score"])
+        self.assertEqual(character.criminal_score, 10_000)
+
 
 @patch("amc.webhook.get_rp_mode", new_callable=AsyncMock)
 @patch("amc.webhook.get_treasury_fund_balance", new_callable=AsyncMock)
