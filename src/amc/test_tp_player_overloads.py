@@ -29,6 +29,7 @@ def make_ctx(character, player_info):
     ctx.player_info = player_info
     ctx.http_client = MagicMock()
     ctx.http_client_mod = MagicMock()
+    ctx.timestamp = MagicMock()
     return ctx
 
 
@@ -143,7 +144,7 @@ class TptoTestCase(TestCase):
         self.assertEqual(
             mock_tp.await_args[0][2], {"X": 1000.0, "Y": 2000.0, "Z": 3100.0}
         )
-        self.assertTrue(mock_tp.await_args[2]["no_vehicles"])
+        self.assertTrue(mock_tp.await_args.kwargs["no_vehicles"])
 
     async def test_tpto_unknown_player_replies(self):
         character = await self._make_character()

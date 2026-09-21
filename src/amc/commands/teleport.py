@@ -264,19 +264,6 @@ async def cmd_tp_coords(ctx: CommandContext, x: int, y: int, z: int):
 
 @registry.register(
     ["/teleport", "/tp"],
-    description=gettext_lazy("Teleport another player to a location (Admin Only)"),
-    category="Admin",
-)
-async def cmd_tp_player_to_point(
-    ctx: CommandContext, target_player_name: str, location: str
-):
-    from amc.commands.admin import teleport_player_to_point
-
-    await teleport_player_to_point(ctx, target_player_name, location)
-
-
-@registry.register(
-    ["/teleport", "/tp"],
     description=gettext_lazy("Teleport another player to coordinates (Admin Only)"),
     category="Admin",
 )
@@ -334,6 +321,19 @@ async def cmd_tp_player_to_coords(
             player=target_player_name, x=x, y=y, z=z
         )
     )
+
+
+@registry.register(
+    ["/teleport", "/tp"],
+    description=gettext_lazy("Teleport another player to a location (Admin Only)"),
+    category="Admin",
+)
+async def cmd_tp_player_to_point(
+    ctx: CommandContext, target_player_name: str, location: str
+):
+    from amc.commands.admin import teleport_player_to_point
+
+    await teleport_player_to_point(ctx, target_player_name, location)
 
 
 async def _find_player_location(
