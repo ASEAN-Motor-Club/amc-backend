@@ -1,7 +1,7 @@
 from amc.command_framework import registry, CommandContext
 from amc.game_server import get_players
 from amc.models import Character, PoliceSession, Wanted
-from amc.special_cargo import calculate_criminal_level
+from amc.special_cargo import calculate_boss_cut_ratio, calculate_criminal_level
 from amc.criminals import _compute_stars
 from django.utils.translation import gettext_lazy
 
@@ -168,8 +168,58 @@ async def cmd_criminals(ctx: CommandContext):
     msg = "<Title>Criminal Leaderboard</>\n\n"
     for i, (name, score) in enumerate(rows, start=1):
         level = calculate_criminal_level(score)
-        marker = "👑 <Highlight>BOSS</> " if i == 1 else ""
-        msg += (
-            f"{i}. {marker}{name} — <Money>${score:,}</> <Secondary>(C{level})</>\n"
+        if i == 1:
+            # Boss gets his own deferred layout: title-sized name line.
+            msg += (
+                f"<Title>BOSS {name}</>\n"
+                f"<Money>${score:,}</> <Secondary>(C{level})</>\n"
+            )
+        else:
+            msg += (
+                f"{i}. {name} — <Money>${score:,}</> <Secondary>(C{level})</>\n"
+            )
+
+    # The caller's own standing in the criminal world.
+    me = ctx.character
+    if me is not None:
+        my_score = (
+            await Character.objects.filter(pk=me.pk)
+            .values_list("criminal_score", flat=True)
+            .aget()
         )
+        my_level = calculate_criminal_level(my_score)
+        boss = (
+            await Character.objects.filter(criminal_score__gt=0)
+            .order_by("-criminal_score", "pk")  # matches collect_boss_tax
+            .afirst()
+        )
+        msg += "\n<Title>Your Criminal Record</>\n"
+        if my_score > 0:
+            ahead = await Character.objects.filter(
+                criminal_score__gt=my_score
+            ).acount()
+            # Same-score ties rank by name (matches the board's ordering).
+            ties = await Character.objects.filter(
+                criminal_score=my_score, name__lt=me.name
+            ).acount()
+            rank = ahead + ties + 1
+            msg += (
+                f"#{rank} {me.name} — <Money>${my_score:,}</>"
+                f" <Secondary>(C{my_level})</>\n"
+            )
+            if boss is not None and boss.pk == me.pk:
+                msg += (
+                    "<EffectGood>You are the BOSS — you collect the boss "
+                    "cut on criminal deliveries.</>\n"
+                )
+            elif boss is not None:
+                boss_level = calculate_criminal_level(boss.criminal_score)
+                cut = calculate_boss_cut_ratio(my_level, boss_level)
+                msg += (
+                    f"<Secondary>Boss cut on criminal deliveries: "
+                    f"{cut * 100:.0f}%</>\n"
+                )
+        else:
+            msg += "<Secondary>You have no criminal score.</>\n"
+
     await ctx.reply(msg.rstrip())

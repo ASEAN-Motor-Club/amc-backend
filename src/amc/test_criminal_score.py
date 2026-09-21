@@ -362,9 +362,10 @@ class ArrestScoreNegationTests(TestCase):
 class CriminalsLeaderboardTests(TestCase):
     """/criminals: top-10 by score, boss marker, empty state."""
 
-    def _ctx(self):
+    def _ctx(self, character=None):
         ctx = MagicMock()
         ctx.reply = AsyncMock()
+        ctx.character = character
         return ctx
 
     async def test_empty_state(self):
@@ -382,11 +383,11 @@ class CriminalsLeaderboardTests(TestCase):
             CharacterFactory, player=player_b, name="Henchman", criminal_score=100_000
         )
         player_c = await _sync_create(PlayerFactory)()
-        await _sync_create(
+        zero_char = await _sync_create(
             CharacterFactory, player=player_c, name="ZeroGuy", criminal_score=0
         )
 
-        ctx = self._ctx()
+        ctx = self._ctx(character=zero_char)
         await cmd_criminals(ctx)
 
         output = ctx.reply.await_args[0][0]
@@ -400,6 +401,98 @@ class CriminalsLeaderboardTests(TestCase):
         # Levels are derived live from score
         self.assertIn("C13", output)  # 600_000 // 50_000 + 1
         self.assertIn("C3", output)  # 100_000 // 50_000 + 1
+        # Zero-score caller gets a clean-slate self-row
+        self.assertIn("You have no criminal score", output)
+
+    async def test_self_row_rank_level_score(self):
+        player_a = await _sync_create(PlayerFactory)()
+        await _sync_create(CharacterFactory)(
+            player=player_a, name="BossMan", criminal_score=600_000
+        )
+        player_b = await _sync_create(PlayerFactory)()
+        await _sync_create(
+            CharacterFactory, player=player_b, name="Alpha", criminal_score=100_000
+        )
+        player_c = await _sync_create(PlayerFactory)()
+        await _sync_create(
+            CharacterFactory, player=player_c, name="Zeta", criminal_score=100_000
+        )
+        player_d = await _sync_create(PlayerFactory)()
+        me = await _sync_create(
+            CharacterFactory, player=player_d, name="Me", criminal_score=75_000
+        )
+        # Rank 4: two ahead (BossMan, Alpha-tie-before-Zeta), none tied ahead.
+        # Rank ordering with equal scores follows name order — Alpha before Zeta.
+
+        ctx = self._ctx(character=me)
+        await cmd_criminals(ctx)
+
+        output = ctx.reply.await_args[0][0]
+        self.assertIn("Your Criminal Record", output)
+        self.assertIn("#4 Me", output)  # BossMan, Alpha, Zeta ahead
+        self.assertIn("$75,000", output)
+        self.assertIn("C2", output)  # 75_000 // 50_000 + 1
+        # Me (C2) vs boss BossMan (C13): cut = 0.05 + 0.20*(2/13)^2 → 5%
+        self.assertIn("Boss cut on criminal deliveries: 5%", output)
+        # The self-row appears even when the caller is not on the top-10 board
+        self.assertNotIn("1. #4", output)
+
+    async def test_self_row_tie_break_by_name(self):
+        player_a = await _sync_create(PlayerFactory)()
+        await _sync_create(
+            CharacterFactory, player=player_a, name="Alpha", criminal_score=50_000
+        )
+        player_b = await _sync_create(PlayerFactory)()
+        me = await _sync_create(
+            CharacterFactory, player=player_b, name="Zeta", criminal_score=50_000
+        )
+
+        ctx = self._ctx(character=me)
+        await cmd_criminals(ctx)
+
+        output = ctx.reply.await_args[0][0]
+        # Same score: name-order tie-break puts Alpha at #1, Zeta at #2
+        self.assertIn("#2 Zeta", output)
+        # Equal levels → cut rides the cap: 0.05 + 0.20*1 = 25%
+        self.assertIn("Boss cut on criminal deliveries: 25%", output)
+
+    async def test_boss_self_row_collects(self):
+        player_a = await _sync_create(PlayerFactory)()
+        boss = await _sync_create(
+            CharacterFactory, player=player_a, name="BossMan", criminal_score=600_000
+        )
+        player_b = await _sync_create(PlayerFactory)()
+        await _sync_create(
+            CharacterFactory, player=player_b, name="Henchman", criminal_score=100_000
+        )
+
+        ctx = self._ctx(character=boss)
+        await cmd_criminals(ctx)
+
+        output = ctx.reply.await_args[0][0]
+        # No emoji on the boss row — deferred layout instead
+        self.assertNotIn("👑", output)
+        self.assertIn("BOSS BossMan", output)
+        self.assertIn("You are the BOSS", output)
+        self.assertNotIn("Boss cut on criminal deliveries", output)
+
+    async def test_zero_score_row_has_no_cut_line(self):
+        player_a = await _sync_create(PlayerFactory)()
+        await _sync_create(CharacterFactory)(
+            player=player_a, name="BossMan", criminal_score=600_000
+        )
+        player_b = await _sync_create(PlayerFactory)()
+        me = await _sync_create(
+            CharacterFactory, player=player_b, name="CleanGuy", criminal_score=0
+        )
+
+        ctx = self._ctx(character=me)
+        await cmd_criminals(ctx)
+
+        output = ctx.reply.await_args[0][0]
+        self.assertIn("You have no criminal score", output)
+        self.assertNotIn("CleanGuy", output)
+        self.assertNotIn("Boss cut", output)
 
 
 class EvasionBonusTests(TestCase):
