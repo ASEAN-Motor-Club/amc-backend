@@ -128,7 +128,7 @@ class TptoTestCase(TestCase):
 
     async def test_tpto_self_teleports_caller_to_target(self):
         character = await self._make_character()
-        ctx = make_ctx(character, {})
+        ctx = make_ctx(character, {"bIsAdmin": True})
         with (
             patch(
                 "amc.commands.teleport.get_players",
@@ -145,11 +145,28 @@ class TptoTestCase(TestCase):
         self.assertEqual(
             mock_tp.await_args[0][2], {"X": 1000.0, "Y": 2000.0, "Z": 3100.0}
         )
-        self.assertTrue(mock_tp.await_args.kwargs["no_vehicles"])
+        self.assertFalse(mock_tp.await_args.kwargs["no_vehicles"])
+
+    async def test_tpto_self_requires_admin(self):
+        character = await self._make_character()
+        ctx = make_ctx(character, {})
+        with (
+            patch(
+                "amc.commands.teleport.get_players",
+                new=AsyncMock(return_value=[BOB]),
+            ),
+            patch(
+                "amc.commands.teleport.teleport_player", new=AsyncMock()
+            ) as mock_tp,
+        ):
+            handled = await registry.execute("/tpto Bob", ctx)
+        self.assertTrue(handled)
+        mock_tp.assert_not_called()
+        self.assertEqual(ctx.reply.await_args[0][0], "Admin Only")
 
     async def test_tpto_unknown_player_replies(self):
         character = await self._make_character()
-        ctx = make_ctx(character, {})
+        ctx = make_ctx(character, {"bIsAdmin": True})
         with (
             patch(
                 "amc.commands.teleport.get_players", new=AsyncMock(return_value=[])
@@ -197,12 +214,20 @@ class TptoTestCase(TestCase):
 
 
 class HelpListTestCase(TestCase):
-    async def test_help_hides_deprecated_tp_player(self):
+    async def test_help_hides_deprecated_and_admin_hides_tpto(self):
         player = await Player.objects.acreate(unique_id="76561198000000099")
         character = await Character.objects.acreate(
             name="HelpTester", player=player, guid="guid-help"
         )
+        # Non-admin: deprecated tp_player hidden AND admin-only /tpto hidden
         ctx = make_ctx(character, {})
+        await cmd_help(ctx)
+        msg = ctx.reply.await_args[0][0]
+        self.assertNotIn("tp_player", msg)
+        self.assertNotIn("/tpto", msg)
+
+        # Admin: /tpto visible
+        ctx = make_ctx(character, {"bIsAdmin": True})
         await cmd_help(ctx)
         msg = ctx.reply.await_args[0][0]
         self.assertNotIn("tp_player", msg)

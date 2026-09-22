@@ -367,20 +367,19 @@ def _player_not_found_message(target_name: str) -> str:
     ["/tpto"],
     description=gettext_lazy(
         "Teleport to a player (/tpto <player>). Admins may teleport one player "
-        "to another (/tpto <player> <player>)"
+        "to another (/tpto <player> <player>) (Admin Only)"
     ),
-    category="Teleportation",
+    category="Admin",
 )
 async def cmd_tpto(ctx: CommandContext, player_a: str, player_b: str = ""):
-    is_admin = bool(ctx.player_info and ctx.player_info.get("bIsAdmin"))
+    if not (ctx.player_info and ctx.player_info.get("bIsAdmin")):
+        await ctx.reply(_("Admin Only"))
+        return
+
     players = await get_players(ctx.http_client)
 
     if player_b:
-        # Admin-only: teleport player_a to player_b
-        if not is_admin:
-            await ctx.reply(_("Admin Only"))
-            return
-
+        # Teleport player_a to player_b
         pid_a, loc_a = await _find_player_location(players, player_a)
         if not pid_a:
             await ctx.reply(_player_not_found_message(player_a))
@@ -440,9 +439,9 @@ async def cmd_tpto(ctx: CommandContext, player_a: str, player_b: str = ""):
         ctx.http_client_mod,
         str(ctx.player.unique_id),
         location,
-        no_vehicles=not is_admin,
-        reset_trailers=not is_admin,
-        reset_carried_vehicles=not is_admin,
+        no_vehicles=False,
+        reset_trailers=False,
+        reset_carried_vehicles=False,
     )
 
 
