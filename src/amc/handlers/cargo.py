@@ -21,7 +21,6 @@ from amc.models import (
     DeliveryJob,
     DeliveryPoint,
     PendingWanted,
-    PoliceSession,
     ServerCargoArrivedLog,
     SubsidyRule,
     Wanted,
@@ -37,10 +36,8 @@ from amc.special_cargo import (
     accumulate_illicit_delivery,
     should_trigger_wanted,
 )
-from amc.mod_detection import detect_custom_parts, POLICE_DUTY_WHITELIST
 from amc.mod_server import (
     get_player_last_vehicle,
-    get_player_last_vehicle_parts,
     show_popup,
     transfer_money,
 )
@@ -250,10 +247,10 @@ async def handle_cargo_arrived(event, player, character, ctx):
 
         cargo_name = group_list[0].get_cargo_key_display()
 
-        # Modded vehicle / on-foot detection for illicit cargo
-        is_modded = False
+        # On-foot detection for illicit cargo (on-foot deliveries are nullified)
+        is_on_foot = False
         if is_illicit and ctx.http_client_mod:
-            is_modded = await _check_modded_vehicle(
+            is_on_foot = await _check_on_foot_delivery(
                 character, ctx.http_client_mod
             )
 
@@ -261,10 +258,10 @@ async def handle_cargo_arrived(event, player, character, ctx):
         # handler accrues the delivery into it — the trigger ratio measures
         # this delivery against the history that existed before it.
         pre_delivery_score = character.criminal_score
-        # Special cargo side effects (criminal level, criminal record, modded penalty)
+        # Special cargo side effects (criminal level, criminal record, on-foot penalty)
         await run_special_cargo_handlers(
             group_list, character, ctx.http_client, ctx.http_client_mod,
-            is_modded=is_modded,
+            is_on_foot=is_on_foot,
         )
 
         # Find matching delivery job
@@ -321,8 +318,8 @@ async def handle_cargo_arrived(event, player, character, ctx):
             )
         delivery_subsidy = delivery_data["subsidy"] + sc_bonus
 
-        # Wanted status for all illicit cargo (skipped for modded criminals)
-        if is_illicit and character and not is_modded:
+        # Wanted status for all illicit cargo (skipped for on-foot deliveries)
+        if is_illicit and character and not is_on_foot:
             delivery_amount = payment * quantity
             # Accumulate within the debounce window so splitting across multiple
             # small deliveries (~5 s apart) is treated the same as one big one.
@@ -479,20 +476,18 @@ def _parse_cargos(event):
     return valid_cargos
 
 
-async def _check_modded_vehicle(
+async def _check_on_foot_delivery(
     character, http_client_mod
 ) -> bool:
-    """Check for modded parts or on-foot delivery of illicit cargo.
+    """Check for on-foot delivery of illicit cargo.
 
-    Returns True if modded parts were detected or player is on foot.
-    Wallet deduction is handled by the special cargo handlers.
+    Returns True if the player delivered without a vehicle. On-foot illicit
+    deliveries are nullified — the wallet deduction is handled by the special
+    cargo handlers. Modded vehicle parts are allowed and carry no penalty.
     """
     try:
-        last_vehicle, parts_data = await asyncio.gather(
-            get_player_last_vehicle(http_client_mod, str(character.guid)),
-            get_player_last_vehicle_parts(
-                http_client_mod, str(character.guid), complete=False
-            ),
+        last_vehicle = await get_player_last_vehicle(
+            http_client_mod, str(character.guid)
         )
         main_vehicle = last_vehicle.get("vehicle")
         if not main_vehicle:
@@ -505,29 +500,9 @@ async def _check_modded_vehicle(
                 )
             )
             return True
-
-        whitelist = None
-        is_on_duty = await PoliceSession.objects.filter(
-            character=character, ended_at__isnull=True
-        ).aexists()
-        if is_on_duty:
-            whitelist = POLICE_DUTY_WHITELIST
-        custom_parts = detect_custom_parts(
-            parts_data.get("parts", []), whitelist=whitelist
-        )
-        if custom_parts:
-            asyncio.create_task(
-                show_popup(
-                    http_client_mod,
-                    "Your criminal profits were zeroed out for using a modified vehicle.",
-                    character_guid=character.guid,
-                    player_id=str(character.player.unique_id),
-                )
-            )
-            return True
         return False
     except Exception as e:
-        logger.warning(f"Failed to check custom parts for money delivery penalty: {e}")
+        logger.warning(f"Failed to check last vehicle for illicit delivery penalty: {e}")
         return False
 
 
