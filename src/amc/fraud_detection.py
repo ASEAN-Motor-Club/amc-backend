@@ -1,28 +1,40 @@
 """Real-time fraud detection for inflated cargo and passenger payments.
 
 Detects players using mods/cheats that multiply work payouts beyond
-base game values.  Two complementary checks per cargo delivery:
+base game values.  Cargo deliveries are validated against, in order:
 
-1. **Per-unit check**: payment / quantity against per-unit baseline.
-   Catches inflated payments regardless of delivery distance.
-2. **Distance-per-km check**: payment / distance_km against per-km
-   baseline.  Catches inflated payments even when per-unit looks
-   normal (e.g. short-distance deliveries with huge payouts).
+1. **Route-history check (primary)**: payment vs the historical consensus
+   of the SAME cargo on the SAME sender/destination pair over the last
+   ROUTE_HISTORY_WINDOW_DAYS - ceiling = max(2 x p99, 1.2 x max) of raw
+   pre-clawback Net_Payment values.  Requires ROUTE_HISTORY_MIN_SAMPLES
+   samples; short histories fall through.
+2. **Per-km check (fallback)**: payment / straight-line route distance
+   against a static per-cargo $/km ceiling.  Catches inflated payments on
+   routes without usable history.
+3. **Per-unit check**: payment / quantity against a static per-cargo
+   ceiling - applied ONLY when neither distance-aware control exists (no
+   route history AND no per-km ceiling): the per-unit tables are
+   calibrated on the global cargo distribution (most routes short) and
+   clip long legitimate routes when applied on top (2026-09-22:
+   CabbagePallet 926 km route, $30,569 at $33/km, clawed $5,569).
+4. **Absolute ceiling**: hard per-delivery cap regardless of distance.
 
-The maximum clawback from both checks is used.  For passengers, an
-absolute per-trip ceiling is enforced per passenger type.
+The maximum clawback from the applicable checks is used.  For
+passengers, an absolute per-trip ceiling is enforced per type.
 
-Thresholds are derived from historical data of legitimate deliveries
-(mean + 3σ on payment-per-km, excluding known outliers).
+Static thresholds are derived from historical data of legitimate
+deliveries (mean + 3s on payment-per-km, excluding known outliers).
 """
 
 import logging
 import math
 from dataclasses import dataclass
+from datetime import timedelta
 
 from django.contrib.gis.geos import Point
+from django.utils import timezone
 
-from amc.models import DeliveryPoint
+from amc.models import DeliveryPoint, ServerCargoArrivedLog
 
 logger = logging.getLogger("amc.fraud_detection")
 
@@ -173,6 +185,15 @@ CARGO_MAX_ABSOLUTE_PAYMENT: dict[str, float] = {
 # skipped for distance-based checks to avoid division noise.
 MIN_DISTANCE_METRES = 500
 
+# --- Route-history primary check ------------------------------------------
+# Primary ceiling for a delivery = historical consensus of the SAME cargo on
+# the SAME sender/destination pair (see validate_cargo_payment).  A route
+# with fewer than ROUTE_HISTORY_MIN_SAMPLES samples has no usable consensus
+# and falls through to the static per-km fallback.
+ROUTE_HISTORY_WINDOW_DAYS = 180
+ROUTE_HISTORY_MIN_SAMPLES = 20
+ROUTE_HISTORY_MAX_ROWS = 1000
+
 # Per-passenger-type payment ceilings (before bonus additions).
 # Derived from p99 of legitimate deliveries (excluding known cheats).
 PASSENGER_PAYMENT_CEILINGS: dict[int, int] = {
@@ -233,29 +254,72 @@ async def validate_cargo_payment(
 
     per_unit = payment / quantity
     per_unit_threshold = CARGO_PER_UNIT_THRESHOLDS.get(cargo_key, CARGO_PER_UNIT_DEFAULT)
-    per_km_threshold = CARGO_PER_KM_THRESHOLDS.get(cargo_key)
     max_absolute = CARGO_MAX_ABSOLUTE_PAYMENT.get(cargo_key)
 
-    # --- Distance-based check ---
+    # --- Route-distance context ---
     distance_m: float | None = None
-    per_km: float | None = None
-    distance_excess = 0
-
-    if sender_point and destination_point and per_km_threshold is not None:
+    if sender_point and destination_point:
         sp = sender_point.coord
         dp = destination_point.coord
         if sp and dp and sp.srid and dp.srid:
             distance_m = _geographic_distance_m(sp, dp)
-            if distance_m > MIN_DISTANCE_METRES:
-                distance_km = distance_m / 1000.0
-                per_km = payment / distance_km
-                if per_km > per_km_threshold:
-                    excess_per_km = per_km - per_km_threshold
-                    distance_excess = int(excess_per_km * distance_km)
+
+    # --- PRIMARY: same route + cargo historical consensus ---
+    # The strongest signal is what THIS cargo has historically paid on THIS
+    # exact sender/destination pair.  Ceiling = max(2 x p99, 1.2 x max) of
+    # the raw pre-clawback Net_Payment values (same calibration formula as
+    # the 2026-09-10 PR #117 table recalibration).  Clawing on a route with
+    # too few samples would let one bad spell define its own ceiling, so a
+    # short history falls through to the static per-km fallback below.
+    # 2026-09-22 case: CabbagePallet 926 km route paying $30,569 at $33/km
+    # (900 km band median $21,598) was clawed $5,569 by the static $25k/unit
+    # ceiling — both the per-unit table and the per-km fallback ignore that
+    # payment scales with route distance; per-route history does not.
+    route_excess = 0
+    route_threshold: float | None = None
+    route_samples = 0
+    route_checked = False
+    if sender_point and destination_point:
+        historical = await _route_history_payments(
+            cargo_key,
+            sender_point,
+            destination_point,
+        )
+        route_samples = len(historical)
+        if route_samples >= ROUTE_HISTORY_MIN_SAMPLES:
+            route_checked = True
+            historical_sorted = sorted(historical)
+            p99 = historical_sorted[int(0.99 * (route_samples - 1))]
+            route_max = historical_sorted[-1]
+            route_threshold = max(2 * p99, 1.2 * route_max)
+            if payment > route_threshold:
+                route_excess = int(payment - route_threshold)
+
+    # --- FALLBACK: static per-km ceiling (no usable route history) ---
+    per_km: float | None = None
+    distance_excess = 0
+    per_km_threshold = CARGO_PER_KM_THRESHOLDS.get(cargo_key)
+    if not route_checked and distance_m and per_km_threshold is not None:
+        if distance_m > MIN_DISTANCE_METRES:
+            distance_km = distance_m / 1000.0
+            per_km = payment / distance_km
+            if per_km > per_km_threshold:
+                excess_per_km = per_km - per_km_threshold
+                distance_excess = int(excess_per_km * distance_km)
 
     # --- Per-unit check ---
+    # Static per-unit ceilings are calibrated on the global cargo
+    # distribution (most routes short) and clip long legitimate routes, so
+    # they only apply when NO distance-aware control exists: no route
+    # history AND no per-km ceiling for this cargo.
+    distance_controlled = route_checked or per_km is not None
+
     unit_excess = 0
-    if per_unit_threshold is not None and per_unit > per_unit_threshold:
+    if (
+        not distance_controlled
+        and per_unit_threshold is not None
+        and per_unit > per_unit_threshold
+    ):
         excess_per_unit = per_unit - per_unit_threshold
         unit_excess = int(excess_per_unit * quantity)
 
@@ -265,10 +329,15 @@ async def validate_cargo_payment(
         absolute_excess = payment - int(max_absolute)
 
     # Use the most conservative (largest) clawback.
-    excess = max(distance_excess, unit_excess, absolute_excess)
+    excess = max(route_excess, distance_excess, unit_excess, absolute_excess)
 
     if excess > 0:
         reason_parts = []
+        if route_excess > 0 and route_threshold is not None:
+            reason_parts.append(
+                f"route_history={route_samples} samples, "
+                f"payment={payment} > threshold={route_threshold:.0f}"
+            )
         if distance_excess > 0 and per_km is not None:
             reason_parts.append(
                 f"per_km={per_km:.0f} > threshold={per_km_threshold:.0f}"
@@ -284,12 +353,13 @@ async def validate_cargo_payment(
         reason = "; ".join(reason_parts)
         logger.warning(
             "FRAUD cargo=%s player=%s payment=%d qty=%d dist=%.0fm "
-            "per_unit=%.0f per_km=%s excess=%d reason=[%s]",
+            "route_samples=%d per_unit=%.0f per_km=%s excess=%d reason=[%s]",
             cargo_key,
             "unknown",
             payment,
             quantity,
             distance_m or 0,
+            route_samples,
             per_unit,
             f"{per_km:.0f}" if per_km else "n/a",
             excess,
@@ -297,6 +367,46 @@ async def validate_cargo_payment(
         )
 
     return excess
+
+
+async def _route_history_payments(
+    cargo_key: str,
+    sender_point: DeliveryPoint,
+    destination_point: DeliveryPoint,
+) -> list[int]:
+    """Raw pre-clawback Net_Payment values for this cargo on this exact
+    sender/destination pair, from the last ROUTE_HISTORY_WINDOW_DAYS.
+
+    Rows whose stored (post-clawback) payment is BELOW their raw
+    Net_Payment were clawed and are EXCLUDED from the consensus: a cheat
+    delivery must never raise the ceiling its next attempt is measured
+    against (otherwise 20 seeded deliveries at the per-km ceiling would
+    double the route's own threshold).  Rows with payment >= raw are kept:
+    legitimate guild/damage bonuses only ever push payment above raw.
+    """
+    cutoff = timezone.now() - timedelta(days=ROUTE_HISTORY_WINDOW_DAYS)
+    rows = (
+        ServerCargoArrivedLog.objects.filter(
+            cargo_key=cargo_key,
+            sender_point_id=sender_point.pk,
+            destination_point_id=destination_point.pk,
+            timestamp__gte=cutoff,
+        )
+        .order_by("-timestamp")
+        .values_list("data", "payment")[:ROUTE_HISTORY_MAX_ROWS]
+    )
+    payments: list[int] = []
+    async for data, stored_payment in rows:
+        raw = (data or {}).get("Net_Payment")
+        if raw is None:
+            continue
+        try:
+            value = int(raw)
+        except (TypeError, ValueError):
+            continue
+        if value > 0 and stored_payment is not None and stored_payment >= value:
+            payments.append(value)
+    return payments
 
 
 def validate_passenger_payment(passenger_type: int, base_payment: int) -> int:

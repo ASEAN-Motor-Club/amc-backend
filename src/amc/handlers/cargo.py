@@ -115,14 +115,28 @@ async def handle_cargo_arrived(event, player, character, ctx):
 
     # --- 4. Fraud detection ---
     total_fraud_excess = 0
+    # A multi-unit delivery emits N identical log rows (same cargo, payment,
+    # sender, destination — one per delivered unit).  validate_cargo_payment
+    # now reads route history from the DB, so identical rows must not each
+    # fire their own identical query: validate once per unique shape and
+    # reuse the excess.
+    validated_excess: dict[tuple, int] = {}
     for log in logs:
-        excess = await validate_cargo_payment(
-            cargo_key=log.cargo_key,
-            payment=log.payment,
-            quantity=1,
-            sender_point=log.sender_point,
-            destination_point=log.destination_point,
+        validation_key = (
+            log.cargo_key,
+            log.payment,
+            log.sender_point_id,
+            log.destination_point_id,
         )
+        if validation_key not in validated_excess:
+            validated_excess[validation_key] = await validate_cargo_payment(
+                cargo_key=log.cargo_key,
+                payment=log.payment,
+                quantity=1,
+                sender_point=log.sender_point,
+                destination_point=log.destination_point,
+            )
+        excess = validated_excess[validation_key]
         if excess > 0:
             total_fraud_excess += excess
             log.payment = max(0, log.payment - excess)

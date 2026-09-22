@@ -10,8 +10,10 @@ from django.test import TestCase, override_settings
 from amc.factories import CharacterFactory, PlayerFactory
 from amc.fraud_detection import (
     CARGO_MAX_ABSOLUTE_PAYMENT,
+    CARGO_PER_KM_THRESHOLDS,
     CARGO_PER_UNIT_DEFAULT,
     CARGO_PER_UNIT_THRESHOLDS,
+    ROUTE_HISTORY_MIN_SAMPLES,
     PASSENGER_PAYMENT_CEILINGS,
     TOW_PAYMENT_CEILING,
     validate_cargo_payment,
@@ -166,6 +168,204 @@ class ValidateCargoPaymentTests(TestCase):
         excess = await validate_cargo_payment(
             cargo_key="BottlePallete",
             payment=5_000,
+            quantity=1,
+            sender_point=sender,
+            destination_point=dest,
+        )
+        self.assertEqual(excess, 0)
+
+    async def test_per_unit_skipped_when_perkm_passes_on_long_route(self):
+        """Regression (2026-09-22): a long legitimate route paying above the
+        static per-unit ceiling but well under the per-km ceiling must not
+        be clawed.  CabbagePallet: 926 km route, $30,569 = $33/km, under the
+        $200/km ceiling, but $5,569 over the $25k/unit ceiling."""
+        sender = DeliveryPoint(
+            guid="sender-4",
+            name="Rest Area",
+            coord=Point(0, 0, 0, srid=3857),
+        )
+        dest = DeliveryPoint(
+            guid="dest-4",
+            name="Supermarket",
+            coord=Point(926_000, 0, 0, srid=3857),
+        )
+        unit_threshold = int(CARGO_PER_UNIT_THRESHOLDS["CabbagePallet"])
+        payment = unit_threshold + 5_000  # over per-unit, under per-km
+        excess = await validate_cargo_payment(
+            cargo_key="CabbagePallet",
+            payment=payment,
+            quantity=1,
+            sender_point=sender,
+            destination_point=dest,
+        )
+        self.assertEqual(excess, 0)
+
+    async def test_perkm_still_claws_inflated_long_route(self):
+        """Dropping the per-unit check on distance-known routes must not
+        disarm long-route inflation: payment per km over the per-km ceiling
+        still claws."""
+        sender = DeliveryPoint(
+            guid="sender-5",
+            name="Rest Area",
+            coord=Point(0, 0, 0, srid=3857),
+        )
+        dest = DeliveryPoint(
+            guid="dest-5",
+            name="Supermarket",
+            coord=Point(926_000, 0, 0, srid=3857),
+        )
+        km_threshold = 200  # CARGO_PER_KM_THRESHOLDS["CabbagePallet"]
+        payment = km_threshold * 926 * 10  # 10x the per-km ceiling
+        excess = await validate_cargo_payment(
+            cargo_key="CabbagePallet",
+            payment=payment,
+            quantity=1,
+            sender_point=sender,
+            destination_point=dest,
+        )
+        expected = int((payment / 926.0 - km_threshold) * 926.0)
+        # haversine distance differs from 926 km by a rounding sliver
+        self.assertAlmostEqual(excess, expected, delta=2_000)
+
+    async def test_per_unit_applies_without_perkm_threshold(self):
+        """Cargo without a per-km ceiling keeps the per-unit check even when
+        distance is known (no distance-aware control exists for it)."""
+        sender = DeliveryPoint(
+            guid="sender-6",
+            name="A",
+            coord=Point(0, 0, 0, srid=3857),
+        )
+        dest = DeliveryPoint(
+            guid="dest-6",
+            name="B",
+            coord=Point(50_000, 0, 0, srid=3857),
+        )
+        assert "Acetone" in CARGO_PER_UNIT_THRESHOLDS
+        assert "Acetone" not in CARGO_PER_KM_THRESHOLDS
+        threshold = CARGO_PER_UNIT_THRESHOLDS["Acetone"]
+        payment = int(threshold * 3)
+        excess = await validate_cargo_payment(
+            cargo_key="Acetone",
+            payment=payment,
+            quantity=1,
+            sender_point=sender,
+            destination_point=dest,
+        )
+        self.assertEqual(excess, payment - threshold)
+
+    async def _seed_route_history(self, sender, dest, payments, cargo="CabbagePallet"):
+        """Create ServerCargoArrivedLog history rows for one route pair."""
+        from datetime import datetime, timezone as dt_tz
+
+        await sender.asave()
+        await dest.asave()
+
+        for i, pay in enumerate(payments):
+            await ServerCargoArrivedLog.objects.acreate(
+                timestamp=datetime(2026, 9, 1, 12, 0, i, tzinfo=dt_tz.utc),
+                cargo_key=cargo,
+                payment=pay,
+                data={"Net_Payment": pay, "Net_CargoKey": cargo},
+                sender_point=sender,
+                destination_point=dest,
+            )
+
+    async def test_route_history_primary_passes_route_consensus(self):
+        """A payment above the static per-unit ceiling but within the
+        historical consensus of the same route+cargo is not clawed.  This is
+        the 2026-09-22 kaizu CabbagePallet case with an established route."""
+        sender = DeliveryPoint(
+            guid="sender-h1", name="Rest Area", coord=Point(0, 0, 0, srid=3857)
+        )
+        dest = DeliveryPoint(
+            guid="dest-h1", name="Supermarket", coord=Point(926_000, 0, 0, srid=3857)
+        )
+        await self._seed_route_history(
+            sender, dest, [30_000 + (i % 5) * 100 for i in range(25)]
+        )
+        excess = await validate_cargo_payment(
+            cargo_key="CabbagePallet",
+            payment=30_569,
+            quantity=1,
+            sender_point=sender,
+            destination_point=dest,
+        )
+        self.assertEqual(excess, 0)
+
+    async def test_route_history_primary_claws_inflation(self):
+        """A payment far above the same route+cargo consensus claws the
+        excess over max(2 x p99, 1.2 x max) of the history."""
+        sender = DeliveryPoint(
+            guid="sender-h2", name="Mine", coord=Point(0, 0, 0, srid=3857)
+        )
+        dest = DeliveryPoint(
+            guid="dest-h2", name="Factory", coord=Point(50_000, 0, 0, srid=3857)
+        )
+        history = [3_000 + i for i in range(25)]
+        await self._seed_route_history(sender, dest, history)
+        payment = 100_000
+        # p99 index = int(0.99 * (25 - 1)) = 23; ceiling = max(2*p99, 1.2*max)
+        route_threshold = max(2 * (3_000 + 23), int(1.2 * (3_000 + 24)))
+        excess = await validate_cargo_payment(
+            cargo_key="CabbagePallet",
+            payment=payment,
+            quantity=1,
+            sender_point=sender,
+            destination_point=dest,
+        )
+        self.assertEqual(excess, payment - route_threshold)
+
+    async def test_route_history_below_min_samples_falls_back(self):
+        """Too few samples = no usable consensus: the per-km fallback
+        applies and a modest per-km payment is not clawed even though it is
+        above the static per-unit ceiling."""
+        sender = DeliveryPoint(
+            guid="sender-h3", name="Rest Area", coord=Point(0, 0, 0, srid=3857)
+        )
+        dest = DeliveryPoint(
+            guid="dest-h3", name="Supermarket", coord=Point(926_000, 0, 0, srid=3857)
+        )
+        await self._seed_route_history(
+            sender, dest, [2_000 + i for i in range(ROUTE_HISTORY_MIN_SAMPLES - 1)]
+        )
+        excess = await validate_cargo_payment(
+            cargo_key="CabbagePallet",
+            payment=30_569,
+            quantity=1,
+            sender_point=sender,
+            destination_point=dest,
+        )
+        self.assertEqual(excess, 0)
+
+    async def test_route_history_excludes_clawed_rows(self):
+        """Rows that were clawed (stored payment < raw Net_Payment) must not
+        raise the consensus ceiling: otherwise a cheat could seed a fresh
+        route with 20 inflated deliveries at the per-km ceiling and double
+        its own future threshold."""
+        sender = DeliveryPoint(
+            guid="sender-h4", name="Rest Area", coord=Point(0, 0, 0, srid=3857)
+        )
+        dest = DeliveryPoint(
+            guid="dest-h4", name="Supermarket", coord=Point(926_000, 0, 0, srid=3857)
+        )
+        from datetime import datetime, timezone as dt_tz
+
+        await sender.asave()
+        await dest.asave()
+        for i in range(25):
+            await ServerCargoArrivedLog.objects.acreate(
+                timestamp=datetime(2026, 9, 1, 12, 0, i, tzinfo=dt_tz.utc),
+                cargo_key="CabbagePallet",
+                payment=5_000,  # post-clawback
+                data={"Net_Payment": 40_000, "Net_CargoKey": "CabbagePallet"},
+                sender_point=sender,
+                destination_point=dest,
+            )
+        # With exclusion: <20 usable samples -> per-km fallback, $97/km < $200.
+        # Without exclusion: ceiling ~$79,800 would claw $10,200.
+        excess = await validate_cargo_payment(
+            cargo_key="CabbagePallet",
+            payment=90_000,
             quantity=1,
             sender_point=sender,
             destination_point=dest,
