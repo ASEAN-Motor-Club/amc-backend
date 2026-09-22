@@ -95,7 +95,7 @@ class TestCompassTuningDashboard:
 
     def test_dashboard_requires_staff(self):
         client = Client()
-        resp = client.get("/staff/compass-tuning/")
+        resp = client.get("/admin/amc/compasstuningconfig/dashboard/")
         assert resp.status_code in (301, 302)  # redirected to admin login
 
     def test_configs_list_and_activate(self, admin_user):
@@ -104,12 +104,12 @@ class TestCompassTuningDashboard:
         client = Client()
         client.force_login(admin_user)
 
-        resp = client.get("/staff/compass-tuning/configs/")
+        resp = client.get("/admin/amc/compasstuningconfig/dashboard/configs/")
         data = resp.json()
         names = {c["config_name"] for c in data["configs"]}
         assert names == {"A", "B"}
 
-        resp = client.post("/staff/compass-tuning/configs/",
+        resp = client.post("/admin/amc/compasstuningconfig/dashboard/configs/",
                            data=json.dumps({"action": "activate", "id": b.pk}),
                            content_type="application/json")
         assert resp.status_code == 200
@@ -121,7 +121,7 @@ class TestCompassTuningDashboard:
         a = _mk("A", active=True)
         client = Client()
         client.force_login(admin_user)
-        resp = client.post("/staff/compass-tuning/configs/",
+        resp = client.post("/admin/amc/compasstuningconfig/dashboard/configs/",
                            data=json.dumps({"action": "save", "id": a.pk,
                                             "config_name": "A", "c": 4.0e-6,
                                             "min_interval": 2.0,
@@ -136,6 +136,6 @@ class TestCompassTuningDashboard:
     def test_dashboard_page_renders_for_staff(self, admin_user):
         client = Client()
         client.force_login(admin_user)
-        resp = client.get("/staff/compass-tuning/")
+        resp = client.get("/admin/amc/compasstuningconfig/dashboard/")
         assert resp.status_code == 200
         assert b"Compass Tuning Dashboard" in resp.content

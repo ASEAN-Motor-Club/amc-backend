@@ -1187,6 +1187,26 @@ class CompassTuningConfigAdmin(admin.ModelAdmin):
     ]
     list_filter = ["active"]
 
+    def get_urls(self):
+        from django.urls import path
+
+        from amc.compass_dashboard import (
+            compass_tuning_dashboard, compass_tuning_configs,
+        )
+        urls = super().get_urls()
+        return [
+            path(
+                "dashboard/",
+                self.admin_site.admin_view(compass_tuning_dashboard),
+                name="amc_compasstuningconfig_dashboard",
+            ),
+            path(
+                "dashboard/configs/",
+                self.admin_site.admin_view(compass_tuning_configs),
+                name="amc_compasstuningconfig_dashboard_configs",
+            ),
+        ] + urls
+
 
 @admin.register(WantedSystemConfig)
 class WantedSystemConfigAdmin(admin.ModelAdmin):
