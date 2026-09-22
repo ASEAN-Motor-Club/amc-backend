@@ -328,7 +328,9 @@ async def handle_cargo_arrived(event, player, character, ctx):
             # effective cop so camping a delivery site farms nothing. The
             # dormant rule is enforced by nearest_effective_cop_distance_m:
             # zero effective cops → no roll (same effective-cop filter as
-            # active_police_present()).
+            # active_police_present()). Exception: police-independent mode
+            # (WantedSystemConfig.police_required OFF) — the roll fires with
+            # zero cops, unattenuated (= police distance infinity).
             #
             # Grace period (freeman 2026-09-20): a rolled trigger does NOT
             # create the Wanted immediately — the criminal gets a private

@@ -3245,6 +3245,45 @@ class CompassTuningConfig(models.Model):
 
 
 @final
+class WantedSystemConfig(models.Model):
+    """Live toggle for the wanted system's dependence on police presence.
+
+    Singleton (pk=1 always). Editable in Django admin; changes apply on the
+    next worker tick (no restart needed).
+    """
+
+    police_required = models.BooleanField(
+        default=True,
+        help_text=(
+            "ON (default): zero effective cops on duty puts the wanted system "
+            "dormant — no organic triggers, active organic wanteds cleared. "
+            "OFF: wanted triggers fire and heat moves with zero cops on duty; "
+            "the distance law treats police distance as infinite "
+            "(decay F(D)=3.0x, growth A(D)=1/3x)."
+        ),
+    )
+
+    class Meta:
+        verbose_name = "Wanted System Configuration"
+        verbose_name_plural = "Wanted System Configuration"
+
+    def save(self, *args, **kwargs):
+        self.pk = 1
+        super().save(*args, **kwargs)
+
+    def delete(self, *args, **kwargs):
+        pass  # Prevent deletion of singleton
+
+    @classmethod
+    async def aget_config(cls) -> "WantedSystemConfig":
+        config, _ = await cls.objects.aget_or_create(pk=1)
+        return config
+
+    def __str__(self):
+        return "Wanted System Configuration"
+
+
+@final
 class MinistryDashboard(models.Model):
     """
     Dummy model to expose the Ministry Dashboard in the Django Admin.

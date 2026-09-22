@@ -137,11 +137,17 @@ async def handle_passenger_arrived(event, player, character, ctx):
                 from amc.criminals import (
                     active_police_present,
                     create_or_refresh_wanted,
+                    wanted_police_required,
                 )
 
                 # Dormant rule (freeman 2026-09-20): no effective cops on
                 # duty -> the wanted system is off, no organic triggers.
-                if await active_police_present(ctx.http_client_mod):
+                # Exception: police-independent mode (WantedSystemConfig.
+                # police_required OFF) — fugitive triggers fire with zero
+                # cops on duty.
+                if not await wanted_police_required() or await active_police_present(
+                    ctx.http_client_mod
+                ):
                     wanted, created = await create_or_refresh_wanted(
                         character,
                         ctx.http_client_mod,

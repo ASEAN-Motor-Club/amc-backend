@@ -11,7 +11,9 @@ Speed-based wanted law (2026-09 rework, corrected 2026-09-20):
   - Dormant rule: with zero effective cops on duty (on-duty + online +
     non-AFK) the wanted system is off — every active Wanted record is
     cleared (online suspects via the normal expiry flow, offline silently)
-    and organic triggers must not fire.
+    and organic triggers must not fire. The WantedSystemConfig toggle can
+    switch this off (police-independent mode): triggers fire, heat moves,
+    and the distance law runs with police distance = infinity.
   - Offline suspects (while armed): no decay, wanted persists indefinitely.
 """
 
@@ -45,7 +47,13 @@ from amc.criminals import (
     wanted_accrual_multiplier,
 )
 from amc.factories import CharacterFactory, PlayerFactory
-from amc.models import Character, CompassTuningConfig, PoliceSession, Wanted
+from amc.models import (
+    Character,
+    CompassTuningConfig,
+    PoliceSession,
+    Wanted,
+    WantedSystemConfig,
+)
 
 
 def _make_player_data(unique_id, character_guid, x, y, z):
@@ -355,6 +363,106 @@ class WantedCountdownTickTests(TestCase):
             delta=0.5,
         )
         self.assertIsNone(wanted.expired_at)
+
+    # -----------------------------------------------------------------------
+    # Police-independent mode (WantedSystemConfig.police_required = OFF)
+    # -----------------------------------------------------------------------
+
+    async def _enable_police_independent(self):
+        """Flip the admin toggle off: the wanted system runs with zero cops."""
+        await WantedSystemConfig.objects.acreate(police_required=False)
+
+    async def test_police_independent_toggle_defaults_on(
+        self,
+        mock_sys_msg,
+        mock_refresh,
+    ):
+        config = await WantedSystemConfig.aget_config()
+        self.assertTrue(config.police_required)
+
+    async def test_police_independent_no_cops_no_amnesty_decays_3x(
+        self,
+        mock_sys_msg,
+        mock_refresh,
+    ):
+        """Toggle OFF + zero cops: no dormant amnesty — the organic wanted
+        survives and decays at the police-distance-infinity rate (stationary
+        suspect: (50 - 0) * 1/50 * F(inf)=3.0 * 1 s = 3.0 s per tick)."""
+        await self._enable_police_independent()
+        self.armed_mock.return_value = False
+        criminal = await self._setup_criminal(wanted_remaining=300)
+        players = _make_players_list(
+            [_make_player_data(criminal.player.unique_id, criminal.guid, *_SUSPECT_LOC)]
+        )
+        mock_http = AsyncMock()
+        mock_http_mod = AsyncMock()
+
+        with patch("amc.criminals.get_players", new_callable=AsyncMock, return_value=players):
+            await tick_wanted_countdown(mock_http, mock_http_mod)
+
+        # active_police_present is never consulted in this mode
+        self.armed_mock.assert_not_awaited()
+        wanted = await Wanted.objects.aget(character=criminal)
+        self.assertAlmostEqual(wanted.wanted_remaining, 297, delta=0.01)
+        self.assertIsNone(wanted.expired_at)
+        mock_refresh.assert_not_called()
+
+    async def test_police_independent_no_cops_growth_uses_far_mult(
+        self,
+        mock_sys_msg,
+        mock_refresh,
+    ):
+        """Toggle OFF + zero cops + running suspect: growth uses the
+        police-distance-infinity multiplier A = 1/3x."""
+        await self._enable_police_independent()
+        self.armed_mock.return_value = False
+        criminal = await self._setup_criminal(wanted_remaining=300)
+        players = _make_players_list(
+            [_make_player_data(criminal.player.unique_id, criminal.guid, *_SUSPECT_LOC)]
+        )
+        # 100 km/h in game units/s (speed_units * 0.036 = km/h)
+        mgmt_entries = [
+            {"CharacterGuid": criminal.guid.upper(), "Speed": 100 / 0.036}
+        ]
+        mock_http = AsyncMock()
+        mock_http_mod = AsyncMock()
+        mock_http_mgmt = AsyncMock()
+
+        with patch("amc.criminals.get_players", new_callable=AsyncMock, return_value=players), \
+             patch("amc.criminals.get_players_locations", new_callable=AsyncMock,
+                   return_value=mgmt_entries):
+            await tick_wanted_countdown(mock_http, mock_http_mod, mock_http_mgmt)
+
+        wanted = await Wanted.objects.aget(character=criminal)
+        # (100 - 50) * 1/50 * 1 s * A(inf) = 50 * 0.02 * (1/3) ≈ 0.3333
+        self.assertAlmostEqual(wanted.wanted_remaining, 300 + 50 / 50 * (1 / 3), delta=0.01)
+        self.assertIsNone(wanted.expired_at)
+
+    async def test_police_independent_toggle_on_restores_dormant_amnesty(
+        self,
+        mock_sys_msg,
+        mock_refresh,
+    ):
+        """Toggle OFF then ON: the dormant amnesty comes back with zero cops."""
+        await self._enable_police_independent()
+        config = await WantedSystemConfig.aget_config()
+        config.police_required = True
+        await config.asave(update_fields=["police_required"])
+        self.armed_mock.return_value = False
+        criminal = await self._setup_criminal(wanted_remaining=300)
+        players = _make_players_list(
+            [_make_player_data(criminal.player.unique_id, criminal.guid, *_SUSPECT_LOC)]
+        )
+        mock_http = AsyncMock()
+        mock_http_mod = AsyncMock()
+
+        with patch("amc.criminals.get_players", new_callable=AsyncMock, return_value=players), \
+             patch("amc.criminals.announce", new_callable=AsyncMock):
+            await tick_wanted_countdown(mock_http, mock_http_mod)
+
+        wanted = await Wanted.objects.aget(character=criminal)
+        self.assertEqual(wanted.wanted_remaining, 0)
+        self.assertIsNotNone(wanted.expired_at)
 
     async def test_offline_suspect_no_decay(
         self,
@@ -1326,6 +1434,26 @@ class NearestEffectiveCopDistanceTests(TestCase):
             await nearest_effective_cop_distance_m(AsyncMock(), AsyncMock(), criminal),
             (False, None),
         )
+
+    async def test_police_independent_mode_is_armed_unattenuated(self):
+        """Toggle OFF: zero effective cops does NOT gate the trigger — the
+        roll runs unattenuated (= police distance infinity: the attenuation
+        is 1.0 beyond 1000 m anyway)."""
+        await WantedSystemConfig.objects.acreate(police_required=False)
+        criminal = await self._setup_criminal()
+        result = await nearest_effective_cop_distance_m(
+            AsyncMock(), AsyncMock(), criminal
+        )
+        self.assertEqual(result, (True, None))
+
+    async def test_inf_distance_saturates_the_law(self):
+        """The distance law's limit at police distance = infinity is the
+        far band: F = 3.0x decay, A = 1/3x growth, weight w = 1.0."""
+        from amc.criminals import _distance_weight
+
+        self.assertEqual(_distance_weight(math.inf), 1.0)
+        self.assertEqual(hide_decay_multiplier(math.inf), 3.0)
+        self.assertAlmostEqual(wanted_accrual_multiplier(math.inf), 1 / 3)
 
     async def test_measures_distance_to_nearest_effective_cop(self):
         criminal = await self._setup_criminal()
