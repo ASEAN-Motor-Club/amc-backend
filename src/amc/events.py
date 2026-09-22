@@ -909,8 +909,14 @@ async def post_random_events(ctx):
     async for game_event in stale_events:
         try:
             await remove_event(http_client_mod, game_event.guid)
-        except Exception:
-            pass
+        except Exception as e:
+            # RemoveEvent needs at least one player online (mod-side
+            # PlayerArray guard) — on an empty server the delete 400s and
+            # the in-game event lingers. Log instead of passing silently.
+            print(
+                f"Auto-TT: failed to remove stale event {game_event.guid} "
+                f"(state=0): {e}"
+            )
         game_event.state = 3
         await game_event.asave(update_fields=["state"])
 
@@ -930,20 +936,30 @@ async def post_random_events(ctx):
         .values_list("race_setup_id", flat=True)
     )
 
-    candidates = [
-        se
-        async for se in ScheduledEvent.objects.filter(
+    # Only resurrect scheduled events whose [start_time, end_time] window is
+    # live right now:
+    #  - _upsert_game_event links scheduled_event ONLY inside the window
+    #    (handlers/events.py), so an out-of-window auto event would land
+    #    with scheduled_event=None — orphaned from its scheduled event
+    #    (no SE-linked results/penalties).
+    #  - the in-game /events listing shows only filter_active_at() rows,
+    #    so the announce's "Use /events" hint would point at nothing.
+    candidate_qs = (
+        ScheduledEvent.objects.filter(
             time_trial=True,
             race_setup__isnull=False,
         )
+        .filter_active_at(timezone.now())
         .exclude(race_setup_id__in=active_race_setup_ids)
         .select_related("race_setup")
         .order_by("?")[:slots_to_fill]
-    ]
+    )
+    candidates = [se async for se in candidate_qs]
 
     if not candidates:
         return
 
+    posted_names = []
     for scheduled_event in candidates:
         race_setup = scheduled_event.race_setup
         config = dict(race_setup.config)
@@ -971,12 +987,21 @@ async def post_random_events(ctx):
             async with http_client_mod.post("/events", json=data) as resp:
                 if resp.status >= 400:
                     error_body = await resp.text()
-                    print(f"Failed to post auto event: {resp.status} {error_body}")
+                    print(
+                        f"Auto-TT: failed to post event "
+                        f"{scheduled_event.name}: {resp.status} {error_body}"
+                    )
+                else:
+                    posted_names.append(scheduled_event.name)
         except Exception as e:
-            print(f"Failed to post auto event: {e}")
+            print(f"Auto-TT: failed to post event {scheduled_event.name}: {e}")
 
-    names = [se.name for se in candidates]
-    await announce(
-        f"New time trial events available: {', '.join(names)}! Use /events to see them.",
-        ctx["http_client"],
-    )
+    # Announce ONLY what actually reached the game server. The old code
+    # announced unconditionally — even when every POST failed, players saw
+    # "New time trial events available!" with no events existing.
+    if posted_names:
+        await announce(
+            f"New time trial events available: {', '.join(posted_names)}! "
+            f"Use /events to see them.",
+            ctx["http_client"],
+        )
