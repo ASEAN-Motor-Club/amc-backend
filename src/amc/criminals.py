@@ -507,16 +507,21 @@ async def nearest_effective_cop_distance_m(
     WantedSystemConfig.police_required toggle is OFF, in which case the
     system is armed with no cops and this returns (True, None): the roll
     runs unattenuated, which is exactly the police-distance-infinity
-    behavior (the attenuation is 1.0 beyond 1000 m anyway). Otherwise metres
-    is the
-    distance to the nearest effective cop, or None when position data is
+    behavior (the attenuation is 1.0 beyond 1000 m anyway).
+    Otherwise metres is the distance to the nearest effective cop, or None
+    when position data is
     unavailable — callers fail OPEN toward the unattenuated roll (the
     suppression is anti-abuse, not a safety interlock).
     """
-    if not await wanted_police_required():
-        return True, None
     cops = await _effective_cop_characters(http_client_mod)
     if not cops:
+        if not await wanted_police_required():
+            # Police-independent mode: zero effective cops on duty does NOT
+            # gate the trigger — the roll runs unattenuated, which is exactly
+            # the police-distance-infinity behavior (the attenuation is 1.0
+            # beyond 1000 m anyway). With cops present, normal attenuation
+            # still applies.
+            return True, None
         return False, None
     try:
         players = await get_players(http_client)
