@@ -86,29 +86,29 @@ async def _no_police():
 
 
 class BossCutRatioTests(TestCase):
-    """Pure unit tests for the progressive, clamped boss-cut curve."""
+    """Pure unit tests for the inverted, clamped boss-cut curve."""
 
-    def test_low_ratio_pays_just_above_floor(self):
-        # Progressive curve: r=0.1 → 0.05 + 0.20*0.01 = 0.052 (not the floor)
-        self.assertAlmostEqual(calculate_boss_cut_ratio(1, 10), 0.052)
+    def test_low_ratio_pays_close_to_cap(self):
+        # Inverted curve: r=0.1 → 0.05 + 0.15*0.81 = 0.1715
+        self.assertAlmostEqual(calculate_boss_cut_ratio(1, 10), 0.1715)
 
-    def test_close_to_boss_pays_up_to_cap(self):
-        self.assertEqual(calculate_boss_cut_ratio(10, 10), BOSS_CUT_CAP)
+    def test_close_to_boss_pays_floor(self):
+        self.assertEqual(calculate_boss_cut_ratio(10, 10), BOSS_CUT_FLOOR)
 
-    def test_progressive_midpoint(self):
-        # r = 0.5 → 0.05 + 0.20 * 0.25 = 0.10
-        self.assertAlmostEqual(calculate_boss_cut_ratio(5, 10), 0.10)
+    def test_inverted_midpoint(self):
+        # r = 0.5 → 0.05 + 0.15 * 0.25 = 0.0875
+        self.assertAlmostEqual(calculate_boss_cut_ratio(5, 10), 0.0875)
 
-    def test_hard_cap_never_exceeds_25pct(self):
+    def test_floor_binds_when_level_exceeds_boss(self):
         # r clamped to 1.0 even if level somehow exceeds boss level
-        self.assertEqual(calculate_boss_cut_ratio(99, 10), BOSS_CUT_CAP)
+        self.assertEqual(calculate_boss_cut_ratio(99, 10), BOSS_CUT_FLOOR)
 
     def test_no_boss_returns_zero(self):
         self.assertEqual(calculate_boss_cut_ratio(5, 0), 0.0)
 
-    def test_floor_binds_at_zero_ratio(self):
-        # r=0 → raw equals the floor exactly; clamp keeps it
-        self.assertEqual(calculate_boss_cut_ratio(0, 1000), BOSS_CUT_FLOOR)
+    def test_cap_binds_at_zero_ratio(self):
+        # r=0 → raw equals the cap exactly; clamp keeps it
+        self.assertEqual(calculate_boss_cut_ratio(0, 1000), BOSS_CUT_CAP)
 
 
 class CollectBossTaxTests(TestCase):
@@ -131,12 +131,12 @@ class CollectBossTaxTests(TestCase):
     ):
         boss, courier = await self._setup_pair()
         # courier level 3, boss level 13 → r = 3/13
-        # ratio = 0.05 + 0.20·r² = 0.060650887…  → cut = int(20_000 · ratio) = 1213
+        # ratio = 0.05 + 0.15·(10/13)² = 0.138757…  → cut = int(20_000 · ratio) = 2775
         await collect_boss_tax(courier, 20_000, MagicMock())
 
         mock_transfer.assert_awaited_once()
         args, _ = mock_transfer.await_args
-        self.assertEqual(args[1], -1213)
+        self.assertEqual(args[1], -2775)
         self.assertEqual(args[2], "Boss Cut")
         self.assertEqual(args[3], str(courier.player_id))
 
@@ -432,8 +432,8 @@ class CriminalsLeaderboardTests(TestCase):
         self.assertIn("#4 Me", output)  # BossMan, Alpha, Zeta ahead
         self.assertIn("$75,000", output)
         self.assertIn("C2", output)  # 75_000 // 50_000 + 1
-        # Me (C2) vs boss BossMan (C13): cut = 0.05 + 0.20*(2/13)^2 → 5%
-        self.assertIn("Boss cut on criminal deliveries: 5%", output)
+        # Me (C2) vs boss BossMan (C13): cut = 0.05 + 0.15*(11/13)^2 ≈ 15.7%
+        self.assertIn("Boss cut on criminal deliveries: 16%", output)
         # The self-row appears even when the caller is not on the top-10 board
         self.assertNotIn("1. #4", output)
 
@@ -453,8 +453,8 @@ class CriminalsLeaderboardTests(TestCase):
         output = ctx.reply.await_args[0][0]
         # Same score: name-order tie-break puts Alpha at #1, Zeta at #2
         self.assertIn("#2 Zeta", output)
-        # Equal levels → cut rides the cap: 0.05 + 0.20*1 = 25%
-        self.assertIn("Boss cut on criminal deliveries: 25%", output)
+        # Equal levels → cut rides the floor: 0.05 + 0.15*0 = 5%
+        self.assertIn("Boss cut on criminal deliveries: 5%", output)
 
     async def test_boss_self_row_collects(self):
         player_a = await _sync_create(PlayerFactory)()
