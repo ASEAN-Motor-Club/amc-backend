@@ -8,9 +8,8 @@ from amc.events import (
     show_scheduled_event_results_popup,
     setup_event,
 )
-from amc.utils import format_timedelta, format_in_local_tz, countdown
+from amc.utils import format_in_local_tz, countdown
 from django.db.models import Exists, OuterRef
-from django.utils import timezone
 from django.utils.translation import gettext_lazy
 
 
@@ -117,22 +116,17 @@ async def cmd_setup_event(ctx: CommandContext, event_id: Optional[int] = None):
                 .aget(pk=event_id)
             )
         else:
-            events: list[str] = []
-            async for event in (
+            # No id: start the CURRENT ACTIVE event (window live right now),
+            # not a listing of everything ever scheduled.
+            active = (
                 ScheduledEvent.objects.filter(race_setup__isnull=False)
-                .select_related("race_setup")
+                .filter_active_at(ctx.timestamp)
                 .order_by("-start_time")
-            ):
-                events.append(
-                    f"<Highlight>/setup_event {event.id}</>\n"
-                    f"<Title>#{event.id} {event.name}</>\n"
-                    f"<Small>{event.description_in_game or event.description}</>"
-                )
-            if not events:
-                await ctx.reply("No events with a race setup.")
-            else:
-                await ctx.reply(f"[EVENTS]\n\n{chr(10).join(events)}")
-            return
+            )
+            scheduled_event = await active.afirst()
+            if scheduled_event is None:
+                await ctx.reply("No active events right now.")
+                return
 
         event_setup = await setup_event(
             ctx.timestamp, ctx.player.unique_id, scheduled_event, ctx.http_client_mod
@@ -155,19 +149,22 @@ async def cmd_setup_event(ctx: CommandContext, event_id: Optional[int] = None):
     featured=True,
 )
 async def cmd_events_list(ctx: CommandContext):
+    # Only events whose window is live RIGHT NOW — the old version listed
+    # everything with end_time in the future, a long stale list.
     events: list[str] = []
-    async for event in ScheduledEvent.objects.filter(
-        end_time__gte=timezone.now()
-    ).order_by("start_time"):
-        start_msg = (
-            f"{format_timedelta(event.start_time - timezone.now())} from now"
-            if event.start_time > timezone.now()
-            else "In progress"
-        )
+    async for event in ScheduledEvent.objects.filter_active_at(ctx.timestamp).order_by(
+        "start_time"
+    ):
+        start_txt = format_in_local_tz(event.start_time)
+        end_txt = format_in_local_tz(event.end_time)
         events.append(f"""<Title>{event.name}</>
-Use <Highlight>/setup_event {event.id}</>
-<Secondary>{format_in_local_tz(event.start_time)} - {format_in_local_tz(event.end_time)} ({start_msg})</>
+Use <Highlight>/setup_event</> to start it
+<Secondary>{start_txt} - {end_txt}</>
 {event.description_in_game or event.description}""")
+
+    if not events:
+        await ctx.reply("No active events right now.")
+        return
 
     await ctx.reply(f"[EVENTS]\n\n{'\n\n'.join(events)}")
 

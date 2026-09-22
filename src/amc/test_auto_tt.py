@@ -288,3 +288,119 @@ async def test_joined_event_not_rotated(announce_mock, remove_mock, db):
     remove_mock.assert_not_awaited()
     await ge.arefresh_from_db()
     assert ge.state == 1
+
+
+# ---------------------------------------------------------------------------
+# /events and /setup_event command behavior
+# ---------------------------------------------------------------------------
+
+from unittest.mock import MagicMock, patch as sync_patch
+
+from amc.command_framework import registry, CommandContext
+
+
+def _make_ctx():
+    ctx = MagicMock(spec=CommandContext)
+    ctx.reply = AsyncMock()
+    ctx.player = MagicMock()
+    ctx.player.unique_id = 42
+    ctx.character = MagicMock()
+    ctx.character.guid = "CHARGUID0000000000000000000000"
+    ctx.http_client_mod = MagicMock()
+    ctx.timestamp = timezone.now()
+    ctx.player_info = {"is_admin": True}
+    return ctx
+
+
+def _se(name, race, start, end):
+    return sync_to_async(ScheduledEvent.objects.create)(
+        name=name,
+        race_setup=race,
+        time_trial=True,
+        start_time=start,
+        end_time=end,
+    )
+
+
+@pytest.mark.asyncio
+@sync_patch("amc.commands.events.setup_event", new_callable=AsyncMock)
+async def test_setup_event_no_arg_starts_active_event(setup_mock, db):
+    now = timezone.now()
+    await _clean_slate()
+    old_race = await _make_race("Expired TT route")
+    await sync_to_async(ScheduledEvent.objects.create)(
+        name="Expired TT",
+        race_setup=old_race,
+        time_trial=True,
+        start_time=now - timedelta(days=2),
+        end_time=now - timedelta(days=1),
+    )
+    race = await _make_race("Active TT route")
+    active = await sync_to_async(ScheduledEvent.objects.create)(
+        name="Active TT",
+        race_setup=race,
+        time_trial=True,
+        start_time=now - timedelta(hours=1),
+        end_time=now + timedelta(hours=1),
+    )
+    setup_mock.return_value = {"EventGuid": "G" * 32}
+
+    executed = await registry.execute("/setup_event", _make_ctx())
+    assert executed is True
+    setup_mock.assert_awaited_once()
+    assert setup_mock.await_args.args[2].pk == active.pk
+
+
+@pytest.mark.asyncio
+@sync_patch("amc.commands.events.setup_event", new_callable=AsyncMock)
+async def test_setup_event_no_arg_no_active_replies_no_events(setup_mock, db):
+    now = timezone.now()
+    await _clean_slate()
+    race = await _make_race("Expired TT route")
+    await sync_to_async(ScheduledEvent.objects.create)(
+        name="Expired TT",
+        race_setup=race,
+        time_trial=True,
+        start_time=now - timedelta(days=30),
+        end_time=now - timedelta(days=1),
+    )
+    ctx = _make_ctx()
+    executed = await registry.execute("/setup_event", ctx)
+    assert executed is True
+    setup_mock.assert_not_awaited()
+    ctx.reply.assert_awaited_once_with("No active events right now.")
+
+
+@pytest.mark.asyncio
+@sync_patch("amc.commands.events.setup_event", new_callable=AsyncMock)
+async def test_events_lists_only_active(setup_mock, db):
+    now = timezone.now()
+    await _clean_slate()
+    race = await _make_race("Active TT route")
+    await sync_to_async(ScheduledEvent.objects.create)(
+        name="Active TT",
+        race_setup=race,
+        time_trial=True,
+        start_time=now - timedelta(hours=1),
+        end_time=now + timedelta(hours=1),
+    )
+    await sync_to_async(ScheduledEvent.objects.create)(
+        name="Future TT",
+        race_setup=race,
+        time_trial=True,
+        start_time=now + timedelta(days=3),
+        end_time=now + timedelta(days=4),
+    )
+    ctx = _make_ctx()
+    await registry.execute("/events", ctx)
+    message = ctx.reply.await_args.args[0]
+    assert "Active TT" in message
+    assert "Future TT" not in message
+
+
+@pytest.mark.asyncio
+async def test_events_empty_replies_no_events(db):
+    await _clean_slate()
+    ctx = _make_ctx()
+    await registry.execute("/events", ctx)
+    ctx.reply.assert_awaited_once_with("No active events right now.")
