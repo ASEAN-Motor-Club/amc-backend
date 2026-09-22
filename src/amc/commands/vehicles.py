@@ -3,7 +3,7 @@ from amc.command_framework import registry, CommandContext
 import asyncio
 import itertools
 import logging
-from amc.mod_server import get_player, get_player_last_vehicle, get_player_last_vehicle_parts, despawn_by_tag, despawn_player_vehicle
+from amc.mod_server import get_player, get_player_last_vehicle, get_player_last_vehicle_decals, get_player_last_vehicle_parts, despawn_by_tag, despawn_player_vehicle
 from amc.game_server import get_players
 from amc.vehicles import (
     format_vehicle_name,
@@ -26,6 +26,8 @@ from amc.mod_detection import (
     POLICE_DUTY_WHITELIST,
 )
 from amc.models import CharacterVehicle, PoliceSession
+from django.contrib.gis.geos import Point
+from django.db.models import Q
 from amc.player_tags import refresh_player_name
 from amc.utils import fuzzy_find_player
 from amc.vehicle_weight import weight_popup_lines
@@ -346,16 +348,106 @@ async def cmd_unrental(ctx: CommandContext, category: str = ""):
     description=gettext_lazy("Mark vehicle as for rental"),
     category="Vehicle Management",
 )
-async def cmd_rental(ctx: CommandContext, name: str = ""):
-    vehicles = await register_player_vehicles(ctx.http_client_mod, ctx.character, ctx.player, active=True)
+async def _relocate_rental_copy(ctx, mod_player) -> bool:
+    """Re-run /rental while sitting in a rental COPY (a spawned copy has no
+    vehicleId of its own, so register_player_vehicles can't identify it).
 
-    if not vehicles:
+    Moves the caller's single rental registration to the copy's current
+    position: despawn the tag copy, then place a fresh rental there. Returns
+    True when handled (caller's reply already sent).
+    """
+    try:
+        last, decals_data, parts_data = await asyncio.gather(
+            get_player_last_vehicle(ctx.http_client_mod, str(ctx.character.guid)),
+            get_player_last_vehicle_decals(
+                ctx.http_client_mod, str(ctx.character.guid)
+            ),
+            get_player_last_vehicle_parts(
+                ctx.http_client_mod, str(ctx.character.guid), complete=True
+            ),
+        )
+        vehicle = last["vehicle"]
+        position = vehicle["position"]
+        rotation = vehicle.get("rotation", {})
+    except Exception:
+        return False
+
+    own_company_guid = None
+    if mod_player:
+        guid = mod_player.get("OwnCompanyGuid")
+        if guid and guid != "0000":
+            own_company_guid = guid
+
+    rows = []
+    async for v in CharacterVehicle.objects.filter(
+        Q(character=ctx.character, rental=True)
+        | Q(company_guid=own_company_guid, rental=True)
+    ):
+        rows.append(v)
+
+    if not rows:
+        return False
+    if len(rows) > 1:
+        # Ambiguous: can't tell which copy they are sitting in.
         await ctx.reply(
             _(
-                "<Title>Rental System</>\nNo rentable vehicle found. Sit in your vehicle and run /rental."
+                "<Title>Rental System</>\nYou have multiple rentals. Sit in the "
+                "original vehicle and run /rental to move it."
             )
         )
-        return
+        return True
+
+    v = rows[0]
+    # Re-capture the full config, not just the location: the vehicle may
+    # have changed between the /rental calls (parts, customization, owner
+    # settings, even the model itself).
+    vehicle_name = vehicle["fullName"].split(" ")[0].replace("_C", "")
+    asset_path = vehicle["classFullName"].split(" ")[1]
+    v.config = {
+        **v.config,
+        "CompanyGuid": vehicle.get("companyGuid"),
+        "CompanyName": vehicle.get("companyName", ""),
+        "Customization": decals_data.get("customization"),
+        "Decal": decals_data.get("decal"),
+        "Parts": parts_data.get("parts", []),
+        "Location": position,
+        "Rotation": rotation,
+        "Net_VehicleOwnerSetting": vehicle.get("Net_VehicleOwnerSetting"),
+        "VehicleName": vehicle_name,
+        "AssetPath": asset_path,
+    }
+    v.location = Point(
+        position["X"], position["Y"], position.get("Z", 0), srid=0
+    )
+    v.rental = True
+    v.spawn_on_restart = True
+    await v.asave()
+
+    await despawn_by_tag(ctx.http_client_mod, f"rental-{v.id}")
+    try:
+        await spawn_registered_vehicle(
+            ctx.http_client_mod,
+            v,
+            tag="rental_vehicles",
+            tags=[f"rental-{v.id}"],
+            extra_data={"drivable": True},
+        )
+    except Exception:
+        logger.warning(
+            "Failed to respawn relocated rental copy for vehicle #%s", v.id,
+            exc_info=True,
+        )
+    await ctx.reply(
+        _(
+            "<Title>Rental System</>\n#{id} - {name} moved to your current "
+            "position."
+        ).format(id=v.id, name=v.config["VehicleName"])
+    )
+    return True
+
+
+async def cmd_rental(ctx: CommandContext, name: str = ""):
+    vehicles = await register_player_vehicles(ctx.http_client_mod, ctx.character, ctx.player, active=True)
 
     # Company-vehicle ownership proof must come from the MOD player payload:
     # the chat command path carries the normalized game-API player_info,
@@ -372,6 +464,19 @@ async def cmd_rental(ctx: CommandContext, name: str = ""):
         guid = mod_player.get("OwnCompanyGuid")
         if guid and guid != "0000":
             own_company_guid = guid
+
+    if not vehicles:
+        # Register can't identify the vehicle when the player is sitting in a
+        # spawned rental COPY (no vehicleId of its own). If they own exactly
+        # one rental row, treat their current position as the new spot.
+        if await _relocate_rental_copy(ctx, mod_player):
+            return
+        await ctx.reply(
+            _(
+                "<Title>Rental System</>\nNo rentable vehicle found. Sit in your vehicle and run /rental."
+            )
+        )
+        return
 
     vehicles = [
         v
