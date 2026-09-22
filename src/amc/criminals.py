@@ -13,7 +13,14 @@ from django.utils import timezone
 
 from amc.commands.faction import _build_player_locations, _distance_3d, execute_arrest
 from amc.game_server import announce, get_players, get_players_locations
-from amc.models import Character, CompassTuningConfig, PendingWanted, PoliceSession, Wanted
+from amc.models import (
+    Character,
+    CompassTuningConfig,
+    PendingWanted,
+    PoliceSession,
+    Wanted,
+    WantedSystemConfig,
+)
 from amc.mod_detection import detect_custom_parts, POLICE_DUTY_WHITELIST
 from amc.mod_server import clear_suspect, despawn_player_vehicle, force_exit_vehicle, get_player, get_player_customization, get_player_last_vehicle, get_player_last_vehicle_parts, make_suspect, send_system_message, show_popup
 from amc.player_tags import refresh_player_name
@@ -63,10 +70,13 @@ LOGOUT_PROXIMITY_RANGE = 200_000  # 2km in game units — no effect beyond this
 #   w = x/(1+x),  x = max(D - 500 m, 0) / 2000 m
 #   F = 1 + 2w    (half the swing at 2.5 km)
 #   A = 1 - (2/3)w
-# No effective cops on duty (zero on-duty + online + non-AFK): the wanted
-# system is DORMANT — organic triggers are blocked and every active ORGANIC
-# Wanted record is cleared; admin /setwanted flags survive the dormant
-# window (see active_police_present + tick_wanted_countdown).
+# No effective cops on duty (zero on-duty + online + non-AFK): by DEFAULT the
+# wanted system is DORMANT — organic triggers are blocked and every active
+# ORGANIC Wanted record is cleared; admin /setwanted flags survive the dormant
+# window (see active_police_present + tick_wanted_countdown). The
+# WantedSystemConfig admin singleton can switch this OFF: triggers fire and
+# heat moves with zero cops on duty, and the distance law runs with police
+# distance = infinity (F(D) = 3.0x decay, A(D) = 1/3x growth).
 WANTED_SPEED_PIVOT_KMH = 50.0     # above: wanted grows; below: wanted decays
 WANTED_LAW_RATE = 1.0 / 50.0      # s of wanted per (km/h from pivot) per second
 HIDE_DECAY_MAX_MULT = 3.0         # F(D) ceiling — far-parked decay multiplier
@@ -90,7 +100,13 @@ WANTED_GRACE_POPUP = (
 
 
 def _distance_weight(dist_units: float) -> float:
-    """Saturating weight w in [0, 1) for distance past the 500 m near cap."""
+    """Saturating weight w in [0, 1) for distance past the 500 m near cap.
+
+    ``math.inf`` (police-independent mode: zero cops on duty) saturates the
+    weight at 1.0 — the far-parked / far-speeding limit of the law.
+    """
+    if math.isinf(dist_units):
+        return 1.0
     d_m = max(dist_units - WANTED_NEAR_CAP_UNITS, 0.0) / 100.0
     x = d_m / WANTED_DISTANCE_SCALE_M
     return x / (1.0 + x)
@@ -469,17 +485,36 @@ async def active_police_present(http_client_mod) -> bool:
     return bool(await _effective_cop_characters(http_client_mod))
 
 
+async def wanted_police_required() -> bool:
+    """True while the wanted system requires effective cops on duty.
+
+    Backed by the WantedSystemConfig admin singleton (applies on the next
+    tick — no restart). False = police-independent mode (freeman 2026-09-22):
+    organic triggers fire with zero cops on duty, no dormant amnesty clears
+    heat, and the distance law treats police distance as INFINITY
+    (F(D) = 3.0x decay, A(D) = 1/3x growth — see tick_wanted_countdown).
+    """
+    return (await WantedSystemConfig.aget_config()).police_required
+
+
 async def nearest_effective_cop_distance_m(
     http_client, http_client_mod, character
 ) -> tuple[bool, float | None]:
     """(cops_present, metres) to the nearest EFFECTIVE cop, for trigger gating.
 
     Present=False ⇔ zero effective cops on duty ⇒ the wanted system is
-    dormant and organic triggers must not fire. Otherwise metres is the
+    dormant and organic triggers must not fire — unless the
+    WantedSystemConfig.police_required toggle is OFF, in which case the
+    system is armed with no cops and this returns (True, None): the roll
+    runs unattenuated, which is exactly the police-distance-infinity
+    behavior (the attenuation is 1.0 beyond 1000 m anyway). Otherwise metres
+    is the
     distance to the nearest effective cop, or None when position data is
     unavailable — callers fail OPEN toward the unattenuated roll (the
     suppression is anti-abuse, not a safety interlock).
     """
+    if not await wanted_police_required():
+        return True, None
     cops = await _effective_cop_characters(http_client_mod)
     if not cops:
         return False, None
@@ -682,14 +717,20 @@ async def tick_wanted_countdown(http_client, http_client_mod, http_client_mgmt=N
     Inside the 500 m cap both multipliers are exactly 1.0: hiding next to a
     cop clears at the plain speed-driven rate.
 
-    Dormant rule (freeman 2026-09-20): with zero effective cops on duty
-    (on-duty + online + non-AFK — see active_police_present) the wanted
-    system is off. No decay, no growth, no underwater arrests, no modded
-    despawns, and every active ORGANIC Wanted record is cleared: online
-    suspects get the normal expiry flow, offline suspects are expired
-    silently. Admin /setwanted flags (set_by set) survive the dormant
-    window at their current heat; the normal speed law resumes once a cop
-    goes back on duty.
+    Dormant rule (freeman 2026-09-20): by default, with zero effective cops
+    on duty (on-duty + online + non-AFK — see active_police_present) the
+    wanted system is off. No decay, no growth, no underwater arrests, no
+    modded despawns, and every active ORGANIC Wanted record is cleared:
+    online suspects get the normal expiry flow, offline suspects are
+    expired silently. Admin /setwanted flags (set_by set) survive the
+    dormant window at their current heat; the normal speed law resumes once
+    a cop goes back on duty.
+
+    Police-independent mode (WantedSystemConfig.police_required = OFF,
+    freeman 2026-09-22): the dormant amnesty is skipped — organic triggers
+    fire and heat keeps moving with zero cops on duty, and the distance law
+    runs with police distance = INFINITY (F(D) = 3.0x decay, A(D) = 1/3x
+    growth).
 
     Offline suspects (while armed): no decay, wanted persists indefinitely.
     """
@@ -722,7 +763,10 @@ async def tick_wanted_countdown(http_client, http_client_mod, http_client_mgmt=N
     # survive it too. They are preserved at their current heat while dormant
     # and the normal speed law resumes once a cop goes back on duty
     # (freeman 2026-09-20: setwanted defaults to full wanted_remaining).
-    if not await active_police_present(http_client_mod):
+    # Skipped entirely in police-independent mode (police_required OFF): the
+    # system stays armed and keeps ticking with zero cops on duty.
+    police_required = await wanted_police_required()
+    if police_required and not await active_police_present(http_client_mod):
         organic = [w for w in wanted_list if w.set_by_id is None]
         admin_flags = [w for w in wanted_list if w.set_by_id is not None]
         if due_pendings:
@@ -946,6 +990,13 @@ async def tick_wanted_countdown(http_client, http_client_mod, http_client_mgmt=N
         min_dist = None
         if cop_locations:
             min_dist = min(_distance_3d(sus_loc, cop_loc) for cop_loc in cop_locations)
+        elif not police_required:
+            # Police-independent mode, zero cops on duty: the distance law
+            # runs with police distance = INFINITY — hiding decays at the
+            # far-parked ceiling (F = HIDE_DECAY_MAX_MULT = 3.0x) and
+            # speeding grows at the far-speeding floor
+            # (A = WANTED_ACCRUAL_MIN_MULT = 1/3x).
+            min_dist = math.inf
 
         if speed_kmh >= WANTED_SPEED_PIVOT_KMH:
             growth = (

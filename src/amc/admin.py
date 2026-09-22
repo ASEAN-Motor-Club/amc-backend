@@ -23,6 +23,7 @@ from .models import (
     Character,
     Company,
     CompassTuningConfig,
+    WantedSystemConfig,
     PlayerChatLog,
     PlayerRestockDepotLog,
     PlayerVehicleLog,
@@ -1187,6 +1188,18 @@ class CompassTuningConfigAdmin(admin.ModelAdmin):
     def has_add_permission(self, request):
         # Only allow add if no instance exists yet
         return not CompassTuningConfig.objects.exists()
+
+    def has_delete_permission(self, request, obj=None):
+        return False
+
+
+@admin.register(WantedSystemConfig)
+class WantedSystemConfigAdmin(admin.ModelAdmin):
+    list_display = ("police_required",)
+
+    def has_add_permission(self, request):
+        # Only allow add if no instance exists yet
+        return not WantedSystemConfig.objects.exists()
 
     def has_delete_permission(self, request, obj=None):
         return False
