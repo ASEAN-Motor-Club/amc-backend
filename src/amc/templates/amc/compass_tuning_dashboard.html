@@ -1,0 +1,409 @@
+{% load static %}<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Compass Tuning Dashboard</title>
+<style>
+  :root { --bg:#101418; --panel:#1a2027; --line:#2a323c; --txt:#d7dde3;
+          --dim:#8a949e; --acc:#4da3ff; --good:#3fb96a; --bad:#e05656; }
+  * { box-sizing:border-box; }
+  body { margin:0; background:var(--bg); color:var(--txt);
+         font:14px/1.45 system-ui,sans-serif; padding:16px 22px 40px; }
+  h1 { font-size:19px; margin:4px 0 2px; }
+  .sub { color:var(--dim); margin-bottom:14px; }
+  .grid { display:grid; grid-template-columns:340px 1fr; gap:18px; max-width:1500px; }
+  .panel { background:var(--panel); border:1px solid var(--line);
+           border-radius:10px; padding:14px 16px; }
+  .panel h2 { font-size:13px; text-transform:uppercase; letter-spacing:.08em;
+              color:var(--dim); margin:0 0 10px; }
+  label.row { display:flex; justify-content:space-between; align-items:baseline;
+              margin:10px 0 3px; font-size:13px; }
+  .val { color:var(--acc); font-variant-numeric:tabular-nums; font-weight:600; }
+  input[type=range] { width:100%; accent-color:var(--acc); }
+  .hint { color:var(--dim); font-size:11.5px; margin:2px 0 8px; }
+  button { background:var(--acc); border:0; color:#0b1016; font-weight:700;
+           padding:8px 14px; border-radius:7px; cursor:pointer; font-size:13px; }
+  button.secondary { background:#2b3540; color:var(--txt); }
+  button:disabled { opacity:.45; cursor:default; }
+  .configs { display:flex; flex-direction:column; gap:6px; }
+  .cfg { display:flex; align-items:center; gap:8px; padding:7px 10px;
+         border:1px solid var(--line); border-radius:8px; cursor:pointer; }
+  .cfg:hover { border-color:var(--acc); }
+  .cfg.active-row { border-color:var(--good); }
+  .cfg .name { font-weight:700; min-width:52px; }
+  .cfg .d { color:var(--dim); font-size:12px; font-variant-numeric:tabular-nums; }
+  .badge { margin-left:auto; color:var(--good); font-size:11px; font-weight:700; }
+  canvas { width:100%; height:340px; display:block; }
+  table { border-collapse:collapse; width:100%; font-variant-numeric:tabular-nums; }
+  th, td { border:1px solid var(--line); padding:3px 7px; text-align:center;
+           font-size:12px; }
+  th { background:#212931; color:var(--dim); font-weight:600; }
+  td.ring { color:var(--acc); font-size:11px; }
+  #status { font-size:12.5px; min-height:18px; margin-top:8px; }
+  #status.err { color:var(--bad); }
+  #status.ok { color:var(--good); }
+  .simbox { margin-top:14px; border:1px solid var(--line); border-radius:8px;
+            padding:10px 12px; background:#0d1115; min-height:64px;
+            position:relative; overflow:hidden; }
+  .simflash { font-size:17px; font-weight:700; color:#ffd966;
+              opacity:0; transition:opacity .5s ease-out;
+              white-space:nowrap; }
+  .simflash.on { opacity:1; transition:none; }
+  .simnext { color:var(--dim); font-size:12px; margin-top:6px;
+             font-variant-numeric:tabular-nums; }
+</style>
+</head>
+<body>
+<h1>Compass Tuning Dashboard</h1>
+<div class="sub">Live law: <code>base = 1/(D·20·C) clamp [min, max]</code> ·
+<code>interval = base × 20/(S+20), floored at min</code> · per officer ×min(N, budget) ·
+inside the ring: fixed ring-proximity ping every <b>max</b> s</div>
+
+<div class="grid">
+  <div class="panel">
+    <h2>Parameters</h2>
+
+    <label class="row">C — frequency constant <span class="val" id="v_c"></span></label>
+    <input type="range" id="s_c" min="0.5e-6" max="8e-6" step="0.1e-6">
+    <div class="hint">higher = faster everywhere (also shrinks the parked-plateau)</div>
+
+    <label class="row">min_interval — floor (s) <span class="val" id="v_min"></span></label>
+    <input type="range" id="s_min" min="1" max="10" step="0.5">
+    <div class="hint">fastest possible bearing per cop</div>
+
+    <label class="row">max_interval — ceiling (s) <span class="val" id="v_max"></span></label>
+    <input type="range" id="s_max" min="5" max="60" step="1">
+    <div class="hint">parked suspect cadence; also the <ring ping interval</div>
+
+    <label class="row">ring_distance (m) <span class="val" id="v_ring"></span></label>
+    <input type="range" id="s_ring" min="50" max="2000" step="25">
+    <div class="hint">inside: fixed proximity ping every max s, no bearing (game units ×100)</div>
+
+    <label class="row">budget_cap <span class="val" id="v_budget"></span></label>
+    <input type="range" id="s_budget" min="1" max="4" step="1">
+    <div class="hint">interval × min(N, cap) — more cops ≠ slower each</div>
+
+    <div id="status"></div>
+
+    <h2 style="margin-top:16px;">Simulator</h2>
+    <label class="row">distance to suspect <span class="val" id="v_simd"></span></label>
+    <input type="range" id="s_simd" min="50" max="10000" step="10" value="1000">
+    <label class="row">suspect speed <span class="val" id="v_sims"></span></label>
+    <input type="range" id="s_sims" min="0" max="150" step="5" value="0">
+    <div class="simbox">
+      <div class="simflash" id="simflash"></div>
+      <div class="simnext" id="simnext"></div>
+    </div>
+    <div class="hint">flashes exactly what a cop sees, at the law's interval —
+    1 s hold, then fade</div>
+  </div>
+
+  <div class="panel">
+    <h2>Configurations (CompassTuningConfig)</h2>
+    <div class="configs" id="configs"></div>
+    <div style="display:flex; gap:8px; margin-top:12px; flex-wrap:wrap;">
+      <button id="btn_update">Update active config to these values</button>
+      <button id="btn_new" class="secondary">Save as new config…</button>
+      <button id="btn_reset" class="secondary">Reset to loaded</button>
+    </div>
+  </div>
+</div>
+
+<div class="panel" style="max-width:1500px; margin-top:18px;">
+  <h2>Interval vs distance (per officer, solo)</h2>
+  <canvas id="graph"></canvas>
+</div>
+
+<div class="panel" style="max-width:1500px; margin-top:18px;">
+  <h2>Interval matrix</h2>
+  <div style="overflow-x:auto;"><table id="matrix"></table></div>
+</div>
+
+<script>
+const csrf = document.querySelector('[name=csrfmiddlewaretoken]')
+  ? document.querySelector('[name=csrfmiddlewaretoken]').value
+  : document.cookie.match(/csrftoken=([^;]+)/)?.[1] ?? '';
+
+const speedLines = [0, 10, 20, 40, 60, 80, 100, 130];
+const tableSpeeds = [0, 10, 20, 30, 40, 50, 60, 80, 100, 120, 150];
+const tableDists  = [100, 200, 300, 500, 1000, 2000, 5000, 10000];
+
+let sliders = {}, loaded = null, configs = [];
+
+function law(D_m, S_kmh, p) {
+  if (D_m <= p.ring) return { ring: true, t: p.max };
+  const raw = 1 / (D_m * 20 * p.c);
+  const base = Math.min(Math.max(raw, p.min), p.max);
+  return { ring: false, t: Math.max(base * 20 / (S_kmh + 20), p.min) };
+}
+
+function heat(t, p) {
+  const lo = p.min, hi = Math.max(p.max * 2, p.min + 1);
+  const x = Math.min(Math.max((t - lo) / (hi - lo), 0), 1);
+  // green (fast) → red (slow)
+  const g = Math.round(224 - x * 161);
+  const r = Math.round(63 + x * 161);
+  const b = Math.round(106 - x * 53);
+  return `rgba(${r},${g},${b},0.45)`;
+}
+
+function fmt(t) {
+  if (t >= 100) return t.toFixed(0);
+  if (t >= 20) return t.toFixed(1);
+  return t.toFixed(2);
+}
+
+function readSliders() {
+  const p = {
+    c: parseFloat(sliders.c.value),
+    min: parseFloat(sliders.min.value),
+    max: parseFloat(sliders.max.value),
+    ring: parseInt(sliders.ring.value),
+    budget: parseInt(sliders.budget.value),
+  };
+  document.getElementById('v_c').textContent = (p.c * 1e6).toFixed(1) + 'e-6';
+  document.getElementById('v_min').textContent = p.min + ' s';
+  document.getElementById('v_max').textContent = p.max + ' s';
+  document.getElementById('v_ring').textContent = p.ring + ' m';
+  document.getElementById('v_budget').textContent = '×' + p.budget;
+  return p;
+}
+
+function setSliders(p) {
+  sliders.c.value = p.c; sliders.min.value = p.min; sliders.max.value = p.max;
+  sliders.ring.value = p.ring; sliders.budget.value = p.budget;
+}
+
+function graph(p) {
+  const cv = document.getElementById('graph');
+  const dpr = window.devicePixelRatio || 1;
+  const W = cv.clientWidth, H = cv.clientHeight;
+  cv.width = W * dpr; cv.height = H * dpr;
+  const ctx = cv.getContext('2d'); ctx.scale(dpr, dpr); ctx.clearRect(0, 0, W, H);
+  const pad = { l: 52, r: 62, t: 26, b: 30 };
+  const dMin = 50, dMax = 10000;
+  const yMax = Math.max(p.max * 2, 30);
+  const lx = m => pad.l + (Math.log(m / dMin) / Math.log(dMax / dMin)) * (W - pad.l - pad.r);
+  const ly = t => pad.t + (1 - t / yMax) * (H - pad.t - pad.b);
+
+  ctx.strokeStyle = '#2a323c'; ctx.fillStyle = '#8a949e';
+  ctx.font = '11px system-ui'; ctx.textAlign = 'center';
+  for (const m of [50, 100, 200, 500, 1000, 2000, 5000, 10000]) {
+    ctx.beginPath(); ctx.moveTo(lx(m), pad.t); ctx.lineTo(lx(m), H - pad.b); ctx.stroke();
+    ctx.fillText(m >= 1000 ? (m / 1000) + 'km' : m + 'm', lx(m), H - pad.b + 14);
+  }
+  ctx.textAlign = 'right';
+  for (let t = 0; t <= yMax; t += yMax <= 30 ? 5 : 10) {
+    ctx.beginPath(); ctx.moveTo(pad.l, ly(t)); ctx.lineTo(W - pad.r, ly(t)); ctx.stroke();
+    ctx.fillText(t + 's', pad.l - 6, ly(t) + 4);
+  }
+
+  // ring zone
+  ctx.fillStyle = 'rgba(77,163,255,0.12)';
+  ctx.fillRect(lx(dMin), pad.t, lx(p.ring) - lx(dMin), H - pad.t - pad.b);
+  ctx.fillStyle = '#4da3ff'; ctx.textAlign = 'center';
+  ctx.fillText('ring <' + p.ring + 'm → fixed ping every ' + p.max + 's', (lx(dMin) + lx(p.ring)) / 2, pad.t - 10);
+
+  const hues = ['#e05656', '#e08a3c', '#d9c04a', '#7ac05a', '#3fb96a', '#4da3ff', '#8f7bff', '#c86bd1'];
+  speedLines.forEach((s, i) => {
+    ctx.strokeStyle = hues[i % hues.length]; ctx.lineWidth = 2; ctx.beginPath();
+    let first = true;
+    for (let m = dMin; m <= dMax; m *= 1.08) {
+      const { t, ring } = law(m, s, p);
+      const x = lx(m), y = ly(t);
+      if (first) { ctx.moveTo(x, y); first = false; } else ctx.lineTo(x, y);
+    }
+    ctx.stroke();
+    ctx.fillStyle = hues[i % hues.length];
+    ctx.textAlign = 'left';
+    ctx.fillText(s + ' km/h', lx(dMax) + 2, ly(law(dMax, s, p).t) - 4);
+  });
+  ctx.lineWidth = 1;
+}
+
+function matrix(p) {
+  const tbl = document.getElementById('matrix');
+  let html = '<tr><th>km/h \\ dist</th>';
+  for (const d of tableDists) html += '<th>' + (d >= 1000 ? d / 1000 + 'km' : d + 'm') + '</th>';
+  html += '</tr>';
+  for (const s of tableSpeeds) {
+    html += '<tr><th>' + s + '</th>';
+    for (const d of tableDists) {
+      const r = law(d, s, p);
+      if (r.ring) html += `<td class="ring" style="background:${heat(p.max, p)}"><${p.ring}m @${p.max}s</td>`;
+      else html += `<td style="background:${heat(r.t, p)}">${fmt(r.t)}s</td>`;
+    }
+    html += '</tr>';
+  }
+  tbl.innerHTML = html;
+}
+
+let raf = 0;
+function refresh() {
+  cancelAnimationFrame(raf);
+  raf = requestAnimationFrame(() => {
+    const p = readSliders();
+    graph(p); matrix(p);
+    scheduleSim();  // law changed → the simulator's cadence follows
+  });
+}
+
+function setStatus(msg, cls) {
+  const el = document.getElementById('status');
+  el.textContent = msg; el.className = cls || '';
+}
+
+function renderConfigs() {
+  const box = document.getElementById('configs');
+  box.innerHTML = '';
+  configs.sort((a, b) => a.config_name.localeCompare(b.config_name));
+  for (const cfg of configs) {
+    const row = document.createElement('div');
+    row.className = 'cfg' + (cfg.active ? ' active-row' : '');
+    row.innerHTML = `<span class="name">${cfg.config_name}</span>
+      <span class="d">C ${(cfg.c * 1e6).toFixed(1)}e-6 · ${cfg.min_interval}s–${cfg.max_interval}s · ${cfg.ring_distance / 100}m · ×${cfg.budget_cap}</span>
+      ${cfg.active ? '<span class="badge">ACTIVE</span>' : ''}`;
+    row.onclick = () => { loaded = { ...cfg }; setSliders(cfgToParams(cfg)); refresh(); setStatus('Loaded ' + cfg.config_name, 'ok'); };
+    box.appendChild(row);
+  }
+}
+
+function cfgToParams(cfg) {
+  return { c: cfg.c, min: cfg.min_interval, max: cfg.max_interval,
+           ring: cfg.ring_distance / 100, budget: cfg.budget_cap };
+}
+
+async function api(method, body) {
+  const r = await fetch('configs/', {
+    method, headers: { 'Content-Type': 'application/json', 'X-CSRFToken': csrf },
+    body: body ? JSON.stringify(body) : undefined,
+  });
+  const d = await r.json();
+  if (!r.ok) throw new Error(d.error || r.statusText);
+  return d;
+}
+
+async function reloadConfigs(keepLoaded) {
+  const d = await api('GET');
+  configs = d.configs;
+  renderConfigs();
+  if (!keepLoaded) {
+    const act = configs.find(c => c.active);
+    if (act) { loaded = { ...act }; setSliders(cfgToParams(act)); }
+  }
+  refresh();
+}
+
+document.getElementById('btn_reset').onclick = () => {
+  if (loaded) { setSliders(cfgToParams(loaded)); refresh(); setStatus('Reset to ' + loaded.config_name, 'ok'); }
+};
+
+document.getElementById('btn_update').onclick = async () => {
+  const p = readSliders();
+  if (!loaded) return setStatus('Load a config first', 'err');
+  try {
+    await api('POST', { action: 'save', id: loaded.id, config_name: loaded.config_name,
+      c: p.c, min_interval: p.min, max_interval: p.max,
+      ring_distance: p.ring * 100, budget_cap: p.budget });
+    await reloadConfigs(true);
+    setStatus('Saved ' + loaded.config_name + (loaded.active ? ' (active — applied next tick)' : ''), 'ok');
+  } catch (e) { setStatus('Save failed: ' + e.message, 'err'); }
+};
+
+document.getElementById('btn_new').onclick = async () => {
+  const p = readSliders();
+  const name = prompt('Config name (A, B, C…):', String.fromCharCode(65 + configs.length));
+  if (!name) return;
+  try {
+    await api('POST', { action: 'create', config_name: name,
+      c: p.c, min_interval: p.min, max_interval: p.max,
+      ring_distance: p.ring * 100, budget_cap: p.budget });
+    await reloadConfigs();
+    setStatus('Created ' + name + ' — click it to load/activate', 'ok');
+  } catch (e) { setStatus('Create failed: ' + e.message, 'err'); }
+};
+
+// double-click a config row to activate
+document.addEventListener('dblclick', async (ev) => {
+  const row = ev.target.closest('.cfg');
+  if (!row) return;
+  const idx = [...row.parentNode.children].indexOf(row);
+  const cfg = configs[idx];
+  if (!cfg) return;
+  try {
+    await api('POST', { action: 'activate', id: cfg.id });
+    await reloadConfigs(true);
+    setStatus(cfg.config_name + ' activated — applied next tick', 'ok');
+  } catch (e) { setStatus('Activate failed: ' + e.message, 'err'); }
+});
+
+for (const id of ['s_c', 's_min', 's_max', 's_ring', 's_budget']) {
+  sliders[id.replace('s_', '')] = document.getElementById(id);
+  document.getElementById(id).addEventListener('input', refresh);
+}
+
+// sensible initial values (config A) until configs load
+setSliders({ c: 3.0e-6, min: 3, max: 15, ring: 200, budget: 2 });
+
+// --- simulator: flash the compass text at the law's interval ---
+const sim = {
+  d: document.getElementById('s_simd'),
+  s: document.getElementById('s_sims'),
+  flash: document.getElementById('simflash'),
+  next: document.getElementById('simnext'),
+  timer: null, holdTimer: null, tick: null,
+};
+
+function simLabel() {
+  document.getElementById('v_simd').textContent = sim.d.value + ' m';
+  document.getElementById('v_sims').textContent = sim.s.value + ' km/h';
+}
+
+function fmtDist(m) {
+  return m >= 1000 ? (m / 1000).toFixed(1) + 'km' : Math.round(m) + 'm';
+}
+
+function flashSim(p) {
+  const d = +sim.d.value, s = +sim.s.value;
+  const r = law(d, s, p);
+  const text = r.ring
+    ? '[SimSuspect] <' + p.ring + 'm'
+    : '[SimSuspect] ' + fmtDist(d) + ' NE';
+  clearTimeout(sim.holdTimer);
+  sim.flash.classList.remove('on');
+  // force reflow so re-adding .on restarts the flash even for same text
+  void sim.flash.offsetWidth;
+  sim.flash.textContent = text;
+  sim.flash.classList.add('on');
+  sim.holdTimer = setTimeout(() => sim.flash.classList.remove('on'), 1000);
+}
+
+function scheduleSim() {
+  clearTimeout(sim.timer);
+  clearInterval(sim.tick);
+  simLabel();
+  const p = readSliders();
+  const d = +sim.d.value, s = +sim.s.value;
+  const r = law(d, s, p);
+  flashSim(p);
+  const t = r.t;
+  const start = Date.now();
+  sim.tick = setInterval(() => {
+    const left = Math.max(0, (t * 1000 - (Date.now() - start)) / 1000);
+    sim.next.textContent = 'next flash in ' + left.toFixed(1) + ' s (every '
+      + (t < 10 ? t.toFixed(1) : t.toFixed(0)) + ' s'
+      + (r.ring ? ' · inside ring' : '') + ')';
+  }, 100);
+  sim.timer = setTimeout(scheduleSim, t * 1000);
+}
+
+sim.d.addEventListener('input', scheduleSim);
+sim.s.addEventListener('input', scheduleSim);
+
+reloadConfigs();
+window.addEventListener('resize', refresh);
+</script>
+{% csrf_token %}
+</body>
+</html>

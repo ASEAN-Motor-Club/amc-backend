@@ -19,7 +19,7 @@ from django.db.models import (
 )
 from django.db.models.functions import RowNumber, Lead, Lag
 from django.db.models.lookups import GreaterThan, GreaterThanOrEqual
-from django.db import IntegrityError
+from django.db import IntegrityError, transaction
 from decimal import Decimal
 from django.core.validators import MinValueValidator, MaxValueValidator
 from django.contrib.postgres.fields import ArrayField
@@ -3223,25 +3223,49 @@ class CompassTuningConfig(models.Model):
         validators=[MinValueValidator(1)],
         help_text="Force-budget cap: interval is multiplied by min(N, cap).",
     )
+    active = models.BooleanField(
+        default=False,
+        help_text="The configuration the compass tick actually uses. Only one row may be active.",
+    )
 
     class Meta:
         verbose_name = "Compass Tuning Configuration"
-        verbose_name_plural = "Compass Tuning Configuration"
+        verbose_name_plural = "Compass Tuning Configurations"
+        constraints = [
+            models.UniqueConstraint(
+                fields=["active"],
+                condition=models.Q(active=True),
+                name="unique_active_compass_tuning",
+            ),
+        ]
 
     def save(self, *args, **kwargs):
-        self.pk = 1
+        if self.active:
+            with transaction.atomic():
+                type(self).objects.exclude(pk=self.pk).filter(active=True).update(
+                    active=False
+                )
         super().save(*args, **kwargs)
 
-    def delete(self, *args, **kwargs):
-        pass  # Prevent deletion of singleton
-
     @classmethod
-    async def aget_config(cls) -> "CompassTuningConfig":
-        config, _ = await cls.objects.aget_or_create(pk=1)
-        return config
+    async def aget_active(cls) -> "CompassTuningConfig":
+        """The active tuning row; lazily seeds config A defaults if none."""
+        row = await cls.objects.filter(active=True).afirst()
+        if row is None:
+            row = await cls.objects.acreate(
+                config_name="A",
+                c=3.0e-6,
+                min_interval=3.0,
+                max_interval=15.0,
+                ring_distance=20_000,
+                budget_cap=2,
+                active=True,
+            )
+        return row
 
     def __str__(self):
-        return f"Compass Tuning Configuration ({self.config_name})"
+        flag = " (active)" if self.active else ""
+        return f"Compass Tuning Configuration ({self.config_name}){flag}"
 
 
 @final
