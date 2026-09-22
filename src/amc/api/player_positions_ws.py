@@ -15,29 +15,29 @@ _VEHICLE_KEY_MAP: dict[str, int] = {
 
 
 def serialize_players(players: list[dict]) -> bytes:
+    """Serialize a roster from get_players_mod_masked().
+
+    The mask is the single source of truth: hidden=True entries already carry
+    a zeroed Location and empty VehicleKey — this function does not re-apply
+    any masking, it only translates the dict to protobuf.
+    """
     positions = PlayerPositions()
     for p in players:
         loc = p.get("Location", {})
         pos = positions.players.add()
         pos.unique_id = int(p.get("UniqueID", 0))
         pos.player_name = str(p.get("PlayerName", ""))
-        hidden = bool(p.get("hidden", False))
-        if hidden:
-            pos.x = 0.0
-            pos.y = 0.0
-            pos.z = 0.0
-        else:
-            pos.x = float(loc.get("X", 0))
-            pos.y = float(loc.get("Y", 0))
-            pos.z = float(loc.get("Z", 0))
+        pos.x = float(loc.get("X", 0))
+        pos.y = float(loc.get("Y", 0))
+        pos.z = float(loc.get("Z", 0))
 
         raw_key = str(p.get("VehicleKey", ""))
         enum_val = _VEHICLE_KEY_MAP.get(raw_key)
-        if not hidden and enum_val is not None:
+        if enum_val is not None:
             pos.vehicle_key_enum = enum_val
-        elif not hidden:
+        else:
             pos.vehicle_key_unknown = raw_key
-        pos.hidden = hidden
+        pos.hidden = bool(p.get("hidden", False))
     return positions.SerializeToString()
 
 

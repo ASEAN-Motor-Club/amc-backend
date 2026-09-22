@@ -18,6 +18,7 @@ from django.test import SimpleTestCase, TestCase
 from django.utils import timezone
 
 from amc.api.player_positions_common import (
+    _mask_hidden_player,
     _should_hide_player,
     get_players_mod,
     get_players_mod_masked,
@@ -411,10 +412,14 @@ class GetPlayersModMaskedTests(TestCase):
 
 class SerializePlayersHiddenTests(SimpleTestCase):
     def test_hidden_player_serializes_zeroed(self):
+        # Single source of truth: the mask zeroes hidden entries; the
+        # serializer just translates whatever get_players_mod_masked() hands it.
+        masked = _mask_hidden_player(
+            _make_mod_player(42, x=123, y=456, z=789, vehicle_key="DUKE")
+        )
         data = serialize_players(
             [
-                _make_mod_player(42, x=123, y=456, z=789, vehicle_key="DUKE")
-                | {"hidden": True},
+                masked,
                 _make_mod_player(7, x=1, y=2, z=3, vehicle_key="DUKE"),
             ]
         )
@@ -423,7 +428,8 @@ class SerializePlayersHiddenTests(SimpleTestCase):
         self.assertTrue(hidden.hidden)
         self.assertEqual((hidden.x, hidden.y, hidden.z), (0.0, 0.0, 0.0))
         self.assertFalse(hidden.HasField("vehicle_key_enum"))
-        self.assertFalse(hidden.HasField("vehicle_key_unknown"))
+        self.assertTrue(hidden.HasField("vehicle_key_unknown"))
+        self.assertEqual(hidden.vehicle_key_unknown, "")
         self.assertEqual(hidden.unique_id, 42)
         self.assertFalse(visible.hidden)
         self.assertEqual((visible.x, visible.y, visible.z), (1.0, 2.0, 3.0))

@@ -77,8 +77,8 @@ async def get_players_mod_masked(
 ):
     """Full roster for position streaming: hidden players stay in the list but
     carry hidden=True with their location/vehicle zeroed instead of being
-    dropped. Callers must still drop the location of hidden=True entries —
-    the zeroed Location here is defense in depth, not the contract."""
+    dropped. The mask is the single source of truth — consumers must not
+    re-derive or re-apply hiding; they only translate the masked entries."""
     players = await get_players_mod(session, cache_key=cache_key, cache_ttl=cache_ttl)
     wanted_ids, police_ids, costume_ids = await _get_hidden_player_unique_ids()
     any_wanted = bool(wanted_ids)
