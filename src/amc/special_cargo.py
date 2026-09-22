@@ -211,22 +211,22 @@ async def announce_money_secured(character_guid: str, http_client) -> None:
 
 
 BOSS_CUT_FLOOR = 0.05
-BOSS_CUT_CAP = 0.25
-BOSS_CUT_CURVE_WEIGHT = 0.20
+BOSS_CUT_CAP = 0.20
+BOSS_CUT_CURVE_WEIGHT = 0.15
 
 
 def calculate_boss_cut_ratio(level: int, boss_level: int) -> float:
     """Non-linear boss cut, hard-capped to [BOSS_CUT_FLOOR, BOSS_CUT_CAP].
 
-    Progressive (freeman 2026-09-20): the closer a criminal's level is to the
-    boss's, the larger the cut — the boss's closest rivals pay up to the cap,
-    far-below players pay the floor.
-    cut_ratio = clamp(0.05 + 0.20 * (level / boss_level)^2, 0.05, 0.25)
+    Inverted (freeman 2026-09-22): the closer a criminal's level is to the
+    boss's, the smaller the cut — close rivals pay the floor, the lowest-level
+    criminals pay up to the cap.
+    cut_ratio = clamp(0.05 + 0.15 * (1 - level / boss_level)^2, 0.05, 0.20)
     """
     if boss_level <= 0:
         return 0.0
     ratio = min(1.0, max(0.0, level / boss_level))
-    raw = BOSS_CUT_FLOOR + BOSS_CUT_CURVE_WEIGHT * ratio * ratio
+    raw = BOSS_CUT_FLOOR + BOSS_CUT_CURVE_WEIGHT * (1.0 - ratio) ** 2
     return max(BOSS_CUT_FLOOR, min(BOSS_CUT_CAP, raw))
 
 
