@@ -38,6 +38,7 @@
   .compass-root th, td { border:1px solid var(--line); padding:3px 7px; text-align:center;
            font-size:12px; }
   .compass-root th { background:#212931; color:var(--dim); font-weight:600; }
+  .compass-root td { font-weight:600; letter-spacing:0.2px; }
   .compass-root td.ring { color:var(--acc); font-size:11px; }
   .compass-root #status { font-size:12.5px; min-height:18px; margin-top:8px; }
   .compass-root #status.err { color:var(--bad); }
@@ -144,11 +145,12 @@ function law(D_m, S_kmh, p) {
 function heat(t, p) {
   const lo = p.min, hi = Math.max(p.max * 2, p.min + 1);
   const x = Math.min(Math.max((t - lo) / (hi - lo), 0), 1);
-  // green (fast) → red (slow)
+  // green (fast) → red (slow); faint fill + bright text keeps numbers readable
   const g = Math.round(224 - x * 161);
   const r = Math.round(63 + x * 161);
   const b = Math.round(106 - x * 53);
-  return `rgba(${r},${g},${b},0.45)`;
+  const fg = `rgb(${Math.round(143 + x * 97)},${Math.round(227 - x * 80)},${Math.round(162 - x * 20)})`;
+  return { bg: `rgba(${r},${g},${b},0.14)`, fg: fg };
 }
 
 function fmt(t) {
@@ -234,8 +236,8 @@ function matrix(p) {
     html += '<tr><th>' + s + '</th>';
     for (const d of tableDists) {
       const r = law(d, s, p);
-      if (r.ring) html += `<td class="ring" style="background:${heat(p.max, p)}"><${p.ring}m @${p.max}s</td>`;
-      else html += `<td style="background:${heat(r.t, p)}">${fmt(r.t)}s</td>`;
+      if (r.ring) html += `<td class="ring" style="background:${heat(p.max, p).bg};color:${heat(p.max, p).fg}"><${p.ring}m @${p.max}s</td>`;
+      else { const h = heat(r.t, p); html += `<td style="background:${h.bg};color:${h.fg}">${fmt(r.t)}s</td>`; }
     }
     html += '</tr>';
   }
