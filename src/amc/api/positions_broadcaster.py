@@ -12,6 +12,7 @@ subscriber sees the same snapshot generation.
 
 import asyncio
 import logging
+import time
 
 import aiohttp
 from django.conf import settings
@@ -40,6 +41,7 @@ class PositionsBroadcaster:
         self._snapshot: list[dict] = []
         self._count = 0
         self._seq = 0
+        self._ts = 0.0
 
     async def ensure_started(self):
         async with self._start_lock:
@@ -71,6 +73,7 @@ class PositionsBroadcaster:
         # player_count semantics: hidden players are not counted.
         self._count = sum(1 for p in players if not p.get("hidden", False))
         self._snapshot = players
+        self._ts = time.time()
         self._seq += 1
         async with self._cond:
             self._cond.notify_all()
@@ -80,17 +83,17 @@ class PositionsBroadcaster:
         async with self._cond:
             while self._seq == seq:
                 await self._cond.wait()
-            return self._seq, self._snapshot
+            return self._seq, self._snapshot, self._ts
 
     async def stream_masked(self):
-        """Yield the shared masked roster once per tick, in order, to every
-        subscriber from the same generation. Consumers must not mutate the
-        yielded list."""
+        """Yield (masked_roster, queried_at_epoch_seconds) once per tick, in
+        order, to every subscriber from the same generation. Consumers must
+        not mutate the yielded list."""
         await self.ensure_started()
         seq = 0
         while True:
-            seq, snapshot = await self._wait_for_next(seq)
-            yield snapshot
+            seq, snapshot, ts = await self._wait_for_next(seq)
+            yield snapshot, ts
 
     async def stream_count(self):
         """Count stream: yield only on change, heartbeats while stable."""
@@ -99,7 +102,7 @@ class PositionsBroadcaster:
         last_count = None
         ticks_since_heartbeat = 0
         while True:
-            seq, _ = await self._wait_for_next(seq)
+            seq, _, _ = await self._wait_for_next(seq)
             count = self._count
             if count != last_count:
                 yield f"data: {count}\n\n"

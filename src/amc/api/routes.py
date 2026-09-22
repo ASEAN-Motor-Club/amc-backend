@@ -397,7 +397,7 @@ player_positions_router = Router()
 @player_positions_router.get("/")
 async def streaming_player_positions(request):
     async def event_stream():
-        async for players in get_positions_broadcaster().stream_masked():
+        async for players, _ts in get_positions_broadcaster().stream_masked():
             player_positions = {
                 player["PlayerName"]: {
                     **{

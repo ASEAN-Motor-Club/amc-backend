@@ -421,8 +421,11 @@ class SerializePlayersHiddenTests(SimpleTestCase):
             [
                 masked,
                 _make_mod_player(7, x=1, y=2, z=3, vehicle_key="DUKE"),
-            ]
+            ],
+            timestamp_s=1_700_000_000.5,
         )
+        positions = PlayerPositions.FromString(data)
+        self.assertEqual(positions.timestamp_ms, 1_700_000_000_500)
         positions = PlayerPositions.FromString(data)
         hidden, visible = positions.players
         self.assertTrue(hidden.hidden)

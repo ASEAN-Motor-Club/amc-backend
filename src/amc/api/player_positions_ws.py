@@ -14,14 +14,17 @@ _VEHICLE_KEY_MAP: dict[str, int] = {
 }
 
 
-def serialize_players(players: list[dict]) -> bytes:
+def serialize_players(players: list[dict], timestamp_s: float = 0.0) -> bytes:
     """Serialize a roster from get_players_mod_masked().
 
     The mask is the single source of truth: hidden=True entries already carry
     a zeroed Location and empty VehicleKey — this function does not re-apply
-    any masking, it only translates the dict to protobuf.
+    any masking, it only translates the dict to protobuf. `timestamp_s` is
+    the broadcaster tick time (UTC epoch seconds) recorded when the mod
+    server was queried; sent as `timestamp_ms`.
     """
     positions = PlayerPositions()
+    positions.timestamp_ms = int(timestamp_s * 1000)
     for p in players:
         loc = p.get("Location", {})
         pos = positions.players.add()
@@ -60,11 +63,11 @@ async def _websocket_handler(scope, receive, send):
     disconnect = asyncio.Event()
     watcher = asyncio.create_task(_watch_disconnect(receive, disconnect))
     try:
-        async for players in broadcaster.stream_masked():
+        async for players, ts in broadcaster.stream_masked():
             if disconnect.is_set():
                 break
             try:
-                data = serialize_players(players)
+                data = serialize_players(players, ts)
                 await send({"type": "websocket.send", "bytes": data})
             except Exception:
                 logger.exception("Error sending player positions")

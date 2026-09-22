@@ -46,15 +46,19 @@ class StreamMaskedTests(SimpleTestCase):
         try:
             g1 = b.stream_masked()
             g2 = b.stream_masked()
-            s1 = await g1.__anext__()
-            s2 = await g2.__anext__()
+            s1, ts1 = await g1.__anext__()
+            s2, ts2 = await g2.__anext__()
             self.assertIs(s1, s2)  # same snapshot generation
+            self.assertEqual(ts1, ts2)  # same tick timestamp
+            self.assertGreater(ts1, 0)  # tick time recorded
             self.assertEqual(calls, 1)  # one fetch, not one per subscriber
 
             await asyncio.sleep(0.05)  # let the next tick(s) run
-            n1 = await g1.__anext__()
-            n2 = await g2.__anext__()
+            n1, nts1 = await g1.__anext__()
+            n2, nts2 = await g2.__anext__()
             self.assertIs(n1, n2)  # still the same generation for both
+            self.assertEqual(nts1, nts2)
+            self.assertGreaterEqual(nts1, ts1)  # timestamps are monotonic
             self.assertGreaterEqual(calls, 2)
         finally:
             await _stop_broadcaster(b)
@@ -65,8 +69,9 @@ class StreamMaskedTests(SimpleTestCase):
 
         b = PositionsBroadcaster(fetch=fetch, sleep_s=0.01)
         try:
-            async for snapshot in b.stream_masked():
+            async for snapshot, ts in b.stream_masked():
                 self.assertEqual(len(snapshot), 1)
+                self.assertGreater(ts, 0)
                 break
         finally:
             await _stop_broadcaster(b)
@@ -83,7 +88,7 @@ class StreamMaskedTests(SimpleTestCase):
         b = PositionsBroadcaster(fetch=fetch, sleep_s=0.01)
         try:
             gen = b.stream_masked()
-            first = await gen.__anext__()
+            first, _ts = await gen.__anext__()
             state["fail"] = True
             await asyncio.sleep(0.08)  # several failing ticks
             self.assertFalse(b._task.done())  # loop survives
