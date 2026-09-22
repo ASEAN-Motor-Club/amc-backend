@@ -140,6 +140,14 @@ async def handle_cargo_arrived(event, player, character, ctx):
         if excess > 0:
             total_fraud_excess += excess
             log.payment = max(0, log.payment - excess)
+            # Mark the claw in the row's payload: route-history consensus
+            # (fraud_detection._route_history_payments) excludes MARKED rows
+            # so a cheat delivery can never raise the ceiling its next
+            # attempt is measured against, while UNMARKED legacy rows
+            # (clawed by pre-#185 over-tight ceilings) keep their raw
+            # payment in the consensus.
+            if log.data is not None:
+                log.data["amc_fraud_excess"] = excess
             logger.warning(
                 "Fraud detected (cargo): player=%s cargo=%s original=%d reduced=%d excess=%d",
                 character.player.unique_id,

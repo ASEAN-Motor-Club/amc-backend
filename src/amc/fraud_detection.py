@@ -377,12 +377,18 @@ async def _route_history_payments(
     """Raw pre-clawback Net_Payment values for this cargo on this exact
     sender/destination pair, from the last ROUTE_HISTORY_WINDOW_DAYS.
 
-    Rows whose stored (post-clawback) payment is BELOW their raw
-    Net_Payment were clawed and are EXCLUDED from the consensus: a cheat
-    delivery must never raise the ceiling its next attempt is measured
-    against (otherwise 20 seeded deliveries at the per-km ceiling would
-    double the route's own threshold).  Rows with payment >= raw are kept:
-    legitimate guild/damage bonuses only ever push payment above raw.
+    Rows MARKED with an `amc_fraud_excess` claw (written by the handler at
+    claw time) are EXCLUDED: a cheat delivery must never raise the ceiling
+    its next attempt is measured against (otherwise 20 seeded deliveries
+    at the per-km ceiling would double the route's own threshold).
+
+    UNMARKED rows are always included with their RAW payment, even when
+    the stored payment is lower: pre-marker rows clawed by over-tight
+    historical ceilings (e.g. Moonshine's pre-#117 $20k/unit cap, which
+    clamped every legitimate full-load run to exactly $20k) carry the
+    TRUE game payment in `Net_Payment`, and excluding them censors the
+    legitimate top of the route's distribution and false-claws later
+    legitimate deliveries at the censoring line.
     """
     cutoff = timezone.now() - timedelta(days=ROUTE_HISTORY_WINDOW_DAYS)
     rows = (
@@ -393,18 +399,21 @@ async def _route_history_payments(
             timestamp__gte=cutoff,
         )
         .order_by("-timestamp")
-        .values_list("data", "payment")[:ROUTE_HISTORY_MAX_ROWS]
+        .values_list("data", flat=True)[:ROUTE_HISTORY_MAX_ROWS]
     )
     payments: list[int] = []
-    async for data, stored_payment in rows:
-        raw = (data or {}).get("Net_Payment")
+    async for data in rows:
+        payload = data or {}
+        if payload.get("amc_fraud_excess") is not None:
+            continue  # clawed by this regime — cheat signal, never consensus
+        raw = payload.get("Net_Payment")
         if raw is None:
             continue
         try:
             value = int(raw)
         except (TypeError, ValueError):
             continue
-        if value > 0 and stored_payment is not None and stored_payment >= value:
+        if value > 0:
             payments.append(value)
     return payments
 
