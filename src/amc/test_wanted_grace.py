@@ -351,7 +351,7 @@ class GracePeriodPopupTests(TestCase):
                 return_value=(True, None),
             ),
             patch(
-                "amc.handlers.cargo._check_modded_vehicle",
+                "amc.handlers.cargo._check_on_foot_delivery",
                 new_callable=AsyncMock,
                 return_value=False,
             ),

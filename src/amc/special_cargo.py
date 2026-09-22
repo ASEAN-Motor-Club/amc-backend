@@ -136,7 +136,7 @@ async def accumulate_illicit_delivery(character_guid: str, amount: int) -> int:
     return new_total
 
 
-# Handler signature: (logs, character, http_client, http_client_mod, is_modded) -> None
+# Handler signature: (logs, character, http_client, http_client_mod, is_on_foot) -> None
 SpecialCargoHandler = Callable[
     [list[ServerCargoArrivedLog], Any, Any, Any, bool],
     Coroutine[Any, Any, None],
@@ -324,7 +324,7 @@ async def accumulate_criminal_score(
     """Add the illicit delivery payment to the character's criminal score.
 
     The score accumulates the FULL payment — even when the wallet was
-    nullified (modded vehicle / invalid delivery), the rap sheet counts the
+    nullified (on-foot / invalid delivery), the rap sheet counts the
     delivery. The boss tax is money-side only and is skipped for nullified
     payments (a zeroed profit is not taxed).
     """
@@ -350,24 +350,24 @@ async def handle_money_cargo(
     character,
     http_client,
     http_client_mod,
-    is_modded: bool = False,
+    is_on_foot: bool = False,
 ) -> None:
     """Side effects for Money deliveries.
 
     - Accumulate criminal_score (rap sheet counts the full payment) + boss cut
     - Debounced laundering announcement (15s window)
     - Record 20% treasury cost
-    - Zero out wallet payment if delivered with a modded vehicle
+    - Zero out wallet payment if delivered on foot
     """
     money_payment = sum(log.payment for log in logs)
 
-    # --- Zero out wallet payment for modded vehicle or invalid delivery (DeliveryId == -1) ---
+    # --- Zero out wallet payment for on-foot delivery or invalid delivery (DeliveryId == -1) ---
     delivery_ids = [log.data.get("Net_DeliveryId") for log in logs if log.data]
     is_invalid_delivery = any(did == -1 for did in delivery_ids)
     payment_nullified = False
-    if (is_modded or is_invalid_delivery) and money_payment > 0 and http_client_mod:
+    if (is_on_foot or is_invalid_delivery) and money_payment > 0 and http_client_mod:
         payment_nullified = True
-        message = "Invalid Delivery" if is_invalid_delivery else "Modded Vehicle Confiscation"
+        message = "Invalid Delivery" if is_invalid_delivery else "On-Foot Delivery Confiscation"
         await transfer_money(
             http_client_mod,
             int(-money_payment),
@@ -429,21 +429,21 @@ async def handle_contraband_cargo(
     character,
     http_client,
     http_client_mod,
-    is_modded: bool = False,
+    is_on_foot: bool = False,
 ) -> None:
     """Side effects for contraband deliveries (Ganja, Cocaine, etc.).
 
     - Accumulate criminal_score (rap sheet counts the full payment) + boss cut
-    - Zero out wallet payment if delivered with a modded vehicle
+    - Zero out wallet payment if delivered on foot
     """
-    # --- Zero out wallet payment for modded vehicle or invalid delivery (DeliveryId == -1) ---
+    # --- Zero out wallet payment for on-foot delivery or invalid delivery (DeliveryId == -1) ---
     delivery_payment = sum(log.payment for log in logs)
     delivery_ids = [log.data.get("Net_DeliveryId") for log in logs if log.data]
     is_invalid_delivery = any(did == -1 for did in delivery_ids)
     payment_nullified = False
-    if (is_modded or is_invalid_delivery) and delivery_payment > 0 and http_client_mod:
+    if (is_on_foot or is_invalid_delivery) and delivery_payment > 0 and http_client_mod:
         payment_nullified = True
-        message = "Invalid Delivery" if is_invalid_delivery else "Modded Vehicle Confiscation"
+        message = "Invalid Delivery" if is_invalid_delivery else "On-Foot Delivery Confiscation"
         await transfer_money(
             http_client_mod,
             int(-delivery_payment),
@@ -496,7 +496,7 @@ async def run_special_cargo_handlers(
     character,
     http_client,
     http_client_mod,
-    is_modded: bool = False,
+    is_on_foot: bool = False,
 ) -> None:
     """Dispatch special-cargo handlers for all cargo keys present in *logs*."""
     if not character:
@@ -507,5 +507,5 @@ async def run_special_cargo_handlers(
             logs_by_key[log.cargo_key].append(log)
     for key, matching_logs in logs_by_key.items():
         await SPECIAL_CARGO_HANDLERS[key](
-            matching_logs, character, http_client, http_client_mod, is_modded
+            matching_logs, character, http_client, http_client_mod, is_on_foot
         )
