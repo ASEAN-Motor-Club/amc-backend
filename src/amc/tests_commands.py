@@ -22,7 +22,13 @@ from amc.commands.admin import (
     cmd_spawn_vehicle,
     cmd_tp_player,
 )
-from amc.commands.vehicles import cmd_check_mods, cmd_check_parts, cmd_rent, cmd_rental
+from amc.commands.vehicles import (
+    cmd_check_mods,
+    cmd_check_parts,
+    cmd_rent,
+    cmd_rental,
+    cmd_unrental,
+)
 from amc.commands.decals import cmd_apply_decal, cmd_decals, cmd_save_decal
 from amc.commands.events import (
     cmd_auto_grid,
@@ -3834,6 +3840,8 @@ class RentalMarkTestCase(SimpleTestCase):
         self.assertEqual(kwargs["tag"], "rental_vehicles")
         self.assertIn("rental-1", kwargs["tags"])
         self.assertEqual(kwargs["extra_data"].get("drivable"), True)
+        # Marking registers the row for the restart-spawn flow.
+        self.assertTrue(v.spawn_on_restart)
 
     async def test_rental_despawn_failure_skips_copy(self):
         # No current vehicle to despawn (already exited): never place the
@@ -3872,6 +3880,41 @@ class RentalMarkTestCase(SimpleTestCase):
         v = self._make_vehicle(alias="Old Name")
         await self._run_rental([v], name="   ")
         self.assertEqual(v.alias, "Old Name")
+
+
+class UnrentalClearsRestartSpawnTests(SimpleTestCase):
+    """/unrental clears the restart-spawn registration along with rental."""
+
+    def setUp(self):
+        self.ctx = MagicMock(spec=CommandContext)
+        self.ctx.reply = AsyncMock()
+        self.ctx.http_client_mod = MagicMock()
+        self.ctx.character = MagicMock()
+        self.ctx.character.name = "TestOwner"
+        self.ctx.player = MagicMock()
+
+    async def test_unrental_clears_rental_and_restart_flags(self):
+        v = MagicMock()
+        v.id = 3
+        v.rental = True
+        v.spawn_on_restart = True
+        v.asave = AsyncMock()
+        v.config = {"VehicleName": "TestCar"}
+
+        with (
+            patch(
+                "amc.commands.vehicles.register_player_vehicles",
+                new=AsyncMock(return_value=[v]),
+            ),
+            patch("amc.commands.vehicles.despawn_by_tag", new=AsyncMock()) as despawn,
+        ):
+            await cmd_unrental(self.ctx)
+
+        self.assertFalse(v.rental)
+        self.assertFalse(v.spawn_on_restart)
+        v.asave.assert_awaited()
+        despawn.assert_awaited_once_with(self.ctx.http_client_mod, "rental-3")
+        self.assertIn("Rentals removed", self.ctx.reply.call_args[0][0])
 
 
 class AdminVehicleSaveTestCase(SimpleTestCase):

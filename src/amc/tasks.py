@@ -58,6 +58,7 @@ from amc.mod_server import (
     spawn_assets,
     spawn_garage,
     despawn_player_vehicle,
+    despawn_by_tag,
     force_exit_vehicle,
     set_pinned_announcement,
 )
@@ -954,6 +955,23 @@ async def spawn_display_vehicles(http_client_mod):
     async for v in CharacterVehicle.objects.select_related("character").filter(
         spawn_on_restart=True
     ):
+        # Rental-marked rows re-materialize as rentals: rental tag + tags so
+        # /unrental still despawns them by tag after a restart.
+        if v.rental:
+            await despawn_by_tag(http_client_mod, f"rental-{v.id}")
+            await _spawn_with_retry(
+                lambda v=v: spawn_registered_vehicle(
+                    http_client_mod,
+                    v,
+                    tag="rental_vehicles",
+                    tags=[f"rental-{v.id}"],
+                    extra_data={"drivable": True},
+                ),
+                f"rental vehicle {v.id}",
+            )
+            await asyncio.sleep(0.5)
+            continue
+
         extra_data = {}
         if v.character:
             extra_data = {

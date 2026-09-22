@@ -336,6 +336,7 @@ async def cmd_unrental(ctx: CommandContext, category: str = ""):
         if v.rental:
             await despawn_by_tag(ctx.http_client_mod, f"rental-{v.id}")
             v.rental = False
+            v.spawn_on_restart = False
             await v.asave()
     await ctx.reply(_("Rentals removed"))
 
@@ -393,6 +394,9 @@ async def cmd_rental(ctx: CommandContext, name: str = ""):
     for v in vehicles:
         if not v.rental:
             v.rental = True
+        # Keep the in-place copy across server restarts: the restart-spawn
+        # flow re-materializes rental rows with their rental tag.
+        v.spawn_on_restart = True
         if rental_name:
             v.alias = rental_name
         await v.asave()

@@ -83,6 +83,19 @@ async def cmd_spawn_displays(ctx: CommandContext, display_id: Optional[int] = No
         qs = qs.filter(pk=display_id)
 
     async for v in qs:
+        # Rental-marked rows re-materialize as rentals: rental tag + tags so
+        # /unrental can still despawn them by tag after a restart.
+        if v.rental:
+            await despawn_by_tag(ctx.http_client_mod, f"rental-{v.id}")
+            await spawn_registered_vehicle(
+                ctx.http_client_mod,
+                v,
+                tag="rental_vehicles",
+                tags=[f"rental-{v.id}"],
+                extra_data={"drivable": True},
+            )
+            continue
+
         tags = [f"display-{v.id}"]
         if v.character:
             tags.extend([v.character.name, f"display-{v.character.guid}"])
