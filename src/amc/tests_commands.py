@@ -3882,6 +3882,117 @@ class RentalMarkTestCase(SimpleTestCase):
         self.assertEqual(v.alias, "Old Name")
 
 
+class RentalRelocateCopyTests(SimpleTestCase):
+    """/rental re-run while sitting in a rental COPY relocates the rental."""
+
+    def setUp(self):
+        self.ctx = MagicMock(spec=CommandContext)
+        self.ctx.reply = AsyncMock()
+        self.ctx.http_client_mod = MagicMock()
+        self.ctx.character = MagicMock()
+        self.ctx.character.id = 7
+        self.ctx.character.guid = "test-guid"
+        self.ctx.character.name = "TestOwner"
+        self.ctx.player = MagicMock()
+        self.last_vehicle = {
+            "vehicle": {
+                "vehicleId": 0,
+                "fullName": "Vista_C SM_Vehicle_Vista_C",
+                "classFullName": "BlueprintGeneratedClass SM_Vehicle_Vista_C",
+                "position": {"X": 111.0, "Y": 222.0, "Z": 33.0},
+                "rotation": {"Yaw": 90.0},
+                "companyName": "",
+            }
+        }
+        self.decals_data = {"customization": {"color": "red"}, "decal": None}
+        self.parts_data = {"parts": [{"Key": "engine_v8"}]}
+
+    def _make_row(self, **overrides):
+        v = MagicMock()
+        v.id = 5
+        v.rental = True
+        v.spawn_on_restart = False
+        v.asave = AsyncMock()
+        v.config = {"VehicleName": "TestCar"}
+        v.character_id = 7
+        v.company_guid = None
+        for key, value in overrides.items():
+            setattr(v, key, value)
+        return v
+
+    async def _run(self, rows, last_vehicle_error=False):
+        """Runs /rental with register returning nothing (sitting in a copy)."""
+        last_mock = (
+            AsyncMock(side_effect=Exception("no last vehicle"))
+            if last_vehicle_error
+            else AsyncMock(return_value=self.last_vehicle)
+        )
+        spawn_mock = AsyncMock()
+        despawn_mock = AsyncMock()
+        filter_mock = MagicMock()
+        filter_mock.__aiter__.return_value = rows
+        with (
+            patch(
+                "amc.commands.vehicles.register_player_vehicles",
+                new=AsyncMock(return_value=[]),
+            ),
+            patch("amc.commands.vehicles.get_player", new=AsyncMock(return_value=None)),
+            patch(
+                "amc.commands.vehicles.get_player_last_vehicle", new=last_mock
+            ),
+            patch(
+                "amc.commands.vehicles.get_player_last_vehicle_decals",
+                new=AsyncMock(return_value=self.decals_data),
+            ),
+            patch(
+                "amc.commands.vehicles.get_player_last_vehicle_parts",
+                new=AsyncMock(return_value=self.parts_data),
+            ),
+            patch(
+                "amc.commands.vehicles.CharacterVehicle.objects.filter",
+                return_value=filter_mock,
+            ),
+            patch("amc.commands.vehicles.despawn_by_tag", new=despawn_mock),
+            patch(
+                "amc.commands.vehicles.spawn_registered_vehicle", new=spawn_mock
+            ),
+        ):
+            await cmd_rental(self.ctx)
+        return spawn_mock, despawn_mock, self.ctx.reply.call_args[0][0]
+
+    async def test_relocates_single_rental_to_current_position(self):
+        v = self._make_row()
+        spawn_mock, despawn_mock, output = await self._run([v])
+        self.assertIn("moved to your current position", output)
+        self.assertEqual(v.config["Location"], {"X": 111.0, "Y": 222.0, "Z": 33.0})
+        self.assertEqual(v.config["Rotation"], {"Yaw": 90.0})
+        # Full config re-capture, not just the location.
+        self.assertEqual(v.config["Parts"], [{"Key": "engine_v8"}])
+        self.assertEqual(v.config["Customization"], {"color": "red"})
+        self.assertEqual(v.config["VehicleName"], "Vista")
+        self.assertEqual(v.config["AssetPath"], "SM_Vehicle_Vista_C")
+        self.assertTrue(v.spawn_on_restart)
+        v.asave.assert_awaited()
+        despawn_mock.assert_awaited_once_with(self.ctx.http_client_mod, "rental-5")
+        spawn_mock.assert_awaited_once()
+        self.assertEqual(spawn_mock.call_args.kwargs["tag"], "rental_vehicles")
+
+    async def test_multiple_rentals_ask_for_original_vehicle(self):
+        rows = [self._make_row(id=5), self._make_row(id=6)]
+        spawn_mock, despawn_mock, output = await self._run(rows)
+        self.assertIn("You have multiple rentals", output)
+        spawn_mock.assert_not_awaited()
+        despawn_mock.assert_not_awaited()
+
+    async def test_no_last_vehicle_falls_through_to_generic_message(self):
+        _spawn, _despawn, output = await self._run([], last_vehicle_error=True)
+        self.assertIn("No rentable vehicle found", output)
+
+    async def test_no_rental_rows_falls_through_to_generic_message(self):
+        _spawn, _despawn, output = await self._run([])
+        self.assertIn("No rentable vehicle found", output)
+
+
 class UnrentalClearsRestartSpawnTests(SimpleTestCase):
     """/unrental clears the restart-spawn registration along with rental."""
 
