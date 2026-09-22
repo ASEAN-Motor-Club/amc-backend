@@ -300,8 +300,15 @@ class WorkerSettings:
         # in-game announce fires only when at least one POST /events
         # actually reached the game server (the old version announced
         # unconditionally, producing "TT is up!" with no events).
+        # Interval: every 10 minutes (Yuuka 2026-09-22) so the tick is
+        # observable on the test server; silent no-op when the slot target
+        # is already filled or no window-active TT ScheduledEvent exists.
         # pyrefly: ignore [bad-argument-type]
-        cron(post_random_events, hour={0, 3, 6, 9, 12, 15, 18, 21}, minute=0, second=15),
+        cron(
+            post_random_events,
+            minute=set(range(0, 60, 10)),
+            second=15,
+        ),
         # cron(monitor_server_condition, minute=set(range(3, 60, 5))),
         # cron(monitor_rp_mode, second=set(range(7, 60, 13))),
     ]
