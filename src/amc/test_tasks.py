@@ -732,3 +732,52 @@ class GarageRestartSpawnTests(TestCase):
         refreshed = await Garage.objects.aget(id=garage.id)
         self.assertIsNone(refreshed.tag)
         self.assertEqual(garage_spawn.await_count, 3)
+
+
+class SpawnDisplayVehiclesRentalBranchTests(SimpleTestCase):
+    """Rental rows in the restart-spawn flow re-materialize as rentals."""
+
+    async def test_rental_rows_respawn_with_rental_tags(self):
+        from unittest.mock import MagicMock
+
+        import amc.tasks as tasks_module
+
+        rental_v = MagicMock()
+        rental_v.id = 5
+        rental_v.rental = True
+        rental_v.character = None
+        display_v = MagicMock()
+        display_v.id = 9
+        display_v.rental = False
+        display_v.character = MagicMock()
+
+        mock_qs = MagicMock()
+        mock_qs.filter.return_value.__aiter__.return_value = [rental_v, display_v]
+
+        patcher, _waits = _patch_sleep()
+        with (
+            patcher,
+            patch(
+                "amc.models.CharacterVehicle.objects.select_related",
+                return_value=mock_qs,
+            ),
+            patch("amc.tasks.despawn_by_tag", new=AsyncMock()) as despawn,
+            patch(
+                "amc.tasks.spawn_registered_vehicle", new=AsyncMock()
+            ) as spawn,
+        ):
+            await tasks_module.spawn_display_vehicles(http_client_mod=object())
+
+        kwargs_rental = spawn.call_args_list[0].kwargs
+        self.assertEqual(kwargs_rental["tag"], "rental_vehicles")
+        self.assertEqual(kwargs_rental["tags"], ["rental-5"])
+        self.assertEqual(kwargs_rental["extra_data"].get("drivable"), True)
+
+        kwargs_display = spawn.call_args_list[1].kwargs
+        self.assertEqual(kwargs_display["tag"], "display_vehicles")
+        self.assertIn("display-9", kwargs_display["tags"])
+
+        despawned_tags = [c.args[1] for c in despawn.await_args_list]
+        # Only the rental branch despawns; the tasks.py display branch spawns
+        # without a despawn (the /spawn_displays command path owns that one).
+        self.assertEqual(despawned_tags, ["rental-5"])
