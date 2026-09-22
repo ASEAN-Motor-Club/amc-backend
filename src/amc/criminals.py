@@ -141,7 +141,7 @@ def wanted_accrual_multiplier(dist_units: float) -> float:
 # distance law sets the base; SPEED multiplies it after the clamp, so near
 # cops a runner breaks well below the parked ceiling while a parked
 # suspect's cadence is unchanged. Speed can only ever speed updates up.
-# An officer inside the suspect's ring gets a fixed "<200m" proximity ping
+# An officer inside the suspect's ring gets a fixed "<ring>m proximity ping
 # every max_interval instead of a bearing — the final-search phase, which
 # doubles as the suspect-facing covert tell.
 #
@@ -1377,7 +1377,7 @@ async def tick_police_suspect_locations(http_client, http_client_mod, http_clien
     is never SLOWER per cop than a pair (the uncapped ×N made a 4-cop
     response 4× blinder per cop; freeman, 2026-09-20). Effective range
     [3×min(N,2), 15×min(N,2)] s. An officer inside the suspect's 200 m
-    close ring gets a fixed "<200m" proximity ping every COMPASS.max_interval
+    close ring gets a fixed "<ring>m proximity ping every tuning.max_interval
     (15 s) instead of a bearing — no budget, no speed effect, and ring cops
     don't count into other officers' budgets. Missing speed
     telemetry degrades to the stationary cadence.
@@ -1446,7 +1446,7 @@ async def tick_police_suspect_locations(http_client, http_client_mod, http_clien
 
     # Live tuning: the admin-editable singleton (defaults mirror config "A").
     # Fetched once per tick so admin edits apply without a restart.
-    tuning = await CompassTuningConfig.aget_config()
+    tuning = await CompassTuningConfig.aget_active()
 
     # Force-level budget (freeman, 2026-09-20): count the officers who would
     # RECEIVE flashes for each suspect (on-duty cops beyond their own 200 m
@@ -1501,7 +1501,9 @@ async def tick_police_suspect_locations(http_client, http_client_mod, http_clien
 
             if in_ring:
                 # Close ring: no bearing, just the proximity callout
-                entries.append((dist, f"[{character.name}] <200m"))
+                # (label follows the tunable ring distance)
+                ring_m = tuning.ring_distance // 100
+                entries.append((dist, f"[{character.name}] <{ring_m}m"))
                 continue
 
             dx = suspect_loc[0] - officer_x

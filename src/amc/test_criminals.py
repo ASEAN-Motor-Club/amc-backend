@@ -48,7 +48,6 @@ from amc.criminals import (
 )
 from amc.factories import CharacterFactory, PlayerFactory
 from amc.models import (
-    Character,
     CompassTuningConfig,
     PoliceSession,
     Wanted,
@@ -2746,8 +2745,8 @@ class CompassTickTests(TestCase):
         clamped to [COMPASS_MIN_INTERVAL, COMPASS_MAX_INTERVAL]
         effective = solo × min(N, 2)   (N = officers beyond their own ring)
 
-    An officer inside the suspect's 200 m close ring receives a fixed
-    "<200m" proximity ping (every COMPASS_MAX_INTERVAL, no bearing, not
+    An officer inside the suspect's close close ring receives a fixed
+    "<ring>m proximity ping (every max_interval, no bearing, not
     counted into the budget); each officer's cadence is keyed on their own
     distance and
     split across the receiving force (force budget, capped at 2 so a large
@@ -3007,11 +3006,16 @@ class CompassTickTests(TestCase):
     async def test_officer_inside_ring_close_ping_far_officer_receives(
         self, mock_get_players, mock_get_locations, mock_police, mock_sys_msg,
     ):
-        """Officer at 100 m gets the fixed '<200m' close ping (no bearing);
+        """Officer at 100 m gets the fixed close ping (no bearing);
         officer at 3 km still gets the normal bearing line."""
         criminal = await self._setup_criminal()
         officer_near = await self._setup_police()
         officer_far = await self._setup_police()
+
+        # Widen the ring via the live tuning row: label must follow it
+        tuning = await CompassTuningConfig.aget_active()
+        tuning.ring_distance = 30_000  # 300 m
+        await tuning.asave(update_fields=["ring_distance"])
 
         mock_get_players.return_value = _make_players_list([
             _make_player_data(criminal.player.unique_id, criminal.guid, *_COMPASS_SUSPECT_LOC),
@@ -3034,7 +3038,7 @@ class CompassTickTests(TestCase):
         self.assertEqual(guids, {officer_near.guid, officer_far.guid})
         near_call = next(c for c in mock_sys_msg.await_args_list
                          if c.kwargs.get("character_guid") == officer_near.guid)
-        self.assertIn("<200m", near_call.args[1])
+        self.assertIn("<300m", near_call.args[1])
 
     async def test_live_tuning_override_changes_cadence(
         self, mock_get_players, mock_get_locations, mock_police, mock_sys_msg,
@@ -3054,7 +3058,7 @@ class CompassTickTests(TestCase):
         mock_http_mod = AsyncMock()
         mock_http_mgmt = AsyncMock()
 
-        tuning = await CompassTuningConfig.aget_config()
+        tuning = await CompassTuningConfig.aget_active()
         tuning.max_interval = 6.0
         await tuning.asave(update_fields=["max_interval"])
 

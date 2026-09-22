@@ -1183,14 +1183,9 @@ class CompassTuningConfigAdmin(admin.ModelAdmin):
         "max_interval",
         "ring_distance",
         "budget_cap",
+        "active",
     ]
-
-    def has_add_permission(self, request):
-        # Only allow add if no instance exists yet
-        return not CompassTuningConfig.objects.exists()
-
-    def has_delete_permission(self, request, obj=None):
-        return False
+    list_filter = ["active"]
 
 
 @admin.register(WantedSystemConfig)
