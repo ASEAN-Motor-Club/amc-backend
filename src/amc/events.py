@@ -920,6 +920,66 @@ async def post_random_events(ctx):
         game_event.state = 3
         await game_event.asave(update_fields=["state"])
 
+    # Live list snapshot — drives both reconcile steps below. If the fetch
+    # fails, skip the reconcile entirely: an empty/absent live list must
+    # NEVER read as "no events live" (it would close every tracked row).
+    live_guids: set[str] | None = None
+    try:
+        async with http_client_mod.get("/events") as resp:
+            if resp.status < 400:
+                payload = (await resp.json()).get("data", [])
+                events = payload.values() if isinstance(payload, dict) else payload
+                live_guids = {
+                    ev.get("EventGuid", "") for ev in events if ev.get("EventGuid")
+                }
+    except Exception as e:
+        print(f"Auto-TT: failed to fetch live events: {e}")
+
+    if live_guids is not None:
+        # 1) Vanished events: the game silently deletes unclaimed owner-less
+        #    events a few minutes after creation (observed 2026-09-22 on the
+        #    test server — no RemoveEvent hook fires). Close their Ready,
+        #    never-raced rows so the slots and setups free up again.
+        async for game_event in GameEvent.objects.filter(
+            auto_created=True, state=1
+        ):
+            if game_event.guid in live_guids:
+                continue
+            if await game_event.participants.aexists():
+                continue  # raced/joined rows are never closed by the cron
+            print(
+                f"Auto-TT: event {game_event.guid} ({game_event.name}) is no "
+                f"longer live in-game; closing stale row {game_event.id}"
+            )
+            await GameEvent.objects.filter(pk=game_event.pk).aupdate(state=3)
+
+        # 2) Rotation: each tick replaces owner-less Ready events that nobody
+        #    joined during their window (Yuuka 2026-09-22: events should get
+        #    replaced when the time is up). Joined/raced events are left
+        #    alone — a player who joined mid-window keeps their event.
+        live_rows = [
+            ge
+            async for ge in GameEvent.objects.filter(
+                auto_created=True, state=1, guid__in=live_guids
+            )
+        ]
+        for game_event in live_rows:
+            if await game_event.participants.aexists():
+                continue
+            try:
+                await remove_event(http_client_mod, game_event.guid)
+            except Exception as e:
+                print(
+                    f"Auto-TT: failed to rotate event {game_event.guid} "
+                    f"({game_event.name}): {e}"
+                )
+                continue
+            print(
+                f"Auto-TT: rotated out unclaimed event {game_event.guid} "
+                f"({game_event.name})"
+            )
+            await GameEvent.objects.filter(pk=game_event.pk).aupdate(state=3)
+
     active_auto = await GameEvent.objects.filter(
         auto_created=True,
         state__gte=0,
