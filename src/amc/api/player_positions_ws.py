@@ -1,11 +1,8 @@
 import asyncio
 import logging
 
-import aiohttp
-from django.conf import settings
-
-from amc.api.player_positions_common import POSITION_UPDATE_SLEEP, get_players_mod
 from amc.api.player_positions_pb2 import PlayerPositions, VehicleKey
+from amc.api.positions_broadcaster import get_positions_broadcaster
 
 logger = logging.getLogger(__name__)
 
@@ -18,6 +15,12 @@ _VEHICLE_KEY_MAP: dict[str, int] = {
 
 
 def serialize_players(players: list[dict]) -> bytes:
+    """Serialize a roster from get_players_mod_masked().
+
+    The mask is the single source of truth: hidden=True entries already carry
+    a zeroed Location and empty VehicleKey — this function does not re-apply
+    any masking, it only translates the dict to protobuf.
+    """
     positions = PlayerPositions()
     for p in players:
         loc = p.get("Location", {})
@@ -34,7 +37,16 @@ def serialize_players(players: list[dict]) -> bytes:
             pos.vehicle_key_enum = enum_val
         else:
             pos.vehicle_key_unknown = raw_key
+        pos.hidden = bool(p.get("hidden", False))
     return positions.SerializeToString()
+
+
+async def _watch_disconnect(receive, disconnect: asyncio.Event):
+    while True:
+        message = await receive()
+        if message["type"] == "websocket.disconnect":
+            disconnect.set()
+            return
 
 
 async def _websocket_handler(scope, receive, send):
@@ -42,27 +54,26 @@ async def _websocket_handler(scope, receive, send):
     # Accept the WebSocket connection
     await send({"type": "websocket.accept", "subprotocol": "protobuf"})
 
-    session = aiohttp.ClientSession(base_url=settings.MOD_SERVER_API_URL)
-    try:
-        while True:
-            # Check if client disconnected
-            try:
-                message = await asyncio.wait_for(receive(), timeout=0.01)
-                if message["type"] == "websocket.disconnect":
-                    return
-            except asyncio.TimeoutError:
-                pass
+    broadcaster = get_positions_broadcaster()
+    await broadcaster.ensure_started()
 
+    disconnect = asyncio.Event()
+    watcher = asyncio.create_task(_watch_disconnect(receive, disconnect))
+    try:
+        async for players in broadcaster.stream_masked():
+            if disconnect.is_set():
+                break
             try:
-                players = await get_players_mod(session, filter_hidden=True)
                 data = serialize_players(players)
                 await send({"type": "websocket.send", "bytes": data})
             except Exception:
                 logger.exception("Error sending player positions")
-
-            await asyncio.sleep(POSITION_UPDATE_SLEEP)
     finally:
-        await session.close()
+        watcher.cancel()
+        try:
+            await watcher
+        except asyncio.CancelledError:
+            pass
 
 
 async def player_positions_ws_app(scope, receive, send):

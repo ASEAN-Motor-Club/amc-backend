@@ -1,4 +1,3 @@
-import asyncio
 import aiohttp
 import json
 from typing import Optional, Any, cast
@@ -88,11 +87,7 @@ from amc.save_file import (
 )
 import os
 
-from .player_positions_common import (
-    POSITION_UPDATE_SLEEP,
-    HEARTBEAT_INTERVAL,
-    get_players_mod,
-)
+from .positions_broadcaster import get_positions_broadcaster
 
 app_router = Router()
 
@@ -401,11 +396,8 @@ player_positions_router = Router()
 
 @player_positions_router.get("/")
 async def streaming_player_positions(request):
-    session = request.state["aiohttp_client"]
-
     async def event_stream():
-        while True:
-            players = await get_players_mod(session, filter_hidden=True)
+        async for players in get_positions_broadcaster().stream_masked():
             player_positions = {
                 player["PlayerName"]: {
                     **{
@@ -414,12 +406,12 @@ async def streaming_player_positions(request):
                     },
                     "vehicle_key": player["VehicleKey"],
                     "unique_id": player["UniqueID"],
+                    "hidden": bool(player.get("hidden", False)),
                 }
                 for player in players
             }
 
             yield f"data: {json.dumps(player_positions)}\n\n"
-            await asyncio.sleep(POSITION_UPDATE_SLEEP)
 
     return StreamingHttpResponse(event_stream(), content_type="text/event-stream")
 
@@ -429,24 +421,9 @@ player_count_router = Router()
 
 @player_count_router.get("/")
 async def streaming_player_count(request):
-    session = request.state["aiohttp_client"]
-
     async def event_stream():
-        last_count = None
-        ticks_since_heartbeat = 0
-        while True:
-            players = await get_players_mod(session, filter_hidden=True)
-            count = len(players)
-            if count != last_count:
-                yield f"data: {count}\n\n"
-                last_count = count
-                ticks_since_heartbeat = 0
-            else:
-                ticks_since_heartbeat += 1
-                if ticks_since_heartbeat * POSITION_UPDATE_SLEEP >= HEARTBEAT_INTERVAL:
-                    yield ": heartbeat\n\n"
-                    ticks_since_heartbeat = 0
-            await asyncio.sleep(POSITION_UPDATE_SLEEP)
+        async for message in get_positions_broadcaster().stream_count():
+            yield message
 
     return StreamingHttpResponse(event_stream(), content_type="text/event-stream")
 
