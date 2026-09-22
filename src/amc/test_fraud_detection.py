@@ -337,11 +337,11 @@ class ValidateCargoPaymentTests(TestCase):
         )
         self.assertEqual(excess, 0)
 
-    async def test_route_history_excludes_clawed_rows(self):
-        """Rows that were clawed (stored payment < raw Net_Payment) must not
-        raise the consensus ceiling: otherwise a cheat could seed a fresh
-        route with 20 inflated deliveries at the per-km ceiling and double
-        its own future threshold."""
+    async def test_route_history_excludes_marked_clawed_rows(self):
+        """Rows MARKED with an amc_fraud_excess claw must not raise the
+        consensus ceiling: otherwise a cheat could seed a fresh route with
+        20 inflated deliveries at the per-km ceiling and double its own
+        future threshold."""
         sender = DeliveryPoint(
             guid="sender-h4", name="Rest Area", coord=Point(0, 0, 0, srid=3857)
         )
@@ -357,7 +357,11 @@ class ValidateCargoPaymentTests(TestCase):
                 timestamp=datetime(2026, 9, 1, 12, 0, i, tzinfo=dt_tz.utc),
                 cargo_key="CabbagePallet",
                 payment=5_000,  # post-clawback
-                data={"Net_Payment": 40_000, "Net_CargoKey": "CabbagePallet"},
+                data={
+                    "Net_Payment": 40_000,
+                    "Net_CargoKey": "CabbagePallet",
+                    "amc_fraud_excess": 35_000,
+                },
                 sender_point=sender,
                 destination_point=dest,
             )
@@ -371,6 +375,63 @@ class ValidateCargoPaymentTests(TestCase):
             destination_point=dest,
         )
         self.assertEqual(excess, 0)
+
+    async def test_route_history_includes_unmarked_legacy_clawed_rows(self):
+        """Pre-marker rows clawed by over-tight historical ceilings (stored
+        payment below raw, no amc_fraud_excess marker) keep their RAW
+        payment in the consensus: excluding them censors the legitimate top
+        of the distribution and false-claws later legitimate deliveries.
+        Regression for the 2026-09-22 Moonshine case: the pre-#117 $20k
+        per-unit cap clamped every legit full-load run (raw up to $70,401)
+        to exactly $20k, the exclusion then left history max at $19,752 and
+        a $39,504 ceiling clawed a legit $51,228 run."""
+        sender = DeliveryPoint(
+            guid="sender-h5", name="Mine", coord=Point(0, 0, 0, srid=3857)
+        )
+        dest = DeliveryPoint(
+            guid="dest-h5", name="Still", coord=Point(926_000, 0, 0, srid=3857)
+        )
+        from datetime import datetime, timezone as dt_tz
+
+        await sender.asave()
+        await dest.asave()
+        # 25 unmarked legacy rows: 24 light runs at ~$3,000 plus one legit
+        # full-load run at $70,401 — all stored clamped to 20,000
+        for i in range(24):
+            await ServerCargoArrivedLog.objects.acreate(
+                timestamp=datetime(2026, 9, 1, 12, 0, i, tzinfo=dt_tz.utc),
+                cargo_key="Moonshine",
+                payment=20_000,
+                data={"Net_Payment": 3_000, "Net_CargoKey": "Moonshine"},
+                sender_point=sender,
+                destination_point=dest,
+            )
+        await ServerCargoArrivedLog.objects.acreate(
+            timestamp=datetime(2026, 9, 1, 12, 0, 24, tzinfo=dt_tz.utc),
+            cargo_key="Moonshine",
+            payment=20_000,
+            data={"Net_Payment": 70_401, "Net_CargoKey": "Moonshine"},
+            sender_point=sender,
+            destination_point=dest,
+        )
+        # A $51,228 delivery (kaizu's shape) is under 1.2 x 70,401 -> no claw.
+        excess = await validate_cargo_payment(
+            cargo_key="Moonshine",
+            payment=51_228,
+            quantity=1,
+            sender_point=sender,
+            destination_point=dest,
+        )
+        self.assertEqual(excess, 0)
+        # ...but beyond 1.2 x the raw max it still claws.
+        excess = await validate_cargo_payment(
+            cargo_key="Moonshine",
+            payment=90_000,
+            quantity=1,
+            sender_point=sender,
+            destination_point=dest,
+        )
+        self.assertEqual(excess, int(90_000 - 1.2 * 70_401))
 
     async def test_short_distance_skipped(self):
         sender = DeliveryPoint(
