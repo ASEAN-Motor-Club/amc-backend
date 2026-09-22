@@ -1,7 +1,11 @@
-"""Compass tuning dashboard — staff-only interactive tuner.
+"""Compass tuning dashboard — embedded in the Django admin site.
 
-Page: GET /staff/compass-tuning/  (sliders, realtime graph + interval matrix)
-API:  GET/POST /staff/compass-tuning/configs/  (list / save / create / activate)
+Page: GET /admin/amc/compasstuningconfig/dashboard/
+API:  GET/POST /admin/amc/compasstuningconfig/dashboard/configs/
+
+Registered via CompassTuningConfigAdmin.get_urls() with
+admin_site.admin_view(), so Django-admin session auth + staff gating
+apply automatically.
 
 Sliders re-implement the compass law client-side so the graph and matrix
 update live while dragging; "Activate" / "Save as new" / "Update active"
@@ -12,10 +16,8 @@ POST back to the API. The compass tick reads the row marked active=True
 import json
 import logging
 
-from django.contrib.admin.views.decorators import staff_member_required
 from django.http import HttpRequest, HttpResponse, JsonResponse
 from django.shortcuts import render
-from django.views.decorators.http import require_http_methods
 
 from amc.models import CompassTuningConfig
 
@@ -32,7 +34,6 @@ _CONFIG_FIELDS = (
 
 
 
-@staff_member_required
 def compass_tuning_dashboard(request: HttpRequest) -> HttpResponse:
     return render(request, "amc/compass_tuning_dashboard.html", {})
 
@@ -50,8 +51,6 @@ def _serialize(cfg: CompassTuningConfig) -> dict:
     }
 
 
-@staff_member_required
-@require_http_methods(["GET", "POST"])
 def compass_tuning_configs(request: HttpRequest) -> JsonResponse:
     """List / save / create / activate compass tuning configs (JSON)."""
     if request.method == "GET":

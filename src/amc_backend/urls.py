@@ -22,12 +22,9 @@ from django.conf.urls.static import static
 from .api import api
 from .api_v1 import api_v1
 from amc.views import login_with_token
-from amc.compass_dashboard import compass_tuning_configs, compass_tuning_dashboard
 
 urlpatterns = [
     path("admin/", admin.site.urls),
-    path("staff/compass-tuning/", compass_tuning_dashboard, name="compass_tuning"),
-    path("staff/compass-tuning/configs/", compass_tuning_configs, name="compass_tuning_configs"),
     path("api/login/token/", login_with_token, name="token_login_api"),
     path("api/v1/", api_v1.urls),
     path("api/", api.urls),
