@@ -56,6 +56,7 @@ def build_display_name(
     wanted_stars: int = 0,
     rp_mode: bool = False,
     police_on_duty: bool = False,
+    pending_wanted: bool = False,
     guild_abbreviation: str | None = None,
     muted: bool = False,
 ) -> str:
@@ -63,8 +64,9 @@ def build_display_name(
 
     Tag format: [XRMP1*****C1G3] BaseName[ABV]  (order: X, R, M, P, stars, C, G; guild suffix at end)
       X = Muted (persisted mute active — cannot chat)
-      R = RP mode toggled on OR wanted OR on police duty (all three are
-          teleport-locked server-side via the R-name hook match)
+      R = RP mode toggled on OR wanted (active or grace-period pending) OR on
+          police duty (all teleport-locked server-side via the R-name hook
+          match)
       M = Modded vehicle parts
       P1 = Police level (active session)
       ***** = Wanted level (1–5 stars, based on wanted_remaining heat)
@@ -81,6 +83,8 @@ def build_display_name(
         wanted_stars: Wanted level (0–5, 0 = not wanted)
         rp_mode: Whether the character is currently in RP mode
         police_on_duty: Whether the character has an active police session
+        pending_wanted: Whether a grace-period PendingWanted flag exists
+            (teleport-locked immediately, before any stars render)
         guild_abbreviation: Active guild abbreviation (e.g. "GOP"), or None
         muted: Whether the player is currently muted
     """
@@ -90,7 +94,7 @@ def build_display_name(
     if muted:
         tag += "X"
 
-    if rp_mode or wanted_stars > 0 or police_on_duty:
+    if rp_mode or wanted_stars > 0 or police_on_duty or pending_wanted:
         tag += "R"
 
     if has_custom_parts:
@@ -183,6 +187,14 @@ async def refresh_player_name(
         character=character, ended_at__isnull=True
     ).aexists()
 
+    # Grace-period pending wanted shares the R tag immediately: the criminal
+    # must not be able to teleport away during the 30 s warning window.
+    from amc.models import PendingWanted
+
+    pending_wanted = await PendingWanted.objects.filter(
+        character=character
+    ).aexists()
+
     # Determine GUILD state
     from amc.models import GuildSession
 
@@ -234,6 +246,7 @@ async def refresh_player_name(
         wanted_stars=wanted_stars,
         rp_mode=character.rp_mode,
         police_on_duty=police_on_duty,
+        pending_wanted=pending_wanted,
         guild_abbreviation=guild_abbreviation,
         muted=muted,
     )

@@ -171,6 +171,20 @@ def test_build_display_name_wanted_only():
     )
 
 
+def test_build_display_name_pending_wanted_only():
+    # Grace period: R (teleport lock) immediately, no stars until apply.
+    assert build_display_name("PlayerOne", pending_wanted=True) == "[R] PlayerOne"
+
+
+def test_build_display_name_pending_wanted_with_rp_and_mods():
+    assert (
+        build_display_name(
+            "PlayerOne", rp_mode=True, has_custom_parts=True, pending_wanted=True
+        )
+        == "[RM] PlayerOne"
+    )
+
+
 def test_build_display_name_wanted_w1():
     assert (
         build_display_name("PlayerOne", wanted_stars=1)

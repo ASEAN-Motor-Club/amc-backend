@@ -32,6 +32,7 @@ from amc.criminals import (
     create_or_refresh_wanted,
     nearest_effective_cop_distance_m,
 )
+from amc.player_tags import refresh_player_name
 from amc.special_cargo import (
     ILLICIT_CARGO_KEYS,
     accumulate_illicit_delivery,
@@ -412,6 +413,9 @@ async def handle_cargo_arrived(event, player, character, ctx):
                         WANTED_GRACE_POPUP,
                         character_guid=character.guid,
                     )
+                    # R tag immediately: the grace window must not be a
+                    # teleport window.
+                    await refresh_player_name(character, ctx.http_client_mod)
 
         # Discord notification — suppressed for illicit cargo to avoid revealing
         # criminal activity in a public channel.

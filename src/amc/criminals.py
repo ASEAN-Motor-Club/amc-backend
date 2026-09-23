@@ -789,6 +789,9 @@ async def tick_wanted_countdown(http_client, http_client_mod, http_client_mgmt=N
                 "wanted tick: dormant — dropped %d pending trigger(s)",
                 len(due_pendings),
             )
+            # Strip the R tag the pending carried (teleport lock lifted).
+            for p in due_pendings:
+                await refresh_player_name(p.character, http_client_mod)
         if organic:
             await Wanted.objects.filter(
                 id__in=[w.id for w in organic]

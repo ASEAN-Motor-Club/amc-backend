@@ -191,6 +191,9 @@ class GracePeriodApplyTests(TestCase):
             await tick_wanted_countdown(AsyncMock(), AsyncMock())
 
         mock_armed.assert_awaited_once()
+        # The dropped pending's R tag is stripped (teleport lock lifted).
+        patches[2].assert_awaited()
+        self.assertIs(patches[2].await_args[0][0], character)
         # Dormant rule: the trigger never applies with zero effective cops.
         still_pending = await PendingWanted.objects.filter(
             character=character
@@ -201,6 +204,24 @@ class GracePeriodApplyTests(TestCase):
         ).aexists()
         self.assertFalse(wanted_exists)
         mock_announce.assert_not_awaited()
+
+    async def test_pending_wanted_carries_r_tag_in_name(self):
+        """The pending flag alone puts [R] on the name — no stars, no wanted."""
+        from amc.player_tags import refresh_player_name
+
+        player = await _sync_create(PlayerFactory)()
+        character = await _sync_create(CharacterFactory)(player=player)
+        await _sync_create(
+            PendingWanted,
+            character=character,
+            apply_at=timezone.now() + timedelta(seconds=WANTED_GRACE_SECONDS),
+            trigger_amount=100_000,
+        )
+
+        await refresh_player_name(character, None)
+
+        await character.arefresh_from_db(fields=["custom_name"])
+        self.assertEqual(character.custom_name, f"[R] {character.name}")
 
     async def test_apply_with_admin_flag_refreshes_without_repricing(self):
         """An admin /setwanted flag landing during the grace window absorbs the
@@ -360,6 +381,10 @@ class GracePeriodPopupTests(TestCase):
             patch(
                 "amc.handlers.cargo.show_popup", new_callable=AsyncMock
             ) as mock_popup,
+            patch(
+                "amc.handlers.cargo.refresh_player_name",
+                new_callable=AsyncMock,
+            ) as mock_refresh,
             patch("amc.criminals.refresh_player_name", new_callable=AsyncMock),
             patch("amc.criminals.send_system_message", new_callable=AsyncMock),
             patch("amc.special_cargo.random") as mock_rng,
@@ -373,6 +398,9 @@ class GracePeriodPopupTests(TestCase):
             )
 
         mock_popup.assert_awaited_once()
+        # R tag applied immediately at trigger time — the grace window must
+        # not be a teleport window.
+        mock_refresh.assert_awaited_once_with(character, mod_client)
         self.assertIs(mock_popup.await_args[0][0], mod_client)
         self.assertEqual(mock_popup.await_args[0][1], WANTED_GRACE_POPUP)
         self.assertEqual(
