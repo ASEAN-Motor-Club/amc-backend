@@ -181,7 +181,7 @@ class GracePeriodApplyTests(TestCase):
         with (
             patches[0] as mock_armed,
             patches[1],
-            patches[2],
+            patches[2] as mock_strip_tag,
             patches[3],
             patches[4],
             patches[5],
@@ -192,8 +192,8 @@ class GracePeriodApplyTests(TestCase):
 
         mock_armed.assert_awaited_once()
         # The dropped pending's R tag is stripped (teleport lock lifted).
-        patches[2].assert_awaited()
-        self.assertIs(patches[2].await_args[0][0], character)
+        mock_strip_tag.assert_awaited_once()
+        self.assertEqual(mock_strip_tag.await_args[0][0].pk, character.pk)
         # Dormant rule: the trigger never applies with zero effective cops.
         still_pending = await PendingWanted.objects.filter(
             character=character
