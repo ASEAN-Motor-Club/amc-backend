@@ -5,11 +5,12 @@ same per-tick snapshot produced by ONE loop — no per-connection fetch loops.
 """
 
 import asyncio
+from unittest.mock import AsyncMock, patch
 
 from django.test import SimpleTestCase
 
 from amc.api.player_positions_common import HEARTBEAT_INTERVAL, POSITION_UPDATE_SLEEP
-from amc.api.positions_broadcaster import PositionsBroadcaster
+from amc.api.positions_broadcaster import PositionsBroadcaster, _default_fetch
 
 
 def _make_player(unique_id, x=1, y=2, z=3, vehicle_key="DUKE", hidden=False):
@@ -145,3 +146,17 @@ class StreamCountTests(SimpleTestCase):
             self.assertEqual(msg, "data: 2\n\n")
         finally:
             await _stop_broadcaster(b)
+
+
+class DefaultFetchTests(SimpleTestCase):
+    async def test_default_fetch_bypasses_cache(self):
+        """The broadcaster's fetch must not read the mod-players cache: the 2 s
+        TTL would replay snapshots across 1 s ticks and emit duplicate frames."""
+        from amc.api import positions_broadcaster
+
+        with patch.object(
+            positions_broadcaster, "get_players_mod_masked", new_callable=AsyncMock
+        ) as mock_masked:
+            mock_masked.return_value = []
+            await _default_fetch(None)
+            mock_masked.assert_awaited_once_with(None, use_cache=False)

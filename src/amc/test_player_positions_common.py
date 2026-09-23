@@ -229,6 +229,24 @@ class GetPlayersModFilterTests(TestCase):
         self.assertEqual(len(result), 1)
         self.assertEqual(int(result[0]["UniqueID"]), regular_player.unique_id)
 
+    async def test_use_cache_false_bypasses_cache(self):
+        """With use_cache=False the roster is fetched directly even when the
+        cache holds data, and the fetch is not written back to the cache."""
+        cache.set("mod_players_list_all", [_make_mod_player(999)], timeout=5)
+        session = _FakeSession([_make_mod_player(1)])
+        result = await get_players_mod(session, use_cache=False)
+        self.assertEqual([int(p["UniqueID"]) for p in result], [1])
+        # the fetch is not written back — the cache still holds only the stale
+        # entry we seeded, never the fresh one
+        cached = cache.get("mod_players_list_all")
+        self.assertEqual([int(p["UniqueID"]) for p in cached], [999])
+
+    async def test_masked_use_cache_false_fresh_snapshot(self):
+        cache.set("mod_players_list_all", [_make_mod_player(999)], timeout=5)
+        session = _FakeSession([_make_mod_player(7)])
+        result = await get_players_mod_masked(session, use_cache=False)
+        self.assertEqual([int(p["UniqueID"]) for p in result], [7])
+
     async def test_no_db_query_when_filter_false_and_cached(self):
         cache.set("mod_players_list_all", [_make_mod_player(1)], timeout=5)
         session = _FakeSession([])
