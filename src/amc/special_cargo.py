@@ -40,16 +40,20 @@ ILLICIT_CARGO_KEYS: set[str] = {
     "CocaineBricks",
 }
 
-# Wanted trigger chance (freeman design 2026-09-20 — ratio-driven, 5% floor →
-# 50% ceiling with a quadratic knee, attenuated by distance to the nearest
-# effective cop). Spec of record:
-#   amc-server/.hermes/plans/2026-09-20_095637-wanted-trigger-restore.md
-#   YouTrack KB 183-4 "Wanted trigger chance formula"
+# Wanted trigger chance (freeman design 2026-09-23 — 1M guarantee + ratio
+# sweep against a SATURATING yardstick). A delivery of WANTED_GUARANTEE_PAY or
+# more is always wanted (no roll, cop attenuation ignored); below that, pay is
+# measured against the criminal's yardstick — their lifetime illicit total
+# *score* (measured before this delivery), which saturates at
+# WANTED_YARDSTICK_ASYMPTOTE so the 300k haul plateaus ~25% at very high
+# scores while a 1M haul is guaranteed for everyone. Spec: this PR thread.
+WANTED_GUARANTEE_PAY = 1_000_000  # illicit deliveries ≥ this are always wanted
 WANTED_TRIGGER_FLOOR_CHANCE = 0.05  # ambient risk on every illicit delivery, all ranks
-WANTED_TRIGGER_CEILING_CHANCE = 0.50  # asymptotic ceiling of the ratio sweep
-WANTED_TRIGGER_KNEE_RATIO = 0.3  # ratio at the sweep midpoint (P = 27.5%)
+WANTED_TRIGGER_CEILING_CHANCE = 1.0  # asymptotic ceiling of the ratio sweep
+WANTED_TRIGGER_KNEE_RATIO = 0.62  # ratio at the sweep midpoint (P = 52.5%)
 WANTED_YARDSTICK_FLOOR = 100_000  # lifetime-total reference for fresh records
-WANTED_YARDSTICK_EXPONENT = 0.75  # sub-linear yardstick growth (rank protection)
+WANTED_YARDSTICK_ASYMPTOTE = 1_050_000  # yardstick saturation (300k plateau ~25%)
+WANTED_YARDSTICK_HALF_SCORE = 2_500_000  # score at which the yardstick is halfway saturated
 WANTED_COP_ATTENUATION_METRES = 1000.0  # ramp length to the nearest effective cop
 WANTED_COP_ATTENUATION_EXPONENT = 2.0  # ramp shape: sweep scales with (d/range)^γ
 # Minimum bounty placed on a Wanted record (creation or per-delivery increment).
@@ -83,17 +87,23 @@ def cop_attenuation_multiplier(cop_distance_m: float | None) -> float:
 def wanted_trigger_chance(pay: int, score: int, cop_distance_m: float | None) -> float:
     """Chance (0..1) that one illicit delivery creates a Wanted record.
 
-    Ratio-driven (freeman 2026-09-20): *pay* is measured against the
-    criminal's yardstick — their lifetime illicit total *score* (measured
-    before this delivery), floored at WANTED_YARDSTICK_FLOOR so fresh records
-    are not auto-maxed. The ratio sweep saturates between the floor and
-    ceiling chances through a quadratic knee; the cop-proximity attenuation
-    then scales everything above the floor by distance to the nearest
-    effective cop, so camping a delivery site farms nothing.
+    Guarantee + ratio-driven (freeman 2026-09-23): a delivery of
+    WANTED_GUARANTEE_PAY or more is wanted outright (returns 1.0 — the roll
+    and the cop-proximity attenuation are bypassed). Below that, *pay* is
+    measured against the criminal's yardstick — their lifetime illicit total
+    *score* (measured before this delivery), which saturates at
+    WANTED_YARDSTICK_ASYMPTOTE so mid-size hauls plateau at very high scores
+    while large hauls stay dangerous. The ratio sweep saturates between the
+    floor and ceiling chances through a quadratic knee; the cop-proximity
+    attenuation then scales everything above the floor by distance to the
+    nearest effective cop, so camping a delivery site farms nothing.
     """
-    ref = (
-        WANTED_YARDSTICK_FLOOR
-        * max(score / WANTED_YARDSTICK_FLOOR, 1.0) ** WANTED_YARDSTICK_EXPONENT
+    if pay >= WANTED_GUARANTEE_PAY:
+        return 1.0
+    ref = WANTED_YARDSTICK_FLOOR + (
+        (WANTED_YARDSTICK_ASYMPTOTE - WANTED_YARDSTICK_FLOOR)
+        * score
+        / (score + WANTED_YARDSTICK_HALF_SCORE)
     )
     ratio = pay / ref
     ratio_sq = ratio * ratio
@@ -116,8 +126,11 @@ def should_trigger_wanted(pay: int, score: int, cop_distance_m: float | None) ->
     total measured BEFORE this delivery accrues. *cop_distance_m* is the
     distance in metres to the nearest effective cop (None = unknown →
     unattenuated). Callers must not roll at all when there is NO effective
-    cop — the wanted system is dormant then (see amc.criminals).
+    cop — the wanted system is dormant then (see amc.criminals). Deliveries
+    of WANTED_GUARANTEE_PAY or more bypass the roll and the attenuation.
     """
+    if pay >= WANTED_GUARANTEE_PAY:
+        return True
     return random.random() < wanted_trigger_chance(pay, score, cop_distance_m)
 
 

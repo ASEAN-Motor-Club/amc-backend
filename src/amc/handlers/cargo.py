@@ -345,9 +345,12 @@ async def handle_cargo_arrived(event, player, character, ctx):
             already_pending = await PendingWanted.objects.filter(
                 character=character
             ).aexists()
-            # Random wanted trigger — restored 2026-09-20 (#154; freeman design).
-            # Ratio-driven chance, attenuated by distance to the nearest
-            # effective cop so camping a delivery site farms nothing. The
+            # Random wanted trigger — restored 2026-09-20 (#154; freeman design),
+            # retuned 2026-09-23: 1M+ aggregate hauls are guaranteed wanted
+            # (no roll, cop attenuation bypassed); smaller hauls use the
+            # ratio-driven chance against a saturating yardstick, attenuated
+            # by distance to the nearest effective cop so camping a delivery
+            # site farms nothing. The
             # dormant rule is enforced by nearest_effective_cop_distance_m:
             # zero effective cops → no roll (same effective-cop filter as
             # active_police_present()). Exception: police-independent mode

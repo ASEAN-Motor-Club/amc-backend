@@ -590,21 +590,31 @@ class DeliveryDebounceAccumulationTests(TestCase):
 
 
 class WantedTriggerChanceTests(TestCase):
-    """wanted_trigger_chance: ratio curve + cop attenuation (freeman 2026-09-20).
+    """wanted_trigger_chance: 1M guarantee + saturating yardstick (freeman 2026-09-23).
 
-    Anchors are the KB values (YouTrack 183-4): fresh records roll against the
-    100k yardstick floor; established criminals roll colder for the same haul.
+    A delivery >= WANTED_GUARANTEE_PAY is always wanted; below that, pay is
+    measured against a yardstick that saturates, so the 300k haul plateaus
+    ~25% at very high scores while large hauls stay dangerous.
     """
+
+    def test_guarantee_at_one_million(self):
+        from amc.special_cargo import WANTED_GUARANTEE_PAY, wanted_trigger_chance
+
+        self.assertEqual(wanted_trigger_chance(WANTED_GUARANTEE_PAY, 0, None), 1.0)
+        self.assertEqual(wanted_trigger_chance(10_000_000, 0, None), 1.0)
+        # Guarantee overrides the cop attenuation too.
+        self.assertEqual(wanted_trigger_chance(WANTED_GUARANTEE_PAY, 20_000_000, 0), 1.0)
+        # Just below the threshold is NOT guaranteed.
+        self.assertLess(wanted_trigger_chance(WANTED_GUARANTEE_PAY - 1, 20_000_000, None), 1.0)
 
     def test_fresh_record_anchors(self):
         from amc.special_cargo import wanted_trigger_chance
 
         for pay, expected in (
-            (10_000, 0.095),
-            (50_000, 0.381),
-            (100_000, 0.463),
-            (500_000, 0.498),
-            (1_500_000, 0.500),
+            (10_000, 0.0741),
+            (50_000, 0.4244),
+            (100_000, 0.7362),
+            (500_000, 0.9856),
         ):
             self.assertAlmostEqual(
                 wanted_trigger_chance(pay, 0, None), expected, places=3, msg=f"pay={pay}"
@@ -614,10 +624,8 @@ class WantedTriggerChanceTests(TestCase):
         from amc.special_cargo import wanted_trigger_chance
 
         for pay, expected in (
-            (100_000, 0.167),
-            (500_000, 0.454),
-            (1_000_000, 0.488),
-            (1_500_000, 0.494),
+            (100_000, 0.2007),
+            (500_000, 0.8337),
         ):
             self.assertAlmostEqual(
                 wanted_trigger_chance(pay, 1_000_000, None),
@@ -627,12 +635,14 @@ class WantedTriggerChanceTests(TestCase):
             )
 
     def test_kingpin_20m_anchors(self):
+        """300k haul plateaus ~25%; 1M+ is guaranteed regardless of score."""
         from amc.special_cargo import wanted_trigger_chance
 
         for pay, expected in (
-            (500_000, 0.090),
-            (1_000_000, 0.177),
-            (1_500_000, 0.261),
+            (300_000, 0.2475),
+            (500_000, 0.4506),
+            (1_000_000, 1.0),
+            (1_500_000, 1.0),
         ):
             self.assertAlmostEqual(
                 wanted_trigger_chance(pay, 20_000_000, None),
@@ -669,16 +679,16 @@ class WantedTriggerChanceTests(TestCase):
             last = chance
 
     def test_attenuation_profile(self):
-        """γ=2 ramp on a fresh 100k run (base 46.3%)."""
+        """γ=2 ramp on a fresh 100k run (base 73.6%)."""
         from amc.special_cargo import wanted_trigger_chance
 
         for metres, expected in (
             (0, 0.050),
-            (250, 0.076),
-            (500, 0.153),
-            (750, 0.282),
-            (1_000, 0.463),
-            (2_000, 0.463),
+            (250, 0.0929),
+            (500, 0.2216),
+            (750, 0.436),
+            (1_000, 0.7362),
+            (2_000, 0.7362),
         ):
             self.assertAlmostEqual(
                 wanted_trigger_chance(100_000, 0, metres),
@@ -719,10 +729,10 @@ class ShouldTriggerWantedRollTests(TestCase):
         from amc.special_cargo import should_trigger_wanted
 
         with patch("amc.special_cargo.random") as mock_rng:
-            # Fresh 10k haul → chance exactly 9.5%
-            mock_rng.random.return_value = 0.0949
+            # Fresh 10k haul → chance exactly 7.41%
+            mock_rng.random.return_value = 0.0740
             self.assertTrue(should_trigger_wanted(10_000, 0, None))
-            mock_rng.random.return_value = 0.0951
+            mock_rng.random.return_value = 0.0742
             self.assertFalse(should_trigger_wanted(10_000, 0, None))
 
     def test_point_blank_chance_is_the_floor(self):
@@ -742,13 +752,16 @@ class ShouldTriggerWantedRollTests(TestCase):
             mock_rng.random.return_value = WANTED_TRIGGER_FLOOR_CHANCE + 0.001
             self.assertFalse(should_trigger_wanted(50_000, 20_000_000, 0))
 
-    def test_never_guarantees_trigger(self):
-        """No haul size reaches 100% — the ceiling is asymptotic."""
+    def test_guarantee_bypasses_roll_and_attenuation(self):
+        """A >= 1M haul is wanted outright — even point-blank under a cop."""
         from amc.special_cargo import should_trigger_wanted
 
         with patch("amc.special_cargo.random") as mock_rng:
             mock_rng.random.return_value = 0.9999
-            self.assertFalse(should_trigger_wanted(10_000_000, 0, 5_000))
+            self.assertTrue(should_trigger_wanted(1_000_000, 0, 0))
+            self.assertTrue(should_trigger_wanted(10_000_000, 50_000_000, 5_000))
+            # the RNG is never consulted on the guarantee path
+            mock_rng.random.assert_not_called()
 
 
 @patch("amc.criminals.send_system_message", new_callable=AsyncMock)
