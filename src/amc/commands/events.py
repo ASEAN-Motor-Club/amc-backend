@@ -121,6 +121,7 @@ async def cmd_setup_event(ctx: CommandContext, event_id: Optional[int] = None):
             active = (
                 ScheduledEvent.objects.filter(race_setup__isnull=False)
                 .filter_active_at(ctx.timestamp)
+                .select_related("race_setup")
                 .order_by("-start_time")
             )
             scheduled_event = await active.afirst()
