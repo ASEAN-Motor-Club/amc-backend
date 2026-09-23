@@ -63,8 +63,10 @@ def build_display_name(
 
     Tag format: [XRMP1*****C1G3] BaseName[ABV]  (order: X, R, M, P, stars, C, G; guild suffix at end)
       X = Muted (persisted mute active — cannot chat)
-      R = RP mode toggled on OR wanted OR on police duty (all three are
-          teleport-locked server-side via the R-name hook match)
+      R = RP mode toggled on ONLY. Wanted suspects and on-duty police are
+          NO LONGER tagged R — their teleport lock rides the invisible
+          backend-pushed no-teleport flag (amc/no_teleport.py → the mod's
+          NoTeleportManager), which reveals nothing in the name
       M = Modded vehicle parts
       P1 = Police level (active session)
       ***** = Wanted level (1–5 stars, based on wanted_remaining heat)
@@ -90,7 +92,7 @@ def build_display_name(
     if muted:
         tag += "X"
 
-    if rp_mode or wanted_stars > 0 or police_on_duty:
+    if rp_mode:
         tag += "R"
 
     if has_custom_parts:

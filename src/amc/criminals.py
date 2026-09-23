@@ -24,7 +24,7 @@ from amc.models import (
 from amc.mod_detection import detect_custom_parts, POLICE_DUTY_WHITELIST
 from amc.mod_server import clear_suspect, despawn_player_vehicle, force_exit_vehicle, get_player, get_player_customization, get_player_last_vehicle, get_player_last_vehicle_parts, make_suspect, send_system_message, show_popup
 from amc.player_tags import refresh_player_name
-from amc.no_teleport import push_no_teleport
+from amc.no_teleport import push_no_teleport, sync_no_teleport
 from amc.special_cargo import WANTED_MIN_BOUNTY
 
 SUSPECT_COSTUMES = getattr(settings, "SUSPECT_COSTUMES", frozenset())
@@ -609,6 +609,10 @@ async def create_or_refresh_wanted(
             set_by=set_by,
         )
         created = True
+        # Teleport lock: invisible flag replaces the R name tag.
+        from amc.no_teleport import push_no_teleport_later
+
+        push_no_teleport_later(character, http_client_mod, True)
 
     await refresh_player_name(character, http_client_mod)
     asyncio.create_task(
@@ -1159,6 +1163,13 @@ async def _finalize_expired_wanted(
     evaded = evaded or set()
     for char in characters:
         _last_star_notified.pop(char.guid, None)
+        # Flag OFF: the teleport lock rode the (now expired) Wanted.
+        try:
+            await sync_no_teleport(char, http_client_mod)
+        except Exception:
+            logger.warning(
+                f"Failed to sync no-teleport flag for {char.name} after wanted expired"
+            )
         if char.guid not in skip_name_refresh:
             try:
                 await refresh_player_name(char, http_client_mod)

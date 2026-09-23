@@ -86,6 +86,74 @@ class PushNoTeleportTests(TestCase):
             mock_set.assert_not_awaited()
 
 
+class EffectiveFlagSyncTests(TestCase):
+    """sync_no_teleport: effective = manual OR wanted OR on-duty police."""
+
+    async def _make(self, **char_kwargs):
+        player = await _sync_create(PlayerFactory)()
+        return await _sync_create(CharacterFactory)(
+            player=player, criminal_score=50_000, **char_kwargs
+        )
+
+    async def _sync(self, character):
+        from amc.no_teleport import sync_no_teleport
+
+        with patch(
+            "amc.mod_server.set_no_teleport", new_callable=AsyncMock
+        ) as mock_set:
+            await sync_no_teleport(character, AsyncMock())
+        self.assertTrue(mock_set.await_args, "push never fired")
+        return mock_set.await_args[0][2]
+
+    async def test_nothing_active_pushes_false(self):
+        character = await self._make()
+        assert await self._sync(character) is False
+
+    async def test_manual_flag_pushes_true(self):
+        character = await self._make(no_teleport=True)
+        assert await self._sync(character) is True
+
+    async def test_active_wanted_pushes_true(self):
+        from amc.models import Wanted
+
+        character = await self._make()
+        await _sync_create(
+            Wanted, character=character, wanted_remaining=600, amount=0
+        )
+        assert await self._sync(character) is True
+
+    async def test_on_duty_police_pushes_true(self):
+        from amc.models import PoliceSession
+
+        character = await self._make()
+        await _sync_create(PoliceSession, character=character)
+        assert await self._sync(character) is True
+
+    async def test_wanted_creation_pushes_flag(self):
+        from amc.criminals import create_or_refresh_wanted
+
+        character = await self._make()
+        with patch(
+            "amc.no_teleport.push_no_teleport", new_callable=AsyncMock
+        ) as mock_push:
+            await create_or_refresh_wanted(character, AsyncMock(), amount=0)
+        mock_push.assert_awaited()
+        self.assertIs(mock_push.await_args_list[0][0][2], True)
+
+    async def test_police_activation_pushes_flag(self):
+        from amc.police import activate_police, deactivate_police
+
+        character = await self._make()
+        mod = AsyncMock()
+        with patch(
+            "amc.no_teleport.push_no_teleport", new_callable=AsyncMock
+        ) as mock_push:
+            await activate_police(character, mod)
+            await deactivate_police(character, mod)
+        states = [c.args[2] for c in mock_push.await_args_list]
+        self.assertEqual(states, [True, False])
+
+
 class GraceWindowFlagTests(TestCase):
     """The grace window pushes the flag; apply and dormant-drop clear it."""
 
