@@ -24,7 +24,7 @@ from amc.models import (
 from amc.mod_detection import detect_custom_parts, POLICE_DUTY_WHITELIST
 from amc.mod_server import clear_suspect, despawn_player_vehicle, force_exit_vehicle, get_player, get_player_customization, get_player_last_vehicle, get_player_last_vehicle_parts, make_suspect, send_system_message, show_popup
 from amc.player_tags import refresh_player_name
-from amc.special_cargo import announce_money_secured, WANTED_MIN_BOUNTY
+from amc.special_cargo import WANTED_MIN_BOUNTY
 
 SUSPECT_COSTUMES = getattr(settings, "SUSPECT_COSTUMES", frozenset())
 
@@ -662,9 +662,9 @@ async def apply_pending_wanted(pending, http_client, http_client_mod) -> None:
 
     Consumes the PendingWanted row. The bounty is computed by the normal
     creation path of create_or_refresh_wanted (10% of the criminal score,
-    frozen for the chase). The laundered announce — the police-facing
+    frozen for the chase). The illicit-delivery announce — the police-facing
     "notice" — fires immediately at apply time (the debounce window is long
-    past; the frozen trigger amount is announced).
+    past; the delivery total and the frozen bounty are announced).
     """
     character = pending.character
     wanted, created = await create_or_refresh_wanted(
@@ -677,15 +677,19 @@ async def apply_pending_wanted(pending, http_client, http_client_mod) -> None:
     if created and http_client:
         from django.core.cache import cache
 
-        from amc.special_cargo import _announce_laundered_after_delay
+        from amc.special_cargo import announce_illicit_delivery
 
         await cache.aset(
             f"money_laundered:{character.guid}",
-            {"total": pending.trigger_amount, "name": character.name},
+            {
+                "total": pending.trigger_amount,
+                "bounty": wanted.amount,
+                "name": character.name,
+            },
             timeout=60,
         )
         asyncio.create_task(
-            _announce_laundered_after_delay(character.guid, http_client, delay=0)
+            announce_illicit_delivery(character.guid, http_client, delay=0)
         )
     logger.info(
         "pending wanted applied: %s (bounty=$%d, created=%s)",
@@ -874,6 +878,7 @@ async def tick_wanted_countdown(http_client, http_client_mod, http_client_mgmt=N
             cop_locations.append(cop_loc)
 
     expired_characters = []
+    expired_bounties: dict[str, int] = {}
     # ORGANIC wanteds (set_by is None) that decayed out while cops were on
     # duty — the only expiry flavour that counts as "successfully evading
     # arrest" for the score bonus. Dormant-amnesty clears, arrests, and
@@ -1034,6 +1039,7 @@ async def tick_wanted_countdown(http_client, http_client_mod, http_client_mgmt=N
             )
             if wanted.wanted_remaining <= 0:
                 expired_characters.append(wanted.character)
+                expired_bounties[wanted.character.guid] = wanted.amount
                 if wanted.set_by_id is None:
                     evaded_characters.append(wanted.character)
 
@@ -1051,7 +1057,8 @@ async def tick_wanted_countdown(http_client, http_client_mod, http_client_mgmt=N
     _last_modded_vehicle_guids.update(_current_modded_guids)
 
     # Bulk save — must happen BEFORE refresh_player_name so it reads correct DB state
-    await Wanted.objects.abulk_update(wanted_list, ["wanted_remaining", "amount"])
+    # (the bounty in `amount` is frozen at trigger time — the tick never touches it)
+    await Wanted.objects.abulk_update(wanted_list, ["wanted_remaining"])
 
     # Mark expired (set expired_at instead of deleting)
     expired_ids = [w.id for w in wanted_list if w.wanted_remaining <= 0]
@@ -1110,6 +1117,8 @@ async def tick_wanted_countdown(http_client, http_client_mod, http_client_mgmt=N
     await _finalize_expired_wanted(
         expired_characters, http_client, http_client_mod,
         skip_name_refresh=refreshed_guids,
+        bounties=expired_bounties,
+        evaded={c.guid for c in evaded_characters},
     )
 
 
@@ -1119,16 +1128,27 @@ async def _finalize_expired_wanted(
     http_client_mod,
     *,
     skip_name_refresh: set[str] | None = None,
+    bounties: dict[str, int] | None = None,
+    evaded: set[str] | None = None,
 ) -> None:
     """Shared expiry flow for characters whose Wanted record just ended.
 
     Used by the normal tick expiry AND the dormant amnesty (no cops on duty).
     Offline characters are skipped entirely (nothing to undo game-side).
+
+    *bounties* maps guid -> the expired Wanted.amount (the frozen bounty the
+    player escaped). *evaded* is the set of guids whose expiry was an actual
+    evasion (organic wanted decaying to zero while cops were on duty) — those
+    get the evasion announce instead of the plain "no longer wanted" one
+    (freeman 2026-09-23). Dormant-amnesty clears and admin-flag expiries are
+    NOT evasions and keep the plain message.
     """
     if not characters:
         return
     if skip_name_refresh is None:
         skip_name_refresh = set()
+    bounties = bounties or {}
+    evaded = evaded or set()
     for char in characters:
         _last_star_notified.pop(char.guid, None)
         if char.guid not in skip_name_refresh:
@@ -1139,18 +1159,29 @@ async def _finalize_expired_wanted(
                     f"Failed to refresh name for {char.name} after wanted expired"
                 )
         if char.guid:
+            if char.guid in evaded:
+                bounty = bounties.get(char.guid, 0)
+                if bounty > 0:
+                    freedom_msg = (
+                        f"{char.name} managed to evade arrest — their "
+                        f"${bounty:,} bounty has expired and their "
+                        "reputation grows amongst the criminals"
+                    )
+                else:
+                    freedom_msg = (
+                        f"{char.name} managed to evade arrest — their "
+                        "reputation grows amongst the criminals"
+                    )
+            else:
+                freedom_msg = f"{char.name} is no longer wanted by police"
             try:
                 await announce(
-                    f"{char.name} is no longer wanted by police",
+                    freedom_msg,
                     http_client,
                     color="43B581",
                 )
             except Exception:
                 logger.warning(f"Failed to announce freedom for {char.name}")
-            try:
-                await announce_money_secured(char.guid, http_client)
-            except Exception:
-                logger.warning(f"Failed to announce money secured for {char.name}")
             # Immediately drop the in-game suspect GE so the blue overlay and
             # Net_Suspects entry disappear within the same tick rather than
             # waiting up to ~60 s for the mod-side GE duration to expire.

@@ -108,7 +108,7 @@ class GracePeriodApplyTests(TestCase):
                 return_value={"parts": []},
             ),
             patch(
-                "amc.special_cargo._announce_laundered_after_delay",
+                "amc.special_cargo.announce_illicit_delivery",
                 new_callable=AsyncMock,
             ),
         )
@@ -141,9 +141,11 @@ class GracePeriodApplyTests(TestCase):
             character=character
         ).aexists()
         self.assertFalse(still_pending)
-        # Police notice: the laundered announce carries the frozen trigger total.
+        # Police notice: the illicit-delivery announce carries the frozen
+        # trigger total AND the frozen bounty.
         cached = await cache.aget(f"money_laundered:{character.guid}")
         self.assertEqual(cached["total"], 100_000)
+        self.assertEqual(cached["bounty"], 5_000)
         self.assertEqual(cached["name"], character.name)
         mock_announce.assert_awaited_once()
 

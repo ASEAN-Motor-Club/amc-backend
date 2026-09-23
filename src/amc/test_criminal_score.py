@@ -531,7 +531,6 @@ class EvasionBonusTests(TestCase):
             )
         ]
 
-    @patch("amc.criminals.announce_money_secured", new_callable=AsyncMock)
     @patch("amc.criminals.announce", new_callable=AsyncMock)
     @patch("amc.criminals.clear_suspect", new_callable=AsyncMock)
     @patch("amc.criminals.refresh_player_name", new_callable=AsyncMock)
@@ -548,7 +547,6 @@ class EvasionBonusTests(TestCase):
         mock_refresh,
         mock_clear,
         mock_announce,
-        mock_money,
     ):
         player, character = await self._setup_evader(score=50_000)
         mock_get_players.return_value = self._players_for(player, character)
@@ -571,7 +569,6 @@ class EvasionBonusTests(TestCase):
         wanted = await Wanted.objects.filter(character=character).afirst()
         self.assertIsNotNone(wanted.expired_at)
 
-    @patch("amc.criminals.announce_money_secured", new_callable=AsyncMock)
     @patch("amc.criminals.announce", new_callable=AsyncMock)
     @patch("amc.criminals.clear_suspect", new_callable=AsyncMock)
     @patch("amc.criminals.refresh_player_name", new_callable=AsyncMock)
@@ -588,7 +585,6 @@ class EvasionBonusTests(TestCase):
         mock_refresh,
         mock_clear,
         mock_announce,
-        mock_money,
     ):
         # 55_555 + 55_555//10 = 61_110 (integer floor, not rounding)
         player, character = await self._setup_evader(score=55_555)
@@ -597,14 +593,26 @@ class EvasionBonusTests(TestCase):
             Wanted,
             character=character,
             wanted_remaining=BASE_DECAY_PER_TICK * TICK_INTERVAL,
+            amount=5_555,
         )
 
         await tick_wanted_countdown(AsyncMock(), AsyncMock())
 
         await character.arefresh_from_db(fields=["criminal_score"])
         self.assertEqual(character.criminal_score, 61_110)
+        # Evasion announce carries the expired bounty (freeman 2026-09-23).
+        announce_texts = [
+            c.args[0] for c in mock_announce.await_args_list if c.args
+        ]
+        self.assertTrue(
+            any("managed to evade arrest" in t for t in announce_texts),
+            announce_texts,
+        )
+        self.assertTrue(
+            any("$5,555 bounty has expired" in t for t in announce_texts),
+            announce_texts,
+        )
 
-    @patch("amc.criminals.announce_money_secured", new_callable=AsyncMock)
     @patch("amc.criminals.announce", new_callable=AsyncMock)
     @patch("amc.criminals.clear_suspect", new_callable=AsyncMock)
     @patch("amc.criminals.refresh_player_name", new_callable=AsyncMock)
@@ -621,7 +629,6 @@ class EvasionBonusTests(TestCase):
         mock_refresh,
         mock_clear,
         mock_announce,
-        mock_money,
     ):
         player, character = await self._setup_evader(score=50_000)
         officer = await _sync_create(CharacterFactory)(name="FlagCop")
@@ -639,8 +646,17 @@ class EvasionBonusTests(TestCase):
         self.assertEqual(character.criminal_score, 50_000)
         wanted = await Wanted.objects.filter(character=character).afirst()
         self.assertIsNotNone(wanted.expired_at)  # still expires, just no bonus
+        # Admin-flag expiry is NOT an evasion — plain message (freeman 2026-09-23).
+        announce_texts = [
+            c.args[0] for c in mock_announce.await_args_list if c.args
+        ]
+        self.assertTrue(
+            any("no longer wanted" in t for t in announce_texts), announce_texts
+        )
+        self.assertFalse(
+            any("evade arrest" in t for t in announce_texts), announce_texts
+        )
 
-    @patch("amc.criminals.announce_money_secured", new_callable=AsyncMock)
     @patch("amc.criminals.announce", new_callable=AsyncMock)
     @patch("amc.criminals.clear_suspect", new_callable=AsyncMock)
     @patch("amc.criminals.refresh_player_name", new_callable=AsyncMock)
@@ -657,7 +673,6 @@ class EvasionBonusTests(TestCase):
         mock_refresh,
         mock_clear,
         mock_announce,
-        mock_money,
     ):
         player, character = await self._setup_evader(score=50_000)
         mock_get_players.return_value = self._players_for(player, character)

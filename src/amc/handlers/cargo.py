@@ -381,17 +381,21 @@ async def handle_cargo_arrived(event, player, character, ctx):
                 )
                 # Announce only when a new Wanted record is created
                 if newly_created and ctx.http_client:
-                    from amc.special_cargo import _announce_laundered_after_delay
+                    from amc.special_cargo import announce_illicit_delivery
                     from django.core.cache import cache
 
                     cache_key = f"money_laundered:{character.guid}"
                     await cache.aset(
                         cache_key,
-                        {"total": delivery_amount, "name": character.name},
+                        {
+                            "total": delivery_amount,
+                            "bounty": wanted.amount,
+                            "name": character.name,
+                        },
                         timeout=60,
                     )
                     asyncio.create_task(
-                        _announce_laundered_after_delay(
+                        announce_illicit_delivery(
                             character.guid, ctx.http_client, delay=15
                         )
                     )
