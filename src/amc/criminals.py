@@ -24,6 +24,7 @@ from amc.models import (
 from amc.mod_detection import detect_custom_parts, POLICE_DUTY_WHITELIST
 from amc.mod_server import clear_suspect, despawn_player_vehicle, force_exit_vehicle, get_player, get_player_customization, get_player_last_vehicle, get_player_last_vehicle_parts, make_suspect, send_system_message, show_popup
 from amc.player_tags import refresh_player_name
+from amc.no_teleport import push_no_teleport
 from amc.special_cargo import WANTED_MIN_BOUNTY
 
 SUSPECT_COSTUMES = getattr(settings, "SUSPECT_COSTUMES", frozenset())
@@ -674,6 +675,9 @@ async def apply_pending_wanted(pending, http_client, http_client_mod) -> None:
         wanted_remaining=Wanted.INITIAL_WANTED_LEVEL,
     )
     await pending.adelete()
+    # Grace-window teleport lock no longer needed: the wanted is live (its
+    # stars carry the visible R tag from here on).
+    await push_no_teleport(character, http_client_mod, False)
     if created and http_client:
         from django.core.cache import cache
 
@@ -789,6 +793,10 @@ async def tick_wanted_countdown(http_client, http_client_mod, http_client_mgmt=N
                 "wanted tick: dormant — dropped %d pending trigger(s)",
                 len(due_pendings),
             )
+            # Strip the teleport lock the pending carried (flag cleared; the
+            # dormant rule drops the trigger entirely).
+            for p in due_pendings:
+                await push_no_teleport(p.character, http_client_mod, False)
         if organic:
             await Wanted.objects.filter(
                 id__in=[w.id for w in organic]

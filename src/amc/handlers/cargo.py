@@ -32,6 +32,7 @@ from amc.criminals import (
     create_or_refresh_wanted,
     nearest_effective_cop_distance_m,
 )
+from amc.no_teleport import push_no_teleport_later
 from amc.special_cargo import (
     ILLICIT_CARGO_KEYS,
     accumulate_illicit_delivery,
@@ -406,6 +407,9 @@ async def handle_cargo_arrived(event, player, character, ctx):
                     + timedelta(seconds=WANTED_GRACE_SECONDS),
                     trigger_amount=accumulated_amount,
                 )
+                # Invisible no-teleport lock for the grace window (replaces
+                # the [R]-tag approach, which revealed wanted status).
+                push_no_teleport_later(character, ctx.http_client_mod, True)
                 if ctx.http_client_mod:
                     await show_popup(
                         ctx.http_client_mod,

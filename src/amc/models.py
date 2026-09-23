@@ -330,6 +330,15 @@ class Character(models.Model):
         ],
     )
     rp_mode = models.BooleanField(default=False)
+    # Backend-pushed invisible no-teleport flag (MTDediMod NoTeleportManager):
+    # the mod blocks ServerTeleportCharacter/Vehicle/RespawnCharacter for
+    # flagged GUIDs. Persisted so it survives game restarts (the mod's set is
+    # memory-only; re-asserted on every player login). Set/cleared by the
+    # admin /noteleport command.
+    no_teleport = models.BooleanField(
+        default=False,
+        help_text="Teleport-locked server-side via the mod's invisible no-teleport flag.",
+    )
     reject_ubi = models.BooleanField(default=False)
     ubi_multiplier = models.FloatField(default=1.0)
     # Cached from CharacterLocation — updated by monitor_locations
