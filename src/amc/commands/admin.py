@@ -1418,3 +1418,62 @@ async def cmd_exclusive_unbreak(ctx: CommandContext, target_player_name: str):
             "flag is True again (was {previous})."
         ).format(name=target_character.name, previous=previous)
     )
+
+
+@registry.register(
+    ["/noteleport", "/nt"],
+    description=gettext_lazy(
+        "Toggle the invisible server-side no-teleport lock on a player (Admin)"
+    ),
+    category="Admin",
+)
+async def cmd_noteleport(ctx: CommandContext, target_player_name: str):
+    """Toggle the mod-side invisible no-teleport flag for a player.
+
+    Unlike the [R] name tag, the flag reveals nothing — the mod blocks the
+    character/vehicle teleport + respawn RPCs for the flagged GUID. Persisted
+    on Character.no_teleport and re-asserted on every login.
+    """
+    from amc.no_teleport import push_no_teleport
+
+    if not ctx.player_info or not ctx.player_info.get("bIsAdmin"):
+        return
+
+    players = await get_players(ctx.http_client)
+    target_pid = fuzzy_find_player(players, target_player_name)
+    if not target_pid:
+        await ctx.reply(
+            _(
+                "<Title>Player not found</>\n\n"
+                "Please make sure you typed the name correctly."
+            )
+        )
+        return
+
+    target_player_data = next(
+        (p for pid, p in players if str(pid) == str(target_pid)), None
+    )
+    if not target_player_data or not target_player_data.get("character_guid"):
+        await ctx.reply(_("Cannot resolve the target's character GUID."))
+        return
+
+    try:
+        target_character = await Character.objects.aget(
+            guid=target_player_data["character_guid"]
+        )
+    except Character.DoesNotExist:
+        await ctx.reply(_("Character not found in database."))
+        return
+
+    target_character.no_teleport = not target_character.no_teleport
+    await target_character.asave(update_fields=["no_teleport"])
+    await push_no_teleport(
+        target_character, ctx.http_client_mod, target_character.no_teleport
+    )
+
+    state = "locked" if target_character.no_teleport else "unlocked"
+    await ctx.reply(
+        _("<Title>No-Teleport {state}</>\n\n{name} is now teleport-{state}.").format(
+            state=state, name=target_character.name
+        )
+    )

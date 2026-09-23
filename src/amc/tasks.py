@@ -617,6 +617,13 @@ async def _login_guid_dependent_actions(
         # 1. Update the player's name based on current DB state
         await refresh_player_name(character, http_client_mod)
 
+        # 1b. Re-assert the teleport lock (invisible flag): the mod's set is
+        # memory-only and a game restart clears it. Effective = manual flag
+        # OR active wanted OR on-duty police (replaces the old R name tag).
+        from amc.no_teleport import sync_no_teleport
+
+        await sync_no_teleport(character, http_client_mod)
+
         # 2. Check if they tried to login with unauthorized tags and warn them
         if player_info:
             player_display_name = player_info.get("PlayerName", "")

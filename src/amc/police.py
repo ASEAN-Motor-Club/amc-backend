@@ -101,6 +101,10 @@ async def activate_police(character, session):
 
     await PoliceSession.objects.acreate(character=character)
     await refresh_player_name(character, session)
+    # Police teleport lock rides the invisible flag now, not the R tag.
+    from amc.no_teleport import sync_no_teleport
+
+    await sync_no_teleport(character, session)
 
 
 async def deactivate_police(character, session):
@@ -112,6 +116,9 @@ async def deactivate_police(character, session):
     ).aupdate(ended_at=timezone.now())
 
     await refresh_player_name(character, session)
+    from amc.no_teleport import sync_no_teleport
+
+    await sync_no_teleport(character, session)
 
 
 async def record_confiscation_for_level(

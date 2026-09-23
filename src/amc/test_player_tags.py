@@ -165,23 +165,24 @@ def test_build_display_name_police_level_10():
 
 
 def test_build_display_name_wanted_only():
+    # No R: the teleport lock rides the invisible no-teleport flag.
     assert (
         build_display_name("PlayerOne", wanted_stars=5)
-        == "[R*****] PlayerOne"
+        == "[*****] PlayerOne"
     )
 
 
 def test_build_display_name_wanted_w1():
     assert (
         build_display_name("PlayerOne", wanted_stars=1)
-        == "[R*] PlayerOne"
+        == "[*] PlayerOne"
     )
 
 
 def test_build_display_name_wanted_w3():
     assert (
         build_display_name("PlayerOne", wanted_stars=3)
-        == "[R***] PlayerOne"
+        == "[***] PlayerOne"
     )
 
 
@@ -196,7 +197,7 @@ def test_build_display_name_wanted_and_crim():
 def test_build_display_name_wanted_and_mods():
     assert (
         build_display_name("PlayerOne", has_custom_parts=True, wanted_stars=2)
-        == "[RM**] PlayerOne"
+        == "[M**] PlayerOne"
     )
 
 
@@ -213,7 +214,7 @@ def test_build_display_name_wanted_with_gov():
     """Wanted tag shows even when gov is active."""
     assert (
         build_display_name("PlayerOne", gov_level=3, wanted_stars=5)
-        == "[R*****G3] PlayerOne"
+        == "[*****G3] PlayerOne"
     )
 
 
@@ -284,29 +285,29 @@ def test_build_display_name_rp_mode_default_false():
     )
 
 
-# --- police duty shares the R tag (teleport-locked server-side) ---
+# --- police duty: NO R tag (teleport lock rides the invisible flag) ---
 
 
 def test_build_display_name_police_on_duty():
-    assert build_display_name("PlayerOne", police_on_duty=True) == "[R] PlayerOne"
+    assert build_display_name("PlayerOne", police_on_duty=True) == "PlayerOne"
 
 
 def test_build_display_name_police_on_duty_with_gov():
     assert (
         build_display_name("PlayerOne", police_on_duty=True, gov_level=3)
-        == "[RG3] PlayerOne"
+        == "[G3] PlayerOne"
     )
 
 
-def test_build_display_name_police_on_duty_and_wanted_single_r():
-    """Duty and wanted both map to R — the tag must not duplicate the letter."""
+def test_build_display_name_police_on_duty_and_wanted_stars_only():
+    """No R — wanted stars render, the lock is the invisible flag."""
     assert (
         build_display_name("PlayerOne", police_on_duty=True, wanted_stars=2)
-        == "[R**] PlayerOne"
+        == "[**] PlayerOne"
     )
 
 
-def test_build_display_name_police_on_duty_and_rp_mode_single_r():
+def test_build_display_name_police_on_duty_and_rp_mode():
     assert (
         build_display_name("PlayerOne", police_on_duty=True, rp_mode=True)
         == "[R] PlayerOne"
@@ -330,7 +331,7 @@ def test_build_display_name_mute_goes_first():
         build_display_name(
             "PlayerOne", muted=True, has_custom_parts=True, wanted_stars=2
         )
-        == "[XRM**] PlayerOne"
+        == "[XM**] PlayerOne"
     )
 
 
@@ -665,8 +666,8 @@ async def test_get_player_singleflight(mock_cache_aget, mock_cache_aset):
 @pytest.mark.asyncio
 @pytest.mark.django_db
 @patch("amc.player_tags.set_character_name", new_callable=AsyncMock)
-async def test_refresh_player_name_police_on_duty_gets_r_tag(mock_set_name):
-    """Active police session → R tag (teleport-locked) + P1 badge."""
+async def test_refresh_player_name_police_on_duty_gets_p_tag(mock_set_name):
+    """Active police session → P1 badge only; the lock is the invisible flag."""
     from amc.factories import CharacterFactory, PlayerFactory
     from amc.models import PoliceSession
     from asgiref.sync import sync_to_async
@@ -684,11 +685,11 @@ async def test_refresh_player_name_police_on_duty_gets_r_tag(mock_set_name):
     await refresh_player_name(character, session)
 
     await character.arefresh_from_db()
-    assert character.custom_name == "[RP1] TestPlayer"
+    assert character.custom_name == "[P1] TestPlayer"
     from amc.player_tags import set_character_name
 
     set_character_name.assert_awaited_once_with(
-        session, "test-guid-police-2", "[RP1] TestPlayer"
+        session, "test-guid-police-2", "[P1] TestPlayer"
     )
 
 
@@ -751,7 +752,7 @@ async def test_refresh_player_name_police_level_scales_with_confiscations(
     await refresh_player_name(character, session)
 
     await character.arefresh_from_db()
-    assert character.custom_name == "[RP2] TestPlayer"
+    assert character.custom_name == "[P2] TestPlayer"
 
 
 @pytest.mark.asyncio

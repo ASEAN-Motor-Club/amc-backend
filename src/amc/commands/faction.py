@@ -144,6 +144,10 @@ async def execute_arrest(
                 wanted.wanted_remaining = 0
                 wanted.expired_at = timezone.now()
                 await wanted.asave(update_fields=["wanted_remaining", "expired_at"])
+                # Teleport lock rides the invisible flag now, not the name.
+                from amc.no_teleport import sync_no_teleport
+
+                await sync_no_teleport(suspect_char, http_client_mod)
 
             confiscated_amount = bounty
 

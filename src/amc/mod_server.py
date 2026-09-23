@@ -773,6 +773,20 @@ async def unmute_player(session, player_id):
         return await resp.json()
 
 
+async def set_no_teleport(session, guid, enabled=True):
+    """Backend-pushed invisible no-teleport flag (MTDediMod NoTeleportManager)."""
+    await _write_limiter.acquire()
+    if enabled:
+        async with session.post(f"/players/{guid}/no_teleport", json={}) as resp:
+            if resp.status != 200:
+                raise Exception("Failed to enable no-teleport flag")
+            return await resp.json()
+    async with session.delete(f"/players/{guid}/no_teleport") as resp:
+        if resp.status != 200:
+            raise Exception("Failed to clear no-teleport flag")
+        return await resp.json()
+
+
 async def get_muted_players(session):
     async with session.get("/players/muted", timeout=FAST_TIMEOUT) as resp:
         if resp.status != 200:
