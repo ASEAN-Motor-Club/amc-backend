@@ -13,7 +13,6 @@ import random
 from django.db.models import F
 from collections import defaultdict
 from collections.abc import Callable, Coroutine
-from datetime import timedelta
 from typing import Any
 
 from django.core.cache import cache
@@ -21,7 +20,7 @@ from django.utils import timezone
 
 from amc.game_server import announce
 from amc.mod_server import show_popup, transfer_money
-from amc.models import Character, Confiscation, ServerCargoArrivedLog
+from amc.models import Character, ServerCargoArrivedLog
 from amc_finance.services import record_treasury_expense, register_player_deposit
 
 logger = logging.getLogger("amc.special_cargo")
@@ -143,70 +142,29 @@ SpecialCargoHandler = Callable[
 ]
 
 
-async def _announce_laundered_after_delay(character_guid, http_client, delay=15):
-    """Wait for the debounce window, then announce the accumulated total."""
+async def announce_illicit_delivery(character_guid, http_client, delay=15):
+    """Wait for the debounce window, then announce the delivery total + bounty.
+
+    The announce fires at wanted-trigger time: *total* is the illegal delivery
+    amount that triggered the wanted, *bounty* the frozen 10%-of-score bounty
+    issued with it (freeman 2026-09-23: announce both; drop the old
+    "laundered" wording whose number was unrelated to the bounty).
+    """
     await asyncio.sleep(delay)
     cache_key = f"money_laundered:{character_guid}"
     data = await cache.aget(cache_key)
     await cache.adelete(cache_key)
     if data and data.get("total", 0) > 0:
         total = data["total"]
+        bounty = data.get("bounty", 0)
         name = data.get("name", "Unknown")
+        bounty_part = (
+            f" — ${bounty:,} bounty issued" if bounty > 0 else ""
+        )
         await announce(
-            f"${total:,} has been laundered by {name}",
+            f"${total:,} in illegal cargo delivered by {name}{bounty_part}",
             http_client,
             color="FFA500",
-        )
-
-
-async def announce_money_secured(character_guid: str, http_client) -> None:
-    """Announce that laundered money is safe, if applicable.
-
-    Called from tick_wanted_countdown when a wanted status expires.
-    Checks the money_secured cache (accumulated by handle_money_cargo)
-    and announces if no confiscation happened.
-    """
-    cache_key = f"money_secured:{character_guid}"
-    data = await cache.aget(cache_key)
-    if not data:
-        logger.debug("announce_money_secured(%s): no cache data", character_guid)
-        return
-    await cache.adelete(cache_key)
-
-    # Check if any confiscation happened during the wanted period
-    # Use a generous window since wanted is now permanent until cleared
-    window_start = timezone.now() - timedelta(days=7)
-    was_confiscated = await Confiscation.objects.filter(
-        character__guid=character_guid,
-        created_at__gte=window_start,
-    ).aexists()
-    if was_confiscated:
-        logger.info(
-            "announce_money_secured(%s): suppressed — confiscation found",
-            character_guid,
-        )
-        return
-
-    total = data.get("total", 0)
-    name = data.get("name", "Unknown")
-    if total > 0 and http_client:
-        logger.info(
-            "announce_money_secured(%s): announcing $%s safe for %s",
-            character_guid,
-            total,
-            name,
-        )
-        await announce(
-            f"{name}'s ${total:,} is now safe from police",
-            http_client,
-            color="43B581",
-        )
-    else:
-        logger.debug(
-            "announce_money_secured(%s): skipped — total=%s http_client=%s",
-            character_guid,
-            total,
-            bool(http_client),
         )
 
 
@@ -402,26 +360,6 @@ async def handle_money_cargo(
         laundering_cost = int(money_payment * 0.20)
         if laundering_cost > 0:
             await record_treasury_expense(laundering_cost, "Money Laundering Cost")
-
-    # --- Accumulate "money secured" total (announced when wanted expires) ---
-    if money_payment > 0:
-        secured_cache_key = f"money_secured:{character.guid}"
-        prev_secured = await cache.aget(secured_cache_key)
-        secured_total = (
-            (prev_secured.get("total", 0) + money_payment)
-            if prev_secured
-            else money_payment
-        )
-        secured_data = {
-            "total": secured_total,
-            "name": character.name,
-        }
-        # Use a long timeout since wanted is now permanent until cleared
-        await cache.aset(
-            secured_cache_key,
-            secured_data,
-            timeout=7 * 24 * 3600,  # 7 days
-        )
 
 
 async def handle_contraband_cargo(

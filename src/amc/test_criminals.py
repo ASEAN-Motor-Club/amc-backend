@@ -1080,7 +1080,8 @@ class WantedCountdownTickTests(TestCase):
 
         mock_announce.assert_awaited_once()
         self.assertIn(criminal.name, mock_announce.call_args.args[0])
-        self.assertIn("no longer wanted", mock_announce.call_args.args[0])
+        # Organic wanted decaying to zero = evasion wording (freeman 2026-09-23)
+        self.assertIn("managed to evade arrest", mock_announce.call_args.args[0])
         self.assertEqual(mock_announce.call_args.kwargs.get("color"), "43B581")
 
     # -----------------------------------------------------------------------
@@ -2364,8 +2365,7 @@ class ClearSuspectTests(TestCase):
 
         with patch("amc.criminals.get_players", new_callable=AsyncMock, return_value=players), \
              patch("amc.criminals.refresh_player_name", new_callable=AsyncMock), \
-             patch("amc.criminals.announce", new_callable=AsyncMock), \
-             patch("amc.criminals.announce_money_secured", new_callable=AsyncMock):
+             patch("amc.criminals.announce", new_callable=AsyncMock):
             await tick_wanted_countdown(mock_http, mock_http_mod)
 
         wanted = await Wanted.objects.aget(character=criminal)
@@ -2407,8 +2407,7 @@ class ClearSuspectTests(TestCase):
 
         with patch("amc.criminals.get_players", new_callable=AsyncMock, return_value=players), \
              patch("amc.criminals.refresh_player_name", new_callable=AsyncMock), \
-             patch("amc.criminals.announce", new_callable=AsyncMock), \
-             patch("amc.criminals.announce_money_secured", new_callable=AsyncMock):
+             patch("amc.criminals.announce", new_callable=AsyncMock):
             # Should not raise
             await tick_wanted_countdown(mock_http, mock_http_mod)
 
