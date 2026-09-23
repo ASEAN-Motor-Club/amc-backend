@@ -74,12 +74,15 @@ async def get_players_mod_masked(
     session,
     cache_key: str = "mod_players_list_all",
     cache_ttl: int = MOD_PLAYERS_CACHE_TTL,
+    use_cache: bool = True,
 ):
     """Full roster for position streaming: hidden players stay in the list but
     carry hidden=True with their location/vehicle zeroed instead of being
     dropped. The mask is the single source of truth — consumers must not
     re-derive or re-apply hiding; they only translate the masked entries."""
-    players = await get_players_mod(session, cache_key=cache_key, cache_ttl=cache_ttl)
+    players = await get_players_mod(
+        session, cache_key=cache_key, cache_ttl=cache_ttl, use_cache=use_cache
+    )
     wanted_ids, police_ids, costume_ids = await _get_hidden_player_unique_ids()
     any_wanted = bool(wanted_ids)
     return [
@@ -115,26 +118,34 @@ async def get_players_mod(
     cache_key: str = "mod_players_list_all",
     cache_ttl: int = MOD_PLAYERS_CACHE_TTL,
     filter_hidden: bool = False,
+    use_cache: bool = True,
 ):
-    cached_data = cache.get(cache_key)
-    if cached_data is not None:
-        if not filter_hidden:
-            return cached_data
-        wanted_ids, police_ids, costume_ids = await _get_hidden_player_unique_ids()
-        any_wanted = bool(wanted_ids)
-        if not any_wanted and not police_ids and not costume_ids:
-            return cached_data
-        return [
-            p for p in cached_data
-            if not _should_hide_player(p, wanted_ids, police_ids, costume_ids, any_wanted)
-        ]
+    """When `use_cache` is False the roster is always fetched directly — used
+    by the position broadcaster, whose 1 s tick would otherwise alternate
+    between a fresh snapshot and a duplicated one from the 2 s cache."""
+    if use_cache:
+        cached_data = cache.get(cache_key)
+        if cached_data is not None:
+            if not filter_hidden:
+                return cached_data
+            wanted_ids, police_ids, costume_ids = (
+                await _get_hidden_player_unique_ids()
+            )
+            any_wanted = bool(wanted_ids)
+            if not any_wanted and not police_ids and not costume_ids:
+                return cached_data
+            return [
+                p for p in cached_data
+                if not _should_hide_player(p, wanted_ids, police_ids, costume_ids, any_wanted)
+            ]
 
     async with session.get("/players") as resp:
         data = await resp.json()
         if not data or not data.get("data"):
             return []
         players = data["data"]
-    cache.set(cache_key, players, timeout=cache_ttl)
+    if use_cache:
+        cache.set(cache_key, players, timeout=cache_ttl)
 
     if filter_hidden:
         wanted_ids, police_ids, costume_ids = await _get_hidden_player_unique_ids()

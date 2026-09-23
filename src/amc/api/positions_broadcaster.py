@@ -27,7 +27,10 @@ logger = logging.getLogger(__name__)
 
 
 async def _default_fetch(session):
-    return await get_players_mod_masked(session)
+    # Bypass the mod-players cache: its TTL (2 s) is longer than the tick
+    # interval (1 s), so cached reads would replay the previous snapshot and
+    # emit duplicate position frames with fresh timestamps.
+    return await get_players_mod_masked(session, use_cache=False)
 
 
 class PositionsBroadcaster:
