@@ -28,6 +28,7 @@ from amc_cogs.active_role import ActiveRoleCog
 from amc_cogs.questionnaire import QuestionnaireCog
 from amc_cogs.exam import ExamCog
 from amc_cogs.license import DriversLicenseCog
+from amc_cogs.vouchers import VouchersCog
 
 
 class AMCDiscordBot(commands.Bot):
@@ -78,6 +79,7 @@ class AMCDiscordBot(commands.Bot):
         await self.add_cog(QuestionnaireCog(self), guild=guild)
         await self.add_cog(ExamCog(self), guild=guild)
         await self.add_cog(DriversLicenseCog(self), guild=guild)
+        await self.add_cog(VouchersCog(self), guild=guild)
         await self.tree.sync(guild=guild)
 
 
