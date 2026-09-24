@@ -5,7 +5,7 @@ Speed-based wanted law (2026-09 rework, corrected 2026-09-20):
     A(D) = 1.0 at the 500 m near cap, falling to 1/3 far away (speeding far
     builds wanted slower).
   - Hiding (< 50 km/h): wanted DECAYS at (50 - S)/50 * F(D) s/s. F(D) = 1.0 at
-    the 500 m near cap, rising to 3.0 far away. Distance NEVER slows or
+    the 500 m near cap, rising to 1.5 far away. Distance NEVER slows or
     freezes decay (the old escape gate is gone): hiding next to a cop clears
     at the plain speed-driven rate.
   - Dormant rule: with zero effective cops on duty (on-duty + online +
@@ -379,14 +379,14 @@ class WantedCountdownTickTests(TestCase):
         config = await WantedSystemConfig.aget_config()
         self.assertTrue(config.police_required)
 
-    async def test_police_independent_no_cops_no_amnesty_decays_3x(
+    async def test_police_independent_no_cops_no_amnesty_decays_1p5x(
         self,
         mock_sys_msg,
         mock_refresh,
     ):
         """Toggle OFF + zero cops: no dormant amnesty — the organic wanted
         survives and decays at the police-distance-infinity rate (stationary
-        suspect: (50 - 0) * 1/50 * F(inf)=3.0 * 1 s = 3.0 s per tick)."""
+        suspect: (50 - 0) * 1/50 * F(inf)=1.5 * 1 s = 1.5 s per tick)."""
         await self._enable_police_independent()
         self.armed_mock.return_value = False
         criminal = await self._setup_criminal(wanted_remaining=300)
@@ -402,7 +402,7 @@ class WantedCountdownTickTests(TestCase):
         # active_police_present is never consulted in this mode
         self.armed_mock.assert_not_awaited()
         wanted = await Wanted.objects.aget(character=criminal)
-        self.assertAlmostEqual(wanted.wanted_remaining, 297, delta=0.01)
+        self.assertAlmostEqual(wanted.wanted_remaining, 298.5, delta=0.01)
         self.assertIsNone(wanted.expired_at)
         mock_refresh.assert_not_called()
 
@@ -1448,11 +1448,11 @@ class NearestEffectiveCopDistanceTests(TestCase):
 
     async def test_inf_distance_saturates_the_law(self):
         """The distance law's limit at police distance = infinity is the
-        far band: F = 3.0x decay, A = 1/3x growth, weight w = 1.0."""
+        far band: F = 1.5x decay, A = 1/3x growth, weight w = 1.0."""
         from amc.criminals import _distance_weight
 
         self.assertEqual(_distance_weight(math.inf), 1.0)
-        self.assertEqual(hide_decay_multiplier(math.inf), 3.0)
+        self.assertEqual(hide_decay_multiplier(math.inf), 1.5)
         self.assertAlmostEqual(wanted_accrual_multiplier(math.inf), 1 / 3)
 
     async def test_measures_distance_to_nearest_effective_cop(self):

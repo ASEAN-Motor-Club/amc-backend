@@ -77,10 +77,10 @@ LOGOUT_PROXIMITY_RANGE = 200_000  # 2km in game units — no effect beyond this
 # window (see active_police_present + tick_wanted_countdown). The
 # WantedSystemConfig admin singleton can switch this OFF: triggers fire and
 # heat moves with zero cops on duty, and the distance law runs with police
-# distance = infinity (F(D) = 3.0x decay, A(D) = 1/3x growth).
+# distance = infinity (F(D) = 1.5x decay, A(D) = 1/3x growth).
 WANTED_SPEED_PIVOT_KMH = 50.0     # above: wanted grows; below: wanted decays
 WANTED_LAW_RATE = 1.0 / 50.0      # s of wanted per (km/h from pivot) per second
-HIDE_DECAY_MAX_MULT = 3.0         # F(D) ceiling — far-parked decay multiplier
+HIDE_DECAY_MAX_MULT = 1.5         # F(D) ceiling — far-parked decay multiplier
 WANTED_ACCRUAL_MIN_MULT = 1 / 3   # A(D) floor — far-speeding growth multiplier
 WANTED_DISTANCE_SCALE_M = 2000.0  # metres past the cap for half the swing
 WANTED_NEAR_CAP_UNITS = 50_000    # 500 m in game units — distance clamp
@@ -117,7 +117,7 @@ def hide_decay_multiplier(dist_units: float) -> float:
     """F(D): decay multiplier for a hiding suspect, by distance to nearest cop.
 
     1.0x at the 500 m near cap (and everywhere inside it — the input is
-    clamped), rising hyperbolically to HIDE_DECAY_MAX_MULT (3.0x) far away
+    clamped), rising hyperbolically to HIDE_DECAY_MAX_MULT (1.5x) far away
     (half the bonus WANTED_DISTANCE_SCALE_M past the cap). Never below 1.0:
     decay NEVER slows or stalls because police are close.
     """
@@ -1004,7 +1004,7 @@ async def tick_wanted_countdown(http_client, http_client_mod, http_client_mgmt=N
         # Running (>= 50 km/h): grow, scaled by A(D) — speeding far builds
         # wanted SLOWER (1/3x floor), never faster (near cap = 1.0x).
         # Hiding (< 50 km/h): decay, scaled by F(D) — hiding far clears
-        # FASTER (3x ceiling), and near cops decay runs at the base rate.
+        # FASTER (1.5x ceiling), and near cops decay runs at the base rate.
         # No gate, no floor: the meter always moves with the suspect's speed.
         speed_units = speed_map.get(sus_guid.upper(), 0.0)
         speed_kmh = speed_units * 0.036  # game units/s -> km/h
@@ -1015,7 +1015,7 @@ async def tick_wanted_countdown(http_client, http_client_mod, http_client_mgmt=N
         elif not police_required:
             # Police-independent mode, zero cops on duty: the distance law
             # runs with police distance = INFINITY — hiding decays at the
-            # far-parked ceiling (F = HIDE_DECAY_MAX_MULT = 3.0x) and
+            # far-parked ceiling (F = HIDE_DECAY_MAX_MULT = 1.5x) and
             # speeding grows at the far-speeding floor
             # (A = WANTED_ACCRUAL_MIN_MULT = 1/3x).
             min_dist = math.inf
