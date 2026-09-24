@@ -34,6 +34,40 @@ async def _stop_broadcaster(b):
         await b._session.close()
 
 
+class TickScheduleTests(SimpleTestCase):
+    async def test_tick_period_does_not_drift_with_slow_fetch(self):
+        """Tick N must start at ~N * interval after the previous tick start,
+        not previous_end + interval — a slow fetch must not accumulate drift."""
+        interval = 0.05
+        fetch_durations = [interval / 2, interval / 2, interval / 2]
+        tick_starts: list[float] = []
+
+        async def fetch(session):
+            # measured from tick start: fetch itself takes half the interval
+            if not tick_starts:
+                start = asyncio.get_running_loop().time()
+            else:
+                start = asyncio.get_running_loop().time()
+            tick_starts.append(start)
+            await asyncio.sleep(fetch_durations[len(tick_starts) - 1])
+            return []
+
+        b = PositionsBroadcaster(fetch=fetch, sleep_s=interval)
+        b.ensure_started()
+        g = b.stream_masked()
+        for _ in range(4):
+            await g.__anext__()
+        await _stop_broadcaster(b)
+
+        self.assertEqual(len(tick_starts), 4)
+        periods = [
+            t2 - t1 for t1, t2 in zip(tick_starts, tick_starts[1:])
+        ]
+        for period in periods:
+            # absolute schedule: period ≈ interval, NOT interval + duration
+            self.assertLess(period, interval * 1.25, periods)
+
+
 class StreamMaskedTests(SimpleTestCase):
     async def test_subscribers_share_one_fetch_per_tick(self):
         calls = 0
