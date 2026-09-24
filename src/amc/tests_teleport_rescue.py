@@ -2,8 +2,86 @@ from django.test import TestCase
 from unittest.mock import MagicMock, AsyncMock, patch
 from amc.command_framework import CommandContext
 from amc.commands.teleport import cmd_tp_name
+from amc.commands.rp_rescue import cmd_respond
 from amc.models import RescueRequest, Character, Player
 from django.contrib.gis.geos import Point
+
+
+class RescueSelfRespondTestCase(TestCase):
+    """A requester must not be able to respond to their own rescue.
+
+    Responding to your own rescue grants the 10-minute /tp rescue-teleport
+    window — self-rescue by teleporting back to the crash site with the
+    crashed vehicle, which defeats the whole point of /rescue.
+    """
+
+    def setUp(self):
+        self.ctx = MagicMock(spec=CommandContext)
+        self.ctx.reply = AsyncMock()
+        self.ctx.announce = AsyncMock()
+        self.ctx.discord_client = None
+        self.ctx.is_current_event = False
+
+        self.player = Player.objects.create(unique_id="76561198000000009")
+        self.character = Character.objects.create(
+            name="SelfRescuer", player=self.player, guid="guid-self"
+        )
+        self.ctx.character = self.character
+        self.ctx.player = self.player
+        self.ctx.http_client_mod = MagicMock()
+        self.ctx.http_client_mod.post = AsyncMock()
+        self.ctx.http_client_mod.get = AsyncMock()
+
+    async def test_cmd_respond_rejects_own_rescue(self):
+        rescue = await RescueRequest.objects.acreate(
+            character=self.character, message="help"
+        )
+
+        await cmd_respond(self.ctx, rescue.id)
+
+        self.ctx.reply.assert_awaited_once()
+        assert "own rescue" in self.ctx.reply.await_args[0][0]
+        responder_count = await rescue.responders.acount()
+        self.assertEqual(responder_count, 0)
+
+    async def test_cmd_respond_other_rescue_still_works(self):
+        other = await Character.objects.acreate(
+            name="Other",
+            player=await Player.objects.acreate(unique_id="76561198000000010"),
+            guid="guid-other",
+        )
+        rescue = await RescueRequest.objects.acreate(character=other, message="help")
+
+        await cmd_respond(self.ctx, rescue.id)
+
+        responder_count = await rescue.responders.acount()
+        self.assertEqual(responder_count, 1)
+
+    async def test_own_rescue_does_not_unlock_tp(self):
+        """Defense-in-depth: a self-responded rescue must not grant the /tp
+        marker teleport even if the responder row exists (legacy data)."""
+        rescue = await RescueRequest.objects.acreate(
+            character=self.character, message="help", location=Point(100, 200, 300)
+        )
+        await rescue.responders.aadd(self.player)
+
+        self.ctx.player_info = {
+            "bIsAdmin": False,
+            "CustomDestinationAbsoluteLocation": {"X": 100, "Y": 200, "Z": 300},
+        }
+
+        with (
+            patch(
+                "amc.commands.teleport.get_player_last_vehicle",
+                new=AsyncMock(return_value={"vehicle": None}),
+            ),
+            patch(
+                "amc.commands.teleport.teleport_player", new=AsyncMock()
+            ) as mock_tp,
+        ):
+            await cmd_tp_name(self.ctx, "")
+
+            mock_tp.assert_not_called()
 
 
 class TeleportRescueTestCase(TestCase):

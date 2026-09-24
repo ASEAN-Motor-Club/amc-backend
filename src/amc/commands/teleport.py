@@ -525,6 +525,7 @@ async def cmd_tp_name(ctx: CommandContext, name: str = ""):
                 responders=ctx.player,
                 timestamp__gte=timezone.now() - timedelta(minutes=10),
             )
+            .exclude(character=ctx.character)
             .select_related("character")
             .order_by("-timestamp")
         )

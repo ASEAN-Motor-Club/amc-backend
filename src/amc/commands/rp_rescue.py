@@ -210,6 +210,10 @@ async def cmd_respond(ctx: CommandContext, rescue_id: int):
             await ctx.reply(_("Invalid or expired rescue request."))
             return
 
+    if rescue_request.character_id == ctx.character.id:
+        await ctx.reply(_("You cannot respond to your own rescue request."))
+        return
+
     await rescue_request.responders.aadd(ctx.player)
 
     await ctx.announce(
