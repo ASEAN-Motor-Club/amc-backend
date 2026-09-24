@@ -494,6 +494,24 @@ class CriminalsLeaderboardTests(TestCase):
         self.assertNotIn("CleanGuy", output)
         self.assertNotIn("Boss cut", output)
 
+    async def test_wanted_risk_table(self):
+        """/criminals shows the wanted-trigger table for the caller's score."""
+        player_a = await _sync_create(PlayerFactory)()
+        me = await _sync_create(
+            CharacterFactory, player=player_a, name="Kingpin", criminal_score=20_000_000
+        )
+
+        ctx = self._ctx(character=me)
+        await cmd_criminals(ctx)
+
+        output = ctx.reply.await_args[0][0]
+        self.assertIn("Wanted Risk", output)
+        # Kingpin at 20M (test_illicit_cargo anchors): 100k ≈ 7.7%, 500k ≈ 45.1%
+        self.assertIn("$100k — <Highlight>8%</>", output)
+        self.assertIn("$500k — <Highlight>45%</>", output)
+        # 1M is the guarantee cliff
+        self.assertIn("$1M — <Highlight><Warning>guaranteed</></>", output)
+
 
 class EvasionBonusTests(TestCase):
     """Successfully evading arrest = an ORGANIC wanted decaying to zero while

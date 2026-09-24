@@ -1,10 +1,14 @@
-from amc.command_framework import registry, CommandContext
-from amc.game_server import get_players
-from amc.models import Character, PoliceSession, Wanted
-from amc.special_cargo import calculate_boss_cut_ratio, calculate_criminal_level
-from amc.criminals import _compute_stars
 from django.utils.translation import gettext_lazy
 
+from amc.command_framework import CommandContext, registry
+from amc.criminals import _compute_stars
+from amc.game_server import get_players
+from amc.models import Character, PoliceSession, Wanted
+from amc.special_cargo import (
+    calculate_boss_cut_ratio,
+    calculate_criminal_level,
+    wanted_trigger_chance,
+)
 
 
 def _stars(n: int) -> str:
@@ -221,5 +225,28 @@ async def cmd_criminals(ctx: CommandContext):
                 )
         else:
             msg += "<Secondary>You have no criminal score.</>\n"
+
+        # Wanted-trigger risk table: the chance that ONE illicit delivery of
+        # each size triggers a Wanted level, for the caller's current score
+        # (no cop nearby — attenuation is unknown at /criminals time).
+        msg += "\n<Title>Wanted Risk</>\n"
+        msg += (
+            "<Secondary>Chance per illicit delivery, no cop nearby"
+            " (within 1km):</>\n"
+        )
+        for pay, label in (
+            (100_000, "$100k"),
+            (250_000, "$250k"),
+            (500_000, "$500k"),
+            (750_000, "$750k"),
+            (1_000_000, "$1M"),
+        ):
+            chance = wanted_trigger_chance(pay, my_score, None)
+            risk = (
+                "<Warning>guaranteed</>"
+                if chance >= 1.0
+                else f"{chance * 100:.0f}%"
+            )
+            msg += f"{label} — <Highlight>{risk}</>\n"
 
     await ctx.reply(msg.rstrip())
