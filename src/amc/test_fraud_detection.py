@@ -1,4 +1,5 @@
 import asyncio
+import os
 import time
 from datetime import timedelta
 from unittest.mock import AsyncMock, MagicMock, patch
@@ -6,6 +7,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 from asgiref.sync import sync_to_async
 from django.contrib.gis.geos import Point
 from django.test import TestCase, override_settings
+from django.utils import timezone
 
 from amc.factories import CharacterFactory, PlayerFactory
 from amc.fraud_detection import (
@@ -14,6 +16,7 @@ from amc.fraud_detection import (
     CARGO_PER_UNIT_DEFAULT,
     CARGO_PER_UNIT_THRESHOLDS,
     ROUTE_HISTORY_MIN_SAMPLES,
+    TELEPORT_BURST_MIN_LEG_M,
     PASSENGER_PAYMENT_CEILINGS,
     TOW_PAYMENT_CEILING,
     validate_cargo_payment,
@@ -1221,4 +1224,100 @@ class FraudBatchProcessEventsTests(TestCase):
         # Reported batch income is the legitimate portion only.
         _, _, total_base, _ = mock_profits.await_args.args[0][0]
         self.assertEqual(total_base, PASSENGER_PAYMENT_CEILINGS[2])
+
+
+
+# ---------------------------------------------------------------------------
+# Teleport-with-cargo burst detection — check_delivery_rate
+# ---------------------------------------------------------------------------
+
+
+class CheckDeliveryRateTests(TestCase):
+    """Temporal feasibility: far deliveries seconds apart = teleport cheat."""
+
+    def setUp(self):
+        from amc import fraud_detection as fd
+
+        fd._delivery_rate_states.clear()
+        self.fd = fd
+        self.t0 = timezone.now()
+
+    def _dp(self, guid, name, x, y):
+        return DeliveryPoint(guid=guid, name=name, coord=Point(x, y, 0, srid=3857))
+
+    def _check(self, char_id, ts, sender, dest):
+        return self.fd.check_delivery_rate(char_id, ts, sender, dest)
+
+    def test_first_delivery_never_flags(self):
+        a = self._dp("dp-a", "A", 0, 0)
+        b = self._dp("dp-b", "B", 500_000, 0)
+        self.assertIsNone(self._check(1, self.t0, a, b))
+
+    def test_infeasible_far_delivery_flags(self):
+        a = self._dp("dp-a2", "A", 0, 0)
+        b = self._dp("dp-b2", "B", 0, 500_000)
+        c = self._dp("dp-c2", "C", 2_000_000, 0)
+        self.assertIsNone(self._check(1, self.t0, a, b))
+        # 10 s later, ~2,000 km leg: physically impossible.
+        flag = self._check(1, self.t0 + timedelta(seconds=10), b, c)
+        self.assertIsNotNone(flag)
+        self.assertGreater(flag.leg_m, TELEPORT_BURST_MIN_LEG_M)
+        self.assertGreater(flag.leg_m, flag.feasible_m)
+
+    def test_legitimate_cadence_does_not_flag(self):
+        a = self._dp("dp-a3", "A", 0, 0)
+        b = self._dp("dp-b3", "B", 0, 400_000)
+        c = self._dp("dp-c3", "C", 100_000, 400_000)
+        self.assertIsNone(self._check(1, self.t0, a, b))
+        # ~100 km leg in 60 min at 30 m/s => feasible (108 km allowed).
+        self.assertIsNone(self._check(1, self.t0 + timedelta(minutes=60), b, c))
+
+    def test_same_route_trickle_within_window_is_continuation(self):
+        """Dump-cargo trickles (repeated amount=1 events, same route, seconds
+        apart) count as ONE physical delivery — no flag, no double distance."""
+        a = self._dp("dp-a4", "A", 0, 0)
+        far = self._dp("dp-f4", "Far", 0, 2_000_000)
+        self.assertIsNone(self._check(1, self.t0, a, far))
+        for i in range(1, 6):
+            self.assertIsNone(
+                self._check(1, self.t0 + timedelta(seconds=3 * i), a, far)
+            )
+        state = self.fd._delivery_rate_states[1]
+        legs = [m for _, m in state.window]
+        # The FIRST delivery has no predecessor (no leg recorded); every
+        # trickle event after it contributes zero extra distance.
+        self.assertEqual(sum(1 for m in legs if m > 0), 0)
+
+    def test_same_route_ping_pong_still_flags(self):
+        """Alternating two far routes (the NiSSiX signature) must NOT be
+        collapsed as trickle — each direction is a distinct route."""
+        a = self._dp("dp-a5", "A", 0, 0)
+        b = self._dp("dp-b5", "B", 0, 1_500_000)
+        self.assertIsNone(self._check(1, self.t0, a, b))
+        flag = self._check(1, self.t0 + timedelta(seconds=5), b, a)
+        self.assertIsNotNone(flag)
+        flag2 = self._check(1, self.t0 + timedelta(seconds=10), a, b)
+        self.assertIsNotNone(flag2)
+        # Window statistics accumulate the burst legs.
+        self.assertGreater(flag2.window_km, 2_500)
+
+    def test_short_leg_below_min_distance_never_flags(self):
+        a = self._dp("dp-a6", "A", 0, 0)
+        b = self._dp("dp-b6", "B", 2_000, 0)
+        self.assertIsNone(self._check(1, self.t0, a, b))
+        self.assertIsNone(self._check(1, self.t0 + timedelta(seconds=1), b, a))
+
+    def test_states_are_per_character(self):
+        a = self._dp("dp-a7", "A", 0, 0)
+        b = self._dp("dp-b7", "B", 0, 1_500_000)
+        self.assertIsNone(self._check(1, self.t0, a, b))
+        # Different character's first delivery: no state, no flag.
+        self.assertIsNone(self._check(2, self.t0 + timedelta(seconds=2), a, b))
+
+    def test_enforce_flag_parsing(self):
+        with patch.dict(os.environ, {"FRAUD_TELEPORT_ENFORCE": "1"}):
+            self.assertTrue(self.fd.teleport_enforce_enabled())
+        with patch.dict(os.environ, {"FRAUD_TELEPORT_ENFORCE": "0"}):
+            self.assertFalse(self.fd.teleport_enforce_enabled())
+        self.assertFalse(self.fd.teleport_enforce_enabled())
 

@@ -28,8 +28,10 @@ deliveries (mean + 3s on payment-per-km, excluding known outliers).
 
 import logging
 import math
-from dataclasses import dataclass
-from datetime import timedelta
+import os
+from collections import deque
+from dataclasses import dataclass, field
+from datetime import datetime, timedelta
 
 from django.contrib.gis.geos import Point
 from django.utils import timezone
@@ -210,6 +212,135 @@ PASSENGER_PAYMENT_CEILINGS: dict[int, int] = {
 
 # Tow request ceiling.
 TOW_PAYMENT_CEILING = 200_000
+
+
+# --- Teleport-with-cargo burst detection -----------------------------------
+#
+# Signature (2026-09-24 NiSSiX case): a client-side teleport cheat moves the
+# loaded vehicle across the map, so the SAME character completes far-apart
+# cargo deliveries seconds apart — e.g. ~184 distinct deliveries covering
+# ~2,200 km of route legs inside one 10-minute window.  Individual payments
+# are tiny, so the payment-ceiling checks above never see it; the tell is
+# TEMPORAL, not monetary: consecutive deliveries whose straight-line transit
+# distance cannot be covered in the elapsed time by any vehicle.
+#
+# State is in-memory per worker process keyed by character id — a worker
+# restart clears it, which only resets the clock (detection resumes on the
+# next delivery).  Trickle handling: dump-style cargo (iron ore etc.)
+# arrives as repeated amount=1 events for ONE physical delivery on the SAME
+# route within seconds; those continuations contribute zero distance
+# instead of re-counting the full route leg each time.
+TELEPORT_BURST_MAX_SPEED_MPS = 30.0  # ~108 km/h sustained straight-line, incl. load/unload time
+TELEPORT_BURST_MIN_LEG_M = 5_000  # ignore legs below this (short shuttles / noise)
+TELEPORT_BURST_CONTINUATION_S = 15.0  # same-route events within this gap = one physical delivery
+TELEPORT_BURST_ALERT_COOLDOWN_S = 60.0  # one alert per character per burst minute
+TELEPORT_BURST_WINDOW_S = 600.0  # rolling window kept for alert statistics
+
+# Default SHADOW: log + #fraud-alert only, no claw.  Set
+# FRAUD_TELEPORT_ENFORCE=1 to claw flagged deliveries.
+
+
+def teleport_enforce_enabled() -> bool:
+    return os.environ.get("FRAUD_TELEPORT_ENFORCE", "0").lower() in ("1", "true", "yes")
+
+
+@dataclass
+class _DeliveryRateState:
+    last_ts: datetime | None = None
+    last_coord: Point | None = None
+    last_route: tuple | None = None
+    window: deque = field(default_factory=deque)  # (ts, leg_m) non-continuation legs
+
+
+_delivery_rate_states: dict[int, _DeliveryRateState] = {}
+
+
+@dataclass
+class TeleportBurstFlag:
+    leg_m: float
+    elapsed_s: float
+    feasible_m: float
+    window_km: float
+    route: str
+    enforce: bool
+    logs: list = field(default_factory=list)
+
+
+def _delivery_leg_distance_m(
+    last_coord, sender_point: DeliveryPoint, destination_point: DeliveryPoint
+) -> float:
+    """Straight-line metres: previous destination -> origin -> destination."""
+    total = 0.0
+    if last_coord is not None and sender_point.coord is not None:
+        total += _geographic_distance_m(last_coord, sender_point.coord)
+    if sender_point.coord is not None and destination_point.coord is not None:
+        total += _geographic_distance_m(sender_point.coord, destination_point.coord)
+    return total
+
+
+def check_delivery_rate(
+    character_id: int,
+    timestamp,
+    sender_point: DeliveryPoint,
+    destination_point: DeliveryPoint,
+) -> TeleportBurstFlag | None:
+    """Detect teleport-with-cargo via physically infeasible delivery cadence.
+
+    Called once per distinct (sender, destination) route per cargo-arrived
+    event batch.  Returns a TeleportBurstFlag when the leg from the previous
+    delivery's destination could not have been covered in the elapsed time,
+    else None.  Purely observational on payments — the caller decides
+    whether to claw (enforce) or alert only (shadow).
+    """
+    if sender_point is None or destination_point is None:
+        return None
+
+    state = _delivery_rate_states.get(character_id)
+    if state is None:
+        state = _DeliveryRateState()
+        _delivery_rate_states[character_id] = state
+
+    route = (sender_point.pk, destination_point.pk)
+    now = timestamp
+    flag: TeleportBurstFlag | None = None
+
+    if state.last_ts is not None:
+        elapsed_s = (now - state.last_ts).total_seconds()
+        is_continuation = (
+            state.last_route == route
+            and 0 <= elapsed_s <= TELEPORT_BURST_CONTINUATION_S
+        )
+        if is_continuation:
+            # Trickle of the same physical delivery: zero extra distance.
+            state.window.append((now, 0.0))
+        elif elapsed_s > 0:
+            leg_m = _delivery_leg_distance_m(
+                state.last_coord, sender_point, destination_point
+            )
+            state.window.append((now, leg_m))
+            feasible_m = TELEPORT_BURST_MAX_SPEED_MPS * elapsed_s
+            if leg_m > TELEPORT_BURST_MIN_LEG_M and leg_m > feasible_m:
+                flag = TeleportBurstFlag(
+                    leg_m=leg_m,
+                    elapsed_s=elapsed_s,
+                    feasible_m=feasible_m,
+                    window_km=0.0,  # filled below
+                    route=f"{sender_point.name} -> {destination_point.name}",
+                    enforce=teleport_enforce_enabled(),
+                )
+    # Advance per-route tracking regardless of outcome.
+    state.last_route = route
+    state.last_coord = destination_point.coord
+    state.last_ts = now
+
+    # Prune + window statistics for the alert.
+    if state.last_ts is not None:
+        cutoff = state.last_ts - timedelta(seconds=TELEPORT_BURST_WINDOW_S)
+        while state.window and state.window[0][0] < cutoff:
+            state.window.popleft()
+    if flag is not None:
+        flag.window_km = sum(m for _, m in state.window) / 1000.0
+    return flag
 
 
 @dataclass
