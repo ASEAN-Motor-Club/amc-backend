@@ -24,7 +24,6 @@ from amc.models import (
     Player,
     RaceSetup,
     ScheduledEvent,
-    TTClass,
 )
 
 # Auto-posted TT names carry the class tag: "Live TT [TT-480]".
@@ -175,7 +174,9 @@ async def test_all_posts_fail_no_announce(announce_mock, db):
     mod = FakeModClient(fail_statuses={"Doomed TT": 400})
     await post_random_events({"http_client_mod": mod, "http_client": AsyncMock()})
 
-    assert [p["EventName"] for p in mod.posts if p["EventName"]] == ["Doomed TT"]
+    assert [
+        base_event_name(p["EventName"]) for p in mod.posts if p["EventName"]
+    ] == ["Doomed TT"]
     announce_mock.assert_not_awaited()
 
 
@@ -305,9 +306,9 @@ async def test_joined_event_not_rotated(announce_mock, remove_mock, db):
 # /events and /setup_event command behavior
 # ---------------------------------------------------------------------------
 
-from unittest.mock import MagicMock, patch as sync_patch
+from amc.command_framework import CommandContext, registry  # noqa: E402
+from unittest.mock import MagicMock, patch as sync_patch  # noqa: E402
 
-from amc.command_framework import registry, CommandContext
 
 
 def _make_ctx():

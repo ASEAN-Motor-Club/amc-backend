@@ -39,7 +39,7 @@ class Migration(migrations.Migration):
             },
         ),
         migrations.AddField(
-            model_name="scheduled_event",
+            model_name="scheduledevent",
             name="tt_class",
             field=models.ForeignKey(
                 blank=True,
@@ -51,7 +51,7 @@ class Migration(migrations.Migration):
             ),
         ),
         migrations.AddField(
-            model_name="game_event",
+            model_name="gameevent",
             name="tt_class",
             field=models.ForeignKey(
                 blank=True,
