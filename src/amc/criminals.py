@@ -1560,6 +1560,12 @@ async def tick_police_suspect_locations(http_client, http_client_mod, http_clien
             dy = suspect_loc[1] - officer_y
             direction = compass_heading(dx, dy)
 
+            if metres < 500:
+                # 200–500 m band (freeman): direction only — the distance
+                # figure would make close searches trivial.
+                entries.append((dist, f"[{character.name}] {direction}"))
+                continue
+
             if metres < 1000:
                 dist_str = f"{metres}m"
             else:
