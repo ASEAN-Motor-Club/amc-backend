@@ -1,13 +1,18 @@
 """Single shared event loop for player-position streaming.
 
-One background task polls the mod server once per tick and fans the snapshot
-out to every subscriber (SSE position stream, SSE count stream, WebSocket).
-Previously each SSE/WS connection ran its OWN poll loop against
-get_players_mod, so concurrent connections (and multiple uvicorn workers)
-fetched independently and could observe different rosters — duplicated /
-stale entries between the cache TTL and the stream loops. With the
-broadcaster there is exactly ONE fetch per tick per process and every
-subscriber sees the same snapshot generation.
+One background task polls once per tick and fans the snapshot out to every
+subscriber (SSE position stream, SSE count stream, WebSocket). Previously
+each SSE/WS connection ran its OWN poll loop against get_players_mod, so
+concurrent connections (and multiple uvicorn workers) fetched independently
+and could observe different rosters — duplicated / stale entries between
+the cache TTL and the stream loops. With the broadcaster there is exactly
+ONE fetch per tick per process and every subscriber sees the same snapshot
+generation.
+
+Data source: the C++ telemetry feed (`GET /players/locations` on the mod
+management API) for location/vehicle, merged with the Lua `GET /players`
+roster (2 s cache) for identity — see `get_positions_masked`. Lua-only
+masked fallback when the C++ feed is unavailable.
 """
 
 import asyncio
@@ -20,17 +25,17 @@ from django.conf import settings
 from amc.api.player_positions_common import (
     HEARTBEAT_INTERVAL,
     POSITION_UPDATE_SLEEP,
-    get_players_mod_masked,
+    get_positions_masked,
 )
 
 logger = logging.getLogger(__name__)
 
 
-async def _default_fetch(session):
-    # Bypass the mod-players cache: its TTL (2 s) is longer than the tick
-    # interval (1 s), so cached reads would replay the previous snapshot and
-    # emit duplicate position frames with fresh timestamps.
-    return await get_players_mod_masked(session, use_cache=False)
+async def _default_fetch(session, mgmt_session):
+    # The merged path reads the Lua roster THROUGH its 2 s cache (identity
+    # only, so cached reads can't emit duplicate positions), and falls back
+    # to the Lua-only masked path when the C++ telemetry feed is down.
+    return await get_positions_masked(session, mgmt_session)
 
 
 class PositionsBroadcaster:
@@ -41,6 +46,7 @@ class PositionsBroadcaster:
         self._start_lock = asyncio.Lock()
         self._task: asyncio.Task | None = None
         self._session: aiohttp.ClientSession | None = None
+        self._mgmt_session: aiohttp.ClientSession | None = None
         self._snapshot: list[dict] = []
         self._count = 0
         self._seq = 0
@@ -52,10 +58,13 @@ class PositionsBroadcaster:
                 self._session = aiohttp.ClientSession(
                     base_url=settings.MOD_SERVER_API_URL
                 )
+                self._mgmt_session = aiohttp.ClientSession(
+                    base_url=settings.MOD_MANAGEMENT_API_URL
+                )
                 self._task = asyncio.create_task(self._run())
 
     async def _run(self):
-        assert self._session is not None
+        assert self._session is not None and self._mgmt_session is not None
         try:
             # Absolute schedule: each tick targets `last_deadline + interval`,
             # not `now + interval` after the work finished. Sleeping
@@ -78,12 +87,14 @@ class PositionsBroadcaster:
                     # multiple intervals — re-anchor to now.
                     deadline = loop.time() + self._sleep_s
         finally:
-            if self._session is not None:
-                await self._session.close()
-                self._session = None
+            for s in (self._session, self._mgmt_session):
+                if s is not None:
+                    await s.close()
+            self._session = None
+            self._mgmt_session = None
 
     async def _tick(self):
-        players = await self._fetch(self._session)
+        players = await self._fetch(self._session, self._mgmt_session)
         if players is None:
             players = []
         # player_count semantics: hidden players are not counted.

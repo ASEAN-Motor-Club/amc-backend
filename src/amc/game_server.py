@@ -113,16 +113,21 @@ async def get_players_with_location(session):
 _FALLBACK_SENTINEL = "__fallback__"
 
 
-async def get_players_locations(session):
+async def get_players_locations(session, use_cache: bool = True):
     """Fetch from /players/locations on the C++ mod management API.
 
     Returns None if the endpoint is unavailable (cached 30s to avoid retries).
     Returns a list of dicts with telemetry data when available.
+
+    The 1s success cache exists for slower consumers; position streaming
+    ticks faster than that TTL and must pass use_cache=False or it replays
+    duplicate snapshots with fresh timestamps.
     """
     cache_key = "mod_players_locations"
-    cached = cache.get(cache_key)
-    if cached is not None:
-        return None if cached == _FALLBACK_SENTINEL else cached
+    if use_cache:
+        cached = cache.get(cache_key)
+        if cached is not None:
+            return None if cached == _FALLBACK_SENTINEL else cached
 
     try:
         async with session.get(
