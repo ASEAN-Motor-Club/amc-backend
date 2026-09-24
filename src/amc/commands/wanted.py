@@ -235,6 +235,8 @@ async def cmd_criminals(ctx: CommandContext):
             " (within 1km):</>\n"
         )
         for pay, label in (
+            (10_000, "$10k"),
+            (50_000, "$50k"),
             (100_000, "$100k"),
             (250_000, "$250k"),
             (500_000, "$500k"),
@@ -242,11 +244,10 @@ async def cmd_criminals(ctx: CommandContext):
             (1_000_000, "$1M"),
         ):
             chance = wanted_trigger_chance(pay, my_score, None)
-            risk = (
-                "<Warning>guaranteed</>"
-                if chance >= 1.0
-                else f"{chance * 100:.0f}%"
-            )
-            msg += f"{label} — <Highlight>{risk}</>\n"
+            if chance >= 1.0:
+                risk = "<Warning>guaranteed</>"
+            else:
+                risk = f"<Highlight>{chance * 100:.0f}%</>"
+            msg += f"{label} — {risk}\n"
 
     await ctx.reply(msg.rstrip())
