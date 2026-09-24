@@ -9,27 +9,22 @@ from amc.factories import CharacterFactory, PlayerFactory
 from amc.models import PendingWalletPayout
 from amc.pending_payout import deliver_pending_wallet_payouts
 from amc_finance.models import Account
-from amc_finance.services import create_journal_entry
 
 
 @pytest.mark.django_db
+@pytest.mark.asyncio
 async def test_delivery_books_withdrawal_and_marks_paid():
     player = await sync_to_async(PlayerFactory)()
     character = await sync_to_async(CharacterFactory)(player=player)
     # Fund the checking account so the withdrawal passes.
+    from amc_finance.services import register_player_deposit
+
+    await register_player_deposit(1_000_000, character, player)
     account = await Account.objects.aget(
         character=character,
         account_type=Account.AccountType.LIABILITY,
         book=Account.Book.BANK,
         name="Checking Account",
-    )
-    from django.utils import timezone as tz
-
-    await create_journal_entry(
-        tz.now(),
-        "Test funding",
-        character,
-        [{"account": account, "debit": 0, "credit": 1_000_000}],
     )
     payout = await PendingWalletPayout.objects.acreate(
         player=player, amount=400_000, reason="Fraud clawback correction"
@@ -58,6 +53,7 @@ async def test_delivery_books_withdrawal_and_marks_paid():
 
 
 @pytest.mark.django_db
+@pytest.mark.asyncio
 async def test_insufficient_balance_leaves_unpaid():
     player = await sync_to_async(PlayerFactory)()
     character = await sync_to_async(CharacterFactory)(player=player)
@@ -85,22 +81,18 @@ async def test_insufficient_balance_leaves_unpaid():
 
 
 @pytest.mark.django_db
+@pytest.mark.asyncio
 async def test_transfer_failure_keeps_booked_and_retries_only_wallet_leg():
     player = await sync_to_async(PlayerFactory)()
     character = await sync_to_async(CharacterFactory)(player=player)
+    from amc_finance.services import register_player_deposit
+
+    await register_player_deposit(1_000_000, character, player)
     account = await Account.objects.aget(
         character=character,
         account_type=Account.AccountType.LIABILITY,
         book=Account.Book.BANK,
         name="Checking Account",
-    )
-    from django.utils import timezone as tz
-
-    await create_journal_entry(
-        tz.now(),
-        "Test funding",
-        character,
-        [{"account": account, "debit": 0, "credit": 1_000_000}],
     )
     payout = await PendingWalletPayout.objects.acreate(
         player=player, amount=400_000, reason="Fraud clawback correction"
