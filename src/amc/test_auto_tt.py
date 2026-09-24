@@ -24,7 +24,15 @@ from amc.models import (
     Player,
     RaceSetup,
     ScheduledEvent,
+    TTClass,
 )
+
+# Auto-posted TT names carry the class tag: "Live TT [TT-480]".
+import re as _re
+
+
+def base_event_name(name):
+    return _re.sub(r"\s*\[TT-\d+\]$", "", name or "")
 
 
 def _race_config(route_name):
@@ -75,7 +83,7 @@ class FakeModClient:
     def post(self, path, json=None):
         self.posts.append(json)
         name = (json or {}).get("EventName")
-        status = self.fail_statuses.get(name, 201)
+        status = self.fail_statuses.get(base_event_name(name), 201)
         return FakeResponse(status)
 
     def get(self, path):
@@ -135,7 +143,10 @@ async def test_active_window_event_posted_and_announced(announce_mock, db):
     mod = FakeModClient()
     await post_random_events({"http_client_mod": mod, "http_client": AsyncMock()})
 
-    assert [p["EventName"] for p in mod.posts] == ["Live TT"]
+    posted = [p["EventName"] for p in mod.posts]
+    assert [base_event_name(n) for n in posted] == ["Live TT"]
+    # The random class tag rides in the posted event name.
+    assert _re.search(r"\[TT-\d+\]$", posted[0])
     payload = mod.posts[0]
     assert payload["EventType"] == 1
     # Location → Translation rename on waypoints
@@ -188,8 +199,8 @@ async def test_announce_lists_only_posted_events(announce_mock, db):
 
     announce_mock.assert_awaited_once()
     message = announce_mock.await_args.args[0]
-    posted = [p["EventName"] for p in mod.posts if p["EventName"] == "Good TT"]
-    assert posted == ["Good TT"]
+    posted = [p["EventName"] for p in mod.posts if base_event_name(p["EventName"]) == "Good TT"]
+    assert len(posted) == 1
     assert "Good TT" in message
     assert "Bad TT" not in message
 

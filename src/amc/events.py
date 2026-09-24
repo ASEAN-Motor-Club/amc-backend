@@ -12,6 +12,7 @@ from amc.mod_server import show_popup, send_message_as_player, teleport_player, 
 from amc.game_server import announce
 from amc.utils import skip_if_running
 from amc.models import (
+    TTClass,
     Character,
     GameEvent,
     GameEventCharacter,
@@ -1036,9 +1037,19 @@ async def post_random_events(ctx):
         if not config.get("EngineKeys"):
             config["EngineKeys"] = []
 
+        # Random TT power class per posted event (Yuuka 2026-09-24). The
+        # class rides in the event-name tag ([TT-480]) — that tag is the
+        # only reliable per-instance channel: the DB GameEvent row is
+        # created later by the SSE hook, and putting the class on the
+        # ScheduledEvent would silently re-class live races mid-run.
+        tt_class = await TTClass.objects.order_by("?").afirst()
+        event_name = scheduled_event.name
+        if tt_class:
+            event_name = f"{event_name} [{tt_class.name}]"
+
         data = {
             "EventGuid": generate_guid(),
-            "EventName": scheduled_event.name,
+            "EventName": event_name,
             "EventType": 1,
             "RaceSetup": config,
         }
