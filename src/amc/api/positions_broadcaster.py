@@ -57,13 +57,26 @@ class PositionsBroadcaster:
     async def _run(self):
         assert self._session is not None
         try:
+            # Absolute schedule: each tick targets `last_deadline + interval`,
+            # not `now + interval` after the work finished. Sleeping
+            # relative to the END of the previous tick let the period drift
+            # to fetch_duration + interval (e.g. 1.2 s -> 2.4 -> 3.6...).
+            loop = asyncio.get_running_loop()
+            deadline = loop.time()
             while True:
                 try:
                     await self._tick()
                 except Exception:
                     # Keep serving the last good snapshot; do not kill the loop.
                     logger.exception("positions broadcaster tick failed")
-                await asyncio.sleep(self._sleep_s)
+                deadline += self._sleep_s
+                delay = deadline - loop.time()
+                if delay > 0:
+                    await asyncio.sleep(delay)
+                else:
+                    # We are behind schedule (tick overran); do not skip ahead
+                    # multiple intervals — re-anchor to now.
+                    deadline = loop.time() + self._sleep_s
         finally:
             if self._session is not None:
                 await self._session.close()
