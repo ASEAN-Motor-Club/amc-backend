@@ -253,7 +253,9 @@ class ValidateCargoPaymentTests(TestCase):
         )
         self.assertEqual(excess, payment - threshold)
 
-    async def _seed_route_history(self, sender, dest, payments, cargo="CabbagePallet"):
+    async def _seed_route_history(
+        self, sender, dest, payments, cargo="CabbagePallet", weight=0.0
+    ):
         """Create ServerCargoArrivedLog history rows for one route pair."""
         from datetime import datetime, timezone as dt_tz
 
@@ -265,6 +267,7 @@ class ValidateCargoPaymentTests(TestCase):
                 timestamp=datetime(2026, 9, 1, 12, 0, i, tzinfo=dt_tz.utc),
                 cargo_key=cargo,
                 payment=pay,
+                weight=weight,
                 data={"Net_Payment": pay, "Net_CargoKey": cargo},
                 sender_point=sender,
                 destination_point=dest,
@@ -305,6 +308,98 @@ class ValidateCargoPaymentTests(TestCase):
         await self._seed_route_history(sender, dest, history)
         payment = 100_000
         # p99 index = int(0.99 * (25 - 1)) = 23; ceiling = max(2*p99, 1.2*max)
+        route_threshold = max(2 * (3_000 + 23), int(1.2 * (3_000 + 24)))
+        excess = await validate_cargo_payment(
+            cargo_key="CabbagePallet",
+            payment=payment,
+            quantity=1,
+            sender_point=sender,
+            destination_point=dest,
+        )
+        self.assertEqual(excess, payment - route_threshold)
+
+    async def test_route_history_weight_band_sparse_disables_detection(self):
+        """2026-09-24 Moonshine false positive: the route history holds only
+        LIGHT jobs while the suspect is a ~100 t full load paying more than
+        the weight-blind 2xp99 ceiling.  Detection must be DISABLED (no
+        claw), not fall through to the distance-blind per-km/per-unit
+        fallbacks which would clip even harder."""
+        sender = DeliveryPoint(
+            guid="sender-h5", name="Mine", coord=Point(0, 0, 0, srid=3857)
+        )
+        dest = DeliveryPoint(
+            guid="dest-h5", name="Rest Area", coord=Point(1_000_000, 0, 0, srid=3857)
+        )
+        # 25 light samples (~30 kg units, low pay) — enough for the old
+        # weight-blind consensus, but EMPTY in the suspect's weight band.
+        await self._seed_route_history(
+            sender, dest, [10_000 + i for i in range(25)], weight=30.0
+        )
+        # Moonshine full load: $88,555/unit at ~100 t, 10 km route.  Per-km
+        # fallback ($1000/km) would claw $78,555 and per-unit ($55k) $33,555
+        # — neither may apply on a sparse weight band.
+        excess = await validate_cargo_payment(
+            cargo_key="Moonshine",
+            payment=88_555,
+            quantity=1,
+            sender_point=sender,
+            destination_point=dest,
+            unit_weight=99.5,
+        )
+        self.assertEqual(excess, 0)
+
+    async def test_route_history_weight_band_uses_matching_samples(self):
+        """A weight-matched consensus is built from same-load samples only:
+        a full load is measured against the route's full loads, not against
+        its light jobs."""
+        sender = DeliveryPoint(
+            guid="sender-h6", name="Mine", coord=Point(0, 0, 0, srid=3857)
+        )
+        dest = DeliveryPoint(
+            guid="dest-h6", name="Supermarket", coord=Point(1_000_000, 0, 0, srid=3857)
+        )
+        # 20 light samples + 20 heavy samples of the same cargo/route.
+        await self._seed_route_history(
+            sender, dest, [3_000 + i for i in range(20)], weight=30.0
+        )
+        await self._seed_route_history(
+            sender, dest, [50_000 + i for i in range(20)], weight=99.0
+        )
+        # Full load slightly above the heavy consensus (50k): in band, and
+        # far above the light-only ceiling the weight-blind check would use.
+        excess = await validate_cargo_payment(
+            cargo_key="CabbagePallet",
+            payment=55_000,
+            quantity=1,
+            sender_point=sender,
+            destination_point=dest,
+            unit_weight=99.5,
+        )
+        self.assertEqual(excess, 0)
+        # ... but genuinely inflated relative to its own load class still claws.
+        excess = await validate_cargo_payment(
+            cargo_key="CabbagePallet",
+            payment=200_000,
+            quantity=1,
+            sender_point=sender,
+            destination_point=dest,
+            unit_weight=99.5,
+        )
+        # heavy p99 = 50_018, max = 50_019 -> ceiling = max(100_036, 60_022)
+        self.assertEqual(excess, 200_000 - 100_036)
+
+    async def test_route_history_without_weight_keeps_legacy_behaviour(self):
+        """No unit weight on the delivery -> weight-blind consensus, exactly
+        the pre-weight-band behaviour."""
+        sender = DeliveryPoint(
+            guid="sender-h7", name="Mine", coord=Point(0, 0, 0, srid=3857)
+        )
+        dest = DeliveryPoint(
+            guid="dest-h7", name="Factory", coord=Point(50_000, 0, 0, srid=3857)
+        )
+        history = [3_000 + i for i in range(25)]
+        await self._seed_route_history(sender, dest, history)
+        payment = 100_000
         route_threshold = max(2 * (3_000 + 23), int(1.2 * (3_000 + 24)))
         excess = await validate_cargo_payment(
             cargo_key="CabbagePallet",
