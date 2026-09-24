@@ -126,6 +126,7 @@ async def handle_cargo_arrived(event, player, character, ctx):
         validation_key = (
             log.cargo_key,
             log.payment,
+            log.weight,
             log.sender_point_id,
             log.destination_point_id,
         )
@@ -136,6 +137,7 @@ async def handle_cargo_arrived(event, player, character, ctx):
                 quantity=1,
                 sender_point=log.sender_point,
                 destination_point=log.destination_point,
+                unit_weight=log.weight,
             )
         excess = validated_excess[validation_key]
         if excess > 0:

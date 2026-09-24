@@ -193,6 +193,12 @@ MIN_DISTANCE_METRES = 500
 ROUTE_HISTORY_WINDOW_DAYS = 180
 ROUTE_HISTORY_MIN_SAMPLES = 20
 ROUTE_HISTORY_MAX_ROWS = 1000
+# Weight-band for the route consensus: a sample counts toward the consensus
+# of a delivery with unit weight W when the sample's unit weight is within
+# [0.6, 1.4] x W (roughly +/-40%).  Outside the band the sample describes a
+# different load class and its payment is not comparable.
+ROUTE_HISTORY_WEIGHT_BAND_LO = 0.6
+ROUTE_HISTORY_WEIGHT_BAND_HI = 1.4
 
 # Per-passenger-type payment ceilings (before bonus additions).
 # Derived from p99 of legitimate deliveries (excluding known cheats).
@@ -244,8 +250,13 @@ async def validate_cargo_payment(
     quantity: int,
     sender_point: DeliveryPoint | None,
     destination_point: DeliveryPoint | None,
+    unit_weight: float | None = None,
 ) -> int:
     """Validate a single cargo delivery payment against baselines.
+
+    `unit_weight` (kg, from the log row's `weight` column) enables the
+    weight-band filter on the route-history consensus; without it the
+    consensus is weight-blind (legacy behaviour).
 
     Returns the excess amount to claw back (0 if legitimate).
     """
@@ -285,10 +296,52 @@ async def validate_cargo_payment(
             sender_point,
             destination_point,
         )
-        route_samples = len(historical)
+        # Payment scales with unit WEIGHT for bulk cargo: a route history
+        # dominated by light jobs has a legitimate top far below a full
+        # load's pay, so a weight-blind consensus censors heavy hauls.
+        # 2026-09-24 case: Moonshine Copper Mine -G -> 1100 Rest Area paid
+        # $88,555/unit (99.5 t) — right where other characters' UNCLAWED
+        # full loads pay on sibling routes ($70-74k/unit) — but the route's
+        # history held only light jobs (top $19,721), so 2 x p99 clipped a
+        # legitimate load.  When the delivery carries a weight, restrict
+        # the consensus to samples of similar unit weight; if that band is
+        # too sparse, the data cannot support ANY payment check (the
+        # distance-blind per-km/per-unit fallbacks would clip harder, not
+        # softer) — disable detection and let only the absolute ceiling
+        # apply.
+        in_band = historical
+        if unit_weight:
+            in_band = [
+                pay
+                for pay, weight in historical
+                if weight
+                and ROUTE_HISTORY_WEIGHT_BAND_LO
+                <= weight / unit_weight
+                <= ROUTE_HISTORY_WEIGHT_BAND_HI
+            ]
+            if len(in_band) < ROUTE_HISTORY_MIN_SAMPLES:
+                logger.warning(
+                    "FRAUD-SKIP cargo=%s payment=%d unit_weight=%.1f: "
+                    "route history sparse (%d/%d samples in weight band "
+                    "%.2f-%.2fx) — detection disabled",
+                    cargo_key,
+                    payment,
+                    unit_weight,
+                    len(in_band),
+                    len(historical),
+                    ROUTE_HISTORY_WEIGHT_BAND_LO,
+                    ROUTE_HISTORY_WEIGHT_BAND_HI,
+                )
+                # Only the absolute ceiling still applies.
+                absolute_excess = 0
+                if max_absolute is not None and payment > max_absolute:
+                    absolute_excess = payment - int(max_absolute)
+                return absolute_excess
+        historical_values = [pay for pay, _ in historical]
+        route_samples = len(historical_values)
         if route_samples >= ROUTE_HISTORY_MIN_SAMPLES:
             route_checked = True
-            historical_sorted = sorted(historical)
+            historical_sorted = sorted(historical_values)
             p99 = historical_sorted[int(0.99 * (route_samples - 1))]
             route_max = historical_sorted[-1]
             route_threshold = max(2 * p99, 1.2 * route_max)
@@ -373,9 +426,9 @@ async def _route_history_payments(
     cargo_key: str,
     sender_point: DeliveryPoint,
     destination_point: DeliveryPoint,
-) -> list[int]:
-    """Raw pre-clawback Net_Payment values for this cargo on this exact
-    sender/destination pair, from the last ROUTE_HISTORY_WINDOW_DAYS.
+) -> list[tuple[int, float]]:
+    """(raw pre-clawback Net_Payment, unit weight kg) for this cargo on this
+    exact sender/destination pair, from the last ROUTE_HISTORY_WINDOW_DAYS.
 
     Rows MARKED with an `amc_fraud_excess` claw (written by the handler at
     claw time) are EXCLUDED: a cheat delivery must never raise the ceiling
@@ -399,10 +452,10 @@ async def _route_history_payments(
             timestamp__gte=cutoff,
         )
         .order_by("-timestamp")
-        .values_list("data", flat=True)[:ROUTE_HISTORY_MAX_ROWS]
+        .values_list("data", "weight")[:ROUTE_HISTORY_MAX_ROWS]
     )
-    payments: list[int] = []
-    async for data in rows:
+    payments: list[tuple[int, float]] = []
+    async for data, weight in rows:
         payload = data or {}
         if payload.get("amc_fraud_excess") is not None:
             continue  # clawed by this regime — cheat signal, never consensus
@@ -414,7 +467,7 @@ async def _route_history_payments(
         except (TypeError, ValueError):
             continue
         if value > 0:
-            payments.append(value)
+            payments.append((value, float(weight or 0)))
     return payments
 
 
