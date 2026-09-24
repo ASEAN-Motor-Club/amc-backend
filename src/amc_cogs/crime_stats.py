@@ -9,6 +9,7 @@ from discord.ext import tasks, commands
 from django.conf import settings
 
 from amc.models import Delivery, Confiscation
+from amc.special_cargo import ILLICIT_CARGO_KEYS
 
 logger = logging.getLogger(__name__)
 
@@ -73,6 +74,43 @@ class CrimeStatsCog(commands.Cog):
             else "No money laundering activity."
         )
 
+        # --- Illegal cargo deliveries (illicit cargo other than Money, which
+        # is covered by the laundering section above) ---
+        illegal_qs = (
+            Delivery.objects.filter(
+                cargo_key__in=ILLICIT_CARGO_KEYS,
+                timestamp__gte=yesterday,
+                timestamp__lte=now,
+            )
+            .exclude(cargo_key="Money")
+            .values("character")
+            .annotate(
+                total_hauled=Sum("payment"),
+                num_deliveries=Count("id"),
+                name=F("character__name"),
+            )
+            .order_by("-total_hauled")
+        )
+
+        illegal_list = []
+        total_illegal = 0
+        total_illegal_deliveries = 0
+        num_illegal_criminals = 0
+
+        async for row in illegal_qs:
+            num_illegal_criminals += 1
+            total_illegal += row["total_hauled"]
+            total_illegal_deliveries += row["num_deliveries"]
+            illegal_list.append(
+                f"**{row['name']}:** `${row['total_hauled']:,}` ({row['num_deliveries']} deliveries)"
+            )
+
+        illegal_str = (
+            "\n".join(illegal_list)
+            if illegal_list
+            else "No illegal cargo deliveries."
+        )
+
         # --- Confiscation stats ---
         confiscation_qs = (
             Confiscation.objects.filter(
@@ -118,6 +156,15 @@ class CrimeStatsCog(commands.Cog):
             value=(
                 f"**{total_laundering_deliveries}** deliveries by **{num_criminals}** criminal{'s' if num_criminals != 1 else ''}\n\n"
                 + laundering_str
+            ),
+            inline=False,
+        )
+
+        embed.add_field(
+            name=f"⚖️ Illegal Cargo Deliveries — `${total_illegal:,}`",
+            value=(
+                f"**{total_illegal_deliveries}** deliveries by **{num_illegal_criminals}** criminal{'s' if num_illegal_criminals != 1 else ''}\n\n"
+                + illegal_str
             ),
             inline=False,
         )
