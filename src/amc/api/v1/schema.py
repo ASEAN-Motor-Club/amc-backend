@@ -138,6 +138,25 @@ class SupplyChainContributorSchema(Schema):
     total_quantity: int
 
 
+# ── Economy Dashboard Schemas ────────────────────────────────────────
+
+
+class ContributorSchema(Schema):
+    character_id: int
+    name: str
+    units: int
+    payment: int
+    score: float
+
+
+class SectorHealthSchema(Schema):
+    sector: str
+    amount: int
+    capacity: int
+    fill: Optional[float] = None
+    starved_sites: int
+
+
 # ── Server Status Schemas ────────────────────────────────────────────
 
 

@@ -3767,3 +3767,33 @@ class ExamAttempt(models.Model):
     @override
     def __str__(self):
         return f"{self.exam_id} - {self.discord_username} - {self.score}%"
+
+
+@final
+class StorageSnapshot(models.Model):
+    """Hourly point-in-time copy of DeliveryPointStorage.
+
+    Written by the worker cron `snapshot_storages` (amc.economy_dashboard).
+    Feeds the economy dashboard: starvation-weighted contribution scoring
+    (deficit BEFORE a delivery) and historical sector-health sparklines.
+    """
+
+    delivery_point = models.ForeignKey(
+        DeliveryPoint, models.CASCADE, related_name="storage_snapshots"
+    )
+    kind = models.CharField(max_length=2, choices=DeliveryPointStorage.Kind)
+    cargo_key = models.CharField(max_length=200, db_index=True)
+    amount = models.PositiveIntegerField()
+    capacity = models.PositiveIntegerField(null=True, blank=True)
+    captured_at = models.DateTimeField(db_index=True)
+
+    class Meta:
+        indexes = [
+            models.Index(
+                fields=["delivery_point", "cargo_key", "captured_at"],
+                name="idx_storagesnap_point_cargo_ts",
+            ),
+        ]
+
+    def __str__(self):
+        return f"{self.delivery_point.name} {self.kind} {self.cargo_key} @ {self.captured_at:%Y-%m-%d %H:%M}"

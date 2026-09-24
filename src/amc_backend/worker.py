@@ -32,6 +32,7 @@ from amc.jobs import monitor_jobs  # noqa: E402
 from amc.status import monitor_server_status  # noqa: E402
 from amc.gov_employee import expire_gov_employees  # noqa: E402
 from amc.supply_chain import monitor_supply_chain_events  # noqa: E402
+from amc.economy_dashboard import snapshot_storages  # noqa: E402
 from amc.rescue_reminder import send_rescue_reminders  # noqa: E402
 import discord  # noqa: E402
 from amc.discord_client import bot as discord_client  # noqa: E402
@@ -287,6 +288,8 @@ class WorkerSettings:
         cron(refresh_all_vehicle_stats, hour=None, minute=30, second=0),
         # pyrefly: ignore [bad-argument-type]
         cron(monitor_supply_chain_events, second=47),
+        # pyrefly: ignore [bad-argument-type]
+        cron(snapshot_storages, hour=None, minute=7, second=0),  # hourly storage snapshot
         # pyrefly: ignore [bad-argument-type]
         cron(send_rescue_reminders, second=set(range(0, 60, 15))),
         # post_random_events (auto-TT posting) removed 2026-09-05 (freeman):

@@ -18,6 +18,8 @@ from amc.api.v1.schema import (
     SupplyChainEventSchema,
     SupplyChainEventListSchema,
     SupplyChainContributorSchema,
+    ContributorSchema,
+    SectorHealthSchema,
     ServerStatusSchema,
     PoliceStatsSchema,
     RescueRequestSchema,
@@ -76,6 +78,31 @@ async def economy_overview(request):
         "active_loan_count": active_loan_count,
         "npl_count": len(npl_loans),
     }
+
+
+@economy_router.get("/contributors/", response=list[ContributorSchema])
+async def economy_contributors(request, days: int = 7, limit: int = 20):
+    """Contribution leaderboard: starvation-weighted, BOM-propagated scores.
+
+    score per delivery = min(units, destination INPUT deficit before the
+    delivery) * cargo weight (see amc.economy_weights). Days window ends now.
+    """
+    from datetime import timedelta
+
+    from amc.economy_dashboard import contribution_leaderboard
+
+    end = timezone.now()
+    days = max(1, min(days, 90))
+    board = await contribution_leaderboard(end - timedelta(days=days), end, limit)
+    return board
+
+
+@economy_router.get("/sectors/", response=list[SectorHealthSchema])
+async def economy_sector_health(request):
+    """Per-sector supply health: fill ratio over current INPUT storages."""
+    from amc.economy_dashboard import sector_health
+
+    return await sector_health()
 
 
 @economy_router.get("/npl/", response=list[NPLLoanSchema])
