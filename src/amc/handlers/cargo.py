@@ -8,6 +8,7 @@ from __future__ import annotations
 import asyncio
 import itertools
 import logging
+import time
 from datetime import timedelta
 from operator import attrgetter
 
@@ -45,7 +46,12 @@ from amc.mod_server import (
     show_popup,
     transfer_money,
 )
-from amc.fraud_detection import validate_cargo_payment
+from amc.fraud_detection import (
+    TELEPORT_BURST_ALERT_COOLDOWN_S,
+    check_delivery_rate,
+    teleport_enforce_enabled,
+    validate_cargo_payment,
+)
 from amc.pipeline.discord import (
     post_discord_delivery_embed,
     post_discord_fraud_alert,
@@ -57,6 +63,9 @@ from amc_finance.services import record_ministry_subsidy_spend
 from asgiref.sync import sync_to_async
 
 logger = logging.getLogger("amc.webhook.handlers.cargo")
+
+# Per-character cooldown for teleport-burst Discord alerts (seconds, monotonic).
+_teleport_alert_times: dict[int, float] = {}
 
 
 # ---------------------------------------------------------------------------
@@ -169,6 +178,16 @@ async def handle_cargo_arrived(event, player, character, ctx):
                 final_payment=log.payment,
                 detail=f"Cargo {log.cargo_key} exceeded fraud thresholds.",
             )
+
+    # --- 4a. Teleport-with-cargo burst detection --------------------------
+    # Temporal check: consecutive deliveries whose straight-line leg cannot
+    # be covered in the elapsed time indicate a teleport cheat moving the
+    # loaded vehicle (2026-09-24 NiSSiX: ~184 deliveries / ~2,200 km of legs
+    # in one 10-minute window).  Payment ceilings never see this — the
+    # individual payments are tiny.  Shadow mode (default) alerts only;
+    # FRAUD_TELEPORT_ENFORCE=1 additionally claws the flagged deliveries.
+    if character:
+        total_fraud_excess += _handle_teleport_burst(character, logs, ctx, timestamp)
 
     await ServerCargoArrivedLog.objects.abulk_create(logs)
 
@@ -616,6 +635,86 @@ async def process_cargo_log(cargo, player, character, timestamp):
         destination_point=destination,
         data=cargo,
     )
+
+
+def _handle_teleport_burst(character, logs, ctx, timestamp) -> int:
+    """Run the teleport-burst delivery-rate check for this event batch.
+
+    Returns the total clawback amount (0 in shadow mode).  Flagged routes
+    are alerted to #fraud-alert at most once per cooldown window per
+    character; in enforce mode the flagged deliveries' payments are zeroed
+    and marked with `amc_fraud_excess` so the route-history consensus
+    excludes them.
+    """
+    enforce = teleport_enforce_enabled()
+    seen_routes: set[tuple] = set()
+    flagged: list = []
+    total_excess = 0
+    for log in logs:
+        if log.sender_point_id is None or log.destination_point_id is None:
+            continue
+        route_key = (log.sender_point_id, log.destination_point_id)
+        if route_key in seen_routes:
+            continue
+        seen_routes.add(route_key)
+        burst = check_delivery_rate(
+            character.id, timestamp, log.sender_point, log.destination_point
+        )
+        if burst is not None:
+            burst.logs = [
+                entry
+                for entry in logs
+                if (entry.sender_point_id, entry.destination_point_id) == route_key
+            ]
+            flagged.append(burst)
+
+    if not flagged:
+        return 0
+
+    now = time.monotonic()
+    last = _teleport_alert_times.get(character.id)
+    alert_due = last is None or (now - last) >= TELEPORT_BURST_ALERT_COOLDOWN_S
+    if alert_due:
+        _teleport_alert_times[character.id] = now
+
+    for burst in flagged:
+        route_excess = sum(entry.payment for entry in burst.logs)
+        if enforce and route_excess > 0:
+            for log in burst.logs:
+                if log.data is not None:
+                    log.data["amc_fraud_excess"] = log.payment
+                log.payment = 0
+            total_excess += route_excess
+        logger.warning(
+            "FRAUD teleport_burst player=%s route=%s leg=%.1fkm in %.0fs "
+            "(feasible %.1fkm) window=%.0fkm mode=%s clawed=%d",
+            character.player.unique_id,
+            burst.route,
+            burst.leg_m / 1000.0,
+            burst.elapsed_s,
+            burst.feasible_m / 1000.0,
+            burst.window_km,
+            "enforce" if burst.enforce else "shadow",
+            route_excess if enforce else 0,
+        )
+        if alert_due and ctx.discord_client:
+            post_discord_fraud_alert(
+                ctx.discord_client,
+                kind="cargo_teleport_burst",
+                character_name=character.name,
+                player_id=str(character.player.unique_id),
+                original_payment=route_excess,
+                clawed_back=route_excess if enforce else 0,
+                final_payment=0 if enforce else route_excess,
+                detail=(
+                    f"Teleport-with-cargo burst: {burst.route} covered "
+                    f"{burst.leg_m / 1000.0:.1f} km in {burst.elapsed_s:.0f}s "
+                    f"(max feasible {burst.feasible_m / 1000.0:.1f} km). "
+                    f"10-min window: {burst.window_km:.0f} km. "
+                    + ("Payments clawed." if enforce else "Shadow mode — payments untouched.")
+                ),
+            )
+    return total_excess
 
 
 def _extract_delivery_id(cargo) -> int | None:
