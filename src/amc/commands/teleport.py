@@ -538,6 +538,7 @@ async def cmd_tp_name(ctx: CommandContext, name: str = ""):
                         "Y": rescue.location.y,
                         "Z": rescue.location.z,
                     },
+                    "is_self_rescue": rescue.character_id == ctx.character.id,
                 }
                 break
 
@@ -565,9 +566,13 @@ async def cmd_tp_name(ctx: CommandContext, name: str = ""):
             player_info = await _fetch_custom_destination(ctx, player_info)
 
             # Teleport to Custom Waypoint
+            # A self-responder (responder == requester) may teleport, but
+            # WITHOUT their vehicle — otherwise a player who rolled over a
+            # loaded truck can teleport the crashed truck to a TP point and
+            # back, self-rescuing with the load intact.
             no_vehicles = (
                 not player_info.get("bIsAdmin") and not rescue_tp_data
-            ) or is_on_duty
+            ) or is_on_duty or (rescue_tp_data or {}).get("is_self_rescue", False)
             location = player_info.get("CustomDestinationAbsoluteLocation")
 
             if location and rescue_tp_data and not player_info.get("bIsAdmin"):
