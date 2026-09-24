@@ -680,6 +680,49 @@ class PendingWanted(models.Model):
         return f"PendingWanted: {self.character.name} (applies at {self.apply_at})"
 
 
+class PendingWalletPayout(models.Model):
+    """A queued bank -> wallet transfer delivered at the player's next login.
+
+    Used when a moderation/economy correction must move money out of a
+    player's bank account while they are offline. Delivered by
+    ``amc.pending_payout.deliver_pending_wallet_payouts`` in the login hook;
+    two-phase (``booked_at`` ledger leg, then ``paid_at`` wallet transfer) so
+    a failed transfer retries without double-withdrawing.
+    """
+
+    player = models.ForeignKey(
+        Player, on_delete=models.CASCADE, related_name="pending_wallet_payouts"
+    )
+    amount = models.PositiveBigIntegerField(
+        help_text="Bank -> wallet amount in game currency."
+    )
+    reason = models.CharField(
+        max_length=200,
+        help_text="Short audit label shown in the ledger description.",
+    )
+    created_at = models.DateTimeField(auto_now_add=True)
+    booked_at = models.DateTimeField(
+        blank=True,
+        null=True,
+        help_text="Set once the ledger withdrawal leg is booked.",
+    )
+    paid_at = models.DateTimeField(
+        blank=True,
+        null=True,
+        help_text="Set once the wallet transfer succeeded.",
+    )
+
+    class Meta:
+        ordering = ["created_at"]
+
+    @override
+    def __str__(self):
+        return (
+            f"PendingWalletPayout: {self.player.unique_id} "
+            f"{self.amount} ({'paid' if self.paid_at else 'pending'})"
+        )
+
+
 class FactionChoice(models.TextChoices):
     COP = "cop", "Cop"
     CRIMINAL = "criminal", "Criminal"

@@ -734,6 +734,28 @@ async def _login_guid_dependent_actions(
         logger.exception(f"GUID-dependent login actions failed for {player_name}: {e}")
 
 
+async def _deliver_pending_payouts_safe(player, http_client_mod) -> None:
+    """Deliver queued bank -> wallet payouts for this player (login hook).
+
+    Delivery targets the player's primary character's Checking Account — the
+    same character the clawback was booked against. Never raises.
+    """
+    from amc.pending_payout import deliver_pending_wallet_payouts
+
+    try:
+        character = await Character.objects.filter(
+            player_id=player.unique_id
+        ).afirst()
+        if character is not None:
+            await deliver_pending_wallet_payouts(
+                player, character, http_client_mod
+            )
+    except Exception:
+        logger.exception(
+            "Pending wallet payout delivery failed for %s", player.unique_id
+        )
+
+
 async def register_player_vehicles(session, character, player):
     try:
         await get_player_last_vehicle(session, str(character.guid))
@@ -1312,6 +1334,12 @@ async def process_log_event(
                 from amc.mute import reapply_mute_on_login
 
                 asyncio.create_task(reapply_mute_on_login(player, http_client_mod))
+                # Deliver any queued bank -> wallet payout (moderation
+                # clawback corrections) — fire-and-forget, login is never
+                # gated on it. Balance-guarded; unpaid rows retry next login.
+                asyncio.create_task(
+                    _deliver_pending_payouts_safe(player, http_client_mod)
+                )
 
             # --- Immediate actions (no GUID needed) ---
             if character:
