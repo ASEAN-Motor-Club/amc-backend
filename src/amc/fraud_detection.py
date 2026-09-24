@@ -232,7 +232,7 @@ TOW_PAYMENT_CEILING = 200_000
 # instead of re-counting the full route leg each time.
 TELEPORT_BURST_MAX_SPEED_MPS = 30.0  # ~108 km/h sustained straight-line, incl. load/unload time
 TELEPORT_BURST_MIN_LEG_M = 5_000  # ignore legs below this (short shuttles / noise)
-TELEPORT_BURST_CONTINUATION_S = 15.0  # same-route events within this gap = one physical delivery
+TELEPORT_BURST_CONTINUATION_S = 120.0  # same-route events within this gap = one physical delivery
 TELEPORT_BURST_ALERT_COOLDOWN_S = 60.0  # one alert per character per burst minute
 TELEPORT_BURST_WINDOW_S = 600.0  # rolling window kept for alert statistics
 
@@ -313,7 +313,9 @@ def check_delivery_rate(
         if is_continuation:
             # Trickle of the same physical delivery: zero extra distance.
             state.window.append((now, 0.0))
-        elif elapsed_s > 0:
+        elif elapsed_s >= 0:
+            # elapsed_s == 0 (two distinct routes in one second) is itself
+            # infeasible for far routes — flag it, don't silently drop it.
             leg_m = _delivery_leg_distance_m(
                 state.last_coord, sender_point, destination_point
             )

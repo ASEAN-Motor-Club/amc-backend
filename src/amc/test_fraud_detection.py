@@ -4,6 +4,10 @@ import time
 from datetime import timedelta
 from unittest.mock import AsyncMock, MagicMock, patch
 
+import pytest
+
+from amc import fraud_detection as _fd
+
 from asgiref.sync import sync_to_async
 from django.contrib.gis.geos import Point
 from django.test import TestCase, override_settings
@@ -34,6 +38,16 @@ from amc.models import (
 from amc.pipeline.discord import post_discord_fraud_alert
 from amc.pipeline.profit import on_player_profit, on_player_profits
 from amc.webhook import process_event, process_events
+
+
+@pytest.fixture(autouse=True)
+def _clear_teleport_rate_state():
+    """check_delivery_rate holds in-memory state that outlives the per-test
+    transaction rollback — clear it around every test so no character-id
+    reuse leaks cadence state between tests."""
+    _fd._delivery_rate_states.clear()
+    yield
+    _fd._delivery_rate_states.clear()
 
 # ---------------------------------------------------------------------------
 # Pure function tests — validate_cargo_payment (async)
@@ -1300,6 +1314,16 @@ class CheckDeliveryRateTests(TestCase):
         self.assertIsNotNone(flag2)
         # Window statistics accumulate the burst legs.
         self.assertGreater(flag2.window_km, 2_500)
+
+    def test_same_second_far_route_flags(self):
+        """Two distinct far routes delivered in the same second is itself
+        infeasible — must flag, not be silently dropped (elapsed == 0)."""
+        a = self._dp("dp-a8", "A", 0, 0)
+        b = self._dp("dp-b8", "B", 0, 1_500_000)
+        c = self._dp("dp-c8", "C", 2_500_000, 0)
+        self.assertIsNone(self._check(1, self.t0, a, b))
+        flag = self._check(1, self.t0, b, c)
+        self.assertIsNotNone(flag)
 
     def test_short_leg_below_min_distance_never_flags(self):
         a = self._dp("dp-a6", "A", 0, 0)
