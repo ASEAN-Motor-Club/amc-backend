@@ -1297,7 +1297,8 @@ class CheckDeliveryRateTests(TestCase):
         b = self._dp("dp-b2", "B", 0, 500_000)
         c = self._dp("dp-c2", "C", 2_000_000, 0)
         self.assertIsNone(self._check(1, self.t0, a, b))
-        # 10 s later, ~2,000 km leg: physically impossible.
+        # 10 s later, ~2,000 km leg: physically impossible — single absurd
+        # leg (speed > TELEPORT_BURST_ABSOLUTE_SPEED_MPS) flags on its own.
         flag = self._check(1, self.t0 + timedelta(seconds=10), b, c)
         self.assertIsNotNone(flag)
         self.assertGreater(flag.leg_m, TELEPORT_BURST_MIN_LEG_M)
@@ -1322,7 +1323,7 @@ class CheckDeliveryRateTests(TestCase):
                 self._check(1, self.t0 + timedelta(seconds=3 * i), a, far)
             )
         state = self.fd._delivery_rate_states[1]
-        legs = [m for _, m in state.window]
+        legs = [leg for _, leg, _ in state.window]
         # The FIRST delivery has no predecessor (no leg recorded); every
         # trickle event after it contributes zero extra distance.
         self.assertEqual(sum(1 for m in legs if m > 0), 0)
@@ -1355,6 +1356,49 @@ class CheckDeliveryRateTests(TestCase):
         b = self._dp("dp-b6", "B", 2_000, 0)
         self.assertIsNone(self._check(1, self.t0, a, b))
         self.assertIsNone(self._check(1, self.t0 + timedelta(seconds=1), b, a))
+
+    def test_one_by_one_trailer_batch_boundary_does_not_flag(self):
+        """Regression (character 8378 on prod): legit one-by-one trailer
+        delivery — 5 same-route deliveries 15-20 s apart (continuation
+        collapse), ~50 min gap while driving back, then the next batch.  The
+        single batch-boundary leg (~2x route at ~830 m/s after CRS inflation)
+        must NOT flag: one infeasible leg is not evidence."""
+        a = self._dp("dp-a9", "Migeum", 0, 0)
+        b = self._dp("dp-b9", "Dasa", 0, 1_248_600)  # ~1,250 CRS-km route
+        t = self.t0
+        self.assertIsNone(self._check(1, t, a, b))
+        for i in range(1, 5):  # trickle of the batch
+            self.assertIsNone(self._check(1, t + timedelta(seconds=15 * i), a, b))
+        # Drive back (~50 min), deliver the next batch.
+        t2 = t + timedelta(seconds=3012)
+        self.assertIsNone(self._check(1, t2, a, b))
+        for i in range(1, 5):
+            self.assertIsNone(
+                self._check(1, t2 + timedelta(seconds=15 * i), a, b)
+            )
+
+    def test_burst_gate_requires_eight_infeasible_legs(self):
+        """Below the gate: 7 moderately-infeasible legs -> silent.  At 8 ->
+        flag (NiSSiX-level burst, but each leg individually under the
+        absolute-speed bar)."""
+        # Use tighter geometry: legs ~30 km in 10 s => 3,000 m/s (infeasible
+        # vs 30 m/s bar, under the 5,000 m/s absolute bar).
+        a2 = self._dp("dp-a11", "A2", 0, 0)
+        b2 = self._dp("dp-b11", "B2", 0, 30_000)
+        self.assertIsNone(self._check(2, self.t0, a2, b2))
+        for i in range(1, 6):
+            ts = self.t0 + timedelta(seconds=10 * i)
+            src, dst = (b2, a2) if i % 2 == 1 else (a2, b2)
+            self.assertIsNone(self._check(2, ts, src, dst))
+        # leg 30 km in 10 s = 3,000 m/s: infeasible but under absolute bar.
+        self.assertIsNone(
+            self._check(2, self.t0 + timedelta(seconds=60), a2, b2)
+        )  # 6 infeasible legs so far -> still silent
+        self.assertIsNone(
+            self._check(2, self.t0 + timedelta(seconds=70), b2, a2)
+        )  # 7 -> still silent
+        flag = self._check(2, self.t0 + timedelta(seconds=80), a2, b2)
+        self.assertIsNotNone(flag)  # 8 -> burst gate fires
 
     def test_states_are_per_character(self):
         a = self._dp("dp-a7", "A", 0, 0)
