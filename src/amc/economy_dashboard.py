@@ -17,8 +17,10 @@ Health metric:
 
 import bisect
 import logging
+from datetime import timedelta
 
 from django.db import models
+from django.db.models import Count, Q, Sum
 from django.utils import timezone
 
 from amc.economy_dashboard_cargo import effective_capacity
@@ -244,6 +246,72 @@ async def sector_health():
             }
         )
     out.sort(key=lambda x: x["fill"] if x["fill"] is not None else 2)
+    return out
+
+
+async def depot_storages() -> list[dict]:
+    """Player-company depot storages (live) + recent delivery inflow.
+
+    Depots are DPs the sync marked removed=False whose name contains
+    "Depot" — player companies build/buy these; dead ones stay in the DB
+    with removed=True, so only active ones list. Storages are unmetered
+    box-pallet rows (capacity resolved via category default, Pallet=50).
+    """
+    from amc.economy_dashboard_cargo import effective_capacity
+    from amc.models import Delivery, DeliveryPoint
+
+    depots = DeliveryPoint.objects.filter(removed=False, name__icontains="depot")
+    now = timezone.now()
+    day_ago = now - timedelta(hours=24)
+    week_ago = now - timedelta(days=7)
+    inflow: dict[str, dict] = {}
+    async for r in (
+        Delivery.objects.filter(timestamp__gte=week_ago)
+        .filter(LEGAL_CARGO_FILTER)
+        .values("destination_point_id")
+        .annotate(
+            u7=Sum("quantity"),
+            d7=Count("id"),
+            u24=Sum(
+                "quantity",
+                filter=Q(timestamp__gte=day_ago),
+            ),
+            d24=Count("id", filter=Q(timestamp__gte=day_ago)),
+        )
+    ):
+        inflow[r["destination_point_id"]] = {
+            "units_7d": r["u7"] or 0,
+            "deliveries_7d": r["d7"] or 0,
+            "units_24h": r["u24"] or 0,
+            "deliveries_24h": r["d24"] or 0,
+        }
+
+    out: list[dict] = []
+    async for dp in depots:
+        rows = []
+        async for s in dp.storages.all().filter(LEGAL_CARGO_FILTER):
+            rows.append(
+                {
+                    "cargo": s.cargo_key,
+                    "kind": s.kind,
+                    "amount": s.amount,
+                    "capacity": await effective_capacity(s.cargo_key, s.capacity),
+                }
+            )
+        rows.sort(key=lambda r: (r["kind"] != "IN", r["cargo"]))
+        f = inflow.get(dp.guid, {})
+        out.append(
+            {
+                "guid": dp.guid,
+                "name": dp.name,
+                "storages": rows,
+                "units_24h": f.get("units_24h", 0),
+                "deliveries_24h": f.get("deliveries_24h", 0),
+                "units_7d": f.get("units_7d", 0),
+                "deliveries_7d": f.get("deliveries_7d", 0),
+            }
+        )
+    out.sort(key=lambda d: -d["units_7d"])
     return out
 
 

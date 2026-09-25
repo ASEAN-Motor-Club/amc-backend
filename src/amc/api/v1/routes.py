@@ -13,6 +13,7 @@ from amc.api.v1.schema import (
     CharacterVehicleSchema,
     ContributorSchema,
     DeliveryPointStorageSchema,
+    DepotSchema,
     DonationsLeaderboardSchema,
     EconomyOverviewSchema,
     NPLLoanSchema,
@@ -119,6 +120,18 @@ async def economy_sector_drilldown(
     if detail is None:
         raise HttpError(404, f"unknown sector: {sector}")
     return detail
+
+
+@economy_router.get("/depots/", response=list[DepotSchema])
+async def economy_depots(request):
+    """Active player-company depots: box-pallet storages + recent inflow.
+
+    Only DPs the game sync still reports (removed=False); depots that
+    disappeared in-game stay in the DB flagged removed and are excluded.
+    """
+    from amc.economy_dashboard import depot_storages
+
+    return await depot_storages()
 
 
 @economy_router.get("/npl/", response=list[NPLLoanSchema])

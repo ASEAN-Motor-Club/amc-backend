@@ -387,7 +387,9 @@ async def test_drilldown_excludes_unmetered_sites(db):
     """Capacity-less INPUT rows (e.g. temp 'Building Construction Site' DPs)
     are excluded from the drilldown listing."""
     p_metered = await _point("econ-dd-metered", "Real Site")
-    p_unmetered = await _point("econ-dd-temp", "Building Construction Site", type="")  # prod temp sites are type-blank
+    p_unmetered = await _point(
+        "econ-dd-temp", "Building Construction Site", type=""
+    )  # prod temp sites are type-blank
     try:
         await DeliveryPointStorage.objects.acreate(
             delivery_point=p_metered,
@@ -466,10 +468,15 @@ async def test_warehouse_out_stock_not_starved(db):
         by_name = {s["name"]: s for s in detail["sites"]}
         assert by_name["Fuel Storage Warehouse"]["starved"] is False
 
-        metal = await sector_drilldown("mining")  # the factory's intake (IronOre) is mining; its output (SteelCoil) is metal
-        assert {s["name"]: s["starved"] for s in metal["sites"]} == {
-            "Steel Factory": True  # different-cargo output (SteelCoil) doesn't rescue an empty intake
-        }
+        metal = await sector_drilldown(
+            "mining"
+        )  # the factory's intake (IronOre) is mining; its output (SteelCoil) is metal
+        assert (
+            {s["name"]: s["starved"] for s in metal["sites"]}
+            == {
+                "Steel Factory": True  # different-cargo output (SteelCoil) doesn't rescue an empty intake
+            }
+        )
 
         health = {s["sector"]: s for s in await sector_health()}
         # the warehouse's empty Fuel IN row no longer counts as starved
@@ -545,11 +552,19 @@ async def test_typed_unmetered_sites_stay_listed(db):
     temp = await _point("econ-temp2", "Building Construction Site", type="")
     try:
         await DeliveryPointStorage.objects.acreate(
-            delivery_point=wh, kind=DeliveryPointStorage.Kind.INPUT,
-            cargo_key="CheesePallet", amount=50, capacity=0)
+            delivery_point=wh,
+            kind=DeliveryPointStorage.Kind.INPUT,
+            cargo_key="CheesePallet",
+            amount=50,
+            capacity=0,
+        )
         await DeliveryPointStorage.objects.acreate(
-            delivery_point=temp, kind=DeliveryPointStorage.Kind.INPUT,
-            cargo_key="Concrete", amount=0, capacity=0)
+            delivery_point=temp,
+            kind=DeliveryPointStorage.Kind.INPUT,
+            cargo_key="Concrete",
+            amount=0,
+            capacity=0,
+        )
 
         food = await sector_drilldown("food")
         by_name = {s["name"]: s for s in food["sites"]}
@@ -562,3 +577,59 @@ async def test_typed_unmetered_sites_stay_listed(db):
         await DeliveryPointStorage.objects.all().adelete()
         for p in (wh, temp):
             await DeliveryPoint.objects.filter(guid=p.guid).adelete()
+
+
+async def test_depot_storages_active_only(db):
+    """Depot listing: active (removed=False) player depots with pallet-50
+    storages and delivery inflow; depots the game dropped (removed=True)
+    are excluded."""
+    from amc.economy_dashboard import depot_storages
+    from amc.models import DeliveryPoint
+
+    live = await DeliveryPoint.objects.acreate(
+        guid="dp-depot-live",
+        name="FreyCo Depot",
+        type="",
+        coord=Point(1, 2, 3, srid=3857),
+        removed=False,
+    )
+    await DeliveryPoint.objects.acreate(
+        guid="dp-depot-dead",
+        name="Depot (Gone Co)",
+        type="",
+        coord=Point(4, 5, 6, srid=3857),
+        removed=True,
+    )
+    try:
+        await DeliveryPointStorage.objects.acreate(
+            delivery_point=live,
+            kind=DeliveryPointStorage.Kind.INPUT,
+            cargo_key="BoxPallete_01",
+            amount=20,
+            capacity=0,
+        )
+        await Delivery.objects.acreate(
+            timestamp=timezone.now(),
+            character=await sync_to_async(CharacterFactory)(
+                player=await sync_to_async(PlayerFactory)()
+            ),
+            cargo_key="BoxPallete_01",
+            quantity=7,
+            payment=1000,
+            destination_point=live,
+        )
+
+        depots = {d["name"]: d for d in await depot_storages()}
+        assert "FreyCo Depot" in depots
+        assert "Depot (Gone Co)" not in depots
+        d = depots["FreyCo Depot"]
+        assert d["units_24h"] == 7
+        assert d["deliveries_7d"] == 1
+        rows = {r["cargo"]: r for r in d["storages"]}
+        assert rows["BoxPallete_01"]["capacity"] == 50  # Pallet category default
+    finally:
+        await Delivery.objects.all().adelete()
+        await DeliveryPointStorage.objects.all().adelete()
+        await DeliveryPoint.objects.filter(
+            guid__in=("dp-depot-live", "dp-depot-dead")
+        ).adelete()
