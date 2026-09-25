@@ -57,6 +57,55 @@ async def post_discord_delivery_embed(
         )
 
 
+def post_discord_reset_flag_alert(
+    discord_client,
+    *,
+    character_name: str,
+    player_id: str,
+    detail: str = "",
+    delivery_point_name: str | None = None,
+    distance_units: float | None = None,
+) -> None:
+    """Fire-and-forget Discord alert for a flagged vehicle reset.
+
+    Same alert channel as the fraud alerts (DISCORD_FRAUD_ALERT_CHANNEL_ID).
+    Silent no-op when no channel/client is available, never raises.
+    """
+    channel_id = settings.DISCORD_FRAUD_ALERT_CHANNEL_ID
+    if not channel_id or discord_client is None:
+        return
+    try:
+        channel = discord_client.get_channel(channel_id)
+        if channel is None:
+            logger.warning(
+                "Fraud alert channel %s not found; dropping reset flag for %s",
+                channel_id,
+                character_name,
+            )
+            return
+
+        embed = Embed(
+            title="Vehicle reset flagged",
+            color=0xE74C3C,
+            description=(
+                "Player flagged: cargo arrivals will be ignored for 5 minutes."
+            ),
+        )
+        embed.add_field(name="Player", value=f"{character_name} ({player_id})")
+        embed.add_field(name="Reason", value=detail or "unknown")
+        if delivery_point_name is not None and distance_units is not None:
+            embed.add_field(
+                name="Delivery point",
+                value=f"{delivery_point_name} ({distance_units / 100:.1f} m)",
+            )
+
+        asyncio.run_coroutine_threadsafe(channel.send(embed=embed), discord_client.loop)
+    except Exception:
+        logger.exception(
+            "Failed to post reset flag alert for %s", character_name
+        )
+
+
 def post_discord_fraud_alert(
     discord_client,
     *,
