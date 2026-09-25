@@ -230,11 +230,22 @@ TOW_PAYMENT_CEILING = 200_000
 # arrives as repeated amount=1 events for ONE physical delivery on the SAME
 # route within seconds; those continuations contribute zero distance
 # instead of re-counting the full route leg each time.
-TELEPORT_BURST_MAX_SPEED_MPS = 30.0  # ~108 km/h sustained straight-line, incl. load/unload time
+TELEPORT_BURST_MAX_SPEED_MPS = 30.0  # leg-speed bar counting toward the burst gate
 TELEPORT_BURST_MIN_LEG_M = 5_000  # ignore legs below this (short shuttles / noise)
 TELEPORT_BURST_CONTINUATION_S = 120.0  # same-route events within this gap = one physical delivery
 TELEPORT_BURST_ALERT_COOLDOWN_S = 60.0  # one alert per character per burst minute
 TELEPORT_BURST_WINDOW_S = 600.0  # rolling window kept for alert statistics
+# Burst gate: DP coords live in the game's projected CRS, NOT calibrated to
+# web-mercator meters (e.g. Migeum Log Warehouse -> Dasa Harbor Log Drop is
+# ~1,250 CRS-km for a ~35 km drive, ~30x inflation), so absolute leg speeds
+# are unreliable across routes — only *relative* feasibility (leg vs elapsed)
+# is.  Legit one-by-one trailer deliveries produce ONE marginal batch-boundary
+# leg every few minutes (8378 case: 5-trailer batches 15-20 s apart, ~50 min
+# between batches -> single leg at ~830 m/s).  The NiSSiX cheat produced
+# dozens of legs at >2000 m/s inside one window.  So flagging requires a
+# BURST of infeasible legs, or a single absurd leg no vehicle can explain.
+TELEPORT_BURST_MIN_INFEASIBLE_LEGS = 8  # infeasible legs within the window required to flag
+TELEPORT_BURST_ABSOLUTE_SPEED_MPS = 5000.0  # 18,000 km/h single leg: pure teleport
 
 # Default SHADOW: log + #fraud-alert only, no claw.  Set
 # FRAUD_TELEPORT_ENFORCE=1 to claw flagged deliveries.
@@ -312,24 +323,44 @@ def check_delivery_rate(
         )
         if is_continuation:
             # Trickle of the same physical delivery: zero extra distance.
-            state.window.append((now, 0.0))
+            state.window.append((now, 0.0, 0.0))
         elif elapsed_s >= 0:
             # elapsed_s == 0 (two distinct routes in one second) is itself
             # infeasible for far routes — flag it, don't silently drop it.
             leg_m = _delivery_leg_distance_m(
                 state.last_coord, sender_point, destination_point
             )
-            state.window.append((now, leg_m))
-            feasible_m = TELEPORT_BURST_MAX_SPEED_MPS * elapsed_s
-            if leg_m > TELEPORT_BURST_MIN_LEG_M and leg_m > feasible_m:
+            # Speed vs the elapsed gap (elapsed 0 => absurd by construction).
+            speed_mps = leg_m / max(elapsed_s, 1.0)
+            state.window.append((now, leg_m, speed_mps))
+            infeasible = leg_m > TELEPORT_BURST_MIN_LEG_M and (
+                speed_mps > TELEPORT_BURST_MAX_SPEED_MPS
+            )
+            absurd = leg_m > TELEPORT_BURST_MIN_LEG_M and (
+                speed_mps > TELEPORT_BURST_ABSOLUTE_SPEED_MPS
+            )
+            if infeasible:
                 flag = TeleportBurstFlag(
                     leg_m=leg_m,
                     elapsed_s=elapsed_s,
-                    feasible_m=feasible_m,
+                    feasible_m=TELEPORT_BURST_MAX_SPEED_MPS * elapsed_s,
                     window_km=0.0,  # filled below
                     route=f"{sender_point.name} -> {destination_point.name}",
                     enforce=teleport_enforce_enabled(),
                 )
+                if not absurd:
+                    # Burst gate: only alert when the window holds enough
+                    # infeasible legs (NiSSiX-level).  A single marginal
+                    # batch-boundary leg (one-by-one trailer delivery) is not
+                    # evidence on its own.
+                    burst = sum(
+                        1
+                        for _, leg, spd in state.window
+                        if leg > TELEPORT_BURST_MIN_LEG_M
+                        and spd > TELEPORT_BURST_MAX_SPEED_MPS
+                    )
+                    if burst < TELEPORT_BURST_MIN_INFEASIBLE_LEGS:
+                        flag = None
     # Advance per-route tracking regardless of outcome.
     state.last_route = route
     state.last_coord = destination_point.coord
@@ -341,7 +372,7 @@ def check_delivery_rate(
         while state.window and state.window[0][0] < cutoff:
             state.window.popleft()
     if flag is not None:
-        flag.window_km = sum(m for _, m in state.window) / 1000.0
+        flag.window_km = sum(leg for _, leg, _ in state.window) / 1000.0
     return flag
 
 
