@@ -182,16 +182,22 @@ async def cmd_police(ctx: CommandContext, verification_code: str = ""):
         await ctx.announce(f"{ctx.character.name} is now on police duty!")
 
 
+# Proximity gate: the caller must be within this many game units of the
+# target (20m — 100 units per metre, same convention as SETWANTED_MIN_DISTANCE).
+MARKWANTED_PROXIMITY_UNITS = 2_000
+
+
 @registry.register(
     ["/markwanted", "/mw"],
     description=gettext_lazy(
-        "Mark a player: their next illegal delivery is guaranteed wanted (admin only)"
+        "Mark a nearby player (within 20m): their next illegal delivery is "
+        "guaranteed wanted (police duty only)"
     ),
-    category="Admin",
+    category="Faction",
 )
 async def cmd_markwanted(ctx: CommandContext, target_player_name: str):
-    # Only game admins can use this command
-    if not ctx.player_info or not ctx.player_info.get("bIsAdmin"):
+    # Only on-duty police can use this command (silent early return)
+    if not await is_police(ctx.character):
         return
 
     # Find the target player online
@@ -214,7 +220,31 @@ async def cmd_markwanted(ctx: CommandContext, target_player_name: str):
     target_player_data = next(
         (p for pid, p in players if str(pid) == str(target_pid)), None
     )
-    if not target_player_data:
+    caller_data = next(
+        (p for pid, p in players if str(pid) == str(ctx.player.unique_id)), None
+    )
+    if not target_player_data or not caller_data:
+        return
+
+    # Proximity gate: the officer must be within 20m of the target
+    try:
+        caller_loc = parse_location_string(caller_data.get("location"))
+        target_loc = parse_location_string(target_player_data.get("location"))
+    except ValueError:
+        await ctx.reply(
+            _(
+                "<Title>Location Unknown</>\n\n"
+                "Cannot determine you or {name}'s location."
+            ).format(name=target_player_data.get("name", "target"))
+        )
+        return
+    if _distance_3d(caller_loc, target_loc) > MARKWANTED_PROXIMITY_UNITS:
+        await ctx.reply(
+            _(
+                "<Title>Too Far</>\n\n"
+                "You must be within 20m of {name} to mark them."
+            ).format(name=target_player_data.get("name", "target"))
+        )
         return
 
     try:

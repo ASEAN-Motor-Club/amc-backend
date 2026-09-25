@@ -3,7 +3,7 @@ from django.db import migrations, models
 
 class Migration(migrations.Migration):
     dependencies = [
-        ("amc", "0253_character_cargo_ignore_until"),
+        ("amc", "0254_merge_0253_leaves"),
     ]
 
     operations = [
