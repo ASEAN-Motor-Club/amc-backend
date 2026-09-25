@@ -367,6 +367,19 @@ class Character(models.Model):
     gov_employee_level = models.PositiveIntegerField(default=0)
     gov_employee_contributions = models.PositiveBigIntegerField(default=0)
 
+    # Teleport-reset flag: set when ServerResetVehicleAt lands within
+    # RESET_NEAR_DP_UNITS of a delivery point. While now < cargo_ignore_until
+    # every ServerCargoArrived event from this character is ignored (no
+    # validation, no payment). Timestamp-based so it expires on its own.
+    cargo_ignore_until = models.DateTimeField(
+        null=True,
+        blank=True,
+        help_text=(
+            "Cargo arrivals are ignored until this timestamp (set by a "
+            "vehicle reset near a delivery point; expires on its own)."
+        ),
+    )
+
     # Criminal
     # criminal_score: the single tracking ledger for criminal activity.
     # Cumulative illicit delivery payments; level = floor(score / 50_000) + 1.

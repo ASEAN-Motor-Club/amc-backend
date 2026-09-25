@@ -109,6 +109,19 @@ async def handle_cargo_arrived(event, player, character, ctx):
 
     timestamp = _parse_timestamp(event)
 
+    # --- 0. Teleport-reset flag: ignore all cargo arrivals ----------------
+    # While the reset-near-delivery-point flag is active, the event is
+    # dropped entirely: no logs, no validation, no payments. The raw event
+    # never existed as far as the economy is concerned.
+    if character is not None and character.cargo_ignore_until is not None:
+        if character.cargo_ignore_until > timezone.now():
+            logger.warning(
+                "Cargo ignored (teleport flag): player=%s until=%s",
+                character.player.unique_id,
+                character.cargo_ignore_until,
+            )
+            return 0, 0, 0, 0
+
     # --- 1. Parse cargos (all non-negative payments, including DeliveryId == 0) ---
     valid_cargos = _parse_cargos(event)
 
