@@ -633,3 +633,9 @@ async def test_depot_storages_active_only(db):
         await DeliveryPoint.objects.filter(
             guid__in=("dp-depot-live", "dp-depot-dead")
         ).adelete()
+        # factory Player/Character rows leak into later suites (exclusive
+        # progression counts Characters) — wipe them like _cleanup does
+        await Character.objects.all().adelete()
+        from amc.models import Player
+
+        await Player.objects.all().adelete()
