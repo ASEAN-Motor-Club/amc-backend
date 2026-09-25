@@ -23,7 +23,7 @@ from datetime import timedelta
 from unittest.mock import AsyncMock, patch
 
 from asgiref.sync import sync_to_async
-from django.test import SimpleTestCase, TestCase
+from django.test import TestCase
 from django.utils import timezone
 
 from amc.criminals import (
