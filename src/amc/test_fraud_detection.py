@@ -629,6 +629,24 @@ class FraudCargoIntegrationTests(TestCase):
         await DeliveryPoint.objects.acreate(
             guid="fd", name="Factory", coord=Point(100_000, 0, 0)
         )
+        # Seed a weight-banded route history for the fs->fd route: since
+        # #204, a weighted delivery on a sparse route DISABLES payment
+        # detection (absolute ceiling only), so without history the inflated
+        # payments below would legitimately go unclawed.  20 samples of
+        # 5,000 at weight 100 (matching the events' Net_Weight) put the
+        # route consensus ceiling at max(2 x p99, 1.2 x max) = 10,000.
+        from datetime import datetime, timezone as dt_tz
+
+        for i in range(ROUTE_HISTORY_MIN_SAMPLES):
+            await ServerCargoArrivedLog.objects.acreate(
+                timestamp=datetime(2026, 9, 1, 12, 0, i, tzinfo=dt_tz.utc),
+                cargo_key="BottlePallete",
+                payment=5_000,
+                weight=100.0,
+                data={"Net_Payment": 5_000, "Net_CargoKey": "BottlePallete"},
+                sender_point_id="fs",
+                destination_point_id="fd",
+            )
         return player, character
 
     def _cargo_event(self, character, player, cargo_key, payment):
@@ -746,7 +764,14 @@ class FraudCargoIntegrationTests(TestCase):
         }
         base_pay, _, _, clawback = await process_event(event, player, character)
 
-        logs = [log async for log in ServerCargoArrivedLog.objects.all()]
+        # Scope to this event's character: _setup seeds route-history rows
+        # (character=NULL) in the same table.
+        logs = [
+            log
+            async for log in ServerCargoArrivedLog.objects.filter(
+                character=character
+            )
+        ]
         self.assertEqual(len(logs), 2)
         payments = sorted(log.payment for log in logs)
         self.assertEqual(payments[0], 5_000)
