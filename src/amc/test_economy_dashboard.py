@@ -562,3 +562,65 @@ async def test_typed_unmetered_sites_stay_listed(db):
         await DeliveryPointStorage.objects.all().adelete()
         for p in (wh, temp):
             await DeliveryPoint.objects.filter(guid=p.guid).adelete()
+
+
+async def test_depot_storages_active_only(db):
+    """Depot listing: active (removed=False) player depots with pallet-50
+    storages and delivery inflow; depots the game dropped (removed=True)
+    are excluded."""
+    from amc.economy_dashboard import depot_storages
+    from amc.models import DeliveryPoint
+
+    live = await DeliveryPoint.objects.acreate(
+        guid="dp-depot-live",
+        name="FreyCo Depot",
+        type="",
+        coord=Point(1, 2, 3, srid=3857),
+        removed=False,
+    )
+    await DeliveryPoint.objects.acreate(
+        guid="dp-depot-dead",
+        name="Depot (Gone Co)",
+        type="",
+        coord=Point(4, 5, 6, srid=3857),
+        removed=True,
+    )
+    try:
+        await DeliveryPointStorage.objects.acreate(
+            delivery_point=live,
+            kind=DeliveryPointStorage.Kind.INPUT,
+            cargo_key="BoxPallete_01",
+            amount=20,
+            capacity=0,
+        )
+        await Delivery.objects.acreate(
+            timestamp=timezone.now(),
+            character=await sync_to_async(CharacterFactory)(
+                player=await sync_to_async(PlayerFactory)()
+            ),
+            cargo_key="BoxPallete_01",
+            quantity=7,
+            payment=1000,
+            destination_point=live,
+        )
+
+        depots = {d["name"]: d for d in await depot_storages()}
+        assert "FreyCo Depot" in depots
+        assert "Depot (Gone Co)" not in depots
+        d = depots["FreyCo Depot"]
+        assert d["units_24h"] == 7
+        assert d["deliveries_7d"] == 1
+        rows = {r["cargo"]: r for r in d["storages"]}
+        assert rows["BoxPallete_01"]["capacity"] == 50  # Pallet category default
+    finally:
+        await Delivery.objects.all().adelete()
+        await DeliveryPointStorage.objects.all().adelete()
+        await DeliveryPoint.objects.filter(
+            guid__in=("dp-depot-live", "dp-depot-dead")
+        ).adelete()
+        # factory Player/Character rows leak into later suites (exclusive
+        # progression counts Characters) — wipe them like _cleanup does
+        await Character.objects.all().adelete()
+        from amc.models import Player
+
+        await Player.objects.all().adelete()

@@ -12,8 +12,8 @@ CATEGORY_DEFAULT_CAPACITY: dict[str, int] = {
     "T::LargePackage": 50,  # Pallet
 }
 
-# cargos whose amc_cargo.type_id is blank but are pallets by name
-_PALLET_KEY_SUFFIXES = ("Pallet", "Pallete")
+# cargos whose amc_cargo.type_id is blank but are pallets by name are
+# caught by a substring match on "allet" in effective_capacity()
 
 _caps: dict[str, int | None] = {}
 
@@ -31,7 +31,7 @@ async def effective_capacity(cargo_key: str, row_capacity: int | None) -> int | 
         )
         if type_id and type_id in CATEGORY_DEFAULT_CAPACITY:
             _caps[cargo_key] = CATEGORY_DEFAULT_CAPACITY[type_id]
-        elif cargo_key.endswith(_PALLET_KEY_SUFFIXES):
+        elif "allet" in cargo_key.lower():  # *Pallet* / *Pallete* box cargo
             _caps[cargo_key] = CATEGORY_DEFAULT_CAPACITY["T::LargePackage"]
         else:
             _caps[cargo_key] = None

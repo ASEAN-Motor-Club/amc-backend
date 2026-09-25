@@ -177,6 +177,16 @@ class SectorDrilldownSchema(Schema):
     sites: list[SectorSiteSchema]
 
 
+class DepotSchema(Schema):
+    guid: str
+    name: str
+    storages: list[SectorStorageSchema]
+    units_24h: int
+    deliveries_24h: int
+    units_7d: int
+    deliveries_7d: int
+
+
 # ── Server Status Schemas ────────────────────────────────────────────
 
 
