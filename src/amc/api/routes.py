@@ -87,6 +87,7 @@ from amc.save_file import (
 )
 import os
 
+from .player_positions_common import _velocity_xyz
 from .positions_broadcaster import get_positions_broadcaster
 
 app_router = Router()
@@ -407,6 +408,10 @@ async def streaming_player_positions(request):
                     "vehicle_key": player["VehicleKey"],
                     "unique_id": player["UniqueID"],
                     "hidden": bool(player.get("hidden", False)),
+                    "velocity": {
+                        axis.lower(): value
+                        for axis, value in _velocity_xyz(player).items()
+                    },
                 }
                 for player in players
             }

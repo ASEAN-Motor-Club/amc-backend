@@ -279,3 +279,35 @@ class DefaultFetchTests(SimpleTestCase):
         self.assertFalse(ok["hidden"])
         self.assertEqual(ok["Location"], {"X": 1, "Y": 2, "Z": 3})
         self.assertEqual(ok["PlayerName"], "O")
+
+    async def test_merged_roster_carries_velocity(self):
+        """Velocity from the C++ feed survives the merge; Lua-only fallback
+        entries surface a zeroed velocity; hidden players are zeroed."""
+        from amc.api.player_positions_common import (
+            _mask_hidden_player,
+            _merge_masked_roster,
+            _velocity_xyz,
+        )
+
+        locations = [
+            {"CharacterGuid": "G-MOVING", "Location": {"X": 1, "Y": 2, "Z": 3},
+             "VehicleKey": None,
+             "Velocity": {"X": 10.5, "Y": -2.0, "Z": 0.25}},
+        ]
+        identity = [{"CharacterGuid": "g-moving", "UniqueID": "8", "PlayerName": "M"}]
+        with patch(
+            "amc.api.player_positions_common._get_hidden_player_unique_ids",
+            new=AsyncMock(return_value=(set(), set(), set())),
+        ):
+            roster = await _merge_masked_roster(locations, identity)
+        self.assertEqual(
+            roster[0]["Velocity"], {"X": 10.5, "Y": -2.0, "Z": 0.25}
+        )
+
+        # Lua-fallback entry (no Velocity key) -> stable zeroed surface
+        lua_entry = {"UniqueID": "9", "PlayerName": "L",
+                     "Location": {"X": 1, "Y": 2, "Z": 3}, "VehicleKey": ""}
+        self.assertEqual(_velocity_xyz(lua_entry), {"x": 0.0, "y": 0.0, "z": 0.0})
+        # hidden entries are zeroed so velocity can't leak movement
+        masked = _mask_hidden_player({"Velocity": {"X": 5, "Y": 5, "Z": 5}})
+        self.assertEqual(_velocity_xyz(masked), {"x": 0.0, "y": 0.0, "z": 0.0})
