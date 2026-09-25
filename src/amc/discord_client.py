@@ -11,6 +11,7 @@ from amc_cogs.status import StatusCog
 from amc_cogs.jobs import JobsCog
 from amc_cogs.roleplay import RoleplayCog
 from amc_cogs.leaderboard import LeaderboardCog
+from amc_cogs.economy_board import EconomyBoardCog
 from amc_cogs.delivery_stats import DeliveryStatsCog
 from amc_cogs.server import ServerCog
 from amc_cogs.profile import PlayerProfileCog
@@ -62,6 +63,7 @@ class AMCDiscordBot(commands.Bot):
         await self.add_cog(JobsCog(self), guild=guild)
         await self.add_cog(RoleplayCog(self), guild=guild)
         await self.add_cog(LeaderboardCog(self), guild=guild)
+        await self.add_cog(EconomyBoardCog(self), guild=guild)
         await self.add_cog(DeliveryStatsCog(self), guild=guild)
         await self.add_cog(ServerCog(self), guild=guild)
         await self.add_cog(PlayerProfileCog(self), guild=guild)
