@@ -293,6 +293,11 @@ async def sector_drilldown(
         # only sites that actually have INPUT rows in this sector
         if not site.pop("_in_sector"):
             continue
+        # exclude unmetered sites (all sector INPUT rows capacity-less):
+        # the game spawns temporary DPs like "Building Construction Site"
+        # for player-home construction — not permanent economy sites.
+        if not site["_cap"]:
+            continue
         if starved_only and not site["starved"]:
             continue
         fill = site["_amt"] / site["_cap"] if site["_cap"] else None

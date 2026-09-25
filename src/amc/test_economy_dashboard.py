@@ -380,3 +380,46 @@ def test_illicit_weights_and_sector_guard():
     for key in ILLICIT_CARGO_KEYS:
         assert weight_of(key) == 0.0
         assert sector_of(key) == "other"
+
+
+async def test_drilldown_excludes_unmetered_sites(db):
+    """Capacity-less INPUT rows (e.g. temp 'Building Construction Site' DPs)
+    are excluded from the drilldown listing."""
+    p_metered = await _point("econ-dd-metered", "Real Site")
+    p_unmetered = await _point("econ-dd-temp", "Building Construction Site")
+    try:
+        await DeliveryPointStorage.objects.acreate(
+            delivery_point=p_metered,
+            kind=DeliveryPointStorage.Kind.INPUT,
+            cargo_key="IronOre",
+            amount=10,
+            capacity=100,
+        )
+        await DeliveryPointStorage.objects.acreate(
+            delivery_point=p_unmetered,
+            kind=DeliveryPointStorage.Kind.INPUT,
+            cargo_key="IronOre",
+            amount=0,
+            capacity=0,  # the game never reports demand for temp construction DPs
+        )
+        detail = await sector_drilldown("mining")
+        guids = [s["guid"] for s in detail["sites"]]
+        assert p_metered.guid in guids
+        assert p_unmetered.guid not in guids
+
+        # a site with one metered row survives even if another row is unmetered
+        await DeliveryPointStorage.objects.acreate(
+            delivery_point=p_metered,
+            kind=DeliveryPointStorage.Kind.INPUT,
+            cargo_key="Coal",
+            amount=0,
+            capacity=0,
+        )
+        detail2 = await sector_drilldown("mining")
+        guids2 = [s["guid"] for s in detail2["sites"]]
+        assert p_metered.guid in guids2
+        assert p_unmetered.guid not in guids2
+    finally:
+        await DeliveryPointStorage.objects.all().adelete()
+        for p in (p_metered, p_unmetered):
+            await DeliveryPoint.objects.filter(guid=p.guid).adelete()
