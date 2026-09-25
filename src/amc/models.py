@@ -617,7 +617,14 @@ class Wanted(models.Model):
     associated with this wanted record (used for confiscation calculations).
     """
 
-    INITIAL_WANTED_LEVEL = 600  # all wanted levels start at the same value
+    INITIAL_WANTED_LEVEL = 600  # 5★ floor — see WANTED_STAR_FLOOR in criminals.py
+
+    # Scale-with-delivery (freeman 2026-09-25): a chase is issued at
+    # max(5, delivery // 100_000) stars; initial_heat records the heat value
+    # it was issued at (stars × LEVEL_PER_STAR) so the running-growth cap in
+    # tick_wanted_countdown matches the issued chase, not the 5★ floor.
+    WANTED_STAR_FLOOR = 5
+    WANTED_STAR_STEP_AMOUNT = 100_000  # $100k of illicit delivery per extra star
 
     # 1/r² decay constants (game units; 100 units = 1 metre)
     REF_DISTANCE = 20_000  # 200m — distance where decay_rate = 1.0/tick
@@ -630,6 +637,13 @@ class Wanted(models.Model):
         Character, on_delete=models.CASCADE, related_name="wanted_records"
     )
     wanted_remaining = models.FloatField()  # seconds (float for fractional decrements)
+    initial_heat = models.IntegerField(
+        default=INITIAL_WANTED_LEVEL,
+        help_text=(
+            "Heat value this chase was issued at (stars × LEVEL_PER_STAR). "
+            "Caps mid-chase running-heat regrowth; never re-priced by decay."
+        ),
+    )
     amount = models.BigIntegerField(
         default=0,
         help_text=(

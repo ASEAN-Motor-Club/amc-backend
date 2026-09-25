@@ -23,7 +23,7 @@ from datetime import timedelta
 from unittest.mock import AsyncMock, patch
 
 from asgiref.sync import sync_to_async
-from django.test import TestCase
+from django.test import SimpleTestCase, TestCase
 from django.utils import timezone
 
 from amc.criminals import (
@@ -45,6 +45,8 @@ from amc.criminals import (
     tick_police_suspect_locations,
     tick_wanted_countdown,
     wanted_accrual_multiplier,
+    wanted_stars_for_delivery,
+    initial_heat_for_stars,
 )
 from amc.factories import CharacterFactory, PlayerFactory
 from amc.models import (
@@ -133,6 +135,35 @@ class ComputeStarsTests(TestCase):
         """A tiny remainder (old escape floor 0.1) still counts as 1 star."""
         self.assertEqual(_compute_stars(0.1), 1)
 
+
+
+
+class DeliveryScaledStarsTests(TestCase):
+    """Scale-with-delivery (freeman 2026-09-25): floor 5★, +1 star per full
+    $100k of illicit delivery. Stars are meter size + display only."""
+
+    def test_floor_is_5_stars(self):
+        for amount in (0, 10_000, 499_999, 500_000):
+            self.assertEqual(wanted_stars_for_delivery(amount), 5, amount)
+
+    def test_one_star_per_full_100k(self):
+        # the 5★ floor covers the first $500k; 6★ starts at $600k
+        self.assertEqual(wanted_stars_for_delivery(600_000), 6)
+        self.assertEqual(wanted_stars_for_delivery(800_000), 8)
+        self.assertEqual(wanted_stars_for_delivery(1_500_000), 15)
+        self.assertEqual(wanted_stars_for_delivery(999_999.99), 9)
+
+    def test_initial_heat_matches_star_bands(self):
+        self.assertEqual(initial_heat_for_stars(5), 600)
+        self.assertEqual(initial_heat_for_stars(8), 960)
+
+    def test_compute_stars_uncapped_above_5(self):
+        self.assertEqual(_compute_stars(960), 8)
+        self.assertEqual(_compute_stars(961), 9)
+        self.assertEqual(_compute_stars(600), 5)
+        self.assertEqual(_compute_stars(360), 3)
+        self.assertEqual(_compute_stars(0.1), 1)
+        self.assertEqual(_compute_stars(0), 0)
 
 @patch("amc.criminals.refresh_player_name", new_callable=AsyncMock)
 @patch("amc.criminals.send_system_message", new_callable=AsyncMock)
