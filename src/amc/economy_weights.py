@@ -75,12 +75,66 @@ CARGO_WEIGHTS: dict[str, float] = {
 
 SECTORS: dict[str, list[str]] = {
     "energy": ["Fuel", "CrudeOil", "Oil"],
-    "mining": ["IronOre", "CopperOre", "Coal", "LimestoneRock", "Limestone", "Sand"],
-    "logging": ["Log_20ft", "Log_Oak_12ft", "Log_Oak_24ft", "Log_30ft_30t", "WoodPlank_14ft_5t"],
-    "metal": ["SteelCoil_10t", "lHBeam_6m", "CopperRodCoil_2t", "CircuitBoardPallet", "Transformer_50MVA", "Transformer_20MVA", "Transformer_5MVA"],
-    "construction": ["Cement", "Concrete", "QuicklimePallet", "PlasticPipes_6m", "Container_20ft_01", "Container_40ft_01", "GlassBottleBox", "BottlePallete"],
-    "food": ["Milk", "MeatBox", "CheesePallet", "CheeseBox", "BreadPallet", "BreadBox", "SunflowerSeed", "CornPallet", "RicePallet", "PumpkinPallet", "CabbagePallet", "PotatoPallet", "BeanPallet", "OrangeBoxes", "ChilliPallet"],
-    "retail": ["Pizza_01", "Pizza_01_Premium", "Burger_01", "Burger_01_Signature", "GroceryBag", "SnackBox", "Sofa_01", "Sofa_02", "Sofa_03", "Sofa_04", "Bed_01", "Bed_02", "Bed_03", "SmallBox", "BoxPallete_01", "ToyBoxes"],
+    "mining": ["IronOre", "CopperOre", "Coal", "Sand"],
+    "logging": [
+        "Log_20ft",
+        "Log_Oak_12ft",
+        "Log_Oak_24ft",
+        "Log_30ft_30t",
+        "WoodPlank_14ft_5t",
+    ],
+    "metal": [
+        "SteelCoil_10t",
+        "lHBeam_6m",
+        "CopperRodCoil_2t",
+        "CircuitBoardPallet",
+        "Transformer_50MVA",
+        "Transformer_20MVA",
+        "Transformer_5MVA",
+    ],
+    "construction": [
+        "Cement",
+        "Concrete",
+        "QuicklimePallet",
+        "Limestone",
+        "LimestoneRock",
+        "PlasticPipes_6m",
+    ],
+    "food": [
+        "Milk",
+        "MeatBox",
+        "CheesePallet",
+        "CheeseBox",
+        "BreadPallet",
+        "BreadBox",
+        "SunflowerSeed",
+        "CornPallet",
+        "RicePallet",
+        "PumpkinPallet",
+        "CabbagePallet",
+        "PotatoPallet",
+        "BeanPallet",
+        "OrangeBoxes",
+        "ChilliPallet",
+    ],
+    "retail": [
+        "Pizza_01",
+        "Pizza_01_Premium",
+        "Burger_01",
+        "Burger_01_Signature",
+        "GroceryBag",
+        "SnackBox",
+        "Sofa_01",
+        "Sofa_02",
+        "Sofa_03",
+        "Sofa_04",
+        "Bed_01",
+        "Bed_02",
+        "Bed_03",
+        "SmallBox",
+        "BoxPallete_01",
+        "ToyBoxes",
+    ],
     "vehicles": ["Terra", "Raven", "FormulaSCM"],
 }
 
@@ -94,6 +148,26 @@ def sector_of(cargo_key: str) -> str:
         if cargo_key in keys:
             return sector
     return "other"
+
+
+# Per-(sector, cargo) DP-type exemptions: the same cargo can serve two purposes
+# (e.g. farms consume QuicklimePallet as fertilizer — not a construction flow),
+# so sites of the listed types don't use that cargo for this sector.
+SECTOR_CARGO_TYPE_EXEMPT: dict[str, dict[str, set[str]]] = {
+    "construction": {"QuicklimePallet": {"Farm"}},
+}
+
+
+def row_in_sector(sector: str, cargo_key: str, dp_type: str | None) -> bool:
+    """Does this INPUT row count the DP toward / fill `sector`?"""
+    if sector == "other":
+        return True
+    if cargo_key not in SECTORS.get(sector, []):
+        return False
+    exempt_types = SECTOR_CARGO_TYPE_EXEMPT.get(sector, {}).get(cargo_key, set())
+    if dp_type in exempt_types:
+        return False
+    return True
 
 
 def weight_of(cargo_key: str) -> float:
