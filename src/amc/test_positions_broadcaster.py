@@ -298,7 +298,7 @@ class DefaultFetchTests(SimpleTestCase):
             new=AsyncMock(return_value=(merged, None)),
         ) as mock_masked:
             out = await positions_broadcaster._default_fetch(None, None)
-            self.assertIs(out, (merged, None))
+            self.assertEqual(out, (merged, None))
             mock_masked.assert_awaited_once_with(None, None)
 
     async def test_merged_roster_masks_hidden_player(self):

@@ -98,7 +98,12 @@ class PositionsBroadcaster:
         # Fetches return (roster, src_ts): src_ts is the C++ feed's snapshot
         # capture time (epoch s) or None on the Lua fallback — fall back to
         # local query time there so the surface always has a timestamp.
-        players, src_ts = result
+        # Plain-roster fetches (custom/test fetches) are accepted too.
+        src_ts = None
+        if isinstance(result, tuple):
+            players, src_ts = result
+        else:
+            players = result
         if src_ts is not None:
             self._ts = src_ts
         else:
@@ -108,7 +113,6 @@ class PositionsBroadcaster:
         # player_count semantics: hidden players are not counted.
         self._count = sum(1 for p in players if not p.get("hidden", False))
         self._snapshot = players
-        self._ts = time.time()
         self._seq += 1
         async with self._cond:
             self._cond.notify_all()
