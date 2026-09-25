@@ -380,6 +380,22 @@ class Character(models.Model):
         ),
     )
 
+    # /markwanted flag: while now < marked_wanted_until, the character's next
+    # illegal delivery triggers a Wanted with 100% chance (the 1km
+    # cop-proximity attenuation still applies). Timestamp-based so it expires
+    # on its own; cleared on the triggering delivery. TTL comes from
+    # WantedSystemConfig.markwanted_ttl_minutes.
+    marked_wanted_until = models.DateTimeField(
+        null=True,
+        blank=True,
+        help_text=(
+            "Wanted-mark flag: the next illicit delivery before this timestamp "
+            "triggers a Wanted with certainty (cop-proximity attenuation still "
+            "applies). Set by /markwanted; expires on its own and is cleared "
+            "once the marked delivery triggers."
+        ),
+    )
+
     # Criminal
     # criminal_score: the single tracking ledger for criminal activity.
     # Cumulative illicit delivery payments; level = floor(score / 50_000) + 1.
@@ -3363,6 +3379,14 @@ class WantedSystemConfig(models.Model):
             "OFF: wanted triggers fire and heat moves with zero cops on duty; "
             "the distance law treats police distance as infinite "
             "(decay F(D)=3.0x, growth A(D)=1/3x)."
+        ),
+    )
+
+    markwanted_ttl_minutes = models.PositiveIntegerField(
+        default=60,
+        help_text=(
+            "How long (minutes) a /markwanted flag stays armed on a character "
+            "before expiring on its own."
         ),
     )
 

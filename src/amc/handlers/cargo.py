@@ -19,6 +19,7 @@ from django.utils import timezone
 
 from amc.handlers import register
 from amc.models import (
+    Character,
     Delivery,
     DeliveryJob,
     DeliveryPoint,
@@ -400,14 +401,28 @@ async def handle_cargo_arrived(event, player, character, ctx):
             # vehicle; tick_wanted_countdown applies the wanted (bounty +
             # laundered announce + compass) once the window elapses.
             trigger = False
+            marked = bool(
+                character.marked_wanted_until
+                and character.marked_wanted_until > timezone.now()
+            )
             if not already_wanted and not already_pending:
                 cops_present, cop_distance_m = await nearest_effective_cop_distance_m(
                     ctx.http_client, ctx.http_client_mod, character
                 )
                 if cops_present:
                     trigger = should_trigger_wanted(
-                        accumulated_amount, pre_delivery_score, cop_distance_m
+                        accumulated_amount,
+                        pre_delivery_score,
+                        cop_distance_m,
+                        marked=marked,
                     )
+                    if trigger and marked:
+                        # The mark is spent on the delivery that triggers:
+                        # clear it immediately (expires on its own otherwise).
+                        await Character.objects.filter(pk=character.pk).aupdate(
+                            marked_wanted_until=None
+                        )
+                        character.marked_wanted_until = None
             if already_wanted:
                 # Bounty: system-triggered CREATIONS auto-set 10% of the
                 # criminal score inside create_or_refresh_wanted (chase-
