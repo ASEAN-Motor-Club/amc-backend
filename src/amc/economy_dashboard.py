@@ -18,14 +18,21 @@ Health metric:
 import bisect
 import logging
 
+from django.db import models
 from django.utils import timezone
 
 from amc.economy_weights import sector_of, weight_of
 from amc.models import Delivery, DeliveryPointStorage, StorageSnapshot
+from amc.special_cargo import ILLICIT_CARGO_KEYS
 
 logger = logging.getLogger("amc.economy_dashboard")
 
 MAX_HAUL_DEGREE = 1.0  # starvation weight when no snapshot/capacity data exists
+
+# Illicit cargo is out of the economy dashboard entirely: it never enters
+# storage snapshots, never scores on the contribution board, never counts
+# toward sector fill. Single source of truth = special_cargo.ILLICIT_CARGO_KEYS.
+LEGAL_CARGO_FILTER = ~models.Q(cargo_key__in=ILLICIT_CARGO_KEYS)
 
 
 async def snapshot_storages() -> int:
@@ -40,9 +47,9 @@ async def snapshot_storages() -> int:
             capacity=capacity,
             captured_at=now,
         )
-        async for dp_id, kind, cargo_key, amount, capacity in DeliveryPointStorage.objects.values_list(
-            "delivery_point_id", "kind", "cargo_key", "amount", "capacity"
-        )
+        async for dp_id, kind, cargo_key, amount, capacity in DeliveryPointStorage.objects.filter(
+            LEGAL_CARGO_FILTER
+        ).values_list("delivery_point_id", "kind", "cargo_key", "amount", "capacity")
     ]
     await StorageSnapshot.objects.abulk_create(current, batch_size=2000)
     logger.info("storage snapshot written: %d rows", len(current))
@@ -78,14 +85,27 @@ async def contribution_leaderboard(window_start, window_end=None, limit: int = 2
         window_end = timezone.now()
 
     deliveries = [
-        (d["character_id"], d["cargo_key"], d["quantity"], d["payment"],
-         d["destination_point_id"], int(d["timestamp"].timestamp()))
+        (
+            d["character_id"],
+            d["cargo_key"],
+            d["quantity"],
+            d["payment"],
+            d["destination_point_id"],
+            int(d["timestamp"].timestamp()),
+        )
         async for d in Delivery.objects.filter(
             timestamp__range=[window_start, window_end],
             character__isnull=False,
         )
-        .values("character_id", "cargo_key", "quantity", "payment",
-                "destination_point_id", "timestamp")
+        .filter(LEGAL_CARGO_FILTER)
+        .values(
+            "character_id",
+            "cargo_key",
+            "quantity",
+            "payment",
+            "destination_point_id",
+            "timestamp",
+        )
     ]
 
     # snapshot timeline per (destination_point, cargo) covering the window
@@ -102,9 +122,7 @@ async def contribution_leaderboard(window_start, window_end=None, limit: int = 2
             "delivery_point_id", "cargo_key", "captured_at", "capacity", "amount"
         ):
             key = (s[0], s[1])
-            grouped.setdefault(key, []).append(
-                (int(s[2].timestamp()), s[3], s[4], 0)
-            )
+            grouped.setdefault(key, []).append((int(s[2].timestamp()), s[3], s[4], 0))
         for key, rows in grouped.items():
             rows.sort()
             timelines[key] = _deficit_timeline(rows)
@@ -164,6 +182,7 @@ async def sector_health():
     rows = [
         (r["cargo_key"], r["amount"], r["capacity"])
         async for r in DeliveryPointStorage.objects.filter(kind="IN", capacity__gt=0)
+        .filter(LEGAL_CARGO_FILTER)
         .values("cargo_key", "amount", "capacity")
     ]
     by_sector: dict[str, dict] = {}
@@ -190,3 +209,118 @@ async def sector_health():
         )
     out.sort(key=lambda x: x["fill"] if x["fill"] is not None else 2)
     return out
+
+
+async def sector_drilldown(
+    sector: str, *, starved_only: bool = False, limit: int = 100
+):
+    """Expand one sector to its delivery points and their storages.
+
+    A DP belongs to the sector iff it has INPUT storages whose cargo maps
+    into the sector (same rule sector_health uses for fill). Reads LIVE
+    DeliveryPointStorage — drilldown is "look now"; snapshots stay for
+    trends/history. Illicit cargo rows excluded.
+
+    Returns {sector, fill, sites: [...]} with sites ordered starved-first,
+    then by fill ascending. Each site: {guid, name, type, fill, starved,
+    storages: [{cargo, kind, amount, capacity}]} — storages sorted INPUT
+    first, then amount/capacity fill ascending.
+    """
+    from amc.economy_weights import SECTORS
+
+    if sector not in SECTORS and sector != "other":
+        return None
+
+    sector_cargo = set(SECTORS.get(sector, []))
+    limit = max(1, min(limit, 400))
+
+    storages = [
+        {
+            "dp_id": s["delivery_point_id"],
+            "name": s["delivery_point__name"],
+            "type": s["delivery_point__type"],
+            "cargo": s["cargo_key"],
+            "kind": s["kind"],
+            "amount": s["amount"],
+            "capacity": s["capacity"],
+        }
+        async for s in DeliveryPointStorage.objects.filter(LEGAL_CARGO_FILTER).values(
+            "delivery_point_id",
+            "delivery_point__name",
+            "delivery_point__type",
+            "cargo_key",
+            "kind",
+            "amount",
+            "capacity",
+        )
+    ]
+
+    # Group rows per DP. Sector fill is computed over the DP's INPUT rows in
+    # this sector; the storages payload keeps every legal row (IN + OUT) so
+    # the drilldown shows the full picture for that site.
+    sites: dict[int, dict] = {}
+    for s in storages:
+        site = sites.setdefault(
+            s["dp_id"],
+            {
+                "name": s["name"],
+                "type": s["type"],
+                "storages": [],
+                "_amt": 0,
+                "_cap": 0,
+                "_in_sector": False,
+                "starved": False,
+            },
+        )
+        site["storages"].append(
+            {
+                "cargo": s["cargo"],
+                "kind": s["kind"],
+                "amount": s["amount"],
+                "capacity": s["capacity"],
+            }
+        )
+        if s["kind"] == "IN" and (sector == "other" or s["cargo"] in sector_cargo):
+            site["_in_sector"] = True
+            denom = s["capacity"] if s["capacity"] and s["capacity"] > 0 else 0
+            site["_amt"] += s["amount"]
+            site["_cap"] += denom
+            if denom and s["amount"] / denom <= 0.15:
+                site["starved"] = True
+
+    out = []
+    for dp_id, site in sites.items():
+        # only sites that actually have INPUT rows in this sector
+        if not site.pop("_in_sector"):
+            continue
+        if starved_only and not site["starved"]:
+            continue
+        fill = site["_amt"] / site["_cap"] if site["_cap"] else None
+        site["fill"] = round(fill, 4) if fill is not None else None
+        site["storages"].sort(
+            key=lambda r: (
+                0 if r["kind"] == "IN" else 1,
+                (r["amount"] / r["capacity"]) if r["capacity"] else 2,
+            )
+        )
+        out.append(
+            {
+                "guid": dp_id,
+                "name": site["name"],
+                "type": site["type"],
+                "fill": site["fill"],
+                "starved": site["starved"],
+                "storages": site["storages"],
+            }
+        )
+
+    out.sort(
+        key=lambda s: (not s["starved"], s["fill"] if s["fill"] is not None else 2)
+    )
+    total_cap = sum(s["_cap"] for s in sites.values())
+    overall = (
+        round(sum(s["_amt"] for s in sites.values()) / total_cap, 4)
+        if total_cap
+        else None
+    )
+    return {"sector": sector, "fill": overall, "sites": out[:limit]}
