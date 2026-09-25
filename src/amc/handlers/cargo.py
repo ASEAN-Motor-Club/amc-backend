@@ -8,6 +8,7 @@ from __future__ import annotations
 import asyncio
 import itertools
 import logging
+import os
 import time
 from datetime import timedelta
 from operator import attrgetter
@@ -180,13 +181,13 @@ async def handle_cargo_arrived(event, player, character, ctx):
             )
 
     # --- 4a. Teleport-with-cargo burst detection --------------------------
-    # Temporal check: consecutive deliveries whose straight-line leg cannot
-    # be covered in the elapsed time indicate a teleport cheat moving the
-    # loaded vehicle (2026-09-24 NiSSiX: ~184 deliveries / ~2,200 km of legs
-    # in one 10-minute window).  Payment ceilings never see this — the
-    # individual payments are tiny.  Shadow mode (default) alerts only;
-    # FRAUD_TELEPORT_ENFORCE=1 additionally claws the flagged deliveries.
-    if character:
+    # DISABLED for now (freeman, 2026-09-25): the DP coordinates are not
+    # calibrated meters (~30x inflation on some routes), so the temporal
+    # gate kept false-positiving on legit one-by-one trailer haulers.
+    # Detection logic stays in fraud_detection.py; re-enable by setting
+    # FRAUD_TELEPORT_ALERT=1 once the signal is trustworthy (position
+    # telemetry is the intended long-term replacement).
+    if character and os.environ.get("FRAUD_TELEPORT_ALERT") == "1":
         total_fraud_excess += _handle_teleport_burst(character, logs, ctx, timestamp)
 
     await ServerCargoArrivedLog.objects.abulk_create(logs)
