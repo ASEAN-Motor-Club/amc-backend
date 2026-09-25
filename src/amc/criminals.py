@@ -85,6 +85,29 @@ WANTED_ACCRUAL_MIN_MULT = 1 / 3   # A(D) floor — far-speeding growth multiplie
 WANTED_DISTANCE_SCALE_M = 2000.0  # metres past the cap for half the swing
 WANTED_NEAR_CAP_UNITS = 50_000    # 500 m in game units — distance clamp
 
+# --- Star scaling with delivery size (freeman 2026-09-25) ---
+# A chase is issued at max(5, delivery // 100k) stars — the 5★ floor never
+# shrinks, big illicit hauls issue MORE stars. Stars are display + meter
+# size only: arrests/confiscation/decay are identical at every star count.
+# WANTED_STARS_PER_100K and WANTED_STAR_FLOOR live on the Wanted model.
+
+
+def wanted_stars_for_delivery(delivery_amount: float) -> int:
+    """Stars a chase is issued at for a given illicit delivery payment.
+
+    Floor 5★; +1 star per full $100k of delivery (e.g. $800k → 8★).
+    """
+    return max(
+        Wanted.WANTED_STAR_FLOOR,
+        int(delivery_amount) // Wanted.WANTED_STAR_STEP_AMOUNT,
+    )
+
+
+def initial_heat_for_stars(stars: int) -> int:
+    """Heat value (wanted_remaining) for an issued star count."""
+    return int(stars * Wanted.LEVEL_PER_STAR)
+
+
 # --- Wanted-trigger grace period (freeman 2026-09-20) ---
 # A rolled trigger does NOT create the Wanted row immediately. The criminal
 # first gets a private warning popup and WANTED_GRACE_SECONDS to switch to a
@@ -413,13 +436,15 @@ async def escalate_heat_on_logout(character, http_client, http_client_mod=None) 
     # Fallback: escalate heat if execute_arrest is unavailable or failed
     heat = _calculate_logout_heat(min_dist)
     old_remaining = wanted.wanted_remaining
-    old_stars = min(math.ceil(old_remaining / Wanted.LEVEL_PER_STAR), 5)
 
-    max_heat = Wanted.INITIAL_WANTED_LEVEL * 5
+    max_heat = max(
+        Wanted.INITIAL_WANTED_LEVEL, wanted.initial_heat
+    )
     wanted.wanted_remaining = min(max_heat, wanted.wanted_remaining + heat)
     await wanted.asave(update_fields=["wanted_remaining"])
 
-    new_stars = min(math.ceil(wanted.wanted_remaining / Wanted.LEVEL_PER_STAR), 5)
+    new_stars = _compute_stars(wanted.wanted_remaining)
+    old_stars = _compute_stars(old_remaining)
     logger.info(
         "logout heat: %s — dist=%.0f heat=%.1f W%d→W%d",
         character.name, min_dist, heat, old_stars, new_stars,
@@ -555,6 +580,7 @@ async def create_or_refresh_wanted(
     *,
     amount: int = 0,
     wanted_remaining: int = Wanted.INITIAL_WANTED_LEVEL,
+    wanted_stars: int | None = None,
     set_by=None,
 ) -> tuple[Wanted, bool]:
     """Create or refresh a Wanted record for the given character.
@@ -572,12 +598,18 @@ async def create_or_refresh_wanted(
             for the life of the chase (freeman 2026-09-20); police-set wanted
             (/setwanted, set_by present) stay flag-only with amount 0.
         wanted_remaining: Initial wanted_remaining value for new or reset records.
-            Defaults to 600 seconds (10 minutes).
+            Defaults to the 5★ floor (600).
+        wanted_stars: When given, overrides wanted_remaining — the chase is
+            issued at this star count (heat = stars × LEVEL_PER_STAR) and
+            initial_heat records it for the mid-chase growth cap. Used by the
+            delivery-scaled trigger paths (freeman 2026-09-25).
         set_by: The Character model instance of the police officer who set
             this wanted status (police commands only).
     """
 
     initial_wanted = wanted_remaining
+    if wanted_stars is not None:
+        initial_wanted = initial_heat_for_stars(wanted_stars)
 
     created = False
     active_wanted = await Wanted.objects.filter(
@@ -589,7 +621,10 @@ async def create_or_refresh_wanted(
         # the countdown only. The bounty is FROZEN at its trigger-time value
         # for the whole chase — score growth mid-chase never re-prices it.
         active_wanted.wanted_remaining = initial_wanted
-        await active_wanted.asave(update_fields=["wanted_remaining"])
+        active_wanted.initial_heat = initial_wanted
+        await active_wanted.asave(
+            update_fields=["wanted_remaining", "initial_heat"]
+        )
     else:
         if set_by is None:
             # Fresh system trigger (illicit-cargo / fugitive): the bounty is
@@ -605,6 +640,7 @@ async def create_or_refresh_wanted(
         active_wanted = await Wanted.objects.acreate(
             character=character,
             wanted_remaining=initial_wanted,
+            initial_heat=initial_wanted,
             amount=bounty,
             set_by=set_by,
         )
@@ -676,7 +712,7 @@ async def apply_pending_wanted(pending, http_client, http_client_mod) -> None:
         character,
         http_client_mod,
         amount=0,
-        wanted_remaining=Wanted.INITIAL_WANTED_LEVEL,
+        wanted_stars=wanted_stars_for_delivery(pending.trigger_amount),
     )
     await pending.adelete()
     # Grace-window teleport lock no longer needed: the wanted is live (its
@@ -708,10 +744,14 @@ async def apply_pending_wanted(pending, http_client, http_client_mod) -> None:
 
 
 def compute_stars(wanted_remaining: float) -> int:
-    """Compute the star level (1–5) from remaining wanted heat."""
+    """Compute the star level from remaining wanted heat.
+
+    Uncapped above 5: delivery-scaled chases (freeman 2026-09-25) issue
+    more than 5 stars and the name tag renders one * per star.
+    """
     if wanted_remaining <= 0:
         return 0
-    return min(math.ceil(wanted_remaining / Wanted.LEVEL_PER_STAR), 5)
+    return math.ceil(wanted_remaining / Wanted.LEVEL_PER_STAR)
 
 
 # Internal alias kept for use within this module
@@ -1029,7 +1069,7 @@ async def tick_wanted_countdown(http_client, http_client_mod, http_client_mgmt=N
             if min_dist is not None:
                 growth *= wanted_accrual_multiplier(min_dist)
             wanted.wanted_remaining = min(
-                float(Wanted.INITIAL_WANTED_LEVEL),
+                float(wanted.initial_heat),
                 wanted.wanted_remaining + growth,
             )
         else:
@@ -1061,7 +1101,11 @@ async def tick_wanted_countdown(http_client, http_client_mod, http_client_mgmt=N
             last_notified = _last_star_notified.get(sus_guid)
             if last_notified is None or new_stars != last_notified:
                 _last_star_notified[sus_guid] = new_stars
-                msg = STAR_MESSAGES.get(new_stars)
+                msg = STAR_MESSAGES.get(new_stars) or (
+                    f"Your wanted status is decreasing. {new_stars} stars remaining."
+                    if new_stars > 5
+                    else None
+                )
                 star_change_notifications.append((wanted, msg))
 
     # Update modded-vehicle tracking for next tick

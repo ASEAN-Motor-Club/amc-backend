@@ -33,6 +33,7 @@ from amc.criminals import (
     WANTED_GRACE_SECONDS,
     create_or_refresh_wanted,
     nearest_effective_cop_distance_m,
+    wanted_stars_for_delivery,
 )
 from amc.no_teleport import push_no_teleport_later
 from amc.special_cargo import (
@@ -403,7 +404,7 @@ async def handle_cargo_arrived(event, player, character, ctx):
                     character,
                     ctx.http_client_mod,
                     amount=0,
-                    wanted_remaining=Wanted.INITIAL_WANTED_LEVEL,
+                    wanted_stars=wanted_stars_for_delivery(accumulated_amount),
                 )
                 # Announce only when a new Wanted record is created
                 if newly_created and ctx.http_client:
