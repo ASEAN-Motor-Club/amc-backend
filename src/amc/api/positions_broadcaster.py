@@ -94,7 +94,15 @@ class PositionsBroadcaster:
             self._mgmt_session = None
 
     async def _tick(self):
-        players = await self._fetch(self._session, self._mgmt_session)
+        result = await self._fetch(self._session, self._mgmt_session)
+        # Fetches return (roster, src_ts): src_ts is the C++ feed's snapshot
+        # capture time (epoch s) or None on the Lua fallback — fall back to
+        # local query time there so the surface always has a timestamp.
+        players, src_ts = result
+        if src_ts is not None:
+            self._ts = src_ts
+        else:
+            self._ts = time.time()
         if players is None:
             players = []
         # player_count semantics: hidden players are not counted.

@@ -5,6 +5,7 @@ same per-tick snapshot produced by ONE loop — no per-connection fetch loops.
 """
 
 import asyncio
+import time
 from unittest.mock import AsyncMock, patch
 
 from django.test import SimpleTestCase
@@ -211,13 +212,62 @@ class DefaultFetchTests(SimpleTestCase):
                 new=AsyncMock(return_value=(hidden_ids, set(), set())),
             ),
         ):
-            roster = await get_positions_masked(None, None)
+            roster, cpp_ts = await get_positions_masked(None, None)
             self.assertEqual(len(roster), 1)
             self.assertEqual(roster[0]["UniqueID"], "42")
             self.assertEqual(roster[0]["PlayerName"], "P1")
             self.assertEqual(roster[0]["Location"], {"X": 5, "Y": 6, "Z": 7})
             self.assertEqual(roster[0]["VehicleKey"], "")
             self.assertFalse(roster[0]["hidden"])
+            # No TimestampMS on the fixture entries -> cpp_ts falls back to None
+            self.assertIsNone(cpp_ts)
+
+    async def test_cpp_capture_timestamp_flows_to_broadcaster(self):
+        """The C++ feed's snapshot timestamp_ms becomes the broadcaster ts
+        (which the WS proto sends as timestamp_ms); Lua fallback uses the
+        backend query time."""
+        from amc.api.player_positions_common import get_positions_masked
+        from amc.api import positions_broadcaster
+
+        locations = [
+            {"CharacterGuid": "GUID-1", "Location": {"X": 5, "Y": 6, "Z": 7},
+             "VehicleKey": None, "TimestampMS": 1790333815123}
+        ]
+        with (
+            patch(
+                "amc.api.player_positions_common.get_players_locations",
+                new=AsyncMock(return_value=locations),
+            ),
+            patch(
+                "amc.api.player_positions_common.get_players_mod",
+                new=AsyncMock(return_value=[]),
+            ),
+            patch(
+                "amc.api.player_positions_common._get_hidden_player_unique_ids",
+                new=AsyncMock(return_value=(set(), set(), set())),
+            ),
+        ):
+            roster, cpp_ts = await get_positions_masked(None, None)
+            self.assertAlmostEqual(cpp_ts, 1790333815.123, places=3)
+
+        # Broadcaster _tick: C++ ts wins over time.time()
+        with patch.object(
+            positions_broadcaster, "get_positions_masked",
+            new=AsyncMock(return_value=([{"hidden": False}], cpp_ts)),
+        ):
+            b = positions_broadcaster.PositionsBroadcaster()
+            await b._tick()
+            self.assertAlmostEqual(b._ts, 1790333815.123, places=3)
+
+        # Lua fallback (src_ts None) -> local query time
+        with patch.object(
+            positions_broadcaster, "get_positions_masked",
+            new=AsyncMock(return_value=([{"hidden": False}], None)),
+        ):
+            b2 = positions_broadcaster.PositionsBroadcaster()
+            before = time.time()
+            await b2._tick()
+            self.assertGreaterEqual(b2._ts, before)
 
     async def test_default_fetch_falls_back_to_lua_when_cpp_unavailable(self):
         """C++ feed down (None): fall back to the Lua-only masked path with
@@ -235,7 +285,7 @@ class DefaultFetchTests(SimpleTestCase):
                 new=AsyncMock(return_value=fallback),
             ),
         ):
-            roster = await get_positions_masked(None, None)
+            roster, _cpp_ts = await get_positions_masked(None, None)
             self.assertIs(roster, fallback)
 
     async def test_default_fetch_wiring(self):
@@ -245,10 +295,10 @@ class DefaultFetchTests(SimpleTestCase):
         merged = [{"UniqueID": "1"}]
         with patch.object(
             positions_broadcaster, "get_positions_masked",
-            new=AsyncMock(return_value=merged),
+            new=AsyncMock(return_value=(merged, None)),
         ) as mock_masked:
             out = await positions_broadcaster._default_fetch(None, None)
-            self.assertIs(out, merged)
+            self.assertIs(out, (merged, None))
             mock_masked.assert_awaited_once_with(None, None)
 
     async def test_merged_roster_masks_hidden_player(self):
@@ -269,7 +319,7 @@ class DefaultFetchTests(SimpleTestCase):
             "amc.api.player_positions_common._get_hidden_player_unique_ids",
             new=AsyncMock(return_value=({7}, set(), set())),
         ):
-            roster = await _merge_masked_roster(locations, identity)
+            roster, _ts = await _merge_masked_roster(locations, identity)
         by_guid = {r["CharacterGuid"]: r for r in roster}
         wanted = by_guid["G-WANTED"]
         self.assertTrue(wanted["hidden"])
@@ -299,7 +349,7 @@ class DefaultFetchTests(SimpleTestCase):
             "amc.api.player_positions_common._get_hidden_player_unique_ids",
             new=AsyncMock(return_value=(set(), set(), set())),
         ):
-            roster = await _merge_masked_roster(locations, identity)
+            roster, _ts = await _merge_masked_roster(locations, identity)
         self.assertEqual(
             roster[0]["Velocity"], {"X": 10.5, "Y": -2.0, "Z": 0.25}
         )

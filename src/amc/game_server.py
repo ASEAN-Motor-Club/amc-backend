@@ -159,6 +159,10 @@ async def get_players_locations(session, use_cache: bool = True):
                 "Velocity": {"X": vx, "Y": vy, "Z": vz},
                 "RPM": e.get("rpm", 0),
                 "Gear": e.get("gear", 0),
+                # Snapshot capture time from the C++ feed (wall-clock UTC
+                # epoch ms at game-thread sample). Same value on every entry
+                # of one response; consumers pick it off any entry.
+                "TimestampMS": data.get("timestamp_ms", 0),
             }
         )
     cache.set(cache_key, result, timeout=1)
