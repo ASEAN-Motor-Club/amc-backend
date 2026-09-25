@@ -24,9 +24,9 @@ from amc.models import (
 pytestmark = pytest.mark.asyncio
 
 
-async def _point(guid, name):
+async def _point(guid, name, type="Factory"):
     return await DeliveryPoint.objects.acreate(
-        guid=guid, name=name, type="Factory", coord=Point(1, 2, 3, srid=3857)
+        guid=guid, name=name, type=type, coord=Point(1, 2, 3, srid=3857)
     )
 
 
@@ -334,10 +334,11 @@ async def test_sector_drilldown_groups_and_orders(db):
         assert starved_first["guid"] == p_starved.guid
         assert starved_first["starved"] is True
         assert starved_first["fill"] == pytest.approx(0.1)
-        # storages: INPUT rows first, illicit Ganja absent
+        # storages: INPUT rows first, illicit Ganja absent, only sector-
+        # relevant rows kept (SteelCoil OUT belongs to metal, not mining)
         cargos = [r["cargo"] for r in starved_first["storages"]]
         assert "Ganja" not in cargos
-        assert set(cargos) == {"IronOre", "SteelCoil_10t"}
+        assert set(cargos) == {"IronOre"}
         assert starved_first["storages"][0]["kind"] == DeliveryPointStorage.Kind.INPUT
 
         # starved_only filters to just the hungry site
@@ -422,4 +423,114 @@ async def test_drilldown_excludes_unmetered_sites(db):
     finally:
         await DeliveryPointStorage.objects.all().adelete()
         for p in (p_metered, p_unmetered):
+            await DeliveryPoint.objects.filter(guid=p.guid).adelete()
+
+
+async def test_warehouse_out_stock_not_starved(db):
+    """A storage warehouse with empty IN but stocked OUT of the same cargo
+    (the output IS the storage) is not starved; a factory with empty intake
+    and a different-cargo output still is."""
+    wh = await _point("econ-wh", "Fuel Storage Warehouse")
+    fac = await _point("econ-fac", "Steel Factory")
+    try:
+        await DeliveryPointStorage.objects.acreate(
+            delivery_point=wh,
+            kind=DeliveryPointStorage.Kind.INPUT,
+            cargo_key="Fuel",
+            amount=0,
+            capacity=100,
+        )
+        await DeliveryPointStorage.objects.acreate(
+            delivery_point=wh,
+            kind=DeliveryPointStorage.Kind.OUTPUT,
+            cargo_key="Fuel",
+            amount=385,
+            capacity=500,
+        )
+        await DeliveryPointStorage.objects.acreate(
+            delivery_point=fac,
+            kind=DeliveryPointStorage.Kind.INPUT,
+            cargo_key="IronOre",
+            amount=0,
+            capacity=100,
+        )
+        await DeliveryPointStorage.objects.acreate(
+            delivery_point=fac,
+            kind=DeliveryPointStorage.Kind.OUTPUT,
+            cargo_key="SteelCoil_10t",
+            amount=200,
+            capacity=300,
+        )
+
+        detail = await sector_drilldown("energy")
+        by_name = {s["name"]: s for s in detail["sites"]}
+        assert by_name["Fuel Storage Warehouse"]["starved"] is False
+
+        metal = await sector_drilldown("mining")  # the factory's intake (IronOre) is mining; its output (SteelCoil) is metal
+        assert {s["name"]: s["starved"] for s in metal["sites"]} == {
+            "Steel Factory": True  # different-cargo output (SteelCoil) doesn't rescue an empty intake
+        }
+
+        health = {s["sector"]: s for s in await sector_health()}
+        # the warehouse's empty Fuel IN row no longer counts as starved
+        assert health["energy"]["starved_sites"] == 0
+    finally:
+        await DeliveryPointStorage.objects.all().adelete()
+        for p in (wh, fac):
+            await DeliveryPoint.objects.filter(guid=p.guid).adelete()
+
+
+async def test_sector_mapping_farm_exemption(db):
+    """Limestone/LimestoneRock are construction inputs (cement chain); farms
+    consume QuicklimePallet as fertilizer so Farm sites don't join
+    construction via it; containers are generic logistics cargo, not
+    construction."""
+    assert sector_of("Limestone") == "construction"
+    assert sector_of("LimestoneRock") == "construction"
+
+    farm = await _point("econ-farm", "Aewol Pumpkin Farm", type="Farm")
+    cement = await _point("econ-cem", "Cement Factory", type="Factory")
+    cont = await _point("econ-cont", "Harbor Warehouse", type="Warehouse")
+    try:
+        await DeliveryPointStorage.objects.acreate(
+            delivery_point=farm,
+            kind=DeliveryPointStorage.Kind.INPUT,
+            cargo_key="QuicklimePallet",
+            amount=10,
+            capacity=100,
+        )
+        await DeliveryPointStorage.objects.acreate(
+            delivery_point=cement,
+            kind=DeliveryPointStorage.Kind.INPUT,
+            cargo_key="QuicklimePallet",
+            amount=10,
+            capacity=100,
+        )
+        await DeliveryPointStorage.objects.acreate(
+            delivery_point=cont,
+            kind=DeliveryPointStorage.Kind.INPUT,
+            cargo_key="Container_20ft_01",
+            amount=5,
+            capacity=100,
+        )
+
+        detail = await sector_drilldown("construction")
+        guids = {s["guid"] for s in detail["sites"]}
+        assert cement.guid in guids  # factory consuming quicklime = construction
+        assert farm.guid not in guids  # farm consuming quicklime = fertilizer use
+        assert cont.guid not in guids  # containers don't map to construction
+
+        # farms still surface under food via their crop INPUTs
+        await DeliveryPointStorage.objects.acreate(
+            delivery_point=farm,
+            kind=DeliveryPointStorage.Kind.INPUT,
+            cargo_key="PumpkinPallet",
+            amount=20,
+            capacity=100,
+        )
+        food = await sector_drilldown("food")
+        assert farm.guid in {s["guid"] for s in food["sites"]}
+    finally:
+        await DeliveryPointStorage.objects.all().adelete()
+        for p in (farm, cement, cont):
             await DeliveryPoint.objects.filter(guid=p.guid).adelete()

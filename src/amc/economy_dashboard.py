@@ -179,21 +179,48 @@ async def sector_health():
     {sector, amount, capacity, fill, starved_sites} where starved_sites
     counts (site, cargo) INPUT rows at or below 15% fill.
     """
-    rows = [
-        (r["cargo_key"], r["amount"], r["capacity"])
+    # INPUT rows: (dp_id, dp_type, cargo, amount, capacity) — plus a map of
+    # same-cargo OUTPUT stock per site: a site whose OUTPUT side holds stock
+    # of the cargo isn't starved (for storage warehouses the output IS the
+    # storage; only factories with a genuinely empty intake count).
+    in_rows = [
+        (
+            r["delivery_point_id"],
+            r["delivery_point__type"],
+            r["cargo_key"],
+            r["amount"],
+            r["capacity"],
+        )
         async for r in DeliveryPointStorage.objects.filter(kind="IN", capacity__gt=0)
         .filter(LEGAL_CARGO_FILTER)
-        .values("cargo_key", "amount", "capacity")
+        .values(
+            "delivery_point_id",
+            "delivery_point__type",
+            "cargo_key",
+            "amount",
+            "capacity",
+        )
     ]
+    out_stock: dict[tuple[int, str], int] = {}
+    async for r in (
+        DeliveryPointStorage.objects.filter(kind=DeliveryPointStorage.Kind.OUTPUT)
+        .filter(LEGAL_CARGO_FILTER)
+        .values("delivery_point_id", "cargo_key", "amount")
+    ):
+        key = (r["delivery_point_id"], r["cargo_key"])
+        out_stock[key] = max(out_stock.get(key, 0), r["amount"])
+    from amc.economy_weights import row_in_sector
+
     by_sector: dict[str, dict] = {}
-    for cargo_key, amount, capacity in rows:
+    for dp_id, dp_type, cargo_key, amount, capacity in in_rows:
         sector = sector_of(cargo_key)
-        if sector == "other":
+        if sector == "other" or not row_in_sector(sector, cargo_key, dp_type):
             continue
         s = by_sector.setdefault(sector, {"amount": 0, "capacity": 0, "starved": 0})
         s["amount"] += amount
         s["capacity"] += capacity
-        if amount / capacity <= 0.15:
+        # same-cargo OUT stock present → the site isn't starved for this cargo
+        if amount / capacity <= 0.15 and out_stock.get((dp_id, cargo_key), 0) == 0:
             s["starved"] += 1
     out = []
     for sector, s in by_sector.items():
@@ -256,10 +283,19 @@ async def sector_drilldown(
     ]
 
     # Group rows per DP. Sector fill is computed over the DP's INPUT rows in
-    # this sector; the storages payload keeps every legal row (IN + OUT) so
-    # the drilldown shows the full picture for that site.
+    # this sector (respecting cargo/type exemptions); the storages payload
+    # keeps only rows whose cargo is relevant to this sector, so e.g. a
+    # construction site under metal shows just its H-Beam storage.
     sites: dict[int, dict] = {}
+    from amc.economy_weights import row_in_sector
+
     for s in storages:
+        in_sector = s["kind"] == "IN" and (
+            sector == "other" or row_in_sector(sector, s["cargo"], s["type"])
+        )
+        relevant = sector == "other" or s["cargo"] in sector_cargo
+        if not relevant:
+            continue
         site = sites.setdefault(
             s["dp_id"],
             {
@@ -280,16 +316,27 @@ async def sector_drilldown(
                 "capacity": s["capacity"],
             }
         )
-        if s["kind"] == "IN" and (sector == "other" or s["cargo"] in sector_cargo):
+        if in_sector:
             site["_in_sector"] = True
             denom = s["capacity"] if s["capacity"] and s["capacity"] > 0 else 0
             site["_amt"] += s["amount"]
             site["_cap"] += denom
-            if denom and s["amount"] / denom <= 0.15:
-                site["starved"] = True
+            site.setdefault("_rows", []).append((s["cargo"], s["amount"], denom))
 
     out = []
+    out_kind = DeliveryPointStorage.Kind.OUTPUT
     for dp_id, site in sites.items():
+        # starved = some sector INPUT row ≤15% with no same-cargo OUTPUT
+        # stock to fall back on (warehouses keep their supply on the OUT side)
+        site["starved"] = any(
+            cap
+            and amt / cap <= 0.15
+            and not any(
+                r["cargo"] == cargo and r["kind"] == out_kind and r["amount"] > 0
+                for r in site["storages"]
+            )
+            for cargo, amt, cap in site.pop("_rows", [])
+        )
         # only sites that actually have INPUT rows in this sector
         if not site.pop("_in_sector"):
             continue
