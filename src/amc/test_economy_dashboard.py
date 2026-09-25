@@ -387,7 +387,7 @@ async def test_drilldown_excludes_unmetered_sites(db):
     """Capacity-less INPUT rows (e.g. temp 'Building Construction Site' DPs)
     are excluded from the drilldown listing."""
     p_metered = await _point("econ-dd-metered", "Real Site")
-    p_unmetered = await _point("econ-dd-temp", "Building Construction Site")
+    p_unmetered = await _point("econ-dd-temp", "Building Construction Site", type="")  # prod temp sites are type-blank
     try:
         await DeliveryPointStorage.objects.acreate(
             delivery_point=p_metered,
@@ -533,4 +533,32 @@ async def test_sector_mapping_farm_exemption(db):
     finally:
         await DeliveryPointStorage.objects.all().adelete()
         for p in (farm, cement, cont):
+            await DeliveryPoint.objects.filter(guid=p.guid).adelete()
+
+
+async def test_typed_unmetered_sites_stay_listed(db):
+    """Warehouse pallet stock is unmetered in DB but resolves to the Pallet
+    category default (50), so warehouses list under food with a real fill.
+    Anonymous type-blank temp sites (Building Construction Site) stay
+    excluded."""
+    wh = await _point("econ-wh2", "Gwangjin Warehouse", type="Warehouse")
+    temp = await _point("econ-temp2", "Building Construction Site", type="")
+    try:
+        await DeliveryPointStorage.objects.acreate(
+            delivery_point=wh, kind=DeliveryPointStorage.Kind.INPUT,
+            cargo_key="CheesePallet", amount=50, capacity=0)
+        await DeliveryPointStorage.objects.acreate(
+            delivery_point=temp, kind=DeliveryPointStorage.Kind.INPUT,
+            cargo_key="Concrete", amount=0, capacity=0)
+
+        food = await sector_drilldown("food")
+        by_name = {s["name"]: s for s in food["sites"]}
+        assert by_name["Gwangjin Warehouse"]["fill"] == 1.0  # 50/50 Pallet default
+        assert by_name["Gwangjin Warehouse"]["starved"] is False
+
+        con = await sector_drilldown("construction")
+        assert "Building Construction Site" not in {s["name"] for s in con["sites"]}
+    finally:
+        await DeliveryPointStorage.objects.all().adelete()
+        for p in (wh, temp):
             await DeliveryPoint.objects.filter(guid=p.guid).adelete()

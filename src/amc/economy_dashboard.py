@@ -21,6 +21,7 @@ import logging
 from django.db import models
 from django.utils import timezone
 
+from amc.economy_dashboard_cargo import effective_capacity
 from amc.economy_weights import sector_of, weight_of
 from amc.models import Delivery, DeliveryPointStorage, StorageSnapshot
 from amc.special_cargo import ILLICIT_CARGO_KEYS
@@ -191,7 +192,7 @@ async def sector_health():
             r["amount"],
             r["capacity"],
         )
-        async for r in DeliveryPointStorage.objects.filter(kind="IN", capacity__gt=0)
+        async for r in DeliveryPointStorage.objects.filter(kind="IN")
         .filter(LEGAL_CARGO_FILTER)
         .values(
             "delivery_point_id",
@@ -200,6 +201,14 @@ async def sector_health():
             "amount",
             "capacity",
         )
+    ]
+    # resolve unmetered rows to their cargo-category default capacity
+    # (e.g. warehouse pallet stock: game doesn't meter it, Pallet default 50)
+
+    in_rows = [
+        (dp_id, dp_type, cargo_key, amount, eff)
+        for dp_id, dp_type, cargo_key, amount, capacity in in_rows
+        if (eff := await effective_capacity(cargo_key, capacity))
     ]
     out_stock: dict[tuple[int, str], int] = {}
     async for r in (
@@ -290,6 +299,7 @@ async def sector_drilldown(
     from amc.economy_weights import row_in_sector
 
     for s in storages:
+        s["capacity"] = await effective_capacity(s["cargo"], s["capacity"])
         in_sector = s["kind"] == "IN" and (
             sector == "other" or row_in_sector(sector, s["cargo"], s["type"])
         )
@@ -340,10 +350,12 @@ async def sector_drilldown(
         # only sites that actually have INPUT rows in this sector
         if not site.pop("_in_sector"):
             continue
-        # exclude unmetered sites (all sector INPUT rows capacity-less):
-        # the game spawns temporary DPs like "Building Construction Site"
-        # for player-home construction — not permanent economy sites.
-        if not site["_cap"]:
+        # exclude unmetered anonymous sites (all sector INPUT rows capacity-
+        # less AND no type): the game spawns temporary DPs like "Building
+        # Construction Site" for player-home construction — not permanent
+        # economy sites. Typed sites (Warehouse, Factory, …) with unmetered
+        # stock (e.g. food pallets at warehouses) stay listed, fill "–".
+        if not site["_cap"] and not (site["type"] or "").strip():
             continue
         if starved_only and not site["starved"]:
             continue
