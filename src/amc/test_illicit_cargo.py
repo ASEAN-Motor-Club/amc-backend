@@ -763,6 +763,29 @@ class ShouldTriggerWantedRollTests(TestCase):
             # the RNG is never consulted on the guarantee path
             mock_rng.random.assert_not_called()
 
+    def test_marked_triggers_regardless_of_pay_and_score(self):
+        """A /markwanted flag: any illicit delivery triggers (far cop → no
+        attenuation), tiny haul, zero score, RNG near-certainty to miss."""
+        from amc.special_cargo import should_trigger_wanted
+
+        with patch("amc.special_cargo.random") as mock_rng:
+            mock_rng.random.return_value = 0.9999
+            self.assertTrue(should_trigger_wanted(5_000, 0, None, marked=True))
+            self.assertTrue(should_trigger_wanted(5_000, 0, 5_000, marked=True))
+            # sanity: the same roll misses when unmarked
+            self.assertFalse(should_trigger_wanted(5_000, 0, 5_000))
+
+    def test_marked_point_blank_attenuates_to_floor(self):
+        """The 1km cop-proximity rule still applies to a marked delivery:
+        point-blank the guaranteed chance attenuates down to the 5% floor."""
+        from amc.special_cargo import WANTED_TRIGGER_FLOOR_CHANCE, should_trigger_wanted
+
+        with patch("amc.special_cargo.random") as mock_rng:
+            mock_rng.random.return_value = WANTED_TRIGGER_FLOOR_CHANCE + 0.001
+            self.assertFalse(should_trigger_wanted(5_000, 0, 0, marked=True))
+            mock_rng.random.return_value = WANTED_TRIGGER_FLOOR_CHANCE - 0.001
+            self.assertTrue(should_trigger_wanted(5_000, 0, 0, marked=True))
+
 
 @patch("amc.criminals.send_system_message", new_callable=AsyncMock)
 @patch("amc.criminals.refresh_player_name", new_callable=AsyncMock)
@@ -929,7 +952,87 @@ class WantedTriggerRestoreTests(TestCase):
             event = self._cargo_event(character, "Ganja", payment=5_000)
             await process_event(event, player, character)
 
-        mock_roll.assert_called_once_with(5_000, 1_000_000, 350.0)
+        mock_roll.assert_called_once_with(5_000, 1_000_000, 350.0, marked=False)
+
+    async def test_marked_delivery_triggers_and_clears_flag(
+        self, mock_accumulate, mock_cops, mock_get_treasury, mock_get_rp_mode,
+        mock_send_system, mock_refresh_crim,
+    ):
+        """A /markwanted flag forces the trigger even on a haul that would
+        miss the organic roll; the flag is spent on the triggering delivery."""
+        from django.utils import timezone as tz
+
+        mock_get_rp_mode.return_value = False
+        mock_get_treasury.return_value = 100_000
+        mock_cops.return_value = (True, None)
+        player, character = await self._setup_character()
+        character.marked_wanted_until = tz.now() + timedelta(minutes=30)
+        await character.asave()
+
+        with patch("amc.special_cargo.random") as mock_rng:
+            mock_rng.random.return_value = 0.999  # would miss unmarked
+            event = self._cargo_event(character, "Ganja", payment=5000)
+            await process_event(event, player, character)
+
+        pending = await PendingWanted.objects.filter(character=character).afirst()
+        self.assertIsNotNone(pending)
+        await character.arefresh_from_db()
+        self.assertIsNone(character.marked_wanted_until)
+
+    async def test_expired_mark_does_not_trigger(
+        self, mock_accumulate, mock_cops, mock_get_treasury, mock_get_rp_mode,
+        mock_send_system, mock_refresh_crim,
+    ):
+        """A mark whose TTL elapsed is inert — no trigger, flag left alone."""
+        from django.utils import timezone as tz
+
+        mock_get_rp_mode.return_value = False
+        mock_get_treasury.return_value = 100_000
+        mock_cops.return_value = (True, None)
+        player, character = await self._setup_character()
+        expired = tz.now() - timedelta(minutes=1)
+        character.marked_wanted_until = expired
+        await character.asave()
+
+        with patch("amc.special_cargo.random") as mock_rng:
+            mock_rng.random.return_value = 0.999
+            event = self._cargo_event(character, "Ganja", payment=5000)
+            await process_event(event, player, character)
+
+        pending_exists = await PendingWanted.objects.filter(
+            character=character
+        ).aexists()
+        self.assertFalse(pending_exists)
+        await character.arefresh_from_db()
+        self.assertEqual(character.marked_wanted_until, expired)
+
+    async def test_marked_point_blank_misses_floor_roll(
+        self, mock_accumulate, mock_cops, mock_get_treasury, mock_get_rp_mode,
+        mock_send_system, mock_refresh_crim,
+    ):
+        """The 1km attenuation still applies to a marked delivery: point-blank
+        under a cop the roll is the 5% floor, so it can miss — the flag then
+        stays armed (it is only spent on a delivery that triggers)."""
+        from django.utils import timezone as tz
+
+        mock_get_rp_mode.return_value = False
+        mock_get_treasury.return_value = 100_000
+        mock_cops.return_value = (True, 0)
+        player, character = await self._setup_character()
+        character.marked_wanted_until = tz.now() + timedelta(minutes=30)
+        await character.asave()
+
+        with patch("amc.special_cargo.random") as mock_rng:
+            mock_rng.random.return_value = 0.999
+            event = self._cargo_event(character, "Ganja", payment=5000)
+            await process_event(event, player, character)
+
+        pending_exists = await PendingWanted.objects.filter(
+            character=character
+        ).aexists()
+        self.assertFalse(pending_exists)
+        await character.arefresh_from_db()
+        self.assertIsNotNone(character.marked_wanted_until)
 
     async def test_already_wanted_refreshes_without_roll(
         self, mock_accumulate, mock_cops, mock_get_treasury, mock_get_rp_mode,

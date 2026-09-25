@@ -1,8 +1,11 @@
 import math
+from datetime import timedelta
+
+from django.utils import timezone
 
 from amc.command_framework import registry, CommandContext
 from amc.game_server import get_players
-from amc.models import Character, Wanted
+from amc.models import Character, Wanted, WantedSystemConfig
 from amc.mod_server import (
     get_player,
     get_player_customization,
@@ -177,6 +180,67 @@ async def cmd_police(ctx: CommandContext, verification_code: str = ""):
 
         await activate_police(ctx.character, ctx.http_client_mod)
         await ctx.announce(f"{ctx.character.name} is now on police duty!")
+
+
+@registry.register(
+    ["/markwanted", "/mw"],
+    description=gettext_lazy(
+        "Mark a player: their next illegal delivery is guaranteed wanted (admin only)"
+    ),
+    category="Admin",
+)
+async def cmd_markwanted(ctx: CommandContext, target_player_name: str):
+    # Only game admins can use this command
+    if not ctx.player_info or not ctx.player_info.get("bIsAdmin"):
+        return
+
+    # Find the target player online
+    players = await get_players(ctx.http_client)
+    target_pid = fuzzy_find_player(players, target_player_name)
+
+    if not target_pid:
+        await ctx.reply(
+            _(
+                "<Title>Player not found</>\n\n"
+                "Please make sure you typed the name correctly."
+            )
+        )
+        return
+
+    if str(target_pid) == str(ctx.player.unique_id):
+        await ctx.reply(_("You cannot mark yourself as wanted."))
+        return
+
+    target_player_data = next(
+        (p for pid, p in players if str(pid) == str(target_pid)), None
+    )
+    if not target_player_data:
+        return
+
+    try:
+        target_character = await Character.objects.aget(
+            guid=target_player_data["character_guid"]
+        )
+    except Character.DoesNotExist:
+        await ctx.reply(_("Character not found in database."))
+        return
+
+    config = await WantedSystemConfig.aget_config()
+    until = timezone.now() + timedelta(minutes=config.markwanted_ttl_minutes)
+    await Character.objects.filter(pk=target_character.pk).aupdate(
+        marked_wanted_until=until
+    )
+
+    await ctx.reply(
+        _(
+            "<Title>Wanted Marked</>\n\n"
+            "{name} is marked. Their next illegal delivery within {minutes} "
+            "minutes triggers a wanted level."
+        ).format(
+            name=target_character.name,
+            minutes=config.markwanted_ttl_minutes,
+        )
+    )
 
 
 @registry.register(

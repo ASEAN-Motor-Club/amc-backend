@@ -117,7 +117,9 @@ def wanted_trigger_chance(pay: int, score: int, cop_distance_m: float | None) ->
     )
 
 
-def should_trigger_wanted(pay: int, score: int, cop_distance_m: float | None) -> bool:
+def should_trigger_wanted(
+    pay: int, score: int, cop_distance_m: float | None, marked: bool = False
+) -> bool:
     """Roll whether this illicit delivery triggers a Wanted level.
 
     *pay* is the accumulated delivery total within the current debounce
@@ -128,7 +130,17 @@ def should_trigger_wanted(pay: int, score: int, cop_distance_m: float | None) ->
     unattenuated). Callers must not roll at all when there is NO effective
     cop — the wanted system is dormant then (see amc.criminals). Deliveries
     of WANTED_GUARANTEE_PAY or more bypass the roll and the attenuation.
+
+    *marked* = the character carries a /markwanted flag: the delivery
+    triggers with certainty, but the cop-proximity attenuation still applies
+    (the 1km no-police rule) — a cop camping point-blank attenuates the
+    guaranteed chance down to the floor, same as the organic sweep.
     """
+    if marked:
+        chance = WANTED_TRIGGER_FLOOR_CHANCE + cop_attenuation_multiplier(
+            cop_distance_m
+        ) * (1.0 - WANTED_TRIGGER_FLOOR_CHANCE)
+        return random.random() < chance
     if pay >= WANTED_GUARANTEE_PAY:
         return True
     return random.random() < wanted_trigger_chance(pay, score, cop_distance_m)
