@@ -86,6 +86,10 @@ SECTORS: dict[str, list[str]] = {
 
 
 def sector_of(cargo_key: str) -> str:
+    from amc.special_cargo import ILLICIT_CARGO_KEYS
+
+    if cargo_key in ILLICIT_CARGO_KEYS:
+        return "other"
     for sector, keys in SECTORS.items():
         if cargo_key in keys:
             return sector
@@ -94,4 +98,8 @@ def sector_of(cargo_key: str) -> str:
 
 def weight_of(cargo_key: str) -> float:
     """Contribution weight per unit. Unknown cargo = 0 (surface for classification)."""
+    from amc.special_cargo import ILLICIT_CARGO_KEYS
+
+    if cargo_key in ILLICIT_CARGO_KEYS:
+        return 0.0
     return CARGO_WEIGHTS.get(cargo_key, 0.0)

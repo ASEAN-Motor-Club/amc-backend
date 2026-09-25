@@ -1,6 +1,4 @@
-from typing import Optional
 from ninja import Schema
-
 
 # ── Economy Schemas ──────────────────────────────────────────────────
 
@@ -33,10 +31,10 @@ class DonationsLeaderboardSchema(Schema):
 
 class StorageItemSchema(Schema):
     cargo_key: str
-    cargo_label: Optional[str] = None
+    cargo_label: str | None = None
     kind: str  # "IN" or "OU"
     amount: int
-    capacity: Optional[int] = None
+    capacity: int | None = None
 
 
 class DeliveryPointStorageSchema(Schema):
@@ -52,13 +50,13 @@ class CharacterProfileSchema(Schema):
     id: int
     name: str
     player_id: str
-    driver_level: Optional[int] = None
-    bus_level: Optional[int] = None
-    taxi_level: Optional[int] = None
-    police_level: Optional[int] = None
-    truck_level: Optional[int] = None
-    wrecker_level: Optional[int] = None
-    racer_level: Optional[int] = None
+    driver_level: int | None = None
+    bus_level: int | None = None
+    taxi_level: int | None = None
+    police_level: int | None = None
+    truck_level: int | None = None
+    wrecker_level: int | None = None
+    racer_level: int | None = None
     credit_score_tier: str
     is_government_employee: bool
     total_donations: float
@@ -67,8 +65,8 @@ class CharacterProfileSchema(Schema):
 class CharacterVehicleSchema(Schema):
     id: int
     vehicle_id: int
-    vehicle_name: Optional[str] = None
-    alias: Optional[str] = None
+    vehicle_name: str | None = None
+    alias: str | None = None
     for_sale: bool
     rental: bool
 
@@ -83,7 +81,7 @@ class CharacterDeliverySchema(Schema):
 
 class CharacterSessionSchema(Schema):
     start_time: str
-    end_time: Optional[str] = None
+    end_time: str | None = None
     duration_seconds: int
 
 
@@ -108,7 +106,7 @@ class SupplyChainObjectiveSchema(Schema):
     id: int
     cargo_names: list[str]
     quantity_fulfilled: int
-    ceiling: Optional[int] = None
+    ceiling: int | None = None
     reward_weight: int
     is_primary: bool
 
@@ -153,8 +151,30 @@ class SectorHealthSchema(Schema):
     sector: str
     amount: int
     capacity: int
-    fill: Optional[float] = None
+    fill: float | None = None
     starved_sites: int
+
+
+class SectorStorageSchema(Schema):
+    cargo: str
+    kind: str
+    amount: int
+    capacity: int | None = None
+
+
+class SectorSiteSchema(Schema):
+    guid: str
+    name: str
+    type: str
+    fill: float | None = None
+    starved: bool
+    storages: list[SectorStorageSchema]
+
+
+class SectorDrilldownSchema(Schema):
+    sector: str
+    fill: float | None = None
+    sites: list[SectorSiteSchema]
 
 
 # ── Server Status Schemas ────────────────────────────────────────────
@@ -165,8 +185,8 @@ class ServerStatusSchema(Schema):
     num_players: int
     fps: int
     used_memory: int
-    fd_total: Optional[int] = None
-    fd_max_num: Optional[int] = None
+    fd_total: int | None = None
+    fd_max_num: int | None = None
 
 
 # ── Police / Rescue Schemas ──────────────────────────────────────────
@@ -183,7 +203,7 @@ class RescueRequestSchema(Schema):
     timestamp: str
     responder_count: int
     message: str
-    location: Optional[dict] = None
+    location: dict | None = None
 
 
 class TeleportPointSchema(Schema):

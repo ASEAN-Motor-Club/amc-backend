@@ -1,30 +1,34 @@
 from datetime import timedelta
+
 from asgiref.sync import sync_to_async
 from django.db.models import Sum
 from django.utils import timezone
 from ninja import Router
+from ninja.errors import HttpError
 
 from amc.api.v1.schema import (
+    CharacterDeliverySchema,
+    CharacterProfileSchema,
+    CharacterSessionSchema,
+    CharacterVehicleSchema,
+    ContributorSchema,
+    DeliveryPointStorageSchema,
+    DonationsLeaderboardSchema,
     EconomyOverviewSchema,
     NPLLoanSchema,
-    DonationsLeaderboardSchema,
-    StorageItemSchema,
-    DeliveryPointStorageSchema,
-    CharacterProfileSchema,
-    CharacterVehicleSchema,
-    CharacterDeliverySchema,
-    CharacterSessionSchema,
-    VehicleCatalogSchema,
-    SupplyChainEventSchema,
-    SupplyChainEventListSchema,
-    SupplyChainContributorSchema,
-    ContributorSchema,
-    SectorHealthSchema,
-    ServerStatusSchema,
     PoliceStatsSchema,
     RescueRequestSchema,
+    SectorDrilldownSchema,
+    SectorHealthSchema,
+    ServerStatusSchema,
+    StorageItemSchema,
+    SupplyChainContributorSchema,
+    SupplyChainEventListSchema,
+    SupplyChainEventSchema,
     TeleportPointSchema,
+    VehicleCatalogSchema,
 )
+from amc.enums import VEHICLE_DATA, CargoKey, VehicleKey
 from amc.models import (
     Character,
     CharacterVehicle,
@@ -32,13 +36,12 @@ from amc.models import (
     DeliveryPoint,
     DeliveryPointStorage,
     PlayerStatusLog,
-    ServerStatus,
-    SupplyChainEvent,
-    SupplyChainContribution,
     RescueRequest,
+    ServerStatus,
+    SupplyChainContribution,
+    SupplyChainEvent,
     TeleportPoint,
 )
-from amc.enums import VehicleKey, CargoKey, VEHICLE_DATA
 
 # ═══════════════════════════════════════════════════════════════
 # Phase 4: Economy & Real-Time Data
@@ -50,9 +53,9 @@ economy_router = Router()
 @economy_router.get("/overview/", response=EconomyOverviewSchema)
 async def economy_overview(request):
     """Aggregate economy statistics: treasury, donations, subsidies, loans."""
-    from amc_finance.services import get_treasury_fund_balance
     from amc_finance.loans import get_non_performing_loans
     from amc_finance.models import Account, LedgerEntry
+    from amc_finance.services import get_treasury_fund_balance
 
     treasury_balance = await get_treasury_fund_balance()
 
@@ -103,6 +106,19 @@ async def economy_sector_health(request):
     from amc.economy_dashboard import sector_health
 
     return await sector_health()
+
+
+@economy_router.get("/sectors/{sector}/", response=SectorDrilldownSchema)
+async def economy_sector_drilldown(
+    request, sector: str, starved_only: bool = False, limit: int = 100
+):
+    """Expand a sector to its delivery points and their storages (live)."""
+    from amc.economy_dashboard import sector_drilldown
+
+    detail = await sector_drilldown(sector, starved_only=starved_only, limit=limit)
+    if detail is None:
+        raise HttpError(404, f"unknown sector: {sector}")
+    return detail
 
 
 @economy_router.get("/npl/", response=list[NPLLoanSchema])
