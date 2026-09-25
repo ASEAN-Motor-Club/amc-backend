@@ -33,6 +33,11 @@ def serialize_players(players: list[dict], timestamp_s: float = 0.0) -> bytes:
         pos.x = float(loc.get("X", 0))
         pos.y = float(loc.get("Y", 0))
         pos.z = float(loc.get("Z", 0))
+        vel = p.get("Velocity", {})
+        if vel:
+            pos.velocity.x = float(vel.get("X", 0))
+            pos.velocity.y = float(vel.get("Y", 0))
+            pos.velocity.z = float(vel.get("Z", 0))
 
         raw_key = str(p.get("VehicleKey", ""))
         enum_val = _VEHICLE_KEY_MAP.get(raw_key)

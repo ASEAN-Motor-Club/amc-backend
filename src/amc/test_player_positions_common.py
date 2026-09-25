@@ -455,3 +455,33 @@ class SerializePlayersHiddenTests(SimpleTestCase):
         self.assertFalse(visible.hidden)
         self.assertEqual((visible.x, visible.y, visible.z), (1.0, 2.0, 3.0))
         self.assertEqual(visible.vehicle_key_enum, _VEHICLE_KEY_MAP["DUKE"])
+
+    def test_velocity_serializes(self):
+        """Velocity from the merged roster lands in the velocity field; entries
+        without one (Lua fallback) leave it at the proto3 default (absent)."""
+        moving = _make_mod_player(7, x=1, y=2, z=3)
+        moving["Velocity"] = {"X": 4.5, "Y": -1.0, "Z": 0.5}
+        masked = _mask_hidden_player(
+            dict(_make_mod_player(42, x=123, y=456, z=789),
+                 Velocity={"X": 9.0, "Y": 9.0, "Z": 9.0})
+        )
+        data = serialize_players([moving, masked], timestamp_s=0.0)
+        positions = PlayerPositions.FromString(data)
+        visible, hidden = positions.players
+        self.assertEqual(
+            (visible.velocity.x, visible.velocity.y, visible.velocity.z),
+            (4.5, -1.0, 0.5),
+        )
+        self.assertEqual(
+            (hidden.velocity.x, hidden.velocity.y, hidden.velocity.z),
+            (0.0, 0.0, 0.0),
+        )
+
+    def test_velocity_absent_stays_default(self):
+        """Lua-fallback entries (no Velocity key) leave the field absent."""
+        data = serialize_players(
+            [_make_mod_player(7, x=1, y=2, z=3)], timestamp_s=0.0
+        )
+        pos = PlayerPositions.FromString(data).players[0]
+        self.assertFalse(pos.HasField("velocity"))
+        self.assertEqual(pos.velocity.x, 0.0)

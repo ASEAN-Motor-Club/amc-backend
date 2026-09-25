@@ -62,6 +62,7 @@ def _mask_hidden_player(player: dict) -> dict:
     masked = dict(player)
     masked["Location"] = {"X": 0.0, "Y": 0.0, "Z": 0.0}
     masked["VehicleKey"] = ""
+    masked["Velocity"] = {"X": 0.0, "Y": 0.0, "Z": 0.0}
     masked["hidden"] = True
     return masked
 
@@ -70,6 +71,18 @@ def _visible_player_with_flag(player: dict) -> dict:
     flagged = dict(player)
     flagged.setdefault("hidden", False)
     return flagged
+
+
+def _velocity_xyz(player: dict) -> dict:
+    """Velocity for a masked roster entry as a JSON surface dict.
+
+    Entries from the C++ merge carry a Velocity dict; Lua-fallback entries
+    don't — both surfaces emit an always-present x/y/z so consumers get a
+    stable shape either way. Hidden players are zeroed by _mask_hidden_player
+    (velocity leaks a hidden player's movement).
+    """
+    vel = player.get("Velocity") or {}
+    return {"x": float(vel.get("X", 0.0)), "y": float(vel.get("Y", 0.0)), "z": float(vel.get("Z", 0.0))}
 
 
 async def get_players_mod_masked(
@@ -202,6 +215,7 @@ async def _merge_masked_roster(locations, identity_players):
             "CharacterGuid": guid,
             "Location": e.get("Location") or {"X": 0.0, "Y": 0.0, "Z": 0.0},
             "VehicleKey": e.get("VehicleKey") or "",
+            "Velocity": e.get("Velocity") or {"X": 0.0, "Y": 0.0, "Z": 0.0},
         }
         if _should_hide_player(player, wanted_ids, police_ids, costume_ids, any_wanted):
             merged.append(_mask_hidden_player(player))
