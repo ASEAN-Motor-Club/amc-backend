@@ -224,14 +224,27 @@ async def broadcast_server_message(session, message):
     ``send_system_message`` is per-character: the mod's
     HandleShowSystemMessage requires ``characterGuid`` and ignores the
     request without one — passing ``str(None)`` ("None") delivered
-    nowhere. ``/messages/announce`` with no playerId is the server-wide
-    broadcast path (ChatManager.AnnounceServerMessage).
+    nowhere. Primary path: ``/messages/announce`` with playerId omitted
+    — ChatManager.AnnounceServerMessage borrows any ONLINE ADMIN's
+    controller for ServerAnnounce (server-wide). Fallback when no admin
+    is online (that path returns 400): per-player system messages to
+    every online character.
     """
     await _write_limiter.acquire()
-    data = {"message": message, "playerId": "0", "isPinned": False}
+    data = {"message": message, "isPinned": False}
     async with session.post("/messages/announce", json=data) as resp:
-        if resp.status != 200:
-            raise Exception("Failed to broadcast announcement")
+        if resp.status == 200:
+            return
+    # No admin online (or endpoint failed) — deliver per player instead.
+    # /players returns ONLINE players only; each row carries CharacterGuid.
+    players = await get_players(session)
+    for player in (players or []):
+        guid = player.get("CharacterGuid")
+        if guid:
+            try:
+                await send_system_message(session, message, character_guid=guid)
+            except Exception:
+                pass
 
 
 async def teleport_player(
