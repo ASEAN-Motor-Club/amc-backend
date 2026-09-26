@@ -16,6 +16,7 @@ from amc.game_server import announce, get_players, get_players_locations
 from amc.models import (
     Character,
     CompassTuningConfig,
+    GameEvent,
     PendingWanted,
     PoliceSession,
     Wanted,
@@ -1495,6 +1496,38 @@ async def refresh_suspect_tags(http_client_mod) -> None:
         except Exception:
             logger.warning("costume make_suspect failed for %s", rec.name)
 
+    # --- Illegal-race pass (Yuuka 2026-09-27) ---
+    # Same persistence mechanism as the costume pass: the suspect GE caps
+    # at 60 s, so the badge survives only by re-applying it every tick.
+    # Every online participant of a live TT-classed event (state 1 or 2 —
+    # ready or racing) keeps the badge until the event leaves those
+    # states (finished/abandoned/closed), then transitions out below.
+    race_guids: set[str] = set()
+    live_race_events = GameEvent.objects.filter(
+        tt_class__isnull=False,
+        state__in=[1, 2],
+        guid__isnull=False,
+    ).prefetch_related("participants__character")
+
+    async for race_event in live_race_events:
+        for participant in race_event.participants.all():
+            char = participant.character
+            if (
+                char
+                and char.guid
+                and char.last_online
+                and char.last_online >= online_cutoff
+            ):
+                race_guids.add(char.guid)
+
+    for guid in sorted(race_guids - wanted_guids - costume_guids):
+        try:
+            await make_suspect(
+                http_client_mod, guid, duration_seconds=CRIMINAL_SUSPECT_DURATION,
+            )
+        except Exception:
+            logger.warning("race suspect re-apply failed for %s", guid)
+
     # --- Reconciliation: one-shot costume hydration for online characters ---
     unreconciled_criminals = Character.objects.filter(
         guid__isnull=False,
@@ -1538,7 +1571,9 @@ async def refresh_suspect_tags(http_client_mod) -> None:
     # module-level comment.  This keeps costume criminals immune to the
     # last_online-lag flicker bug while still preventing false clears on
     # wanted-to-costume transitions via the combined diff here.
-    currently_suspect = wanted_guids | costume_guids
+    # race_guids included: a racer whose wanted/costume status cleared must
+    # not lose the badge while the race is still live.
+    currently_suspect = wanted_guids | costume_guids | race_guids
     transitioned_out = _last_suspect_guids - currently_suspect
     for guid in transitioned_out:
         try:
