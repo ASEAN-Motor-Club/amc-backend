@@ -1500,13 +1500,18 @@ async def refresh_suspect_tags(http_client_mod) -> None:
     # Same persistence mechanism as the costume pass: the suspect GE caps
     # at 60 s, so the badge survives only by re-applying it every tick.
     # Every online participant of a live TT-classed event (state 1 or 2 —
-    # ready or racing) keeps the badge until the event leaves those
-    # states (finished/abandoned/closed), then transitions out below.
+    # ready or racing) keeps the badge, bounded by the SE window: when the
+    # window's end_time passes (or the event closes at state 3) the guid
+    # drops out of race_guids and the transition-out pass clears it.
+    # The state filter alone is NOT enough — TT rows sit at state 1
+    # forever between runs (Yuuka 2026-09-27: "I'm now infinitely wanted").
     race_guids: set[str] = set()
     live_race_events = GameEvent.objects.filter(
         tt_class__isnull=False,
         state__in=[1, 2],
         guid__isnull=False,
+        scheduled_event__isnull=False,
+        scheduled_event__end_time__gte=timezone.now(),
     ).prefetch_related("participants__character")
 
     async for race_event in live_race_events:
