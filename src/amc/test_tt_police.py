@@ -3,9 +3,10 @@ the 0-lap-only rotation filter (events.post_random_events).
 
 Covers the contract agreed for the Yuuka 2026-09-26 request:
 
-* every participant gets the wanted star at race start (create_or_refresh_
-  wanted, system-trigger path) except players DQ'd at the line
-* a missing Character row skips that player without breaking the rest
+* every non-DQ'd participant gets the suspect badge WITHOUT a wanted
+  star (Yuuka 2026-09-27: "badge should still exist, but no star" — the
+  Wanted row is what despawns modded cars); a missing Character row
+  skips that player and no Wanted row is ever created
 * the 60s announcement fires only while the event is still live AND
   racing (state 2); vanished / between-run-reset events stay silent
 * rotation candidates are restricted to race setups with NumLaps == 0
@@ -50,9 +51,8 @@ async def _make_character(name, player_id, guid):
 
 
 @pytest.mark.asyncio
-@patch("amc.handlers.tt_police.create_or_refresh_wanted", new_callable=AsyncMock)
-async def test_all_racers_marked_except_dqd(wanted_mock, db):
-    wanted_mock.return_value = (None, True)
+@patch("amc.handlers.tt_police.make_suspect", new_callable=AsyncMock)
+async def test_all_racers_flagged_except_dqd(suspect_mock, db):
     await _make_character("Alice", 1, "GUIDPOL000000000000000000000001")
     await _make_character("Bob", 2, "GUIDPOL000000000000000000000002")
     event = await sync_to_async(GameEvent.objects.create)(
@@ -69,18 +69,20 @@ async def test_all_racers_marked_except_dqd(wanted_mock, db):
         disqualified=["DQdDan"],
     )
     assert marked == ["Alice", "Bob"]
-    assert wanted_mock.await_count == 2
-    marked_guids = {c.args[0].guid for c in wanted_mock.await_args_list}
-    assert marked_guids == {
+    assert suspect_mock.await_count == 2
+    assert {c.args[1] for c in suspect_mock.await_args_list} == {
         "GUIDPOL000000000000000000000001",
         "GUIDPOL000000000000000000000002",
     }
+    # No wanted rows may be created by the race-start flag (no stars).
+    from amc.models import Wanted
+
+    assert not await Wanted.objects.aexists()
 
 
 @pytest.mark.asyncio
-@patch("amc.handlers.tt_police.create_or_refresh_wanted", new_callable=AsyncMock)
-async def test_unknown_character_skipped_others_marked(wanted_mock, db):
-    wanted_mock.return_value = (None, True)
+@patch("amc.handlers.tt_police.make_suspect", new_callable=AsyncMock)
+async def test_unknown_character_skipped_others_flagged(suspect_mock, db):
     await _make_character("Alice", 1, "GUIDPOL000000000000000000000001")
     event = await sync_to_async(GameEvent.objects.create)(
         guid="GUIDPOL000000000000000000000F", name="Police Test 2 [TT-140]", state=2
@@ -95,7 +97,7 @@ async def test_unknown_character_skipped_others_marked(wanted_mock, db):
         disqualified=[],
     )
     assert marked == ["Alice"]
-    assert wanted_mock.await_count == 1
+    assert suspect_mock.await_count == 1
 
 
 @pytest.mark.asyncio

@@ -40,6 +40,7 @@ from amc.mod_server import (
     get_player_last_vehicle,
     get_player_last_vehicle_parts,
     kick_player_from_event,
+    set_event_state,
 )
 from amc.models import GameEventCharacter, TTClass
 from amc.parts_audit import _post_audit_embed
@@ -68,6 +69,7 @@ async def _disqualify_illegal_starters(
     event_guid = game_event.guid
     disqualified: list[str] = []
 
+    candidates: list[tuple[str, str, str, list[str], dict | None]] = []
     for player_info in live_event.get("Players", []):
         character_id = player_info.get("CharacterId") or {}
         guid = character_id.get("CharacterGuid", "")
@@ -97,7 +99,35 @@ async def _disqualify_illegal_starters(
             violations = evaluate_tt_parts(parts, max_hp)
             if not violations:
                 continue
+            candidates.append((guid, player_name, unique_net_id, violations, vehicle))
+        except Exception:
+            logger.warning(
+                "TT start DQ failed for %s in %s", player_name, event_guid,
+                exc_info=True,
+            )
 
+    if not candidates:
+        return disqualified
+
+    # Whole-roster DQ: the event would strand at "started" with nobody in
+    # it (nothing to join, state route refuses empty rosters). Reset it to
+    # ready BEFORE the kicks — the mod's state change requires players in
+    # the event (Yuuka 2026-09-27).
+    if len(candidates) == len(live_event.get("Players", [])):
+        try:
+            await set_event_state(http_client_mod, event_guid, 1)
+            logger.info(
+                "TT DQ: whole roster illegal in %s — event reset to ready",
+                event_guid,
+            )
+        except Exception:
+            logger.warning(
+                "TT DQ: failed to reset emptied event %s to ready",
+                event_guid, exc_info=True,
+            )
+
+    for guid, player_name, unique_net_id, violations, vehicle in candidates:
+        try:
             # Force the vanilla leave path — the game's own DQ outcome.
             await kick_player_from_event(http_client_mod, event_guid, unique_net_id)
             disqualified.append(player_name)
@@ -118,7 +148,7 @@ async def _disqualify_illegal_starters(
                 color=discord.Color.red(),
             )
             embed.add_field(
-                name=format_vehicle_name(vehicle.get("fullName") or "") or "Vehicle",
+                name=format_vehicle_name((vehicle or {}).get("fullName") or "") or "Vehicle",
                 value="\n".join(f"- {v}" for v in violations),
                 inline=False,
             )

@@ -3,20 +3,18 @@
 Wires a TT-classed event's start transition into the cops-and-criminals
 RP loop:
 
-1. On start every racer gets the wanted star via
-   :func:`amc.criminals.create_or_refresh_wanted` (system-trigger path —
-   suspect flag in-game, "You are wanted" message, bounty = 10% criminal
-   score, same as illicit-cargo triggers).  Wanted suspects are hidden
-   from the map, which is what forces the chase to start from the event
-   route (point 3 — /events already shows active events + route).
+1. On start every racer gets the suspect BADGE ONLY — no wanted star
+   (Yuuka 2026-09-27: "badge should still exist, but no star"). The
+   Wanted row is what feeds the wanted-tick anti-abuse despawn of modded
+   vehicles, so none is created: no stars, no bounty, no "You are
+   wanted" message — just the vanilla suspect GE via make_suspect.
 2. 60s into the race a global announcement fires:
    "An Illegal race is happening! Check Events!" — but only if the event
    is still live and still racing (state 2), so abandoned/finished runs
    stay silent.
 
 The DQ check (handlers/tt_dq.py) runs FIRST in the same start reconcile;
-players disqualified at the line are not marked wanted — they never
-entered the race.
+disqualified players are not flagged — they never entered the race.
 """
 
 from __future__ import annotations
@@ -24,8 +22,7 @@ from __future__ import annotations
 import asyncio
 import logging
 
-from amc.criminals import create_or_refresh_wanted
-from amc.mod_server import get_events, send_system_message
+from amc.mod_server import get_events, make_suspect, send_system_message
 from amc.models import Character
 
 logger = logging.getLogger(__name__)
@@ -37,13 +34,15 @@ RACE_ALERT_MESSAGE = "An Illegal race is happening! Check Events!"
 async def mark_racers_wanted(
     http_client_mod, game_event, live_event: dict, disqualified: list[str]
 ) -> list[str]:
-    """Give every non-disqualified participant the wanted star.
+    """Flag every non-disqualified participant as an illegal racer.
 
-    Returns the list of player names successfully marked (for logs/tests).
-    Per-player failures are contained — one broken character row must not
-    stop the rest of the lineup from being flagged.
+    Badge WITHOUT the wanted star (Yuuka 2026-09-27: "badge should still
+    exist, but no star"). The suspect gameplay effect alone is safe — the
+    despawn risk comes from the Wanted row (stars) feeding the wanted-tick
+    anti-abuse. So: make_suspect only, no Wanted row, no bounty, no
+    "You are wanted" message. The start-line DQ remains enforcement.
     """
-    marked: list[str] = []
+    flagged: list[str] = []
     for player_info in live_event.get("Players", []):
         guid = (player_info.get("CharacterId") or {}).get("CharacterGuid", "")
         player_name = player_info.get("PlayerName", "") or guid[:8] or "unknown"
@@ -53,22 +52,22 @@ async def mark_racers_wanted(
             character = await Character.objects.filter(guid=guid).afirst()
             if character is None:
                 logger.info(
-                    "TT race wanted-skip for %s in %s: no Character row",
+                    "TT race flag-skip for %s in %s: no Character row",
                     player_name, game_event.guid,
                 )
                 continue
-            await create_or_refresh_wanted(character, http_client_mod)
-            marked.append(player_name)
+            await make_suspect(http_client_mod, guid)
+            flagged.append(player_name)
             logger.info(
-                "TT race start: %s (%s) marked wanted for %s",
+                "TT race start: %s (%s) flagged illegal racer (badge, no stars) for %s",
                 player_name, guid, game_event.guid,
             )
         except Exception:
             logger.warning(
-                "TT race wanted failed for %s in %s",
+                "TT race flag failed for %s in %s",
                 player_name, game_event.guid, exc_info=True,
             )
-    return marked
+    return flagged
 
 
 async def announce_illegal_race(http_client_mod, game_event) -> None:

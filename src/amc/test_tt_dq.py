@@ -194,3 +194,29 @@ async def test_kick_failure_contained(kick, last_veh, last_parts, post, db):
     )
     assert out == []
     post.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+@patch("amc.handlers.tt_dq.set_event_state", new_callable=AsyncMock)
+@patch("amc.handlers.tt_dq._post_audit_embed", new_callable=AsyncMock)
+@patch("amc.handlers.tt_dq.get_player_last_vehicle_parts", new_callable=AsyncMock)
+@patch("amc.handlers.tt_dq.get_player_last_vehicle", new_callable=AsyncMock)
+@patch("amc.handlers.tt_dq.kick_player_from_event", new_callable=AsyncMock)
+async def test_whole_roster_dq_resets_event_to_ready(
+    kick, last_veh, last_parts, post, state_mock, db
+):
+    """Solo racer DQ'd -> event returns to ready, not stuck at started."""
+    event = await _make_tt_event(max_hp=140)
+    last_veh.return_value = {"vehicle": {"fullName": "Vehicle_X_C"}}
+    last_parts.return_value = {"parts": _over_parts()}
+    out = await _disqualify_illegal_starters(
+        object(),
+        event,
+        {"Players": [_player("GUIDDQ00000000000000000000000001", "U1", "Solo")]},
+        None,
+    )
+    assert out == ["Solo"]
+    state_mock.assert_awaited_once()
+    assert state_mock.await_args.args[1] == event.guid
+    assert state_mock.await_args.args[2] == 1
+    kick.assert_awaited_once()
