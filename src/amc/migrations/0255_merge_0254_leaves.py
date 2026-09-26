@@ -8,7 +8,7 @@ from django.db import migrations
 class Migration(migrations.Migration):
     dependencies = [
         ("amc", "0254_merge_0253_leaves"),
-        ("amc", "0254_wanted_mark"),
+        ("amc", "0255_wanted_mark"),
     ]
 
     operations = []
