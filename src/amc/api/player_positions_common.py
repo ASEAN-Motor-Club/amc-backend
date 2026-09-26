@@ -188,10 +188,14 @@ async def get_positions_masked(session, mgmt_session):
 
     When the C++ endpoint is unavailable (get_players_locations returns
     None), falls back to the Lua-only masked path.
+
+    Returns (roster, cpp_ts): `cpp_ts` is the C++ feed's snapshot capture
+    time in epoch seconds (from `timestamp_ms` on the mod response), or
+    None on the Lua fallback — callers fall back to their own query time.
     """
     locations = await get_players_locations(mgmt_session, use_cache=False)
     if locations is None:
-        return await get_players_mod_masked(session, use_cache=False)
+        return await get_players_mod_masked(session, use_cache=False), None
     identity_players = await get_players_mod(session, use_cache=True)
     return await _merge_masked_roster(locations, identity_players)
 
@@ -206,7 +210,12 @@ async def _merge_masked_roster(locations, identity_players):
             by_guid[guid] = p
 
     merged = []
+    cpp_ts = None
     for e in locations:
+        # Snapshot capture time (same on every entry of one response).
+        raw_ts = e.get("TimestampMS")
+        if raw_ts and cpp_ts is None:
+            cpp_ts = float(raw_ts) / 1000.0
         guid = str(e.get("CharacterGuid", "") or "").upper()
         ident = by_guid.get(guid, {})
         player = {
@@ -221,4 +230,4 @@ async def _merge_masked_roster(locations, identity_players):
             merged.append(_mask_hidden_player(player))
         else:
             merged.append(_visible_player_with_flag(player))
-    return merged
+    return merged, cpp_ts
