@@ -219,26 +219,19 @@ async def set_pinned_announcement(session, message):
 
 
 async def broadcast_server_message(session, message):
-    """Global chat announcement (Yuuka 2026-09-27).
+    """Deliver a message to every ONLINE player (Yuuka 2026-09-27).
 
-    ``send_system_message`` is per-character: the mod's
-    HandleShowSystemMessage requires ``characterGuid`` and ignores the
-    request without one — passing ``str(None)`` ("None") delivered
-    nowhere. Primary path: ``/messages/announce`` with playerId omitted
-    — ChatManager.AnnounceServerMessage borrows any ONLINE ADMIN's
-    controller for ServerAnnounce (server-wide). Fallback when no admin
-    is online (that path returns 400): per-player system messages to
-    every online character.
+    Two dead ends ruled out live: ``send_system_message`` with no guid is
+    dropped by the mod (per-character endpoint), and
+    ``/messages/announce`` (ServerAnnounce via an online admin's
+    controller) returns status ok but renders nothing visible. The
+    reliably visible primitive is the per-character system message —
+    the same one the wanted-badge flow uses — so the broadcast fans out
+    to each online player's CharacterGuid. /players returns online
+    players only.
     """
-    await _write_limiter.acquire()
-    data = {"message": message, "isPinned": False}
-    async with session.post("/messages/announce", json=data) as resp:
-        if resp.status == 200:
-            return
-    # No admin online (or endpoint failed) — deliver per player instead.
-    # /players returns ONLINE players only; each row carries CharacterGuid.
     players = await get_players(session)
-    for player in (players or []):
+    for player in players or []:
         guid = player.get("CharacterGuid")
         if guid:
             try:
