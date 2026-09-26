@@ -151,6 +151,16 @@ async def join_player_to_event(session, event_guid, player_id):
             raise Exception("Failed to join event")
 
 
+async def set_event_state(session, event_guid, state: int):
+    """Change a live event's state via the mod's POST /events/<guid>/state."""
+    await _write_limiter.acquire()
+    async with session.post(
+        f"/events/{event_guid}/state", json={"State": state}
+    ) as resp:
+        if resp.status != 204:
+            raise Exception(f"Failed to set event state (status={resp.status})")
+
+
 async def kick_player_from_event(session, event_guid, player_id):
     await _write_limiter.acquire()
     data = {
