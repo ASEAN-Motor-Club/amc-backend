@@ -170,11 +170,17 @@ async def test_rotation_posts_zero_lap_events_only(announce_mock, db):
 
     sprint = await _make_setup("Sprint TT route", 0)
     circuit = await _make_setup("Circuit TT route", 3)
+    from amc.models import TTClass
+
+    cls, _ = await sync_to_async(TTClass.objects.get_or_create)(
+        name="TT-480", defaults={"max_hp": 480}
+    )
     for name, setup in (("Sprint SE", sprint), ("Circuit SE", circuit)):
         await sync_to_async(ScheduledEvent.objects.create)(
             name=name,
             race_setup=setup,
             time_trial=True,
+            tt_class=cls,
             start_time=now - timedelta(hours=1),
             end_time=now + timedelta(hours=1),
         )
