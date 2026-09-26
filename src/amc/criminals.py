@@ -1496,22 +1496,21 @@ async def refresh_suspect_tags(http_client_mod) -> None:
         except Exception:
             logger.warning("costume make_suspect failed for %s", rec.name)
 
-    # --- Illegal-race pass (Yuuka 2026-09-27) ---
-    # Same persistence mechanism as the costume pass: the suspect GE caps
-    # at 60 s, so the badge survives only by re-applying it every tick.
-    # Every online participant of a live TT-classed event (state 1 or 2 —
-    # ready or racing) keeps the badge, bounded by the SE window: when the
-    # window's end_time passes (or the event closes at state 3) the guid
-    # drops out of race_guids and the transition-out pass clears it.
-    # The state filter alone is NOT enough — TT rows sit at state 1
-    # forever between runs (Yuuka 2026-09-27: "I'm now infinitely wanted").
+    # --- Illegal-race pass (Yuuka 2026-09-27: badge until RACE FINISH) ---
+    # The suspect GE caps at ~60 s server-side, so persistence requires
+    # re-applying every tick. Scope: events RACING (state 2) — the badge
+    # is applied at the start transition and re-applied here until the
+    # race finishes (state 3) or the row closes; transition-out below
+    # clears it. State-1 (ready) rows are deliberately NOT included: TT
+    # rows sit at state 1 forever between runs, which caused the
+    # "infinitely wanted (not in an event)" report. The SE-window bound
+    # was also wrong (and SE links are unreliable on posted events —
+    # their re-serialized setup hashes to a fresh RaceSetup row).
     race_guids: set[str] = set()
     live_race_events = GameEvent.objects.filter(
         tt_class__isnull=False,
-        state__in=[1, 2],
+        state=2,
         guid__isnull=False,
-        scheduled_event__isnull=False,
-        scheduled_event__end_time__gte=timezone.now(),
     ).prefetch_related("participants__character")
 
     async for race_event in live_race_events:
@@ -1524,6 +1523,24 @@ async def refresh_suspect_tags(http_client_mod) -> None:
                 and char.last_online >= online_cutoff
             ):
                 race_guids.add(char.guid)
+
+        # Announcement guarantee (Yuuka 2026-09-27: "still not giving the
+        # announcement"): the SSE-hook alert task can lose the race with a
+        # worker restart (observed: worker restart raced the event start).
+        # The first tick that sees the event racing announces, once per
+        # event guid, regardless of which path detected the start.
+        try:
+            from amc.handlers.tt_police import (
+                RACE_ALERT_MESSAGE,
+                ensure_announced,
+            )
+
+            if await ensure_announced(http_client_mod, race_event):
+                await send_system_message(http_client_mod, RACE_ALERT_MESSAGE)
+        except Exception:
+            logger.warning(
+                "race-pass announce failed for %s", race_event.guid, exc_info=True
+            )
 
     for guid in sorted(race_guids - wanted_guids - costume_guids):
         try:

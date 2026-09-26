@@ -31,6 +31,33 @@ RACE_ALERT_DELAY_SECONDS = 60
 RACE_ALERT_MESSAGE = "An Illegal race is happening! Check Events!"
 _ALERT_MAX_POLLS = 10  # announce on the first tick where the event races
 _alert_tasks: set[asyncio.Task] = set()
+_announced_race_guids: set[str] = set()
+
+
+async def ensure_announced(http_client_mod, game_event) -> bool:
+    """True exactly once per event guid — the caller sends the broadcast.
+
+    Shared de-dup between the SSE-hook alert task and the
+    refresh_suspect_tags race pass (Yuuka 2026-09-27: the announcement
+    must fire even when the hook path loses the race to a worker
+    restart). Race events loop back to state 1 between runs, so a guid
+    is re-armed whenever the event is seen non-racing.
+    """
+    guid = game_event.guid
+    if guid in _announced_race_guids:
+        return False
+    # Re-arm: if the event is no longer racing (finished/reset), forget it.
+    events = await get_events(http_client_mod)
+    data = events.get("data", [])
+    live = (data.values() if isinstance(data, dict) else data) or []
+    racing = any(
+        ev.get("EventGuid") == guid and ev.get("State") == 2 for ev in live
+    )
+    if not racing:
+        _announced_race_guids.discard(guid)
+        return False
+    _announced_race_guids.add(guid)
+    return True
 
 
 async def mark_racers_wanted(
@@ -106,6 +133,7 @@ async def announce_illegal_race(http_client_mod, game_event) -> None:
                 if match.get("State") != 2:
                     continue
                 await send_system_message(http_client_mod, RACE_ALERT_MESSAGE)
+                _announced_race_guids.add(game_event.guid)
                 logger.info(
                     "TT race alert sent for %s (%s)",
                     game_event.guid, game_event.name,
