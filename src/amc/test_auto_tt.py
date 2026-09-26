@@ -46,7 +46,7 @@ def _race_config(route_name):
                 },
             ],
         },
-        "NumLaps": 3,
+        "NumLaps": 0,  # 0-lap only lineup (Yuuka 2026-09-26 rotation rule)
         "VehicleKeys": [],
         "EngineKeys": [],
     }

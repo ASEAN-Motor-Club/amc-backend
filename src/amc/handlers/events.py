@@ -427,15 +427,24 @@ async def _reconcile_event_players(
                 pruned[0], event_guid,
             )
     if require_state == 2:
-        # Start-line enforcement: on a TT-classed event's 1→2 transition,
-        # DQ (force-leave) every participant violating the class rules.
-        # Deliberately after the prune so the DQ path sees the settled
-        # roster; per-player failures are contained inside the helper.
+        # Start-line enforcement for TT-classed events (in order):
+        #   1. DQ (force-leave) participants violating the class rules —
+        #      deliberately after the prune so it sees the settled roster.
+        #   2. Mark the remaining racers wanted (illegal-race RP trigger,
+        #      Yuuka 2026-09-26) — DQ'd players never entered the race.
+        #   3. Schedule the 60s "An Illegal race is happening!" broadcast
+        #      (fires only if the event is still live and racing).
+        # Per-player failures are contained inside the helpers.
         from amc.handlers.tt_dq import _disqualify_illegal_starters
+        from amc.handlers.tt_police import announce_illegal_race, mark_racers_wanted
 
-        await _disqualify_illegal_starters(
+        disqualified = await _disqualify_illegal_starters(
             http_client_mod, game_event, live_event, discord_client,
         )
+        await mark_racers_wanted(
+            http_client_mod, game_event, live_event, disqualified
+        )
+        await announce_illegal_race(http_client_mod, game_event)
     return game_event
 
 
