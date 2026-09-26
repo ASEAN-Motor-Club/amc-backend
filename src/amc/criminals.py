@@ -1530,13 +1530,16 @@ async def refresh_suspect_tags(http_client_mod) -> None:
         # The first tick that sees the event racing announces, once per
         # event guid, regardless of which path detected the start.
         try:
+            from amc.mod_server import broadcast_server_message
             from amc.handlers.tt_police import (
                 RACE_ALERT_MESSAGE,
                 ensure_announced,
             )
 
             if await ensure_announced(http_client_mod, race_event):
-                await send_system_message(http_client_mod, RACE_ALERT_MESSAGE)
+                await broadcast_server_message(
+                    http_client_mod, RACE_ALERT_MESSAGE
+                )
         except Exception:
             logger.warning(
                 "race-pass announce failed for %s", race_event.guid, exc_info=True

@@ -101,7 +101,7 @@ async def test_unknown_character_skipped_others_flagged(suspect_mock, db):
 
 
 @pytest.mark.asyncio
-@patch("amc.handlers.tt_police.send_system_message", new_callable=AsyncMock)
+@patch("amc.handlers.tt_police.broadcast_server_message", new_callable=AsyncMock)
 @patch("amc.handlers.tt_police.get_events", new_callable=AsyncMock)
 async def test_alert_fires_when_still_racing(get_events_mock, send_mock, db):
     get_events_mock.return_value = {
@@ -132,7 +132,7 @@ async def _flush_tasks():
 
 
 @pytest.mark.asyncio
-@patch("amc.handlers.tt_police.send_system_message", new_callable=AsyncMock)
+@patch("amc.handlers.tt_police.broadcast_server_message", new_callable=AsyncMock)
 @patch("amc.handlers.tt_police.get_events", new_callable=AsyncMock)
 async def test_alert_silent_when_event_not_racing(get_events_mock, send_mock, db):
     get_events_mock.return_value = {
