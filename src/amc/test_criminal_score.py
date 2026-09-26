@@ -20,11 +20,16 @@ from amc.commands.wanted import cmd_criminals
 from amc.criminals import (
     BASE_DECAY_PER_TICK,
     TICK_INTERVAL,
+    WANTED_EVASION_MAX_BONUS,
     create_or_refresh_wanted,
+    _evasion_announce_text,
+    evasion_proximity_term,
+    evasion_quality_gain,
+    evasion_speed_term,
     tick_wanted_countdown,
 )
 from amc.factories import CharacterFactory, PlayerFactory
-from amc.models import Wanted
+from amc.models import PoliceSession, Wanted
 from amc.special_cargo import (
     BOSS_CUT_CAP,
     BOSS_CUT_FLOOR,
@@ -516,9 +521,64 @@ class CriminalsLeaderboardTests(TestCase):
         self.assertNotIn("<Highlight><Warning>", output)
 
 
+class EvasionQualityTermTests(TestCase):
+    """Pure-math checks for the chase-quality meter terms."""
+
+    def test_proximity_term_bounded(self):
+        self.assertEqual(evasion_proximity_term(0.0), 1.0)  # point-blank
+        self.assertAlmostEqual(evasion_proximity_term(50_000.0), 0.5)  # 500 m
+        self.assertEqual(evasion_proximity_term(100_000.0), 0.0)  # 1000 m
+        self.assertEqual(evasion_proximity_term(500_000.0), 0.0)  # far
+        self.assertEqual(evasion_proximity_term(float("inf")), 0.0)  # zero cops
+
+    def test_speed_term_saturates(self):
+        self.assertEqual(evasion_speed_term(0.0), 0.0)  # hiding
+        self.assertEqual(evasion_speed_term(50.0), 0.0)  # pivot
+        self.assertEqual(evasion_speed_term(100.0), 1 / 3)  # 50/(50+100)
+        self.assertEqual(evasion_speed_term(150.0), 0.5)  # 100/(100+100)
+        self.assertEqual(evasion_speed_term(200.0), 0.6)  # 150/(150+100)
+        self.assertLess(evasion_speed_term(300.0), 0.75)  # diminishing returns
+        self.assertLess(evasion_speed_term(1000.0), 1.0)  # asymptote
+
+    def test_gain_zero_without_cops(self):
+        self.assertEqual(evasion_quality_gain(float("inf"), 300.0), 0.0)
+
+
+class EvasionAnnounceTierTests(TestCase):
+    """The public evasion message grades with chase quality."""
+
+    def test_tiers(self):
+        # No chase ever → plain expiry wording, no evasion flavour.
+        self.assertEqual(
+            _evasion_announce_text("Bob", 0, 0.0),
+            "Bob is no longer wanted by police",
+        )
+        # Barely a chase.
+        low = _evasion_announce_text("Bob", 0, 0.1)
+        self.assertIn("slipped away", low)
+        self.assertIn("without much of a chase", low)
+        # Genuine chase → the classic evasion wording.
+        mid = _evasion_announce_text("Bob", 0, 0.5)
+        self.assertIn("managed to evade arrest", mid)
+        # Massive chase outrun.
+        high = _evasion_announce_text("Bob", 0, 0.9)
+        self.assertIn("spectacular escape", high)
+        self.assertIn("massive police chase", high)
+
+    def test_bounty_clause_in_all_paid_tiers(self):
+        for quality in (0.1, 0.5, 0.9):
+            self.assertIn(
+                "$5,555 bounty has expired",
+                _evasion_announce_text("Bob", 5_555, quality),
+            )
+        # Unpaid tiers carry no bounty clause.
+        self.assertNotIn("bounty", _evasion_announce_text("Bob", 0, 0.9))
+
+
 class EvasionBonusTests(TestCase):
     """Successfully evading arrest = an ORGANIC wanted decaying to zero while
-    cops are on duty → +10% criminal score (freeman 2026-09-20).
+    cops are on duty → criminal score + EVASION_MAX_BONUS × chase_quality
+    (freeman 2026-09-26; replaced the flat +10% of 2026-09-20).
 
     Expiry flavours that are NOT evasions and must not pay:
       - dormant amnesty (no effective cops — the system was off, not outplayed)
@@ -561,7 +621,7 @@ class EvasionBonusTests(TestCase):
         return_value=True,
     )
     @patch("amc.criminals.get_players", new_callable=AsyncMock)
-    async def test_organic_expiry_grants_10pct(
+    async def test_organic_expiry_no_chase_grants_nothing(
         self,
         mock_get_players,
         mock_armed,
@@ -569,6 +629,8 @@ class EvasionBonusTests(TestCase):
         mock_clear,
         mock_announce,
     ):
+        # No cop ever got within 1000 m → chase_quality 0 → 0% bonus
+        # (freeman 2026-09-26: the bonus measures the chase, not the decay).
         player, character = await self._setup_evader(score=50_000)
         mock_get_players.return_value = self._players_for(player, character)
         clock_before = character.last_illicit_delivery_at
@@ -583,12 +645,76 @@ class EvasionBonusTests(TestCase):
         await character.arefresh_from_db(
             fields=["criminal_score", "last_illicit_delivery_at"]
         )
-        self.assertEqual(character.criminal_score, 55_000)
+        self.assertEqual(character.criminal_score, 50_000)
         # The decay clock is anchored to illicit deliveries only — evading
         # must not reset the 30-day grace window.
         self.assertEqual(character.last_illicit_delivery_at, clock_before)
         wanted = await Wanted.objects.filter(character=character).afirst()
         self.assertIsNotNone(wanted.expired_at)
+        # Still an expiry, but a zero-quality one is NOT announced as an
+        # evasion (freeman 2026-09-26: the message grades with quality).
+        announce_texts = [
+            c.args[0] for c in mock_announce.await_args_list if c.args
+        ]
+        self.assertTrue(
+            any("no longer wanted" in t for t in announce_texts), announce_texts
+        )
+        self.assertFalse(
+            any("evade arrest" in t for t in announce_texts), announce_texts
+        )
+
+    @patch("amc.criminals.announce", new_callable=AsyncMock)
+    @patch("amc.criminals.clear_suspect", new_callable=AsyncMock)
+    @patch("amc.criminals.refresh_player_name", new_callable=AsyncMock)
+    @patch(
+        "amc.criminals.active_police_present",
+        new_callable=AsyncMock,
+        return_value=True,
+    )
+    @patch("amc.criminals.get_players", new_callable=AsyncMock)
+    async def test_quality_scaled_bonus(
+        self,
+        mock_get_players,
+        mock_armed,
+        mock_refresh,
+        mock_clear,
+        mock_announce,
+    ):
+        # A cop sits point-blank the whole chase: the final tick accrues
+        # evasion_quality_gain(0, 0) on top of the pre-set 0.9 meter, and
+        # the bonus is score × 10% × quality (integer floor).
+        player, character = await self._setup_evader(score=55_555)
+        officer = await _sync_create(CharacterFactory)(
+            name="ChaseCop", last_online=timezone.now()
+        )
+        await _sync_create(PoliceSession, character=officer, ended_at=None)
+        mock_get_players.return_value = self._players_for(
+            player, character
+        ) + self._players_for(officer.player, officer)
+        await _sync_create(
+            Wanted,
+            character=character,
+            wanted_remaining=BASE_DECAY_PER_TICK * TICK_INTERVAL,
+            amount=5_555,
+            chase_quality=0.9,
+        )
+
+        await tick_wanted_countdown(AsyncMock(), AsyncMock())
+
+        expected_quality = 0.9 + evasion_quality_gain(0.0, 0.0)
+        expected_bonus = int(55_555 * WANTED_EVASION_MAX_BONUS * expected_quality)
+        await character.arefresh_from_db(fields=["criminal_score"])
+        self.assertEqual(character.criminal_score, 55_555 + expected_bonus)
+        self.assertGreater(expected_bonus, 0)
+        self.assertLess(expected_bonus, 55_555)  # strictly below the old +10%
+        # High quality → the "spectacular escape" tier.
+        announce_texts = [
+            c.args[0] for c in mock_announce.await_args_list if c.args
+        ]
+        self.assertTrue(
+            any("spectacular escape" in t for t in announce_texts),
+            announce_texts,
+        )
 
     @patch("amc.criminals.announce", new_callable=AsyncMock)
     @patch("amc.criminals.clear_suspect", new_callable=AsyncMock)
@@ -607,9 +733,17 @@ class EvasionBonusTests(TestCase):
         mock_clear,
         mock_announce,
     ):
-        # 55_555 + 55_555//10 = 61_110 (integer floor, not rounding)
+        # Integer floor: one point-blank tick from a zero meter gives
+        # quality = 1/480, bonus = int(55_555 × 10% × 1/480) = 11 (truncated,
+        # not rounded to 12).
         player, character = await self._setup_evader(score=55_555)
-        mock_get_players.return_value = self._players_for(player, character)
+        officer = await _sync_create(CharacterFactory)(
+            name="FloorCop", last_online=timezone.now()
+        )
+        await _sync_create(PoliceSession, character=officer, ended_at=None)
+        mock_get_players.return_value = self._players_for(
+            player, character
+        ) + self._players_for(officer.player, officer)
         await _sync_create(
             Wanted,
             character=character,
@@ -619,14 +753,23 @@ class EvasionBonusTests(TestCase):
 
         await tick_wanted_countdown(AsyncMock(), AsyncMock())
 
+        expected_bonus = int(
+            55_555 * WANTED_EVASION_MAX_BONUS * evasion_quality_gain(0.0, 0.0)
+        )
+        self.assertEqual(expected_bonus, 11)  # floor pin, not 12
         await character.arefresh_from_db(fields=["criminal_score"])
-        self.assertEqual(character.criminal_score, 61_110)
-        # Evasion announce carries the expired bounty (freeman 2026-09-23).
+        self.assertEqual(character.criminal_score, 55_555 + expected_bonus)
+        # Evasion announce grades with quality (freeman 2026-09-26): this
+        # one-tick chase is low quality → the "slipped away" tier, with the
+        # expired-bounty clause kept.
         announce_texts = [
             c.args[0] for c in mock_announce.await_args_list if c.args
         ]
         self.assertTrue(
-            any("managed to evade arrest" in t for t in announce_texts),
+            any(
+                "slipped away from the police without much of a chase" in t
+                for t in announce_texts
+            ),
             announce_texts,
         )
         self.assertTrue(

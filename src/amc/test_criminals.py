@@ -1111,8 +1111,13 @@ class WantedCountdownTickTests(TestCase):
 
         mock_announce.assert_awaited_once()
         self.assertIn(criminal.name, mock_announce.call_args.args[0])
-        # Organic wanted decaying to zero = evasion wording (freeman 2026-09-23)
-        self.assertIn("managed to evade arrest", mock_announce.call_args.args[0])
+        # Organic wanted decaying to zero = evasion wording — but the cop is
+        # 510 m away for a single tick, so the message grades to the
+        # low-quality tier (freeman 2026-09-26).
+        self.assertIn(
+            "slipped away from the police without much of a chase",
+            mock_announce.call_args.args[0],
+        )
         self.assertEqual(mock_announce.call_args.kwargs.get("color"), "43B581")
 
     # -----------------------------------------------------------------------
