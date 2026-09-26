@@ -22,7 +22,11 @@ from __future__ import annotations
 import asyncio
 import logging
 
-from amc.mod_server import get_events, make_suspect, send_system_message
+from amc.mod_server import (
+    broadcast_server_message,
+    get_events,
+    make_suspect,
+)
 from amc.models import Character
 
 logger = logging.getLogger(__name__)
@@ -132,7 +136,7 @@ async def announce_illegal_race(http_client_mod, game_event) -> None:
                     return
                 if match.get("State") != 2:
                     continue
-                await send_system_message(http_client_mod, RACE_ALERT_MESSAGE)
+                await broadcast_server_message(http_client_mod, RACE_ALERT_MESSAGE)
                 _announced_race_guids.add(game_event.guid)
                 logger.info(
                     "TT race alert sent for %s (%s)",

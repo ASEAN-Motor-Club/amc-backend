@@ -218,6 +218,22 @@ async def set_pinned_announcement(session, message):
             raise Exception("Failed to set pinned announcement")
 
 
+async def broadcast_server_message(session, message):
+    """Global chat announcement (Yuuka 2026-09-27).
+
+    ``send_system_message`` is per-character: the mod's
+    HandleShowSystemMessage requires ``characterGuid`` and ignores the
+    request without one — passing ``str(None)`` ("None") delivered
+    nowhere. ``/messages/announce`` with no playerId is the server-wide
+    broadcast path (ChatManager.AnnounceServerMessage).
+    """
+    await _write_limiter.acquire()
+    data = {"message": message, "playerId": "0", "isPinned": False}
+    async with session.post("/messages/announce", json=data) as resp:
+        if resp.status != 200:
+            raise Exception("Failed to broadcast announcement")
+
+
 async def teleport_player(
     session,
     player_id,
