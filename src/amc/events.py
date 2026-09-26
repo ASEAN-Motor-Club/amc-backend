@@ -905,6 +905,33 @@ async def auto_starting_grid(http_client_mod, game_event):
         )
 
 
+_TT_INSTANCE: int | None = None
+
+
+@skip_if_running
+async def _next_tt_instance_number() -> int:
+    """Monotonic counter for posted TT event instance names (001, 002, ...).
+
+    Derived from the highest "(NNN)" already present on posted GameEvent
+    rows (the DB event history), cached in-process and incremented per
+    post. Single worker process, so no locking concern.
+    """
+    global _TT_INSTANCE
+    if _TT_INSTANCE is None:
+        import re
+
+        from amc.models import GameEvent
+
+        highest = 0
+        async for name in GameEvent.objects.values_list("name", flat=True):
+            m = re.search(r"\((\d{3})\)", name or "")
+            if m:
+                highest = max(highest, int(m.group(1)))
+        _TT_INSTANCE = highest
+    _TT_INSTANCE += 1
+    return _TT_INSTANCE
+
+
 @skip_if_running
 async def post_random_events(ctx):
     http_client_mod = ctx["http_client_mod"]
@@ -1055,7 +1082,13 @@ async def post_random_events(ctx):
         # created later by the SSE hook, and putting the class on the
         # ScheduledEvent would silently re-class live races mid-run.
         tt_class = await TTClass.objects.order_by("?").afirst()
-        event_name = scheduled_event.name
+        # Per-instance counter so every posted event is uniquely named.
+        # The game client matches posted events to its native event
+        # templates by name (a native name like "Get The Priest! - Time
+        # Trial" gets the template's popup requirements regardless of our
+        # setup) — a unique suffix defeats that match (Yuuka 2026-09-26).
+        instance = await _next_tt_instance_number()
+        event_name = f"{scheduled_event.name} ({instance:03d})"
         if tt_class:
             event_name = f"{event_name} [{tt_class.name}]"
             # Clear the setup's stale, class-conflicting restrictions
