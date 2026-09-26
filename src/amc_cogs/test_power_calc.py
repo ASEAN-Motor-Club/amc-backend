@@ -120,3 +120,30 @@ def test_parts_command_sends_embed_as_kwarg(cog):
     assert kwargs.get("ephemeral") is True
     assert emb.description and "Intakes" in emb.description
     assert "Turbos" in emb.description
+
+
+def test_setup_and_recommend_are_ephemeral(cog):
+    """All /power responses are user-private: setup success, and the
+    recommend defer + followup, must pass ephemeral=True so results don't
+    spam the channel for everyone else."""
+    import asyncio
+
+    interaction = MagicMock()
+    interaction.response.send_message = AsyncMock()
+    interaction.response.defer = AsyncMock()
+    interaction.followup.send = AsyncMock()
+    asyncio.run(
+        PowerCalcCog.power_setup.callback(
+            cog, interaction, "SmallBlock_240HP", None, None, False
+        )
+    )
+    interaction.response.send_message.assert_called_once()
+    assert interaction.response.send_message.await_args.kwargs.get("ephemeral") is True
+
+    interaction = MagicMock()
+    interaction.response.defer = AsyncMock()
+    interaction.followup.send = AsyncMock()
+    asyncio.run(PowerCalcCog.power_recommend.callback(cog, interaction, 400))
+    interaction.response.defer.assert_awaited_once()
+    assert interaction.response.defer.await_args.kwargs.get("ephemeral") is True
+    assert interaction.followup.send.await_args.kwargs.get("ephemeral") is True
