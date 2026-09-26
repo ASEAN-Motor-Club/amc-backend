@@ -219,25 +219,17 @@ async def set_pinned_announcement(session, message):
 
 
 async def broadcast_server_message(session, message):
-    """Deliver a message to every ONLINE player (Yuuka 2026-09-27).
+    """Global POPUP to every connected player (Yuuka 2026-09-27).
 
-    Two dead ends ruled out live: ``send_system_message`` with no guid is
-    dropped by the mod (per-character endpoint), and
-    ``/messages/announce`` (ServerAnnounce via an online admin's
-    controller) returns status ok but renders nothing visible. The
-    reliably visible primitive is the per-character system message —
-    the same one the wanted-badge flow uses — so the broadcast fans out
-    to each online player's CharacterGuid. /players returns online
-    players only.
+    Ruled out live: ``send_system_message`` without a guid is dropped by
+    the mod; per-character system messages return 204 but render nothing;
+    ``/messages/announce`` returns status ok (admin controller) but also
+    renders nothing. The proven-visible path is ``/messages/popup`` with
+    NO playerId/characterGuid — ShowMessagePopup loops every player
+    controller and calls ClientShowPopupMessage (the same popup UI the
+    game's own event restrictions use).
     """
-    players = await get_players(session)
-    for player in players or []:
-        guid = player.get("CharacterGuid")
-        if guid:
-            try:
-                await send_system_message(session, message, character_guid=guid)
-            except Exception:
-                pass
+    await show_popup(session, message)
 
 
 async def teleport_player(
