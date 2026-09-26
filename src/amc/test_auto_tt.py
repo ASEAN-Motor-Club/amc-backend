@@ -28,10 +28,16 @@ from amc.models import (
 
 # Auto-posted TT names carry the class tag: "Live TT [TT-480]".
 import re as _re
+import re
 
 
 def base_event_name(name):
     return _re.sub(r"\s*\[TT-\d+\]$", "", name or "")
+
+
+def strip_instance_suffix(name):
+    """Drop the per-instance "(NNN)" suffix (see amc.events)."""
+    return _re.sub(r"\s*\(\d{3}\)\s*(\[TT-\d+\])?$", "", name or "")
 
 
 def _race_config(route_name):
@@ -82,7 +88,7 @@ class FakeModClient:
     def post(self, path, json=None):
         self.posts.append(json)
         name = (json or {}).get("EventName")
-        status = self.fail_statuses.get(base_event_name(name), 201)
+        status = self.fail_statuses.get(strip_instance_suffix(name), 201)
         return FakeResponse(status)
 
     def get(self, path):
@@ -91,8 +97,9 @@ class FakeModClient:
         return FakeResponse(404)
 
 
-async def _make_race(route_name):
+async def _make_race(route_name, num_laps=0):
     config = _race_config(route_name)
+    config["NumLaps"] = num_laps
     return await sync_to_async(RaceSetup.objects.create)(
         config=config,
         hash=RaceSetup.calculate_hash(config),
@@ -128,6 +135,34 @@ async def test_expired_window_events_not_posted(announce_mock, db):
 
 @pytest.mark.asyncio
 @patch("amc.events.announce", new_callable=AsyncMock)
+async def test_posted_names_carry_instance_numbers(announce_mock, db):
+    """Every post gets a unique "(NNN)" instance suffix, incrementing."""
+    now = timezone.now()
+    await _clean_slate()
+    race = await _make_race("Instance TT route")
+    await sync_to_async(ScheduledEvent.objects.create)(
+        name="Instance TT",
+        race_setup=race,
+        time_trial=True,
+        start_time=now - timedelta(hours=1),
+        end_time=now + timedelta(hours=1),
+    )
+    mod = FakeModClient()
+    await post_random_events({"http_client_mod": mod, "http_client": AsyncMock()})
+    assert re.fullmatch(
+        r"Instance TT \(\d{3}\) \[TT-\d+\]", mod.posts[0]["EventName"]
+    )
+    first = int(re.search(r"\((\d{3})\)", mod.posts[0]["EventName"]).group(1))
+
+    # Second rotation (rotate-out the previous unclaimed event first)
+    await post_random_events({"http_client_mod": mod, "http_client": AsyncMock()})
+    second_name = mod.posts[-1]["EventName"]
+    second = int(re.search(r"\((\d{3})\)", second_name).group(1))
+    assert second == first + 1
+
+
+@pytest.mark.asyncio
+@patch("amc.events.announce", new_callable=AsyncMock)
 async def test_active_window_event_posted_and_announced(announce_mock, db):
     now = timezone.now()
     await _clean_slate()
@@ -143,7 +178,7 @@ async def test_active_window_event_posted_and_announced(announce_mock, db):
     await post_random_events({"http_client_mod": mod, "http_client": AsyncMock()})
 
     posted = [p["EventName"] for p in mod.posts]
-    assert [base_event_name(n) for n in posted] == ["Live TT"]
+    assert [strip_instance_suffix(n) for n in posted] == ["Live TT"]
     # The random class tag rides in the posted event name.
     assert _re.search(r"\[TT-\d+\]$", posted[0])
     payload = mod.posts[0]
@@ -175,7 +210,7 @@ async def test_all_posts_fail_no_announce(announce_mock, db):
     await post_random_events({"http_client_mod": mod, "http_client": AsyncMock()})
 
     assert [
-        base_event_name(p["EventName"]) for p in mod.posts if p["EventName"]
+        strip_instance_suffix(p["EventName"]) for p in mod.posts if p["EventName"]
     ] == ["Doomed TT"]
     announce_mock.assert_not_awaited()
 
@@ -186,8 +221,10 @@ async def test_announce_lists_only_posted_events(announce_mock, db):
     """2 candidates, second POST fails → announce names only the first."""
     now = timezone.now()
     await _clean_slate()
-    for name in ("Good TT", "Bad TT"):
-        race = await _make_race(f"{name} route")
+    # One slot per rotation (TARGET_EVENTS = 1), so "Bad TT" is kept out of
+    # the candidate pool entirely via the 0-lap filter; "Good TT" posts.
+    for name, laps in (("Good TT", 0), ("Bad TT", 3)):
+        race = await _make_race(f"{name} route", num_laps=laps)
         await sync_to_async(ScheduledEvent.objects.create)(
             name=name,
             race_setup=race,
@@ -200,7 +237,7 @@ async def test_announce_lists_only_posted_events(announce_mock, db):
 
     announce_mock.assert_awaited_once()
     message = announce_mock.await_args.args[0]
-    posted = [p["EventName"] for p in mod.posts if base_event_name(p["EventName"]) == "Good TT"]
+    posted = [p["EventName"] for p in mod.posts if strip_instance_suffix(p["EventName"]) == "Good TT"]
     assert len(posted) == 1
     assert "Good TT" in message
     assert "Bad TT" not in message
