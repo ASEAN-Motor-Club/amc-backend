@@ -1,5 +1,7 @@
 """Tests for TT class rules (tt_rules) and the per-instance class tag."""
 
+from unittest.mock import patch
+
 from amc.tt_rules import HP_BUFFER, evaluate_tt_parts
 
 
@@ -36,15 +38,19 @@ def test_unknown_engine_power_is_explicit_violation():
 
 def test_mod_tire_is_violation():
     # More Tuning Baja tire (known_mod_parts registry, not a vanilla key) on
-    # a tire slot.
-    violations = evaluate_tt_parts(
-        _parts(extra=[{"Slot": 19, "Key": "HeavyDutyBaja60FrontTire"}]), max_hp=480
-    )
+    # a tire slot. The stock-part registry normally loads from the game
+    # database (absent in CI/test envs) — stub it so the test is
+    # environment-independent.
+    with patch("amc.mod_detection.get_stock_part_keys", return_value={"201"}):
+        violations = evaluate_tt_parts(
+            _parts(extra=[{"Slot": 19, "Key": "HeavyDutyBaja60FrontTire"}]), max_hp=480
+        )
     assert any("Non-vanilla tires" in v for v in violations)
 
 
 def test_vanilla_tires_pass():
-    assert evaluate_tt_parts(_parts(extra=[{"Slot": 19, "Key": "201"}]), max_hp=480) == []
+    with patch("amc.mod_detection.get_stock_part_keys", return_value={"201"}):
+        assert evaluate_tt_parts(_parts(extra=[{"Slot": 19, "Key": "201"}]), max_hp=480) == []
 
 
 def test_buffer_constant_is_five():
