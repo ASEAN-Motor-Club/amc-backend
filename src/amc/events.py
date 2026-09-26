@@ -993,7 +993,7 @@ async def post_random_events(ctx):
         state__lt=3,
     ).acount()
 
-    TARGET_EVENTS = 3
+    TARGET_EVENTS = 1  # one event per reset (Yuuka 2026-09-26: "only 1 every reset")
     slots_to_fill = TARGET_EVENTS - active_auto
     if slots_to_fill <= 0:
         return
