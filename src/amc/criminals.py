@@ -1407,7 +1407,7 @@ SCORE_DECAY_FACTOR_PER_TICK = 0.5 ** (
 )
 
 
-async def refresh_suspect_tags(http_client_mod) -> None:
+async def refresh_suspect_tags(http_client_mod, http_client_game=None) -> None:
     """Re-apply the suspect flag to every online wanted player and to every
     online active criminal wearing a costume.
 
@@ -1538,7 +1538,7 @@ async def refresh_suspect_tags(http_client_mod) -> None:
 
             if await ensure_announced(http_client_mod, race_event):
                 await broadcast_server_message(
-                    http_client_mod, RACE_ALERT_MESSAGE
+                    http_client_game or http_client_mod, RACE_ALERT_MESSAGE
                 )
         except Exception:
             logger.warning(

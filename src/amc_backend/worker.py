@@ -207,7 +207,9 @@ async def wanted_countdown_tick(ctx):
 
 
 async def suspect_tag_refresh_tick(ctx):
-    await refresh_suspect_tags(ctx["http_client_mod"])
+    await refresh_suspect_tags(
+        ctx["http_client_mod"], http_client_game=ctx["http_client"]
+    )
 
 
 async def police_suspect_locations_tick(ctx):

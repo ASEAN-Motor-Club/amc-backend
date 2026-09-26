@@ -339,7 +339,7 @@ async def _audit_new_joiners(
 
 async def _reconcile_event_players(
     http_client_mod, event_guid: str, require_state=None, prune_absent=False,
-    live_event=None, discord_client=None,
+    live_event=None, discord_client=None, http_client_game=None,
 ):
     """Re-sync a race event's participants from the mod's live state.
 
@@ -444,7 +444,9 @@ async def _reconcile_event_players(
         await mark_racers_wanted(
             http_client_mod, game_event, live_event, disqualified
         )
-        await announce_illegal_race(http_client_mod, game_event)
+        await announce_illegal_race(
+            http_client_mod, game_event, http_client_game=http_client_game
+        )
     return game_event
 
 
@@ -818,6 +820,7 @@ async def handle_change_event_state(event, player, character, ctx):
             require_state=2,
             prune_absent=True,
             discord_client=getattr(ctx, "discord_client", None),
+            http_client_game=getattr(ctx, "http_client", None),
         )
 
     if transition and transition[1] == 3:

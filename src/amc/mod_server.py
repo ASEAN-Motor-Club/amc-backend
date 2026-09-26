@@ -219,17 +219,21 @@ async def set_pinned_announcement(session, message):
 
 
 async def broadcast_server_message(session, message):
-    """Global POPUP to every connected player (Yuuka 2026-09-27).
+    """In-game chat announcement via the game API (Yuuka 2026-09-27).
 
-    Ruled out live: ``send_system_message`` without a guid is dropped by
-    the mod; per-character system messages return 204 but render nothing;
-    ``/messages/announce`` returns status ok (admin controller) but also
-    renders nothing. The proven-visible path is ``/messages/popup`` with
-    NO playerId/characterGuid — ShowMessagePopup loops every player
-    controller and calls ClientShowPopupMessage (the same popup UI the
-    game's own event restrictions use).
+    ``session`` is the GAME API client (ctx['http_client'],
+    GAME_SERVER_API_URL) — NOT the mod webserver. This is the same
+    /chat path police promotions, promos and job notifications use:
+    a colored chat-line announcement, no blocking popup.
+
+    Ruled out live earlier: mod ``/messages/system`` without a guid is
+    dropped; per-character system messages return 204 but render
+    nothing; ``/messages/announce`` returns ok (admin controller) but
+    renders nothing; mod ``/messages/popup`` renders but obstructs.
     """
-    await show_popup(session, message)
+    from amc.game_server import announcement_request
+
+    await announcement_request(message, session, type="message", color="FFFF00")
 
 
 async def teleport_player(
