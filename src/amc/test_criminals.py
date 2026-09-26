@@ -3506,40 +3506,30 @@ class CompassTickTests(TestCase):
 @pytest.mark.asyncio
 @pytest.mark.django_db
 @patch("amc.criminals.make_suspect", new_callable=AsyncMock)
-async def test_race_suspect_bounded_by_se_window(make_suspect_mock):
-    """Racers keep the badge only while the SE window is live (Yuuka
-    2026-09-27: TT rows sit at state 1 forever, so state alone would
-    make them infinitely wanted)."""
+async def test_race_suspect_while_racing_cleared_on_finish(make_suspect_mock):
+    """Badge re-applies while the race runs (state 2) and clears at
+    finish (state 3); ready rows (state 1) never re-apply — TT rows sit
+    at state 1 forever between runs (Yuuka 2026-09-27)."""
     now = timezone.now()
-    from amc.models import (Character, GameEvent, GameEventCharacter, RaceSetup, ScheduledEvent, TTClass)
+    from amc.models import (
+        Character,
+        GameEvent,
+        GameEventCharacter,
+        TTClass,
+    )
 
     tt, _ = await sync_to_async(TTClass.objects.get_or_create)(
         name="TT-480", defaults={"max_hp": 480}
     )
-    setup = await sync_to_async(RaceSetup.objects.create)(
-        config={}, hash=RaceSetup.calculate_hash({})
-    )
-    se = await sync_to_async(ScheduledEvent.objects.create)(
-        name="Windowed TT",
-        race_setup=setup,
-        time_trial=True,
-        tt_class=tt,
-        start_time=now - timedelta(hours=1),
-        end_time=now + timedelta(hours=1),
-    )
     char, *_ = await Character.objects.aget_or_create_character_player(
         "RacerX", 777, character_guid="GUIDRACE00000000000000000000001"
     )
-    await sync_to_async(Character.objects.filter(pk=char.pk).update)(
-        last_online=now
-    )
-    char.last_online = now
+    await sync_to_async(Character.objects.filter(pk=char.pk).update)(last_online=now)
     event = await sync_to_async(GameEvent.objects.create)(
         guid="GUIDRACE000000000000000000000E",
-        name="Windowed TT (001) [TT-480]",
-        state=1,
+        name="Racing TT (001) [TT-480]",
+        state=2,
         tt_class=tt,
-        scheduled_event=se,
     )
     await sync_to_async(GameEventCharacter.objects.create)(
         game_event=event, character=char, rank=0
@@ -3547,11 +3537,9 @@ async def test_race_suspect_bounded_by_se_window(make_suspect_mock):
     await refresh_suspect_tags(AsyncMock())
     assert make_suspect_mock.await_count >= 1
 
-    # Window expired -> no re-apply, badge transitioned out
+    # Race finished (state 3) -> re-apply stops, badge transitioned out
     make_suspect_mock.reset_mock()
-    await sync_to_async(ScheduledEvent.objects.filter(pk=se.pk).update)(
-        end_time=now - timedelta(minutes=1)
-    )
+    await sync_to_async(GameEvent.objects.filter(pk=event.pk).update)(state=3)
     with patch("amc.criminals.clear_suspect", new_callable=AsyncMock):
         await refresh_suspect_tags(AsyncMock())
     make_suspect_mock.assert_not_awaited()
