@@ -29,6 +29,8 @@ logger = logging.getLogger(__name__)
 
 RACE_ALERT_DELAY_SECONDS = 60
 RACE_ALERT_MESSAGE = "An Illegal race is happening! Check Events!"
+_ALERT_MAX_POLLS = 10  # announce on the first tick where the event races
+_alert_tasks: set[asyncio.Task] = set()
 
 
 async def mark_racers_wanted(
@@ -71,36 +73,47 @@ async def mark_racers_wanted(
 
 
 async def announce_illegal_race(http_client_mod, game_event) -> None:
-    """Schedule the 60s 'illegal race' global announcement.
+    """Broadcast the 60s 'illegal race' global announcement.
 
-    Fire-and-forget: sleeps RACE_ALERT_DELAY_SECONDS, re-checks the event
-    is still live AND still racing (state 2 — the game resets TT events
-    to state 1 between runs, and a vanished event must not announce),
-    then broadcasts the alert.  All failures contained.
+    Polls every RACE_ALERT_DELAY_SECONDS until the event is seen racing
+    (state 2 — the game resets TT events to state 1 between runs and the
+    hook-time snapshot can be stale), announces once, then stops. Gives
+    up after _ALERT_MAX_POLLS or when the event vanishes. All failures
+    contained. The task handle is held in a module-level set —
+    fire-and-forget tasks without a reference can be garbage collected
+    mid-flight (Yuuka 2026-09-27: "I didn't see any announcement at all").
     """
 
     async def _alert() -> None:
         try:
-            await asyncio.sleep(RACE_ALERT_DELAY_SECONDS)
-            events = await get_events(http_client_mod)
-            data = events.get("data", [])
-            live = (
-                data.values() if isinstance(data, dict) else data
-            ) or []
-            if not any(
-                ev.get("EventGuid") == game_event.guid
-                and ev.get("State") == 2
-                for ev in live
-            ):
+            for _ in range(_ALERT_MAX_POLLS):
+                await asyncio.sleep(RACE_ALERT_DELAY_SECONDS)
+                events = await get_events(http_client_mod)
+                data = events.get("data", [])
+                live = (
+                    data.values() if isinstance(data, dict) else data
+                ) or []
+                match = next(
+                    (
+                        ev
+                        for ev in live
+                        if ev.get("EventGuid") == game_event.guid
+                    ),
+                    None,
+                )
+                if match is None:
+                    return
+                if match.get("State") != 2:
+                    continue
+                await send_system_message(http_client_mod, RACE_ALERT_MESSAGE)
+                logger.info(
+                    "TT race alert sent for %s (%s)",
+                    game_event.guid, game_event.name,
+                )
                 return
-            await send_system_message(http_client_mod, RACE_ALERT_MESSAGE)
-            logger.info(
-                "TT race alert sent for %s (%s)",
-                game_event.guid, game_event.name,
-            )
         except Exception:
             logger.warning(
                 "TT race alert failed for %s", game_event.guid, exc_info=True
             )
 
-    asyncio.create_task(_alert())
+    _alert_tasks.add(asyncio.create_task(_alert()))
