@@ -1,27 +1,33 @@
-import math
 import asyncio
-import discord
-import aiohttp
+import math
+import uuid
 from datetime import timedelta
-from django.utils import timezone
 from urllib.parse import quote
+
+import aiohttp
+import discord
 from django.conf import settings
-from django.db.models import F, Prefetch, Exists, OuterRef, Window
+from django.db.models import Exists, F, OuterRef, Prefetch, Window
 from django.db.models.functions import RowNumber
-from amc.mod_server import show_popup, send_message_as_player, teleport_player, remove_event
+from django.utils import timezone
+
 from amc.game_server import announce
-from amc.utils import skip_if_running
+from amc.mod_server import (
+    remove_event,
+    send_message_as_player,
+    show_popup,
+    teleport_player,
+)
 from amc.models import (
-    TTClass,
     Character,
     GameEvent,
     GameEventCharacter,
     LapSectionTime,
     RaceSetup,
     ScheduledEvent,
+    TTClass,
 )
-
-import uuid
+from amc.utils import skip_if_running
 
 
 def generate_guid():
@@ -1013,9 +1019,15 @@ async def post_random_events(ctx):
         .filter_active_at(timezone.now())
         .exclude(race_setup_id__in=active_race_setup_ids)
         .select_related("race_setup")
-        .order_by("?")[:slots_to_fill]
+        .order_by("?")
     )
-    candidates = [se async for se in candidate_qs]
+    # 0-lap events only for rotation (Yuuka 2026-09-26: "only rotate events
+    # that have 0 laps for now") — NumLaps is a JSON config key that may be
+    # absent (= 0 per RaceSetup.num_laps), so filter in Python rather than
+    # risk a JSON-path lookup dropping absent-key setups.
+    candidates = [
+        se async for se in candidate_qs if (se.race_setup.num_laps or 0) == 0
+    ][:slots_to_fill]
 
     if not candidates:
         return
