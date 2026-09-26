@@ -1107,6 +1107,26 @@ class ScheduledEventManager(models.Manager.from_queryset(ScheduledEventQuerySet)
 
 
 @final
+class TTClass(models.Model):
+    """A time-trial power tier (Yuuka 2026-09-24).
+
+    Engine parts are regulated to ``max_hp`` (+ :data:`amc.tt_rules.HP_BUFFER`
+    tolerance); tires must be vanilla. Auto-posted TT events pick a random
+    class per posted event; manual events may pin one via
+    ``ScheduledEvent.tt_class``.
+    """
+
+    name = models.CharField(max_length=60, unique=True)
+    max_hp = models.PositiveIntegerField()
+
+    class Meta:
+        ordering = ["max_hp"]
+
+    @override
+    def __str__(self):
+        return f"{self.name} ({self.max_hp}hp)"
+
+
 class ScheduledEvent(models.Model):
     name = models.CharField(max_length=200)
     start_time = models.DateTimeField()
@@ -1139,6 +1159,14 @@ class ScheduledEvent(models.Model):
         help_text="This will be shown when players use /events. Defaults to description",
     )
     time_trial = models.BooleanField(default=False)
+    tt_class = models.ForeignKey(
+        TTClass,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="scheduled_events",
+        help_text="Optional pinned TT power class; auto-posted events override per instance",
+    )
     staggered_start_delay = models.PositiveIntegerField(
         default=0,
         help_text="Delay between staggered start, in seconds. This can be overridden in the game",
@@ -1182,6 +1210,14 @@ class GameEvent(models.Model):
     )
     state = models.IntegerField()
     auto_created = models.BooleanField(default=False)
+    tt_class = models.ForeignKey(
+        TTClass,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="game_events",
+        help_text="TT power class for this event instance (parsed from the [TT-…] name tag)",
+    )
     discord_message_id = models.PositiveBigIntegerField(null=True)
     owner = models.ForeignKey(Character, models.SET_NULL, null=True, blank=True)
 

@@ -12,6 +12,7 @@ from amc.mod_server import show_popup, send_message_as_player, teleport_player, 
 from amc.game_server import announce
 from amc.utils import skip_if_running
 from amc.models import (
+    TTClass,
     Character,
     GameEvent,
     GameEventCharacter,
@@ -909,10 +910,76 @@ async def post_random_events(ctx):
     async for game_event in stale_events:
         try:
             await remove_event(http_client_mod, game_event.guid)
-        except Exception:
-            pass
+        except Exception as e:
+            # RemoveEvent needs at least one player online (mod-side
+            # PlayerArray guard) — on an empty server the delete 400s and
+            # the in-game event lingers. Log instead of passing silently.
+            print(
+                f"Auto-TT: failed to remove stale event {game_event.guid} "
+                f"(state=0): {e}"
+            )
         game_event.state = 3
         await game_event.asave(update_fields=["state"])
+
+    # Live list snapshot — drives both reconcile steps below. If the fetch
+    # fails, skip the reconcile entirely: an empty/absent live list must
+    # NEVER read as "no events live" (it would close every tracked row).
+    live_guids: set[str] | None = None
+    try:
+        async with http_client_mod.get("/events") as resp:
+            if resp.status < 400:
+                payload = (await resp.json()).get("data", [])
+                events = payload.values() if isinstance(payload, dict) else payload
+                live_guids = {
+                    ev.get("EventGuid", "") for ev in events if ev.get("EventGuid")
+                }
+    except Exception as e:
+        print(f"Auto-TT: failed to fetch live events: {e}")
+
+    if live_guids is not None:
+        # 1) Vanished events: the game silently deletes unclaimed owner-less
+        #    events a few minutes after creation (observed 2026-09-22 on the
+        #    test server — no RemoveEvent hook fires). Close their Ready,
+        #    never-raced rows so the slots and setups free up again.
+        async for game_event in GameEvent.objects.filter(
+            auto_created=True, state=1
+        ):
+            if game_event.guid in live_guids:
+                continue
+            if await game_event.participants.aexists():
+                continue  # raced/joined rows are never closed by the cron
+            print(
+                f"Auto-TT: event {game_event.guid} ({game_event.name}) is no "
+                f"longer live in-game; closing stale row {game_event.id}"
+            )
+            await GameEvent.objects.filter(pk=game_event.pk).aupdate(state=3)
+
+        # 2) Rotation: each tick replaces owner-less Ready events that nobody
+        #    joined during their window (Yuuka 2026-09-22: events should get
+        #    replaced when the time is up). Joined/raced events are left
+        #    alone — a player who joined mid-window keeps their event.
+        live_rows = [
+            ge
+            async for ge in GameEvent.objects.filter(
+                auto_created=True, state=1, guid__in=live_guids
+            )
+        ]
+        for game_event in live_rows:
+            if await game_event.participants.aexists():
+                continue
+            try:
+                await remove_event(http_client_mod, game_event.guid)
+            except Exception as e:
+                print(
+                    f"Auto-TT: failed to rotate event {game_event.guid} "
+                    f"({game_event.name}): {e}"
+                )
+                continue
+            print(
+                f"Auto-TT: rotated out unclaimed event {game_event.guid} "
+                f"({game_event.name})"
+            )
+            await GameEvent.objects.filter(pk=game_event.pk).aupdate(state=3)
 
     active_auto = await GameEvent.objects.filter(
         auto_created=True,
@@ -930,20 +997,30 @@ async def post_random_events(ctx):
         .values_list("race_setup_id", flat=True)
     )
 
-    candidates = [
-        se
-        async for se in ScheduledEvent.objects.filter(
+    # Only resurrect scheduled events whose [start_time, end_time] window is
+    # live right now:
+    #  - _upsert_game_event links scheduled_event ONLY inside the window
+    #    (handlers/events.py), so an out-of-window auto event would land
+    #    with scheduled_event=None — orphaned from its scheduled event
+    #    (no SE-linked results/penalties).
+    #  - the in-game /events listing shows only filter_active_at() rows,
+    #    so the announce's "Use /events" hint would point at nothing.
+    candidate_qs = (
+        ScheduledEvent.objects.filter(
             time_trial=True,
             race_setup__isnull=False,
         )
+        .filter_active_at(timezone.now())
         .exclude(race_setup_id__in=active_race_setup_ids)
         .select_related("race_setup")
         .order_by("?")[:slots_to_fill]
-    ]
+    )
+    candidates = [se async for se in candidate_qs]
 
     if not candidates:
         return
 
+    posted_names = []
     for scheduled_event in candidates:
         race_setup = scheduled_event.race_setup
         config = dict(race_setup.config)
@@ -960,9 +1037,19 @@ async def post_random_events(ctx):
         if not config.get("EngineKeys"):
             config["EngineKeys"] = []
 
+        # Random TT power class per posted event (Yuuka 2026-09-24). The
+        # class rides in the event-name tag ([TT-480]) — that tag is the
+        # only reliable per-instance channel: the DB GameEvent row is
+        # created later by the SSE hook, and putting the class on the
+        # ScheduledEvent would silently re-class live races mid-run.
+        tt_class = await TTClass.objects.order_by("?").afirst()
+        event_name = scheduled_event.name
+        if tt_class:
+            event_name = f"{event_name} [{tt_class.name}]"
+
         data = {
             "EventGuid": generate_guid(),
-            "EventName": scheduled_event.name,
+            "EventName": event_name,
             "EventType": 1,
             "RaceSetup": config,
         }
@@ -971,12 +1058,21 @@ async def post_random_events(ctx):
             async with http_client_mod.post("/events", json=data) as resp:
                 if resp.status >= 400:
                     error_body = await resp.text()
-                    print(f"Failed to post auto event: {resp.status} {error_body}")
+                    print(
+                        f"Auto-TT: failed to post event "
+                        f"{scheduled_event.name}: {resp.status} {error_body}"
+                    )
+                else:
+                    posted_names.append(scheduled_event.name)
         except Exception as e:
-            print(f"Failed to post auto event: {e}")
+            print(f"Auto-TT: failed to post event {scheduled_event.name}: {e}")
 
-    names = [se.name for se in candidates]
-    await announce(
-        f"New time trial events available: {', '.join(names)}! Use /events to see them.",
-        ctx["http_client"],
-    )
+    # Announce ONLY what actually reached the game server. The old code
+    # announced unconditionally — even when every POST failed, players saw
+    # "New time trial events available!" with no events existing.
+    if posted_names:
+        await announce(
+            f"New time trial events available: {', '.join(posted_names)}! "
+            f"Use /events to see them.",
+            ctx["http_client"],
+        )

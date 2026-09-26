@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import re
 import time
 
 import discord
@@ -33,6 +34,7 @@ from amc.models import (
     LapSectionTime,
     RaceSetup,
     ScheduledEvent,
+    TTClass,
 )
 from amc.utils import delay
 
@@ -125,6 +127,14 @@ async def _upsert_game_event(event_data: dict):
 
     # --- GameEvent upsert ---
     transition = None
+    # TT class tag: auto-posted events carry "[TT-480]" in the name
+    # (post_random_events). Parse it back to the FK so per-instance
+    # classes survive the SSE hop; manual events fall back to the
+    # ScheduledEvent's pinned class at enforcement time.
+    tt_class = None
+    name_match = re.search(r"\[(TT-\d+)\]\s*$", event_name)
+    if name_match:
+        tt_class = await TTClass.objects.filter(name=name_match.group(1)).afirst()
     try:
         game_event = await (
             GameEvent.objects.filter(
@@ -140,6 +150,8 @@ async def _upsert_game_event(event_data: dict):
         game_event.owner = owner
         if race_setup:
             game_event.race_setup = race_setup
+        if tt_class:
+            game_event.tt_class = tt_class
         if not game_event.scheduled_event and scheduled_event:
             game_event.scheduled_event = scheduled_event
         await game_event.asave()
@@ -179,6 +191,7 @@ async def _upsert_game_event(event_data: dict):
             owner=owner,
             scheduled_event=scheduled_event,
             auto_created=(owner is None),
+            tt_class=tt_class,
         )
 
     return game_event, transition
