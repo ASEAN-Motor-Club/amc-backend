@@ -9,7 +9,7 @@ from amc.events import (
     setup_event,
 )
 from amc.utils import format_in_local_tz, countdown
-from django.db.models import Exists, OuterRef
+from django.db.models import Exists, F, OuterRef
 from django.utils.translation import gettext_lazy
 
 
@@ -117,12 +117,15 @@ async def cmd_setup_event(ctx: CommandContext, event_id: Optional[int] = None):
             )
         else:
             # No id: start the CURRENT ACTIVE event (window live right now),
-            # not a listing of everything ever scheduled.
+            # not a listing of everything ever scheduled. Classed SEs
+            # (illegal-TT twins) win over classless originals sharing the
+            # same window — Yuuka 2026-09-27: "if the active SE is of the
+            # class'd one, the /setup_event should also have it".
             active = (
                 ScheduledEvent.objects.filter(race_setup__isnull=False)
                 .filter_active_at(ctx.timestamp)
-                .select_related("race_setup")
-                .order_by("-start_time")
+                .select_related("race_setup", "tt_class")
+                .order_by(F("tt_class").asc(nulls_last=True), "-start_time")
             )
             scheduled_event = await active.afirst()
             if scheduled_event is None:
