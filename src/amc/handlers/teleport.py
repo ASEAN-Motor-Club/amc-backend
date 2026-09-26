@@ -24,13 +24,11 @@ logger = logging.getLogger("amc.webhook.handlers.teleport")
 # ServerResetVehicleAt
 # ---------------------------------------------------------------------------
 
-# A vehicle reset landing within this many units (1 unit ~ 1 cm in the game's
-# coordinate space; 200 units = 2 m) of a delivery point flags the player:
-# popup + Discord alert, and every cargo arrival from them for the next
-# CARGO_IGNORE_SECONDS is ignored by the cargo handler.
-RESET_NEAR_DP_UNITS = 200
-# Also flag when roadside recovery teleported the vehicle >1 km to reach the
+# Flag when roadside recovery teleported the vehicle >1 km to reach the
 # character: their last driving position is >1 km from where they stand now.
+# (freeman 2026-09-26: the earlier near-delivery-point trigger was REMOVED —
+# legit long-distance tow jobs land wrecks right at delivery points and
+# false-flagged towers; only the far-recovery signal remains.)
 RESET_FAR_RECOVERY_UNITS = 100_000  # 1 km
 # Only trust driving-location rows at most this old when measuring the
 # recovery teleport distance.
@@ -48,41 +46,17 @@ FLAG_POPUP_TEXT = (
 )
 
 
-async def _nearest_delivery_point(point):
-    """Return (delivery_point, distance_units) or (None, None)."""
-    import math
-
-    from amc.models import DeliveryPoint
-
-    best, best_dist = None, None
-    async for dp in DeliveryPoint.objects.filter(removed=False).only(
-        "guid", "name", "coord"
-    ):
-        d = math.hypot(point.x - dp.coord.x, point.y - dp.coord.y)
-        if best_dist is None or d < best_dist:
-            best, best_dist = dp, d
-    return best, best_dist
-
-
 async def _reset_flag_reason(character, now):
     """Return (reason_text, delivery_point_name, distance_units) or all-None.
 
-    Trigger 1: the reset lands within RESET_NEAR_DP_UNITS of a delivery
-    point.  Trigger 2: the character's last driving position (the vehicle
+    Single trigger: the character's last driving position (the vehicle
     roadside recovery would teleport) is more than RESET_FAR_RECOVERY_UNITS
-    from where they stand now.
+    from where they stand now. The near-delivery-point trigger was removed
+    (freeman 2026-09-26): legit tow jobs deliver wrecks to delivery points.
     """
     import math
 
     from amc.models import CharacterLocation
-
-    dp, dp_dist = await _nearest_delivery_point(character.last_location)
-    if dp is not None and dp_dist is not None and dp_dist <= RESET_NEAR_DP_UNITS:
-        return (
-            f"Reset landed {dp_dist / 100:.1f} m from delivery point {dp.name}",
-            dp.name,
-            dp_dist,
-        )
 
     # Far-recovery: last row where the character was driving, within the
     # freshness window; the vehicle was there before recovery.
@@ -127,14 +101,14 @@ async def handle_reset_vehicle(event, player, character, ctx):
         )
         return 0, 0, 0, 0
 
-    # Reset flag — two triggers, same consequence:
-    #   1. Reset lands within RESET_NEAR_DP_UNITS of a delivery point
-    #      (teleport the loaded vehicle right onto the DP, unload instantly).
-    #   2. Roadside recovery teleported the vehicle >1 km to reach the
-    #      character (their last driving position is >1 km from where they
-    #      stand now).  Recovery itself is a legit feature — the flag only
-    #      pauses cargo arrivals so teleported cargo can't be dumped.
-    # Both need a fresh last_location (positions monitor).
+    # Reset flag — roadside recovery teleported the vehicle >1 km to reach
+    # the character (their last driving position is >1 km from where they
+    # stand now).  Recovery itself is a legit feature — the flag only
+    # pauses cargo arrivals so teleported cargo can't be dumped.
+    # (freeman 2026-09-26: the near-delivery-point trigger was removed —
+    # legit long-distance tow jobs land wrecks right at DPs and
+    # false-flagged towers.)  Needs a fresh last_location (positions
+    # monitor).
     if character is not None:
         now = timezone.now()
         location_fresh = (
