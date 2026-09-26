@@ -55,9 +55,16 @@ async def setup_event(timestamp, player_id, scheduled_event, http_client_mod):
 
     event_type = getattr(scheduled_event, "event_type", 1) or 1
 
+    # Same treatment as the rotation posts (Yuuka 2026-09-26): unique
+    # per-instance name so the game client can't match the event to a
+    # native template (whose popup would override ours), and no setup
+    # restrictions — the popup shows none and DQ/enforcement stays ours.
+    instance = await _next_tt_instance_number()
+    event_name = f"{scheduled_event.name} ({instance:03d})"
+
     data = {
         "EventGuid": generate_guid(),
-        "EventName": scheduled_event.name,
+        "EventName": event_name,
         "EventType": event_type,
         "OwnerCharacterId": {
             "CharacterGuid": player["CharacterGuid"].rjust(32, "0"),
@@ -75,10 +82,8 @@ async def setup_event(timestamp, player_id, scheduled_event, http_client_mod):
             }
             for waypoint in race_setup["Route"]["Waypoints"]
         ]
-        if len(race_setup["VehicleKeys"]) == 0:
-            race_setup["VehicleKeys"] = []
-        if len(race_setup["EngineKeys"]) == 0:
-            race_setup["EngineKeys"] = []
+        race_setup["VehicleKeys"] = []
+        race_setup["EngineKeys"] = []
         data["RaceSetup"] = race_setup
     elif event_type == 2:
         data["CaptureTheFlagSetup"] = scheduled_event.capture_the_flag_setup.config
