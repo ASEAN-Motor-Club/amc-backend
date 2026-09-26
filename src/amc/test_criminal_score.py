@@ -22,6 +22,7 @@ from amc.criminals import (
     TICK_INTERVAL,
     WANTED_EVASION_MAX_BONUS,
     create_or_refresh_wanted,
+    _evasion_announce_text,
     evasion_proximity_term,
     evasion_quality_gain,
     evasion_speed_term,
@@ -543,6 +544,37 @@ class EvasionQualityTermTests(TestCase):
         self.assertEqual(evasion_quality_gain(float("inf"), 300.0), 0.0)
 
 
+class EvasionAnnounceTierTests(TestCase):
+    """The public evasion message grades with chase quality."""
+
+    def test_tiers(self):
+        # No chase ever → plain expiry wording, no evasion flavour.
+        self.assertEqual(
+            _evasion_announce_text("Bob", 0, 0.0),
+            "Bob is no longer wanted by police",
+        )
+        # Barely a chase.
+        low = _evasion_announce_text("Bob", 0, 0.1)
+        self.assertIn("slipped away", low)
+        self.assertIn("without much of a chase", low)
+        # Genuine chase → the classic evasion wording.
+        mid = _evasion_announce_text("Bob", 0, 0.5)
+        self.assertIn("managed to evade arrest", mid)
+        # Massive chase outrun.
+        high = _evasion_announce_text("Bob", 0, 0.9)
+        self.assertIn("spectacular escape", high)
+        self.assertIn("massive police chase", high)
+
+    def test_bounty_clause_in_all_paid_tiers(self):
+        for quality in (0.1, 0.5, 0.9):
+            self.assertIn(
+                "$5,555 bounty has expired",
+                _evasion_announce_text("Bob", 5_555, quality),
+            )
+        # Unpaid tiers carry no bounty clause.
+        self.assertNotIn("bounty", _evasion_announce_text("Bob", 0, 0.9))
+
+
 class EvasionBonusTests(TestCase):
     """Successfully evading arrest = an ORGANIC wanted decaying to zero while
     cops are on duty → criminal score + EVASION_MAX_BONUS × chase_quality
@@ -619,13 +651,16 @@ class EvasionBonusTests(TestCase):
         self.assertEqual(character.last_illicit_delivery_at, clock_before)
         wanted = await Wanted.objects.filter(character=character).afirst()
         self.assertIsNotNone(wanted.expired_at)
-        # Still an evasion for the announce — just an unpaid one.
+        # Still an expiry, but a zero-quality one is NOT announced as an
+        # evasion (freeman 2026-09-26: the message grades with quality).
         announce_texts = [
             c.args[0] for c in mock_announce.await_args_list if c.args
         ]
         self.assertTrue(
-            any("managed to evade arrest" in t for t in announce_texts),
-            announce_texts,
+            any("no longer wanted" in t for t in announce_texts), announce_texts
+        )
+        self.assertFalse(
+            any("evade arrest" in t for t in announce_texts), announce_texts
         )
 
     @patch("amc.criminals.announce", new_callable=AsyncMock)
@@ -672,6 +707,14 @@ class EvasionBonusTests(TestCase):
         self.assertEqual(character.criminal_score, 55_555 + expected_bonus)
         self.assertGreater(expected_bonus, 0)
         self.assertLess(expected_bonus, 55_555)  # strictly below the old +10%
+        # High quality → the "spectacular escape" tier.
+        announce_texts = [
+            c.args[0] for c in mock_announce.await_args_list if c.args
+        ]
+        self.assertTrue(
+            any("spectacular escape" in t for t in announce_texts),
+            announce_texts,
+        )
 
     @patch("amc.criminals.announce", new_callable=AsyncMock)
     @patch("amc.criminals.clear_suspect", new_callable=AsyncMock)
@@ -716,12 +759,17 @@ class EvasionBonusTests(TestCase):
         self.assertEqual(expected_bonus, 11)  # floor pin, not 12
         await character.arefresh_from_db(fields=["criminal_score"])
         self.assertEqual(character.criminal_score, 55_555 + expected_bonus)
-        # Evasion announce carries the expired bounty (freeman 2026-09-23).
+        # Evasion announce grades with quality (freeman 2026-09-26): this
+        # one-tick chase is low quality → the "slipped away" tier, with the
+        # expired-bounty clause kept.
         announce_texts = [
             c.args[0] for c in mock_announce.await_args_list if c.args
         ]
         self.assertTrue(
-            any("managed to evade arrest" in t for t in announce_texts),
+            any(
+                "slipped away from the police without much of a chase" in t
+                for t in announce_texts
+            ),
             announce_texts,
         )
         self.assertTrue(

@@ -131,6 +131,36 @@ def evasion_quality_gain(dist_units: float, speed_kmh: float) -> float:
     return TICK_INTERVAL * rate / WANTED_EVASION_PERFECT_SECONDS
 
 
+# Evasion announce tiers (freeman 2026-09-26): the public message reflects
+# how real the chase was, matching the quality-scaled score bonus.
+WANTED_EVASION_QUALITY_HIGH = 0.75  # ≥: a massive chase was outrun
+WANTED_EVASION_QUALITY_LOW = 0.25  # ≥: a genuine chase; below: barely one
+
+
+def _evasion_announce_text(name: str, bounty: int, quality: float) -> str:
+    """Public evasion announcement, graded by chase quality."""
+    bounty_clause = (
+        f" — their ${bounty:,} bounty has expired" if bounty > 0 else ""
+    )
+    if quality >= WANTED_EVASION_QUALITY_HIGH:
+        return (
+            f"{name} made a spectacular escape from a massive police chase"
+            f"{bounty_clause} — their reputation soars amongst the criminals"
+        )
+    if quality >= WANTED_EVASION_QUALITY_LOW:
+        return (
+            f"{name} managed to evade arrest{bounty_clause} — their "
+            "reputation grows amongst the criminals"
+        )
+    if quality > 0.0:
+        return (
+            f"{name} slipped away from the police without much of a chase"
+            f"{bounty_clause}"
+        )
+    # No cop ever got close: not an evasion worth announcing as one.
+    return f"{name} is no longer wanted by police"
+
+
 # --- Star scaling with delivery size (freeman 2026-09-25) ---
 # A chase is issued at max(5, delivery // 100k) stars — the 5★ floor never
 # shrinks, big illicit hauls issue MORE stars. Stars are display + meter
@@ -1250,6 +1280,7 @@ async def tick_wanted_countdown(http_client, http_client_mod, http_client_mgmt=N
         skip_name_refresh=refreshed_guids,
         bounties=expired_bounties,
         evaded={c.guid for c in evaded_characters},
+        evaded_qualities=evaded_qualities,
     )
 
 
@@ -1261,6 +1292,7 @@ async def _finalize_expired_wanted(
     skip_name_refresh: set[str] | None = None,
     bounties: dict[str, int] | None = None,
     evaded: set[str] | None = None,
+    evaded_qualities: dict[str, float] | None = None,
 ) -> None:
     """Shared expiry flow for characters whose Wanted record just ended.
 
@@ -1299,17 +1331,10 @@ async def _finalize_expired_wanted(
         if char.guid:
             if char.guid in evaded:
                 bounty = bounties.get(char.guid, 0)
-                if bounty > 0:
-                    freedom_msg = (
-                        f"{char.name} managed to evade arrest — their "
-                        f"${bounty:,} bounty has expired and their "
-                        "reputation grows amongst the criminals"
-                    )
-                else:
-                    freedom_msg = (
-                        f"{char.name} managed to evade arrest — their "
-                        "reputation grows amongst the criminals"
-                    )
+                quality = (evaded_qualities or {}).get(char.guid, 0.0)
+                freedom_msg = _evasion_announce_text(
+                    char.name, bounty, quality
+                )
             else:
                 freedom_msg = f"{char.name} is no longer wanted by police"
             try:
