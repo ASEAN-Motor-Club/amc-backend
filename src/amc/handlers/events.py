@@ -26,7 +26,6 @@ from django.utils import timezone
 from amc.events import create_event_embed, show_results_popup
 from amc.handlers import register
 from amc.mod_server import get_event_state, get_events, transfer_exp
-from amc.parts_audit import audit_event_join
 from amc.models import (
     Character,
     GameEvent,
@@ -36,6 +35,7 @@ from amc.models import (
     ScheduledEvent,
     TTClass,
 )
+from amc.parts_audit import audit_event_join
 from amc.utils import delay
 
 logger = logging.getLogger("amc.webhook.handlers.events")
@@ -426,6 +426,16 @@ async def _reconcile_event_players(
                 "Pruned %s never-raced participant row(s) no longer in event %s",
                 pruned[0], event_guid,
             )
+    if require_state == 2:
+        # Start-line enforcement: on a TT-classed event's 1→2 transition,
+        # DQ (force-leave) every participant violating the class rules.
+        # Deliberately after the prune so the DQ path sees the settled
+        # roster; per-player failures are contained inside the helper.
+        from amc.handlers.tt_dq import _disqualify_illegal_starters
+
+        await _disqualify_illegal_starters(
+            http_client_mod, game_event, live_event, discord_client,
+        )
     return game_event
 
 
