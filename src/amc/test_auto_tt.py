@@ -106,6 +106,16 @@ async def _make_race(route_name, num_laps=0):
     )
 
 
+async def _get_class():
+    """Pinned TT class for rotation-candidate SEs (illegal-TT twins)."""
+    from amc.models import TTClass
+
+    cls, _ = await sync_to_async(TTClass.objects.get_or_create)(
+        name="TT-480", defaults={"max_hp": 480}
+    )
+    return cls
+
+
 async def _clean_slate():
     """Defensive reset: this stack's async tests can leave rows behind, so
     every test starts from an empty ScheduledEvent/RaceSetup pool."""
@@ -124,6 +134,7 @@ async def test_expired_window_events_not_posted(announce_mock, db):
         name="Expired TT",
         race_setup=race,
         time_trial=True,
+        tt_class=await _get_class(),
         start_time=now - timedelta(days=30),
         end_time=now - timedelta(days=1),
     )
@@ -144,6 +155,7 @@ async def test_posted_names_carry_instance_numbers(announce_mock, db):
         name="Instance TT",
         race_setup=race,
         time_trial=True,
+        tt_class=await _get_class(),
         start_time=now - timedelta(hours=1),
         end_time=now + timedelta(hours=1),
     )
@@ -171,6 +183,7 @@ async def test_active_window_event_posted_and_announced(announce_mock, db):
         name="Live TT",
         race_setup=race,
         time_trial=True,
+        tt_class=await _get_class(),
         start_time=now - timedelta(hours=1),
         end_time=now + timedelta(hours=1),
     )
@@ -203,6 +216,7 @@ async def test_all_posts_fail_no_announce(announce_mock, db):
         name="Doomed TT",
         race_setup=race,
         time_trial=True,
+        tt_class=await _get_class(),
         start_time=now - timedelta(hours=1),
         end_time=now + timedelta(hours=1),
     )
@@ -229,6 +243,7 @@ async def test_announce_lists_only_posted_events(announce_mock, db):
             name=name,
             race_setup=race,
             time_trial=True,
+            tt_class=await _get_class(),
             start_time=now - timedelta(hours=1),
             end_time=now + timedelta(hours=1),
         )
@@ -266,6 +281,7 @@ async def test_vanished_event_row_closed(announce_mock, db):
         name="Live TT",
         race_setup=race,
         time_trial=True,
+        tt_class=await _get_class(),
         start_time=now - timedelta(hours=1),
         end_time=now + timedelta(hours=1),
     )
@@ -291,6 +307,7 @@ async def test_unclaimed_live_event_rotated_out(announce_mock, remove_mock, db):
         name="Live TT",
         race_setup=race,
         time_trial=True,
+        tt_class=await _get_class(),
         start_time=now - timedelta(hours=1),
         end_time=now + timedelta(hours=1),
     )
@@ -321,6 +338,7 @@ async def test_joined_event_not_rotated(announce_mock, remove_mock, db):
         name="Live TT",
         race_setup=race,
         time_trial=True,
+        tt_class=await _get_class(),
         start_time=now - timedelta(hours=1),
         end_time=now + timedelta(hours=1),
     )
@@ -361,11 +379,20 @@ def _make_ctx():
     return ctx
 
 
-def _se(name, race, start, end):
+async def _tt_class(name="TT-480", max_hp=480):
+    from amc.models import TTClass
+
+    return await sync_to_async(TTClass.objects.get_or_create)(
+        name=name, defaults={"max_hp": int(name.split("-")[1])}
+    )
+
+
+def _se(name, race, start, end, tt_class=None):
     return sync_to_async(ScheduledEvent.objects.create)(
         name=name,
         race_setup=race,
         time_trial=True,
+        tt_class=tt_class,
         start_time=start,
         end_time=end,
     )
@@ -381,6 +408,7 @@ async def test_setup_event_no_arg_starts_active_event(setup_mock, db):
         name="Expired TT",
         race_setup=old_race,
         time_trial=True,
+        tt_class=await _get_class(),
         start_time=now - timedelta(days=2),
         end_time=now - timedelta(days=1),
     )
@@ -389,6 +417,7 @@ async def test_setup_event_no_arg_starts_active_event(setup_mock, db):
         name="Active TT",
         race_setup=race,
         time_trial=True,
+        tt_class=await _get_class(),
         start_time=now - timedelta(hours=1),
         end_time=now + timedelta(hours=1),
     )
@@ -410,6 +439,7 @@ async def test_setup_event_no_arg_no_active_replies_no_events(setup_mock, db):
         name="Expired TT",
         race_setup=race,
         time_trial=True,
+        tt_class=await _get_class(),
         start_time=now - timedelta(days=30),
         end_time=now - timedelta(days=1),
     )
@@ -430,6 +460,7 @@ async def test_events_lists_only_active(setup_mock, db):
         name="Active TT",
         race_setup=race,
         time_trial=True,
+        tt_class=await _get_class(),
         start_time=now - timedelta(hours=1),
         end_time=now + timedelta(hours=1),
     )
@@ -437,6 +468,7 @@ async def test_events_lists_only_active(setup_mock, db):
         name="Future TT",
         race_setup=race,
         time_trial=True,
+        tt_class=await _get_class(),
         start_time=now + timedelta(days=3),
         end_time=now + timedelta(days=4),
     )

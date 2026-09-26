@@ -25,7 +25,6 @@ from amc.models import (
     LapSectionTime,
     RaceSetup,
     ScheduledEvent,
-    TTClass,
 )
 from amc.utils import skip_if_running
 
@@ -61,6 +60,12 @@ async def setup_event(timestamp, player_id, scheduled_event, http_client_mod):
     # restrictions — the popup shows none and DQ/enforcement stays ours.
     instance = await _next_tt_instance_number()
     event_name = f"{scheduled_event.name} ({instance:03d})"
+    # Pinned TT class (illegal-TT twin): the [TT-xxx] name tag is what the
+    # SSE hook parses into GameEvent.tt_class, which arms the start-line
+    # DQ / wanted / police flow. Classless SEs (championships etc.) post
+    # with no tag and are never criminalized.
+    if getattr(scheduled_event, "tt_class_id", None):
+        event_name = f"{event_name} [{scheduled_event.tt_class.name}]"
 
     data = {
         "EventGuid": generate_guid(),
@@ -1047,10 +1052,14 @@ async def post_random_events(ctx):
         ScheduledEvent.objects.filter(
             time_trial=True,
             race_setup__isnull=False,
+            # Illegal-TT twins only (Yuuka 2026-09-26): SEs without a pinned
+            # class are plain templates (championships, RP events) and must
+            # never be auto-criminalized (DQ/wanted/police) by rotation.
+            tt_class__isnull=False,
         )
         .filter_active_at(timezone.now())
         .exclude(race_setup_id__in=active_race_setup_ids)
-        .select_related("race_setup")
+        .select_related("race_setup", "tt_class")
         .order_by("?")
     )
     # 0-lap events only for rotation (Yuuka 2026-09-26: "only rotate events
@@ -1081,12 +1090,12 @@ async def post_random_events(ctx):
         if not config.get("EngineKeys"):
             config["EngineKeys"] = []
 
-        # Random TT power class per posted event (Yuuka 2026-09-24). The
-        # class rides in the event-name tag ([TT-480]) — that tag is the
-        # only reliable per-instance channel: the DB GameEvent row is
-        # created later by the SSE hook, and putting the class on the
-        # ScheduledEvent would silently re-class live races mid-run.
-        tt_class = await TTClass.objects.order_by("?").afirst()
+        # Class comes from the ScheduledEvent's pin (illegal-TT twin, Yuuka
+        # 2026-09-26) — no random roll. The class rides in the event-name
+        # tag ([TT-480]) — that tag is the only reliable per-instance
+        # channel: the DB GameEvent row is created later by the SSE hook,
+        # which parses the tag back into GameEvent.tt_class.
+        tt_class = scheduled_event.tt_class
         # Per-instance counter so every posted event is uniquely named.
         # The game client matches posted events to its native event
         # templates by name (a native name like "Get The Priest! - Time
