@@ -85,6 +85,52 @@ WANTED_ACCRUAL_MIN_MULT = 1 / 3   # A(D) floor — far-speeding growth multiplie
 WANTED_DISTANCE_SCALE_M = 2000.0  # metres past the cap for half the swing
 WANTED_NEAR_CAP_UNITS = 50_000    # 500 m in game units — distance clamp
 
+# --- Evasion chase-quality meter (freeman 2026-09-26) ---
+# Replaces the flat +10% criminal-score evasion bonus: the bonus is now
+# 0–10% scaled by how REAL the chase was. The meter accrues per tick from
+# two bounded terms (cop proximity + speed) while an organic wanted is
+# active and at least one effective cop is within the proximity scale —
+# driving fast with nobody chasing earns nothing.
+WANTED_EVASION_MAX_BONUS = 0.10      # ceiling — the old flat bonus
+WANTED_EVASION_PERFECT_SECONDS = 240.0  # seconds of PERFECT chase to fill the meter
+WANTED_EVASION_PROXIMITY_SCALE_UNITS = 100_000  # 1000 m — p term reaches 0 here
+WANTED_EVASION_SPEED_SATURATION_KMH = 100.0  # s term: +100 km/h past pivot = 0.5
+
+
+def evasion_proximity_term(dist_units: float) -> float:
+    """p in [0, 1]: 1.0 point-blank, linearly to 0 at the 1000 m scale.
+
+    Bounded per tick — point-blank proximity never "explodes" the meter,
+    the worst a single tick can contribute is the same as any other max
+    tick. ``math.inf`` (police-independent mode: zero cops) → 0.
+    """
+    if math.isinf(dist_units):
+        return 0.0
+    return max(0.0, min(1.0, 1.0 - dist_units / WANTED_EVASION_PROXIMITY_SCALE_UNITS))
+
+
+def evasion_speed_term(speed_kmh: float) -> float:
+    """s in [0, 1): saturating hyperbola past the 50 km/h pivot.
+
+    50→0, 100→1/3, 150→0.5, 200→0.6, 300→0.71, asymptote 1.0 — diminishing
+    returns are built into the curve, no extra cap needed. Hiding → 0.
+    """
+    if speed_kmh <= WANTED_SPEED_PIVOT_KMH:
+        return 0.0
+    excess = speed_kmh - WANTED_SPEED_PIVOT_KMH
+    return excess / (excess + WANTED_EVASION_SPEED_SATURATION_KMH)
+
+
+def evasion_quality_gain(dist_units: float, speed_kmh: float) -> float:
+    """Meter gained by ONE tick of chasing at this distance/speed."""
+    if math.isinf(dist_units):
+        return 0.0
+    rate = (
+        evasion_proximity_term(dist_units) + evasion_speed_term(speed_kmh)
+    ) / 2.0
+    return TICK_INTERVAL * rate / WANTED_EVASION_PERFECT_SECONDS
+
+
 # --- Star scaling with delivery size (freeman 2026-09-25) ---
 # A chase is issued at max(5, delivery // 100k) stars — the 5★ floor never
 # shrinks, big illicit hauls issue MORE stars. Stars are display + meter
@@ -936,6 +982,7 @@ async def tick_wanted_countdown(http_client, http_client_mod, http_client_mgmt=N
     # arrest" for the score bonus. Dormant-amnesty clears, arrests, and
     # pull-over clears never enter this list.
     evaded_characters = []
+    evaded_qualities: dict[str, float] = {}  # guid → meter at expiry
     star_change_notifications = []  # (wanted, message) for deferred processing
     _current_modded_guids: set[str] = set()  # modded vehicle state this tick
 
@@ -1060,6 +1107,18 @@ async def tick_wanted_countdown(http_client, http_client_mod, http_client_mgmt=N
             # (A = WANTED_ACCRUAL_MIN_MULT = 1/3x).
             min_dist = math.inf
 
+        # Chase-quality accrual (freeman 2026-09-26): while an ORGANIC
+        # wanted is active and a real cop is in play (min_dist finite —
+        # police-independent mode's inf means nobody is chasing), the
+        # meter absorbs proximity + speed. Admin /setwanted flags never
+        # accrue — their expiry is not an evasion.
+        if wanted.set_by_id is None and min_dist is not None:
+            wanted.chase_quality = min(
+                1.0,
+                wanted.chase_quality
+                + evasion_quality_gain(min_dist, speed_kmh),
+            )
+
         if speed_kmh >= WANTED_SPEED_PIVOT_KMH:
             growth = (
                 (speed_kmh - WANTED_SPEED_PIVOT_KMH)
@@ -1094,6 +1153,7 @@ async def tick_wanted_countdown(http_client, http_client_mod, http_client_mgmt=N
                 expired_bounties[wanted.character.guid] = wanted.amount
                 if wanted.set_by_id is None:
                     evaded_characters.append(wanted.character)
+                    evaded_qualities[wanted.character.guid] = wanted.chase_quality
 
         # Track star changes for deferred notification
         new_stars = _compute_stars(wanted.wanted_remaining)
@@ -1114,7 +1174,9 @@ async def tick_wanted_countdown(http_client, http_client_mod, http_client_mgmt=N
 
     # Bulk save — must happen BEFORE refresh_player_name so it reads correct DB state
     # (the bounty in `amount` is frozen at trigger time — the tick never touches it)
-    await Wanted.objects.abulk_update(wanted_list, ["wanted_remaining"])
+    await Wanted.objects.abulk_update(
+        wanted_list, ["wanted_remaining", "chase_quality"]
+    )
 
     # Mark expired (set expired_at instead of deleting)
     expired_ids = [w.id for w in wanted_list if w.wanted_remaining <= 0]
@@ -1129,21 +1191,34 @@ async def tick_wanted_countdown(http_client, http_client_mod, http_client_mgmt=N
             expired_at=timezone.now(),
         )
 
-    # Evasion bonus (freeman 2026-09-20): an ORGANIC wanted that decays to
-    # zero while cops are on duty means the suspect outran a live chase —
-    # reward it with +10% criminal score (integer floor; score//10). Only
-    # this tick path grants it: dormant-amnesty clears, arrests (score
-    # negation instead), and pull-over clears never reach here. The decay
-    # clock (last_illicit_delivery_at) is deliberately untouched — evading
-    # is not an illicit delivery.
+    # Evasion bonus (freeman 2026-09-26, replacing the flat 2026-09-20 +10%):
+    # an ORGANIC wanted that decays to zero while cops are on duty means the
+    # suspect outran a live chase — reward it with criminal_score ×
+    # EVASION_MAX_BONUS × chase_quality (integer floor), so the payoff
+    # measures how real the chase was. Only this tick path grants it:
+    # dormant-amnesty clears, arrests (score negation instead), and
+    # pull-over clears never reach here. The decay clock
+    # (last_illicit_delivery_at) is deliberately untouched — evading is not
+    # an illicit delivery.
     if evaded_characters:
-        await Character.objects.filter(
+        chased = Character.objects.filter(
             pk__in=[c.pk for c in evaded_characters]
-        ).aupdate(criminal_score=F("criminal_score") + F("criminal_score") / 10)
+        ).only("id", "guid", "name", "criminal_score")
+        bonus_lines = []
+        async for char in chased:
+            quality = evaded_qualities.get(char.guid, 0.0)
+            bonus = int(char.criminal_score * WANTED_EVASION_MAX_BONUS * quality)
+            if bonus <= 0:
+                bonus_lines.append(f"{char.name} +$0 (quality {quality:.2f})")
+                continue
+            await Character.objects.filter(pk=char.pk).aupdate(
+                criminal_score=F("criminal_score") + bonus
+            )
+            bonus_lines.append(f"{char.name} +${bonus} (quality {quality:.2f})")
         logger.info(
-            "wanted tick: %d player(s) evaded arrest — criminal score +10%%: %s",
+            "wanted tick: %d player(s) evaded arrest — chase-quality score bonus: %s",
             len(evaded_characters),
-            [c.name for c in evaded_characters],
+            bonus_lines,
         )
 
     # Send star-change messages and refresh names (DB is now up-to-date)

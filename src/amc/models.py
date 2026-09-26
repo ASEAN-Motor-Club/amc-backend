@@ -653,6 +653,15 @@ class Wanted(models.Model):
         Character, on_delete=models.CASCADE, related_name="wanted_records"
     )
     wanted_remaining = models.FloatField()  # seconds (float for fractional decrements)
+    chase_quality = models.FloatField(
+        default=0.0,
+        help_text=(
+            "Chase-quality meter in [0, 1] (freeman 2026-09-26): accrues each "
+            "tick from cop proximity + speed while an organic wanted is "
+            "active. On evasion the criminal-score bonus is "
+            "EVASION_MAX_BONUS × this meter instead of a flat 10%."
+        ),
+    )
     initial_heat = models.IntegerField(
         default=INITIAL_WANTED_LEVEL,
         help_text=(
