@@ -39,6 +39,7 @@ from amc.criminals import (
     _last_suspect_guids,
     active_police_present,
     hide_decay_multiplier,
+    initial_heat_for_stars,
     nearest_effective_cop_distance_m,
     refresh_suspect_tags,
     tick_criminal_score_decay,
@@ -46,7 +47,6 @@ from amc.criminals import (
     tick_wanted_countdown,
     wanted_accrual_multiplier,
     wanted_stars_for_delivery,
-    initial_heat_for_stars,
 )
 from amc.factories import CharacterFactory, PlayerFactory
 from amc.models import (
@@ -1128,7 +1128,7 @@ class WantedCountdownTickTests(TestCase):
         from amc.criminals import UNDERWATER_Z_THRESHOLD
 
         criminal = await self._setup_criminal(wanted_remaining=200)
-        sx, sy, sz = _SUSPECT_LOC
+        sx, sy, _sz = _SUSPECT_LOC
         underwater_z = UNDERWATER_Z_THRESHOLD - 1
         players = _make_players_list([
             _make_player_data(criminal.player.unique_id, criminal.guid, sx, sy, underwater_z),
@@ -1136,9 +1136,11 @@ class WantedCountdownTickTests(TestCase):
         mock_http = AsyncMock()
         mock_http_mod = AsyncMock()
 
-        with patch("amc.criminals.get_players", new_callable=AsyncMock, return_value=players):
-            with patch("amc.criminals.execute_arrest", new_callable=AsyncMock, return_value=([criminal.name], 1000)) as mock_arrest:
-                await tick_wanted_countdown(mock_http, mock_http_mod)
+        with (
+            patch("amc.criminals.get_players", new_callable=AsyncMock, return_value=players),
+            patch("amc.criminals.execute_arrest", new_callable=AsyncMock, return_value=([criminal.name], 1000)) as mock_arrest,
+        ):
+            await tick_wanted_countdown(mock_http, mock_http_mod)
 
         mock_arrest.assert_awaited_once()
         call_kwargs = mock_arrest.call_args.kwargs
@@ -1158,16 +1160,18 @@ class WantedCountdownTickTests(TestCase):
         from amc.criminals import UNDERWATER_Z_THRESHOLD
 
         criminal = await self._setup_criminal(wanted_remaining=200)
-        sx, sy, sz = _SUSPECT_LOC
+        sx, sy, _sz = _SUSPECT_LOC
         players = _make_players_list([
             _make_player_data(criminal.player.unique_id, criminal.guid, sx, sy, UNDERWATER_Z_THRESHOLD),
         ])
         mock_http = AsyncMock()
         mock_http_mod = AsyncMock()
 
-        with patch("amc.criminals.get_players", new_callable=AsyncMock, return_value=players):
-            with patch("amc.criminals.execute_arrest", new_callable=AsyncMock) as mock_arrest:
-                await tick_wanted_countdown(mock_http, mock_http_mod)
+        with (
+            patch("amc.criminals.get_players", new_callable=AsyncMock, return_value=players),
+            patch("amc.criminals.execute_arrest", new_callable=AsyncMock) as mock_arrest,
+        ):
+            await tick_wanted_countdown(mock_http, mock_http_mod)
 
         mock_arrest.assert_not_called()
         wanted = await Wanted.objects.aget(character=criminal)
@@ -1182,16 +1186,18 @@ class WantedCountdownTickTests(TestCase):
         from amc.criminals import UNDERWATER_Z_THRESHOLD
 
         criminal = await self._setup_criminal(wanted_remaining=200)
-        sx, sy, sz = _SUSPECT_LOC
+        sx, sy, _sz = _SUSPECT_LOC
         players = _make_players_list([
             _make_player_data(criminal.player.unique_id, criminal.guid, sx, sy, UNDERWATER_Z_THRESHOLD + 1),
         ])
         mock_http = AsyncMock()
         mock_http_mod = AsyncMock()
 
-        with patch("amc.criminals.get_players", new_callable=AsyncMock, return_value=players):
-            with patch("amc.criminals.execute_arrest", new_callable=AsyncMock) as mock_arrest:
-                await tick_wanted_countdown(mock_http, mock_http_mod)
+        with (
+            patch("amc.criminals.get_players", new_callable=AsyncMock, return_value=players),
+            patch("amc.criminals.execute_arrest", new_callable=AsyncMock) as mock_arrest,
+        ):
+            await tick_wanted_countdown(mock_http, mock_http_mod)
 
         mock_arrest.assert_not_called()
         wanted = await Wanted.objects.aget(character=criminal)
@@ -1207,7 +1213,7 @@ class WantedCountdownTickTests(TestCase):
 
         criminal_a = await self._setup_criminal(wanted_remaining=200)
         criminal_b = await self._setup_criminal(wanted_remaining=200)
-        sx, sy, sz = _SUSPECT_LOC
+        sx, sy, _sz = _SUSPECT_LOC
         underwater_z = UNDERWATER_Z_THRESHOLD - 1
         players = _make_players_list([
             _make_player_data(criminal_a.player.unique_id, criminal_a.guid, sx, sy, underwater_z),
@@ -1216,9 +1222,11 @@ class WantedCountdownTickTests(TestCase):
         mock_http = AsyncMock()
         mock_http_mod = AsyncMock()
 
-        with patch("amc.criminals.get_players", new_callable=AsyncMock, return_value=players):
-            with patch("amc.criminals.execute_arrest", new_callable=AsyncMock, side_effect=ValueError("Jail not configured")) as mock_arrest:
-                await tick_wanted_countdown(mock_http, mock_http_mod)
+        with (
+            patch("amc.criminals.get_players", new_callable=AsyncMock, return_value=players),
+            patch("amc.criminals.execute_arrest", new_callable=AsyncMock, side_effect=ValueError("Jail not configured")) as mock_arrest,
+        ):
+            await tick_wanted_countdown(mock_http, mock_http_mod)
 
         mock_arrest.assert_awaited_once()
         # criminal_b should still have decayed normally
