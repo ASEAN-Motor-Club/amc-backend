@@ -116,15 +116,26 @@ async def cmd_setup_event(ctx: CommandContext, event_id: Optional[int] = None):
                 .aget(pk=event_id)
             )
         else:
-            # No id: start the CURRENT ACTIVE event (window live right now),
-            # not a listing of everything ever scheduled.
-            active = (
-                ScheduledEvent.objects.filter(race_setup__isnull=False)
-                .filter_active_at(ctx.timestamp)
-                .select_related("race_setup")
+            # No id: start the CURRENT ACTIVE event (window live right now).
+            # Originals and illegal-TT twins are distinct SE rows (Yuuka
+            # 2026-09-27: "accurately separate them") — prefer the classed
+            # twin outright; only fall back to a classless SE when no twin
+            # window is live.
+            base = ScheduledEvent.objects.filter(
+                race_setup__isnull=False
+            ).filter_active_at(ctx.timestamp)
+            scheduled_event = (
+                await base.filter(tt_class__isnull=False)
+                .select_related("race_setup", "tt_class")
                 .order_by("-start_time")
+                .afirst()
             )
-            scheduled_event = await active.afirst()
+            if scheduled_event is None:
+                scheduled_event = (
+                    await base.select_related("race_setup")
+                    .order_by("-start_time")
+                    .afirst()
+                )
             if scheduled_event is None:
                 await ctx.reply("No active events right now.")
                 return
