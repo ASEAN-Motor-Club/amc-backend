@@ -1,8 +1,13 @@
-"""Reset-near-delivery-point flag.
+"""Roadside-recovery flag.
 
-ServerResetVehicleAt within 200 units of a delivery point flags the
-character: opaque popup + Discord alert, and every cargo arrival from that
-character for the next 60 seconds is ignored entirely (no logs, no payment).
+ServerResetVehicleAt where the vehicle was recovered from >1 km away
+(RESET_FAR_RECOVERY_UNITS) flags the character: opaque popup + Discord
+alert, and every cargo arrival from that character for the next
+CARGO_IGNORE_SECONDS is ignored entirely (no logs, no payment).
+
+The earlier near-delivery-point trigger was removed (freeman 2026-09-26):
+legit long-distance tow jobs deliver wrecks right at delivery points and
+false-flagged towers.
 """
 
 import asyncio
@@ -18,9 +23,8 @@ from asgiref.sync import sync_to_async
 
 from amc.factories import CharacterFactory, DeliveryPointFactory, PlayerFactory
 from amc.handlers.teleport import (
-    CARGO_IGNORE_SECONDS,
     FLAG_POPUP_TEXT,
-    RESET_NEAR_DP_UNITS,
+    RESET_FAR_RECOVERY_UNITS,
 )
 from amc.models import ServerCargoArrivedLog
 
@@ -77,42 +81,27 @@ class ResetNearDeliveryPointTests(TestCase):
 
     @patch("amc.webhook.get_treasury_fund_balance", new_callable=AsyncMock, return_value=100_000)
     @patch("amc.webhook.announce", new_callable=AsyncMock)
-    async def test_reset_within_2m_of_dp_flags_pops_and_alerts(
+    async def test_reset_on_delivery_point_does_not_flag(
         self, mock_announce, mock_treasury
     ):
+        """Near-DP trigger removed (freeman 2026-09-26): legit tow jobs land
+        wrecks right at delivery points — a reset parked on a DP must NOT
+        flag by proximity alone."""
         from amc.webhook import process_events
 
         character = await self._setup(x=0, y=0)
-        dp = await self._dp("dp-rf-1", "Mine", 100, 100)  # ~141 units < 200
+        await self._dp("dp-rf-1", "Mine", 1, 1)  # ~1.4 units away
 
-        posted = []
-        with patch(
-            "amc.handlers.teleport.show_popup", new_callable=AsyncMock
-        ) as _popup, patch(
-            "amc.pipeline.discord.post_discord_reset_flag_alert",
-            side_effect=lambda *a, **k: posted.append(k),
-        ):
+        with patch("amc.handlers.teleport.show_popup", new_callable=AsyncMock) as popup:
             await process_events(
                 [_reset_event(character.guid)],
                 http_client=MagicMock(),
                 http_client_mod=MagicMock(),
             )
-            for _ in range(20):
-                await asyncio.sleep(0.05)
 
         await character.arefresh_from_db()
-        assert character.cargo_ignore_until is not None
-        remaining = (
-            character.cargo_ignore_until - timezone.now()
-        ).total_seconds()
-        assert 0 < remaining <= CARGO_IGNORE_SECONDS
-        # Popup: flagged copy only, no duration mention
-        _popup.assert_called_once()
-        text = _popup.call_args.args[1]
-        assert "flagged" in text
-        assert "60" not in text and "second" not in text.lower()
-        # Discord alert carries the details
-        assert posted and posted[0]["delivery_point_name"] == dp.name
+        assert character.cargo_ignore_until is None
+        popup.assert_not_called()
 
     @patch("amc.webhook.get_treasury_fund_balance", new_callable=AsyncMock, return_value=100_000)
     @patch("amc.webhook.announce", new_callable=AsyncMock)
@@ -143,7 +132,6 @@ class ResetNearDeliveryPointTests(TestCase):
         from amc.webhook import process_events
 
         character = await self._setup(x=0, y=0, last_online_age_s=600)
-        await self._dp("dp-rf-3", "Near DP", 10, 10)
 
         with patch("amc.handlers.teleport.show_popup", new_callable=AsyncMock):
             await process_events(
@@ -265,4 +253,4 @@ def test_flag_popup_copy_is_opaque():
     assert "60" not in FLAG_POPUP_TEXT
     assert "second" not in FLAG_POPUP_TEXT.lower()
     assert "admin" in FLAG_POPUP_TEXT.lower()
-    assert RESET_NEAR_DP_UNITS == 200
+    assert RESET_FAR_RECOVERY_UNITS == 100_000  # 1 km
