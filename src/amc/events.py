@@ -1058,6 +1058,13 @@ async def post_random_events(ctx):
         event_name = scheduled_event.name
         if tt_class:
             event_name = f"{event_name} [{tt_class.name}]"
+            # Clear the setup's stale, class-conflicting restrictions
+            # (Yuuka 2026-09-26: "the override should be to NONE, we rely
+            # on our DQ checks (total hp)") — the game popup then shows no
+            # requirements and the start-line DQ (total-hp + vanilla-tires
+            # check) is the single source of enforcement.
+            config["EngineKeys"] = []
+            config["VehicleKeys"] = []
 
         data = {
             "EventGuid": generate_guid(),
