@@ -219,32 +219,21 @@ async def set_pinned_announcement(session, message):
 
 
 async def broadcast_server_message(session, message):
-    """Global chat announcement (Yuuka 2026-09-27).
+    """In-game chat announcement via the game API (Yuuka 2026-09-27).
 
-    ``send_system_message`` is per-character: the mod's
-    HandleShowSystemMessage requires ``characterGuid`` and ignores the
-    request without one — passing ``str(None)`` ("None") delivered
-    nowhere. Primary path: ``/messages/announce`` with playerId omitted
-    — ChatManager.AnnounceServerMessage borrows any ONLINE ADMIN's
-    controller for ServerAnnounce (server-wide). Fallback when no admin
-    is online (that path returns 400): per-player system messages to
-    every online character.
+    ``session`` is the GAME API client (ctx['http_client'],
+    GAME_SERVER_API_URL) — NOT the mod webserver. This is the same
+    /chat path police promotions, promos and job notifications use:
+    a colored chat-line announcement, no blocking popup.
+
+    Ruled out live earlier: mod ``/messages/system`` without a guid is
+    dropped; per-character system messages return 204 but render
+    nothing; ``/messages/announce`` returns ok (admin controller) but
+    renders nothing; mod ``/messages/popup`` renders but obstructs.
     """
-    await _write_limiter.acquire()
-    data = {"message": message, "isPinned": False}
-    async with session.post("/messages/announce", json=data) as resp:
-        if resp.status == 200:
-            return
-    # No admin online (or endpoint failed) — deliver per player instead.
-    # /players returns ONLINE players only; each row carries CharacterGuid.
-    players = await get_players(session)
-    for player in (players or []):
-        guid = player.get("CharacterGuid")
-        if guid:
-            try:
-                await send_system_message(session, message, character_guid=guid)
-            except Exception:
-                pass
+    from amc.game_server import announcement_request
+
+    await announcement_request(message, session, type="message", color="FFFF00")
 
 
 async def teleport_player(

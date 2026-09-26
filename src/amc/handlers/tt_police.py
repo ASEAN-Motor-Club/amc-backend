@@ -103,7 +103,9 @@ async def mark_racers_wanted(
     return flagged
 
 
-async def announce_illegal_race(http_client_mod, game_event) -> None:
+async def announce_illegal_race(
+    http_client_mod, game_event, http_client_game=None
+) -> None:
     """Broadcast the 60s 'illegal race' global announcement.
 
     Polls every RACE_ALERT_DELAY_SECONDS until the event is seen racing
@@ -136,7 +138,9 @@ async def announce_illegal_race(http_client_mod, game_event) -> None:
                     return
                 if match.get("State") != 2:
                     continue
-                await broadcast_server_message(http_client_mod, RACE_ALERT_MESSAGE)
+                await broadcast_server_message(
+                    http_client_game or http_client_mod, RACE_ALERT_MESSAGE
+                )
                 _announced_race_guids.add(game_event.guid)
                 logger.info(
                     "TT race alert sent for %s (%s)",
