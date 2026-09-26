@@ -274,9 +274,9 @@ class PowerCalcCog(commands.Cog):
             file = discord.File(buf, filename="curve.png")
             emb.set_image(url="attachment://curve.png")
         if file is not None:
-            await interaction.response.send_message(embed=emb, file=file)
+            await interaction.response.send_message(embed=emb, file=file, ephemeral=True)
         else:
-            await interaction.response.send_message(embed=emb)
+            await interaction.response.send_message(embed=emb, ephemeral=True)
 
     @power.command(name="recommend", description="Recommend builds near a target hp")
     @app_commands.describe(
@@ -296,7 +296,7 @@ class PowerCalcCog(commands.Cog):
         max_mass: app_commands.Range[int, 0, 5000] | None = None,
         limit: app_commands.Range[int, 1, 15] = 10,
     ):
-        await interaction.response.defer()
+        await interaction.response.defer(ephemeral=True)
         hits = await asyncio.to_thread(
             search,
             float(target_hp),
@@ -308,6 +308,7 @@ class PowerCalcCog(commands.Cog):
         )
         await interaction.followup.send(
             embed=_recommend_embed(float(target_hp), hits),
+            ephemeral=True,
         )
 
     @power.command(name="parts", description="List intake and turbocharger part values")
