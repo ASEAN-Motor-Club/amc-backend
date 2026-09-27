@@ -102,9 +102,9 @@ async def test_grant_wanted_skips_offline(grant_mock, db):
 @patch("amc.handlers.tt_police.broadcast_server_message", new_callable=AsyncMock)
 @patch("amc.handlers.tt_police.get_events", new_callable=AsyncMock)
 async def test_alert_fires_when_still_racing(get_events_mock, send_mock, db):
-    get_events_mock.return_value = {
-        "data": [{"EventGuid": "GUIDPOL000000000000000000000E", "State": 2}]
-    }
+    get_events_mock.return_value = [
+        {"EventGuid": "GUIDPOL000000000000000000000E", "State": 2}
+    ]
     event = await sync_to_async(GameEvent.objects.create)(
         guid="GUIDPOL000000000000000000000E", name="Alert Test [TT-350]", state=2
     )
@@ -133,9 +133,9 @@ async def _flush_tasks():
 @patch("amc.handlers.tt_police.broadcast_server_message", new_callable=AsyncMock)
 @patch("amc.handlers.tt_police.get_events", new_callable=AsyncMock)
 async def test_alert_silent_when_event_not_racing(get_events_mock, send_mock, db):
-    get_events_mock.return_value = {
-        "data": [{"EventGuid": "GUIDPOL000000000000000000000E", "State": 1}]
-    }
+    get_events_mock.return_value = [
+        {"EventGuid": "GUIDPOL000000000000000000000E", "State": 1}
+    ]
     event = await sync_to_async(GameEvent.objects.create)(
         guid="GUIDPOL000000000000000000000E", name="Alert Test 2 [TT-480]", state=1
     )
