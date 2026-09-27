@@ -189,13 +189,6 @@ message PlayerPosition {
         string vehicle_key_unknown = 7;
     }
     bool hidden = 8;
-    Velocity velocity = 9;
-}
-
-message Velocity {
-    double x = 1;
-    double y = 2;
-    double z = 3;
 }
 
 message PlayerPositions {

@@ -156,7 +156,6 @@ async def get_players_locations(session, use_cache: bool = True):
                 "VehicleKey": vehicle_key,
                 "Yaw": e.get("yaw", 0),
                 "Speed": speed,
-                "Velocity": {"X": vx, "Y": vy, "Z": vz},
                 "RPM": e.get("rpm", 0),
                 "Gear": e.get("gear", 0),
                 # Snapshot capture time from the C++ feed (wall-clock UTC
