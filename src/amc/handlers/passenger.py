@@ -135,33 +135,32 @@ async def handle_passenger_arrived(event, player, character, ctx):
         if session.guild.passenger_requirement.fugitive_chance > 0:
             if random.random() < session.guild.passenger_requirement.fugitive_chance:
                 from amc.criminals import (
-                    active_police_present,
+                    WANTED_ORIGIN_FUGITIVE_PASSENGER,
                     create_or_refresh_wanted,
-                    wanted_police_required,
                 )
 
-                # Dormant rule (freeman 2026-09-20): no effective cops on
-                # duty -> the wanted system is off, no organic triggers.
-                # Exception: police-independent mode (WantedSystemConfig.
-                # police_required OFF) — fugitive triggers fire with zero
-                # cops on duty.
-                if not await wanted_police_required() or await active_police_present(
-                    ctx.http_client_mod
-                ):
-                    wanted, created = await create_or_refresh_wanted(
-                        character,
-                        ctx.http_client_mod,
-                        amount=log.payment,
-                    )
-                    if ctx.http_client_mod:
-                        asyncio.create_task(
-                            show_popup(
-                                ctx.http_client_mod,
-                                "You picked up a fugitive! The police are after you.",
-                                character_guid=str(character.guid),
-                                player_id=str(character.player.unique_id),
-                            )
+                # Fugitive-passenger triggers fire regardless of police
+                # presence (Hamster 2026-09-27): the delivery itself is the
+                # offense, so the trigger is cop-independent. The resulting
+                # Wanted row carries the fugitive origin and is exempt from
+                # the dormant amnesty — it survives zero-cop ticks and
+                # re-enters the normal speed law once a cop is on duty.
+                # (Illicit-cargo triggers keep the dormant rule unchanged.)
+                wanted, created = await create_or_refresh_wanted(
+                    character,
+                    ctx.http_client_mod,
+                    amount=log.payment,
+                    origin=WANTED_ORIGIN_FUGITIVE_PASSENGER,
+                )
+                if ctx.http_client_mod:
+                    asyncio.create_task(
+                        show_popup(
+                            ctx.http_client_mod,
+                            "You picked up a fugitive! The police are after you.",
+                            character_guid=str(character.guid),
+                            player_id=str(character.player.unique_id),
                         )
+                    )
 
         if ctx.http_client_mod:
             asyncio.create_task(

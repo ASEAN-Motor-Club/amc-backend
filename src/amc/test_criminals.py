@@ -33,6 +33,7 @@ from amc.criminals import (
     SCORE_DECAY_FACTOR_PER_TICK,
     TICK_INTERVAL,
     WANTED_NEAR_CAP_UNITS,
+    WANTED_ORIGIN_FUGITIVE_PASSENGER,
     _compute_stars,
     _costume_reconciled_guids,
     _last_compass_sent,
@@ -322,6 +323,99 @@ class WantedCountdownTickTests(TestCase):
         self.assertIsNone(wanted.expired_at)
         # No expiry flow ran for the admin flag
         mock_refresh.assert_not_called()
+
+    async def _setup_fugitive_wanted(self, wanted_remaining=600):
+        """Create an organic wanted carrying the fugitive-passenger origin —
+        the shape the guild fugitive trigger produces."""
+        player = await sync_to_async(PlayerFactory)()
+        character = await sync_to_async(CharacterFactory)(player=player)
+        character.last_online = timezone.now()
+        await character.asave(update_fields=["last_online"])
+        await Wanted.objects.acreate(
+            character=character,
+            wanted_remaining=wanted_remaining,
+            origin=WANTED_ORIGIN_FUGITIVE_PASSENGER,
+        )
+        return character
+
+    async def test_dormant_preserves_fugitive_passenger_wanted(
+        self,
+        mock_sys_msg,
+        mock_refresh,
+    ):
+        """Fugitive-passenger wanteds survive the dormant amnesty — the
+        delivery was the offense, so the record is cop-independent
+        (Hamster 2026-09-27)."""
+        self.armed_mock.return_value = False
+        organic_criminal = await self._setup_criminal(wanted_remaining=300)
+        fugitive = await self._setup_fugitive_wanted(wanted_remaining=600)
+        players = _make_players_list([
+            _make_player_data(
+                organic_criminal.player.unique_id, organic_criminal.guid, *_SUSPECT_LOC
+            ),
+            _make_player_data(
+                fugitive.player.unique_id, fugitive.guid, *_SUSPECT_LOC
+            ),
+        ])
+        mock_http = AsyncMock()
+        mock_http_mod = AsyncMock()
+
+        with patch("amc.criminals.get_players", new_callable=AsyncMock, return_value=players):
+            for _ in range(5):
+                await tick_wanted_countdown(mock_http, mock_http_mod)
+
+        organic_wanted = await Wanted.objects.aget(character=organic_criminal)
+        self.assertEqual(organic_wanted.wanted_remaining, 0)
+        self.assertIsNotNone(organic_wanted.expired_at)
+
+        fugitive_wanted = await Wanted.objects.aget(character=fugitive)
+        self.assertEqual(fugitive_wanted.wanted_remaining, 600)
+        self.assertIsNone(fugitive_wanted.expired_at)
+        self.assertEqual(
+            fugitive_wanted.origin, WANTED_ORIGIN_FUGITIVE_PASSENGER
+        )
+
+    async def test_fugitive_wanted_frozen_dormant_then_decays_when_armed(
+        self,
+        mock_sys_msg,
+        mock_refresh,
+    ):
+        """A fugitive-passenger wanted freezes while dormant and re-enters the
+        normal speed law once a cop is back on duty."""
+        fugitive = await self._setup_fugitive_wanted(wanted_remaining=200)
+        officer = await self._setup_police()
+        mock_http = AsyncMock()
+        mock_http_mod = AsyncMock()
+
+        # Phase 1: dormant — frozen at full heat
+        self.armed_mock.return_value = False
+        players = _make_players_list([
+            _make_player_data(fugitive.player.unique_id, fugitive.guid, *_SUSPECT_LOC),
+        ])
+        with patch("amc.criminals.get_players", new_callable=AsyncMock, return_value=players):
+            for _ in range(10):
+                await tick_wanted_countdown(mock_http, mock_http_mod)
+        wanted = await Wanted.objects.aget(character=fugitive)
+        self.assertEqual(wanted.wanted_remaining, 200)
+        self.assertIsNone(wanted.expired_at)
+
+        # Phase 2: cop back on duty — normal hiding decay resumes
+        # (stationary suspect, cop 1 km away -> F(1000 m) multiplier)
+        self.armed_mock.return_value = True
+        players_armed = _make_players_list([
+            _make_player_data(fugitive.player.unique_id, fugitive.guid, *_SUSPECT_LOC),
+            _make_player_data(officer.player.unique_id, officer.guid, *_COP_FAR),
+        ])
+        with patch("amc.criminals.get_players", new_callable=AsyncMock, return_value=players_armed):
+            for _ in range(10):
+                await tick_wanted_countdown(mock_http, mock_http_mod)
+        wanted = await Wanted.objects.aget(character=fugitive)
+        self.assertAlmostEqual(
+            wanted.wanted_remaining,
+            200 - 10 * hide_decay_multiplier(100_000),
+            delta=0.5,
+        )
+        self.assertIsNone(wanted.expired_at)
 
     async def test_dormant_clears_organic_preserves_admin(
         self,
