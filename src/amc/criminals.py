@@ -1597,8 +1597,10 @@ async def refresh_suspect_tags(http_client_mod, http_client_game=None) -> None:
             )
 
             if await ensure_announced(http_client_mod, race_event):
+                # game-API client: the announcement goes through the native
+                # /chat path (game_server.announce), never a donor player.
                 await broadcast_server_message(
-                    http_client_mod, RACE_ALERT_MESSAGE
+                    http_client_game, RACE_ALERT_MESSAGE
                 )
                 await grant_race_wanted(http_client_mod, race_event)
         except Exception:
