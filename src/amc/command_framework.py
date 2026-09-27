@@ -136,7 +136,11 @@ class CommandRegistry:
             is_optional = default != inspect.Parameter.empty
 
             # Determine regex for type
-            if annotation is int:
+            # `int | None` (optional int) matches the same token class as
+            # a required int — bare `annotation is int` misses it and would
+            # build a \S+ string pattern, letting non-numeric tokens
+            # hijack the position before the int cast rejects them.
+            if annotation is int or annotation == (int | None):
                 # Matches digits, optional negative sign
                 type_regex = r"[-]?\d+"
             elif annotation is float:
@@ -227,7 +231,7 @@ class CommandRegistry:
 
                     target_type = hints.get(k, str)
                     try:
-                        if target_type is int:
+                        if target_type is int or target_type == (int | None):
                             # Handle "1,000" -> 1000
                             processed_kwargs[k] = int(v.replace(",", ""))
                         elif target_type is float:
