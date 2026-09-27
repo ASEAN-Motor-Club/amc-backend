@@ -1990,10 +1990,10 @@ class CommandsTestCase(TestCase):
             output = self.ctx.reply.call_args[0][0]
             self.assertIn("Parts Check", output)
             # power block: validated golden dyno build (SmallBlock_240HP+201+Stage1)
-            self.assertIn("Power: 293.2 hp @ 6,216 rpm", output)
+            self.assertIn("Power: 293.2 hp @ 6,214 rpm", output)
             self.assertIn("413.0 Nm @ 4,355 rpm", output)
             self.assertIn("Intake 201 · Turbo Turbocharger_Stage1", output)
-            self.assertIn("model 1.0.0 · data 2026.09.3", output)
+            self.assertIn("model 1.1.0 · data 2026.09.3", output)
             # drivetrain line removed — DriveInfo is not server-populated
             # final-drive ratio enrichment: opaque preset id + resolved ratio
             self.assertIn("FinalDriveRatio: 107 (4.78)", output)

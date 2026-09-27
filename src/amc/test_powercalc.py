@@ -185,7 +185,7 @@ def test_vehicle_setup_petrol_exact_matches_compute():
         f" · {res.peak_torque_nm:.1f} Nm @ {res.peak_torque_rpm:,.0f} rpm"
     )
     # pinned to the validated dyno build (test_golden_dyno_case)
-    assert lines[0].startswith("Power: 293.2 hp @ 6,216 rpm")
+    assert lines[0].startswith("Power: 293.2 hp @ 6,214 rpm")
     assert lines[1] == "Intake 201 · Turbo Turbocharger_Stage1 · engine 250 kg"
     assert lines[2] == f"model {model_version()} · data {data_version()}"
 
@@ -325,7 +325,7 @@ def test_teh_engine_pack_popup_lines():
     """A teh engine in the engine slot renders the real Power line with the
     bumped data footer (what /check_parts shows in-game)."""
     lines = compute_popup_lines([{"Slot": 2, "Key": "Bigblock_V8"}])
-    assert lines[0].startswith("Power: 416.6 hp @ 5,572 rpm")
+    assert lines[0].startswith("Power: 416.6 hp @ 5,574 rpm")
     assert lines[1] == "Intake stock · Turbo none · engine 300 kg"
     assert lines[2] == f"model {model_version()} · data {data_version()}"
 

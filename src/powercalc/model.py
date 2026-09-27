@@ -5,7 +5,7 @@ VehicleParts/Engines DataTables) and validated against in-game dyno runs to <0.2
 
     FordSmalBlock302_V8_5L_240HP + Intake 201 + Turbocharger_Stage1
       in-game: 412.3 Nm @4364 / 293.0 hp @6212
-      model:   413.0 Nm @4355 / 293.2 hp @6216
+      model:   413.0 Nm @4355 / 293.2 hp @6214
 
     TehPack Integrai4 + SuperchargerStage2 + Turbocharger_EcoStage2
       in-game: 219.0 Nm @7620 / 271.0 hp @8990 (2026-09-27)
