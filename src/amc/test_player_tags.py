@@ -737,13 +737,14 @@ async def test_refresh_player_name_police_level_scales_with_confiscations(
 
     from amc.factories import CharacterFactory, PlayerFactory
     from amc.models import PoliceSession
+    from amc.police import POLICE_LEVEL_STEP
 
     player = await sync_to_async(PlayerFactory)()
     character = await sync_to_async(CharacterFactory)(
         player=player,
         name="TestPlayer",
         guid="test-guid-police-p2",
-        police_confiscated_total=50_000,
+        police_confiscated_total=POLICE_LEVEL_STEP,
     )
 
     await PoliceSession.objects.acreate(character=character)

@@ -8,7 +8,7 @@ from django.db.models import F
 from django.utils import timezone
 from amc.player_tags import refresh_player_name
 
-POLICE_LEVEL_STEP = 50_000
+POLICE_LEVEL_STEP = 100_000
 
 # (name, x, y, z) — coordinates in game units
 POLICE_STATIONS = [
