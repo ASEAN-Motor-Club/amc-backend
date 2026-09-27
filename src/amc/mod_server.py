@@ -799,11 +799,20 @@ async def unmute_player(session, player_id):
         return await resp.json()
 
 
-async def set_no_teleport(session, guid, enabled=True):
-    """Backend-pushed invisible no-teleport flag (MTDediMod NoTeleportManager)."""
+async def set_no_teleport(session, guid, enabled=True, mode=None):
+    """Backend-pushed invisible no-teleport flag (MTDediMod NoTeleportManager).
+
+    mode: lock mode pushed with the flag ("all" default mod-side, or
+    "reset_cargo_keep" for the cargo-kept-roadside-only police lock). Omitting
+    it keeps the mod's default ("all") — back-compat with older mod builds,
+    which ignore the key.
+    """
     await _write_limiter.acquire()
     if enabled:
-        async with session.post(f"/players/{guid}/no_teleport", json={}) as resp:
+        body = {"Mode": mode} if mode else {}
+        async with session.post(
+            f"/players/{guid}/no_teleport", json=body
+        ) as resp:
             if resp.status != 200:
                 raise Exception("Failed to enable no-teleport flag")
             return await resp.json()

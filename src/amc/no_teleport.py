@@ -1,13 +1,21 @@
 """Backend-pushed invisible no-teleport flag (freeman 2026-09-23).
 
-The mod (MTDediMod NoTeleportManager) keeps an in-memory per-GUID set and
-blocks ServerTeleportCharacter / ServerTeleportVehicle / ServerRespawnCharacter
-for flagged GUIDs — no display-name involvement, so the flag reveals nothing
-about wanted status (unlike the [R] tag).
+The mod (MTDediMod NoTeleportManager) keeps an in-memory per-GUID map of
+GUID -> lock MODE and blocks movement RPCs for flagged GUIDs — no display-name
+involvement, so the flag reveals nothing about wanted status (unlike the
+[R] tag).
+
+Lock MODES (freeman 2026-09-27: "allow different types of teleport blocking"):
+- ``MODE_ALL`` — block every movement RPC. Used for wanted / wanted-grace /
+  manual admin holds.
+- ``MODE_RESET_CARGO_KEEP`` — block ONLY ``ServerResetVehicleAt`` with
+  ``bRemoveCargo=false`` (the cargo-kept roadside flow that teleports the
+  vehicle with its cargo); ``bRemoveCargo=true`` passes and the other three
+  movement RPCs are unaffected. Used for on-duty police.
 
 The backend is the source of truth:
 - Manual flags persist on ``Character.no_teleport`` (admin /noteleport) and are
-  re-asserted on every player login (the mod's set is memory-only and a game
+  re-asserted on every player login (the mod's map is memory-only and a game
   restart clears it).
 - The wanted-grace window pushes the flag transiently while a PendingWanted
   exists, and clears it at apply/drop.
@@ -18,18 +26,51 @@ import logging
 
 logger = logging.getLogger(__name__)
 
+MODE_ALL = "all"
+MODE_RESET_CARGO_KEEP = "reset_cargo_keep"
 
-async def push_no_teleport(character, http_client_mod, enabled: bool) -> None:
-    """Push the no-teleport flag for one character to the mod. Best-effort."""
+
+async def teleport_lock_mode(character) -> str | None:
+    """Effective lock MODE for one character, or None when unlocked.
+
+    Priority: manual flag / wanted / wanted-grace (PendingWanted) all yield
+    MODE_ALL. On-duty police alone yields MODE_RESET_CARGO_KEEP — police stay
+    able to use cargo-strip resets; only the cargo-kept roadside flow is
+    blocked (freeman 2026-09-27). Any ALL-source wins over police.
+    """
+    from amc.models import PendingWanted, PoliceSession, Wanted
+
+    if character.no_teleport:
+        return MODE_ALL
+    if await Wanted.objects.filter(
+        character=character,
+        expired_at__isnull=True,
+        wanted_remaining__gt=0,
+    ).aexists():
+        return MODE_ALL
+    if await PendingWanted.objects.filter(character=character).aexists():
+        return MODE_ALL
+    if await PoliceSession.objects.filter(
+        character=character, ended_at__isnull=True
+    ).aexists():
+        return MODE_RESET_CARGO_KEEP
+    return None
+
+
+async def push_no_teleport(
+    character, http_client_mod, enabled: bool, mode: str = MODE_ALL
+) -> None:
+    """Push the no-teleport flag (+ lock mode) for one character. Best-effort."""
     if not http_client_mod or not character.guid:
         return
     try:
         from amc import mod_server
 
-        await mod_server.set_no_teleport(http_client_mod, character.guid, enabled)
+        await mod_server.set_no_teleport(http_client_mod, character.guid, enabled, mode)
         logger.info(
-            "no-teleport flag %s for %s (%s)",
+            "no-teleport flag %s (mode=%s) for %s (%s)",
             "ENABLED" if enabled else "cleared",
+            mode if enabled else "-",
             character.name,
             character.guid,
         )
@@ -42,9 +83,11 @@ async def push_no_teleport(character, http_client_mod, enabled: bool) -> None:
         )
 
 
-def push_no_teleport_later(character, http_client_mod, enabled: bool) -> None:
+def push_no_teleport_later(
+    character, http_client_mod, enabled: bool, mode: str = MODE_ALL
+) -> None:
     """Fire-and-forget variant for event-handler contexts."""
-    asyncio.create_task(push_no_teleport(character, http_client_mod, enabled))
+    asyncio.create_task(push_no_teleport(character, http_client_mod, enabled, mode))
 
 
 async def is_teleport_locked(character) -> bool:
@@ -57,25 +100,11 @@ async def is_teleport_locked(character) -> bool:
     window keeps the lock: the re-assert used to compute effective from the
     Wanted table only and silently unlock a graced player.
     """
-    from amc.models import PendingWanted, PoliceSession, Wanted
-
-    if character.no_teleport:
-        return True
-    return (
-        await PoliceSession.objects.filter(
-            character=character, ended_at__isnull=True
-        ).aexists()
-        or await Wanted.objects.filter(
-            character=character,
-            expired_at__isnull=True,
-            wanted_remaining__gt=0,
-        ).aexists()
-        or await PendingWanted.objects.filter(character=character).aexists()
-    )
+    return await teleport_lock_mode(character) is not None
 
 
 async def sync_no_teleport(character, http_client_mod) -> None:
-    """Push the EFFECTIVE flag for one character.
+    """Push the EFFECTIVE flag (+ mode) for one character.
 
     Replaces the [R] name tag as the teleport-lock carrier (freeman
     2026-09-23): on-duty police and wanted suspects are flagged invisibly.
@@ -83,5 +112,5 @@ async def sync_no_teleport(character, http_client_mod) -> None:
     it is safe to call at any transition point (login, activate/deactivate,
     wanted create/expire/arrest-clear, pending-wanted apply/drop).
     """
-    effective = await is_teleport_locked(character)
-    await push_no_teleport(character, http_client_mod, effective)
+    mode = await teleport_lock_mode(character)
+    await push_no_teleport(character, http_client_mod, mode is not None, mode or MODE_ALL)
