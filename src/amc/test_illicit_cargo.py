@@ -426,7 +426,7 @@ class IllicitCargoKeysRegistryTests(TestCase):
     """Verify that the ILLICIT_CARGO_KEYS set and handler registry are consistent."""
 
     def test_illicit_cargo_keys_contains_all_expected(self):
-        expected = {"Money", "Ganja", "CocaLeavesPallet", "GanjaPallet", "Cocaine", "MoneyPallet", "Moonshine", "CocaPaste", "CocaineBricks"}
+        expected = {"Money", "Ganja", "CocaLeavesPallet", "GanjaPallet", "Cocaine", "MoneyPallet", "Moonshine", "CocaPaste", "CocaineBase", "CocaineBricks", "CocainePackets", "CocaineBags", "LiquidCocaine", "MoonshineBottles"}
         self.assertEqual(ILLICIT_CARGO_KEYS, expected)
 
     def test_all_illicit_keys_have_handlers(self):
