@@ -436,13 +436,14 @@ async def _reconcile_event_players(
         #      (fires only if the event is still live and racing).
         # Per-player failures are contained inside the helpers.
         from amc.handlers.tt_dq import _disqualify_illegal_starters
-        from amc.handlers.tt_police import announce_illegal_race, mark_racers_wanted
+        from amc.handlers.tt_police import announce_illegal_race
 
-        disqualified = await _disqualify_illegal_starters(
+        # Yuuka 2026-09-27 rework: NO badge/Wanted at race start anymore.
+        # Start-line DQ remains the only start-time enforcement; ~60 s in,
+        # the announcement fires and everyone inside the event gets the
+        # star Wanted (grant_race_wanted inside announce_illegal_race).
+        await _disqualify_illegal_starters(
             http_client_mod, game_event, live_event, discord_client,
-        )
-        await mark_racers_wanted(
-            http_client_mod, game_event, live_event, disqualified
         )
         await announce_illegal_race(
             http_client_mod, game_event, http_client_game=http_client_game

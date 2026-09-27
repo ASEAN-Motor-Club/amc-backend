@@ -25,10 +25,7 @@ import logging
 from amc.mod_server import (
     broadcast_server_message,
     get_events,
-    make_suspect,
 )
-from amc.models import Character
-
 logger = logging.getLogger(__name__)
 
 RACE_ALERT_DELAY_SECONDS = 60
@@ -64,43 +61,56 @@ async def ensure_announced(http_client_mod, game_event) -> bool:
     return True
 
 
-async def mark_racers_wanted(
-    http_client_mod, game_event, live_event: dict, disqualified: list[str]
-) -> list[str]:
-    """Flag every non-disqualified participant as an illegal racer.
+async def grant_race_wanted(http_client_mod, game_event) -> list[str]:
+    """Grant real Wanted (stars) to every online participant of the event.
 
-    Badge WITHOUT the wanted star (Yuuka 2026-09-27: "badge should still
-    exist, but no star"). The suspect gameplay effect alone is safe — the
-    despawn risk comes from the Wanted row (stars) feeding the wanted-tick
-    anti-abuse. So: make_suspect only, no Wanted row, no bounty, no
-    "You are wanted" message. The start-line DQ remains enforcement.
+    Yuuka 2026-09-27 rework: at race start nobody is flagged; ~60 s after
+    start the announcement fires and ALL players inside the event get a
+    real Wanted row (the star status) — origin 'event_race',
+    mod_vehicles_allowed=True (the wanted-tick despawn pass skips them),
+    bounty 0 (flag-only; race enforcement is not a confiscation source).
+
+    The refresh loop in refresh_suspect_tags keeps topping the countdown
+    up every 30 s until the race finishes / the player leaves / the
+    event ends; after that the normal speed-law decay takes over
+    (the star decays naturally — no forced clear).
     """
-    flagged: list[str] = []
-    for player_info in live_event.get("Players", []):
-        guid = (player_info.get("CharacterId") or {}).get("CharacterGuid", "")
-        player_name = player_info.get("PlayerName", "") or guid[:8] or "unknown"
-        if not guid or player_name in disqualified:
+    granted: list[str] = []
+    from amc.criminals import (
+        WANTED_ORIGIN_EVENT_RACE,
+        create_or_refresh_wanted,
+    )
+
+    async for participant in game_event.participants.select_related(
+        "character"
+    ).all():
+        char = participant.character
+        if not char or not char.guid:
+            continue
+        if not (char.last_online and char.last_online >= online_cutoff_dt()):
             continue
         try:
-            character = await Character.objects.filter(guid=guid).afirst()
-            if character is None:
-                logger.info(
-                    "TT race flag-skip for %s in %s: no Character row",
-                    player_name, game_event.guid,
-                )
-                continue
-            await make_suspect(http_client_mod, guid)
-            flagged.append(player_name)
-            logger.info(
-                "TT race start: %s (%s) flagged illegal racer (badge, no stars) for %s",
-                player_name, guid, game_event.guid,
+            await create_or_refresh_wanted(
+                char,
+                http_client_mod,
+                origin=WANTED_ORIGIN_EVENT_RACE,
+                mod_vehicles_allowed=True,
+                bounty=0,
             )
+            granted.append(char.guid)
         except Exception:
             logger.warning(
-                "TT race flag failed for %s in %s",
-                player_name, game_event.guid, exc_info=True,
+                "race wanted grant failed for %s", char.name, exc_info=True
             )
-    return flagged
+    return granted
+
+
+def online_cutoff_dt():
+    """Online = seen in the last 90 s (matches the wanted pass cutoff)."""
+    from django.utils import timezone
+    from datetime import timedelta
+
+    return timezone.now() - timedelta(seconds=90)
 
 
 async def announce_illegal_race(
@@ -142,6 +152,9 @@ async def announce_illegal_race(
                     http_client_game or http_client_mod, RACE_ALERT_MESSAGE
                 )
                 _announced_race_guids.add(game_event.guid)
+                # Yuuka 2026-09-27 rework: the announcement IS the moment the
+                # star Wanted lands on everyone inside the event.
+                await grant_race_wanted(http_client_mod, game_event)
                 logger.info(
                     "TT race alert sent for %s (%s)",
                     game_event.guid, game_event.name,

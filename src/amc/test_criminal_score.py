@@ -852,3 +852,38 @@ class EvasionBonusTests(TestCase):
         self.assertEqual(character.criminal_score, 50_000)
         wanted = await Wanted.objects.filter(character=character).afirst()
         self.assertIsNotNone(wanted.expired_at)  # amnesty cleared it, no bonus
+
+    @patch("amc.criminals.announce", new_callable=AsyncMock)
+    @patch("amc.criminals.clear_suspect", new_callable=AsyncMock)
+    @patch("amc.criminals.refresh_player_name", new_callable=AsyncMock)
+    @patch(
+        "amc.criminals.active_police_present",
+        new_callable=AsyncMock,
+        return_value=False,
+    )
+    @patch("amc.criminals.get_players", new_callable=AsyncMock)
+    async def test_dormant_amnesty_spares_event_race_origin(
+        self,
+        mock_get_players,
+        mock_armed,
+        mock_refresh,
+        mock_clear,
+        mock_announce,
+    ):
+        """Event-race wanteds share the fugitive dormant carve-out."""
+        from amc.criminals import WANTED_ORIGIN_EVENT_RACE
+
+        player, character = await self._setup_evader(score=50_000)
+        mock_get_players.return_value = self._players_for(player, character)
+        wanted = await _sync_create(
+            Wanted,
+            character=character,
+            wanted_remaining=300,
+            origin=WANTED_ORIGIN_EVENT_RACE,
+            mod_vehicles_allowed=True,
+        )
+
+        await tick_wanted_countdown(AsyncMock(), AsyncMock())
+
+        await wanted.arefresh_from_db()
+        self.assertIsNone(wanted.expired_at)  # survives dormant ticks
