@@ -14,6 +14,7 @@ from amc.mod_server import (
     enter_last_vehicle,
 )
 from amc.game_server import get_players
+from amc.no_teleport import is_teleport_locked
 from amc.police import is_police_vehicle
 from amc.utils import fuzzy_find_player, with_verification_code
 from amc_finance.loans import get_player_bank_balance
@@ -614,6 +615,14 @@ async def cmd_tp_name(ctx: CommandContext, name: str = ""):
         )
         return
 
+    # Teleport-lock (manual flag / wanted / wanted-grace): self-teleports go
+    # through the mod endpoint, which takes a TeleportAllow token, so the
+    # mod-side no-teleport enforcement never sees them — refuse here instead.
+    # Rescue-responders keep their granted teleport.
+    if location and not rescue_tp_data and await is_teleport_locked(ctx.character):
+        await ctx.reply(_("Teleporting is blocked right now."))
+        return
+
     if await _check_police_tp_near_wanted(ctx, location):
         return
 
@@ -644,6 +653,13 @@ async def cmd_tp2marker(ctx: CommandContext, verification_code: str = ""):
 
     if ctx.character.rp_mode:
         await ctx.reply(_("Teleporting is disabled while in RP mode."))
+        return
+
+    # Teleport-lock (manual flag / wanted / wanted-grace): paid self-teleport
+    # is a mod-endpoint call that takes a TeleportAllow token, so the
+    # mod-side no-teleport enforcement does not see it — refuse here.
+    if await is_teleport_locked(ctx.character):
+        await ctx.reply(_("Teleporting is blocked right now."))
         return
 
     is_on_duty = await PoliceSession.objects.filter(
