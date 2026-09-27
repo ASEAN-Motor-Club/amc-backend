@@ -48,9 +48,9 @@ async def ensure_announced(http_client_mod, game_event) -> bool:
     if guid in _announced_race_guids:
         return False
     # Re-arm: if the event is no longer racing (finished/reset), forget it.
+    # get_events returns the EVENT LIST (or None) — NOT a {"data": ...} dict.
     events = await get_events(http_client_mod)
-    data = events.get("data", [])
-    live = (data.values() if isinstance(data, dict) else data) or []
+    live = events or []
     racing = any(
         ev.get("EventGuid") == guid and ev.get("State") == 2 for ev in live
     )
@@ -131,11 +131,9 @@ async def announce_illegal_race(
         try:
             for _ in range(_ALERT_MAX_POLLS):
                 await asyncio.sleep(RACE_ALERT_DELAY_SECONDS)
-                events = await get_events(http_client_mod)
-                data = events.get("data", [])
-                live = (
-                    data.values() if isinstance(data, dict) else data
-                ) or []
+                # get_events returns the EVENT LIST (or None) — not a
+                # {"data": ...} dict.
+                live = await get_events(http_client_mod) or []
                 match = next(
                     (
                         ev
