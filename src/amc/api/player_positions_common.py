@@ -11,7 +11,7 @@ from amc.game_server import get_players_locations
 
 logger = logging.getLogger(__name__)
 
-POSITION_UPDATE_RATE = 6
+POSITION_UPDATE_RATE = 4
 POSITION_UPDATE_SLEEP = 1.0 / POSITION_UPDATE_RATE
 HEARTBEAT_INTERVAL = 15
 MOD_PLAYERS_CACHE_TTL = 2
