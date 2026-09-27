@@ -859,6 +859,50 @@ class EvasionBonusTests(TestCase):
     @patch(
         "amc.criminals.active_police_present",
         new_callable=AsyncMock,
+        return_value=True,
+    )
+    @patch("amc.criminals.get_players", new_callable=AsyncMock)
+    async def test_event_race_wanted_decays_as_plain_countdown(
+        self,
+        mock_get_players,
+        mock_armed,
+        mock_refresh,
+        mock_clear,
+        mock_announce,
+    ):
+        """Race wanteds decay at the base 1/s countdown regardless of speed.
+
+        The speed law would RE-GROW heat while the ex-racer drives
+        (>50 km/h accrues), so the star never visibly dropped after the
+        race (Yuuka 2026-09-27). No evasion bonus either.
+        """
+        from amc.criminals import WANTED_ORIGIN_EVENT_RACE, BASE_DECAY_PER_TICK
+
+        player, character = await self._setup_evader(score=50_000)
+        mock_get_players.return_value = self._players_for(player, character)
+        wanted = await _sync_create(
+            Wanted,
+            character=character,
+            wanted_remaining=600,
+            origin=WANTED_ORIGIN_EVENT_RACE,
+            mod_vehicles_allowed=True,
+        )
+
+        await tick_wanted_countdown(AsyncMock(), AsyncMock())
+
+        await wanted.arefresh_from_db()
+        # Exactly one base-rate tick of decay — no speed-law regrowth.
+        self.assertAlmostEqual(wanted.wanted_remaining, 600 - BASE_DECAY_PER_TICK)
+        # No evasion: race wanteds never enter evaded_characters.
+        await character.arefresh_from_db(fields=["criminal_score"])
+        self.assertEqual(character.criminal_score, 50_000)
+
+    @patch("amc.criminals.announce", new_callable=AsyncMock)
+    @patch("amc.criminals.clear_suspect", new_callable=AsyncMock)
+    @patch("amc.criminals.refresh_player_name", new_callable=AsyncMock)
+    @patch(
+        "amc.criminals.active_police_present",
+        new_callable=AsyncMock,
         return_value=False,
     )
     @patch("amc.criminals.get_players", new_callable=AsyncMock)
