@@ -442,12 +442,18 @@ async def _reconcile_event_players(
         # Start-line DQ remains the only start-time enforcement; ~60 s in,
         # the announcement fires and everyone inside the event gets the
         # star Wanted (grant_race_wanted inside announce_illegal_race).
-        await _disqualify_illegal_starters(
-            http_client_mod, game_event, live_event, discord_client,
-        )
-        await announce_illegal_race(
-            http_client_mod, game_event, http_client_game=http_client_game
-        )
+        # Gated on tt_class — only illegal (TT-classed) races get any of
+        # this; ordinary events racing must stay clean (Yuuka 2026-09-27:
+        # "ALL events are getting this wanted thing applied"). The
+        # suspect-tick race pass filters tt_class__isnull=False the same
+        # way.
+        if game_event.tt_class_id is not None:
+            await _disqualify_illegal_starters(
+                http_client_mod, game_event, live_event, discord_client,
+            )
+            await announce_illegal_race(
+                http_client_mod, game_event, http_client_game=http_client_game
+            )
     return game_event
 
 
