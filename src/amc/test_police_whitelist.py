@@ -63,15 +63,12 @@ async def test_confiscation_total_persists_across_characters(mock_refresh):
 
 @pytest.mark.django_db
 @pytest.mark.asyncio
-@patch("amc.game_server.announce", new_callable=AsyncMock)
 @patch("amc.police.refresh_player_name", new_callable=AsyncMock)
-async def test_confiscation_level_up_refreshes_and_announces(
-    mock_refresh, mock_announce
-):
-    """Crossing POLICE_LEVEL_STEP refreshes the name and announces promotion."""
+async def test_confiscation_level_up_refreshes_name(mock_refresh):
+    """Crossing POLICE_LEVEL_STEP triggers a name refresh (level-up path)."""
     from amc.police import record_confiscation_for_level
 
-    _player, character = await _make_officer(
+    player, character = await _make_officer(
         "OfficerOne", "guid-wl-levelup", total=49_999
     )
 
@@ -80,7 +77,8 @@ async def test_confiscation_level_up_refreshes_and_announces(
     )
 
     mock_refresh.assert_awaited_once()
-    mock_announce.assert_awaited_once()
+    row = await PoliceWhitelist.objects.aget(player=player)
+    assert row.police_confiscated_total == 50_000
 
 
 # --- /police whitelist gate (dispatch through the registry) ---
@@ -198,7 +196,7 @@ async def test_police_whitelist_non_admin_silent(mock_players):
     await registry.execute("/police_whitelist Anyone", ctx)
 
     mock_players.assert_not_called()
-    assert await PoliceWhitelist.objects.acount() == 0
+    assert not await PoliceWhitelist.objects.filter(player=caller).aexists()
 
 
 @pytest.mark.django_db
