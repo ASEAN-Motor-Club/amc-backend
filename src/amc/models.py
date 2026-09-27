@@ -855,6 +855,36 @@ class PoliceSession(models.Model):
 
 
 @final
+class PoliceWhitelist(models.Model):
+    """Players allowed to run /police.
+
+    One row per PLAYER (not character) so an officer's whitelist status and
+    lifetime confiscation total survive character switches.
+    """
+
+    player = models.OneToOneField(
+        Player, models.CASCADE, related_name="police_whitelist"
+    )
+    police_confiscated_total = models.PositiveBigIntegerField(default=0)
+    added_by = models.ForeignKey(
+        Player,
+        models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="+",
+        help_text="Admin player who added this entry (via /police_whitelist).",
+    )
+    added_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        indexes = [models.Index(fields=["player", "police_confiscated_total"])]
+
+    @override
+    def __str__(self) -> str:
+        return f"{self.player} — police whitelist"
+
+
+@final
 class RPSession(models.Model):
     character = models.ForeignKey(
         Character, on_delete=models.CASCADE, related_name="rp_sessions"
