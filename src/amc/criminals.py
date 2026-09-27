@@ -1129,12 +1129,10 @@ async def tick_wanted_countdown(http_client, http_client_mod, http_client_mgmt=N
         # (transition from not-in-modded → in-modded).  Players who
         # were already in a modded vehicle when they became wanted are
         # seeded into _last_modded_vehicle_guids by create_or_refresh_wanted.
-        # mod_vehicles_allowed records (race enforcement) are skipped
-        # entirely — the race must not strip players' modded vehicles.
-        if wanted.mod_vehicles_allowed:
-            continue
+        # mod_vehicles_allowed records (race enforcement) skip ONLY the
+        # despawn check — the decay law must still run for them.
         currently_in_modded = False
-        if http_client_mod:
+        if not wanted.mod_vehicles_allowed and http_client_mod:
             try:
                 last_vehicle, parts_data = await asyncio.gather(
                     get_player_last_vehicle(http_client_mod, sus_guid),
@@ -1201,53 +1199,68 @@ async def tick_wanted_countdown(http_client, http_client_mod, http_client_mgmt=N
             # (A = WANTED_ACCRUAL_MIN_MULT = 1/3x).
             min_dist = math.inf
 
-        # Chase-quality accrual (freeman 2026-09-26): while an ORGANIC
-        # wanted is active and a real cop is in play (min_dist finite —
-        # police-independent mode's inf means nobody is chasing), the
-        # meter absorbs proximity + speed. Admin /setwanted flags never
-        # accrue — their expiry is not an evasion.
-        if wanted.set_by_id is None and min_dist is not None:
-            wanted.chase_quality = min(
-                1.0,
-                wanted.chase_quality
-                + evasion_quality_gain(min_dist, speed_kmh),
-            )
-
-        if speed_kmh >= WANTED_SPEED_PIVOT_KMH:
-            growth = (
-                (speed_kmh - WANTED_SPEED_PIVOT_KMH)
-                * WANTED_LAW_RATE
-                * TICK_INTERVAL
-            )
-            if min_dist is not None:
-                growth *= wanted_accrual_multiplier(min_dist)
-            wanted.wanted_remaining = min(
-                float(wanted.initial_heat),
-                wanted.wanted_remaining + growth,
-            )
-        else:
-            # Distance never slows decay: F(D) >= 1.0 everywhere (clamped
-            # at the 500 m near cap), so point-blank hiding decays at the
-            # plain speed-driven rate and hiding far clears faster.
-            if min_dist is not None:
-                mult = hide_decay_multiplier(min_dist)
-            else:
-                mult = 1.0
-            decay = (
-                (WANTED_SPEED_PIVOT_KMH - speed_kmh)
-                * WANTED_LAW_RATE
-                * mult
-                * TICK_INTERVAL
-            )
+        # Event-race wanteds: plain countdown decay (Yuuka 2026-09-27
+        # "stars didn't seem to decrease"). The speed law would RE-GROW
+        # heat to the cap while the ex-racer drives (>50 km/h accrues),
+        # so the star never visibly dropped after the race. Race flags
+        # decay at the base 1/s countdown regardless of speed, never
+        # grow, and get no chase-quality accrual / evasion bonus — this
+        # is not an evasion chase.
+        if wanted.origin == WANTED_ORIGIN_EVENT_RACE:
             wanted.wanted_remaining = max(
-                0.0, wanted.wanted_remaining - decay
+                0.0, wanted.wanted_remaining - BASE_DECAY_PER_TICK
             )
             if wanted.wanted_remaining <= 0:
                 expired_characters.append(wanted.character)
                 expired_bounties[wanted.character.guid] = wanted.amount
-                if wanted.set_by_id is None:
-                    evaded_characters.append(wanted.character)
-                    evaded_qualities[wanted.character.guid] = wanted.chase_quality
+        else:
+            # Chase-quality accrual (freeman 2026-09-26): while an ORGANIC
+            # wanted is active and a real cop is in play (min_dist finite —
+            # police-independent mode's inf means nobody is chasing), the
+            # meter absorbs proximity + speed. Admin /setwanted flags never
+            # accrue — their expiry is not an evasion.
+            if wanted.set_by_id is None and min_dist is not None:
+                wanted.chase_quality = min(
+                    1.0,
+                    wanted.chase_quality
+                    + evasion_quality_gain(min_dist, speed_kmh),
+                )
+
+            if speed_kmh >= WANTED_SPEED_PIVOT_KMH:
+                growth = (
+                    (speed_kmh - WANTED_SPEED_PIVOT_KMH)
+                    * WANTED_LAW_RATE
+                    * TICK_INTERVAL
+                )
+                if min_dist is not None:
+                    growth *= wanted_accrual_multiplier(min_dist)
+                wanted.wanted_remaining = min(
+                    float(wanted.initial_heat),
+                    wanted.wanted_remaining + growth,
+                )
+            else:
+                # Distance never slows decay: F(D) >= 1.0 everywhere (clamped
+                # at the 500 m near cap), so point-blank hiding decays at the
+                # plain speed-driven rate and hiding far clears faster.
+                if min_dist is not None:
+                    mult = hide_decay_multiplier(min_dist)
+                else:
+                    mult = 1.0
+                decay = (
+                    (WANTED_SPEED_PIVOT_KMH - speed_kmh)
+                    * WANTED_LAW_RATE
+                    * mult
+                    * TICK_INTERVAL
+                )
+                wanted.wanted_remaining = max(
+                    0.0, wanted.wanted_remaining - decay
+                )
+                if wanted.wanted_remaining <= 0:
+                    expired_characters.append(wanted.character)
+                    expired_bounties[wanted.character.guid] = wanted.amount
+                    if wanted.set_by_id is None:
+                        evaded_characters.append(wanted.character)
+                        evaded_qualities[wanted.character.guid] = wanted.chase_quality
 
         # Track star changes for deferred notification
         new_stars = _compute_stars(wanted.wanted_remaining)
