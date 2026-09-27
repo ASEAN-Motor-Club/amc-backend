@@ -93,8 +93,10 @@ def wanted_trigger_chance(pay: int, score: int, cop_distance_m: float | None) ->
     """Chance (0..1) that one illicit delivery creates a Wanted record.
 
     Guarantee + ratio-driven (freeman 2026-09-23): a delivery of
-    WANTED_GUARANTEE_PAY or more is wanted outright (returns 1.0 — the roll
-    and the cop-proximity attenuation are bypassed). Below that, *pay* is
+    WANTED_GUARANTEE_PAY or more is wanted outright at its UNattenuated chance
+    (1.0; attenuated 2026-09-27 per freeman — the cop-proximity multiplier now
+    scales the guarantee down toward the floor like any other chance, so a 1M
+    haul under a point-blank cop rolls only the floor). Below that, *pay* is
     measured against the criminal's yardstick — their lifetime illicit total
     *score* (measured before this delivery), which saturates at
     WANTED_YARDSTICK_ASYMPTOTE so mid-size hauls plateau at very high scores
@@ -104,7 +106,9 @@ def wanted_trigger_chance(pay: int, score: int, cop_distance_m: float | None) ->
     nearest effective cop, so camping a delivery site farms nothing.
     """
     if pay >= WANTED_GUARANTEE_PAY:
-        return 1.0
+        return WANTED_TRIGGER_FLOOR_CHANCE + cop_attenuation_multiplier(
+            cop_distance_m
+        ) * (1.0 - WANTED_TRIGGER_FLOOR_CHANCE)
     ref = WANTED_YARDSTICK_FLOOR + (
         (WANTED_YARDSTICK_ASYMPTOTE - WANTED_YARDSTICK_FLOOR)
         * score
@@ -134,7 +138,8 @@ def should_trigger_wanted(
     distance in metres to the nearest effective cop (None = unknown →
     unattenuated). Callers must not roll at all when there is NO effective
     cop — the wanted system is dormant then (see amc.criminals). Deliveries
-    of WANTED_GUARANTEE_PAY or more bypass the roll and the attenuation.
+    of WANTED_GUARANTEE_PAY or more bypass the ratio sweep but still roll the
+    attenuated chance (cop-proximity applies; 2026-09-27 freeman retune).
 
     *marked* = the character carries a /markwanted flag: the delivery
     triggers with certainty, but the cop-proximity attenuation still applies
@@ -147,7 +152,10 @@ def should_trigger_wanted(
         ) * (1.0 - WANTED_TRIGGER_FLOOR_CHANCE)
         return random.random() < chance
     if pay >= WANTED_GUARANTEE_PAY:
-        return True
+        chance = WANTED_TRIGGER_FLOOR_CHANCE + cop_attenuation_multiplier(
+            cop_distance_m
+        ) * (1.0 - WANTED_TRIGGER_FLOOR_CHANCE)
+        return random.random() < chance
     return random.random() < wanted_trigger_chance(pay, score, cop_distance_m)
 
 
