@@ -1252,6 +1252,13 @@ class GameEvent(models.Model):
         related_name="game_events",
         help_text="TT power class for this event instance (parsed from the [TT-…] name tag)",
     )
+    RACE_LEGALITY_CHOICES = (("legal", "Legal"), ("illegal", "Illegal"))
+    race_legality = models.CharField(
+        max_length=7,
+        choices=RACE_LEGALITY_CHOICES,
+        default="legal",
+        help_text="Illegal races get start-line DQ, the 60s announcement and the star Wanted. Defaults to legal — only events explicitly classed illegal (e.g. stamped with a TT class by the auto-poster) are enforced.",
+    )
     discord_message_id = models.PositiveBigIntegerField(null=True)
     owner = models.ForeignKey(Character, models.SET_NULL, null=True, blank=True)
 

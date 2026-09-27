@@ -3624,6 +3624,7 @@ async def test_race_suspect_while_racing_cleared_on_finish(make_suspect_mock):
         name="Racing TT (001) [TT-480]",
         state=2,
         tt_class=tt,
+        race_legality="illegal",
     )
     await sync_to_async(GameEventCharacter.objects.create)(
         game_event=event, character=char, rank=0
