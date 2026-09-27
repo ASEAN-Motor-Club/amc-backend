@@ -686,6 +686,18 @@ class Wanted(models.Model):
         related_name="wants_set",
         help_text="Police officer who set this wanted status.",
     )
+    origin = models.CharField(
+        max_length=32,
+        null=True,
+        blank=True,
+        help_text=(
+            "What triggered this wanted: NULL = illicit cargo, "
+            "'fugitive_passenger' = guild fugitive passenger. "
+            "Fugitive-origin records are exempt from the dormant amnesty — "
+            "they persist through dormant ticks and resume normal decay "
+            "once a cop is back on duty (Hamster 2026-09-27)."
+        ),
+    )
 
     class Meta:
         verbose_name_plural = "wants"

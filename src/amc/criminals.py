@@ -43,6 +43,9 @@ UNDERWATER_Z_THRESHOLD = -22455
 BASE_WANTED_DURATION = Wanted.INITIAL_WANTED_LEVEL  # e.g. 900 s = 15 min
 BASE_DECAY_PER_TICK = Wanted.INITIAL_WANTED_LEVEL / BASE_WANTED_DURATION  # = 1.0/tick
 
+# Trigger-source markers for Wanted.origin. NULL = illicit-cargo trigger.
+WANTED_ORIGIN_FUGITIVE_PASSENGER = "fugitive_passenger"
+
 # Bounty growth is DISABLED (WANTED_MIN_BOUNTY = 0) — Wanted.amount stays 0.
 # The growth spec below is retained as an unexercised code path description.
 # Bounty growth — amount ($) added per second while police are nearby (within ESCAPE_DISTANCE).
@@ -659,6 +662,7 @@ async def create_or_refresh_wanted(
     wanted_remaining: int = Wanted.INITIAL_WANTED_LEVEL,
     wanted_stars: int | None = None,
     set_by=None,
+    origin: str | None = None,
 ) -> tuple[Wanted, bool]:
     """Create or refresh a Wanted record for the given character.
 
@@ -699,9 +703,18 @@ async def create_or_refresh_wanted(
         # for the whole chase — score growth mid-chase never re-prices it.
         active_wanted.wanted_remaining = initial_wanted
         active_wanted.initial_heat = initial_wanted
-        await active_wanted.asave(
-            update_fields=["wanted_remaining", "initial_heat"]
-        )
+        # Backfill the trigger origin only when the record doesn't carry one
+        # yet — never overwrite an existing marker (refreshes from other
+        # trigger types keep the original classification).
+        if origin and active_wanted.origin != origin:
+            active_wanted.origin = origin
+            await active_wanted.asave(
+                update_fields=["wanted_remaining", "initial_heat", "origin"]
+            )
+        else:
+            await active_wanted.asave(
+                update_fields=["wanted_remaining", "initial_heat"]
+            )
     else:
         if set_by is None:
             # Fresh system trigger (illicit-cargo / fugitive): the bounty is
@@ -720,6 +733,7 @@ async def create_or_refresh_wanted(
             initial_heat=initial_wanted,
             amount=bounty,
             set_by=set_by,
+            origin=origin,
         )
         created = True
         # Teleport lock: invisible flag replaces the R name tag.
@@ -903,6 +917,14 @@ async def tick_wanted_countdown(http_client, http_client_mod, http_client_mgmt=N
     if police_required and not await active_police_present(http_client_mod):
         organic = [w for w in wanted_list if w.set_by_id is None]
         admin_flags = [w for w in wanted_list if w.set_by_id is not None]
+        # Fugitive-passenger carve-out (Hamster 2026-09-27): these triggers
+        # are the crime — the delivery itself was the offense, so they survive
+        # dormant ticks like admin flags and re-enter the normal speed law
+        # once a cop is back on duty.
+        fugitive_flags = [
+            w for w in organic if w.origin == WANTED_ORIGIN_FUGITIVE_PASSENGER
+        ]
+        organic = [w for w in organic if w.origin != WANTED_ORIGIN_FUGITIVE_PASSENGER]
         if due_pendings:
             # Pending triggers are organic work in flight — the dormant rule
             # applies to them too: they never apply with zero effective cops
@@ -934,17 +956,21 @@ async def tick_wanted_countdown(http_client, http_client_mod, http_client_mgmt=N
             logger.info(
                 "wanted tick: no effective cops on duty — dormant amnesty "
                 "cleared %d organic records (%d online); "
+                "%d fugitive-passenger wanted(s) preserved; "
                 "%d admin flag(s) preserved",
                 len(organic),
                 len(online_chars),
+                len(fugitive_flags),
                 len(admin_flags),
             )
             await _finalize_expired_wanted(
                 online_chars, http_client, http_client_mod
             )
-        elif admin_flags:
+        elif fugitive_flags or admin_flags:
             logger.info(
-                "wanted tick: dormant — %d admin flag(s) preserved",
+                "wanted tick: dormant — %d fugitive-passenger wanted(s) and "
+                "%d admin flag(s) preserved",
+                len(fugitive_flags),
                 len(admin_flags),
             )
         return
