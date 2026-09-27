@@ -61,8 +61,8 @@ def weight_db(tmp_path, monkeypatch):
 
 
 # Golden values (printed once from the committed snapshot, 2026-09-10):
-# SmallBlock_240HP + intake 201 + Turbocharger_Stage1 -> 293.2352 hp
-GOLDEN_PEAK = 293.2352326527303
+# SmallBlock_240HP + intake 201 + Turbocharger_Stage1 -> 293.2352 hp (model 1.1.0)
+GOLDEN_PEAK = 293.2351855093925
 
 
 def _golden_parts():
@@ -226,7 +226,7 @@ class TestComputePeakHp:
     def test_teh_pack_engine(self):
         # teh engine pack (PR #120) row, computed through the same path
         assert compute_peak_hp([{"Key": "FerrariV12", "Slot": 2}]) == (
-            pytest.approx(799.573381550541, abs=1e-9)
+            pytest.approx(799.5738267188876, abs=1e-9)
         )
 
 
@@ -244,7 +244,7 @@ class TestPopupAndAuditWiring:
     def test_summarize_parts_inserts_weight_after_power(self, weight_db):
         parts = _golden_parts() + [{"Key": "Damper200_200", "Slot": 9}]
         lines = summarize_parts(parts, "Elisa2_C Default__Elisa2")
-        assert lines[0] == "Power: 293.2 hp @ 6,216 rpm · 413.0 Nm @ 4,355 rpm"
+        assert lines[0] == "Power: 293.2 hp @ 6,214 rpm · 413.0 Nm @ 4,355 rpm"
         assert lines[1] == "Weight: 1,705 kg (1,420 chassis + 285 parts) · PWR: 172 hp/t"
         assert lines[2:5] == [
             "Engine: SmallBlock_240HP",
@@ -265,6 +265,6 @@ class TestPopupAndAuditWiring:
 
         monkeypatch.setattr(vw, "compute_weight_summary", boom)
         lines = summarize_parts(_golden_parts(), "Elisa2_C Default__Elisa2")
-        assert lines[0] == "Power: 293.2 hp @ 6,216 rpm · 413.0 Nm @ 4,355 rpm"
+        assert lines[0] == "Power: 293.2 hp @ 6,214 rpm · 413.0 Nm @ 4,355 rpm"
         assert lines[1] == "Engine: SmallBlock_240HP"
         assert not any(line.startswith("Weight") for line in lines)
