@@ -1583,7 +1583,7 @@ async def refresh_suspect_tags(http_client_mod, http_client_game=None) -> None:
     # naturally (never force-cleared here).
     race_guids: set[str] = set()
     live_race_events = GameEvent.objects.filter(
-        tt_class__isnull=False,
+        race_legality="illegal",
         state=2,
         guid__isnull=False,
     ).prefetch_related("participants__character")

@@ -190,3 +190,44 @@ async def cmd_countdown(ctx: CommandContext):
     asyncio.create_task(
         countdown(ctx.http_client_mod, str(ctx.player.unique_id))
     )
+
+
+@registry.register(
+    "/racelegality",
+    description=gettext_lazy(
+        "Toggle the event you are in between legal and illegal "
+        "(illegal races get start-line DQ, the 60s announcement and "
+        "the star Wanted)"
+    ),
+    category="Events",
+)
+async def cmd_race_legality(ctx: CommandContext):
+    # Admin-only (same gate as the other Admin-category commands)
+    if not ctx.player_info or not ctx.player_info.get("bIsAdmin"):
+        return
+
+    event = await (
+        GameEvent.objects.filter(
+            Exists(
+                GameEventCharacter.objects.filter(
+                    game_event=OuterRef("pk"), character=ctx.character
+                )
+            ),
+            state__lt=3,
+        )
+        .alatest("start_time")
+    )
+
+    if not event:
+        await ctx.reply(
+            "<Title>No event</>\nYou are not inside an active event."
+        )
+        return
+
+    event.race_legality = "illegal" if event.race_legality != "illegal" else "legal"
+    await event.asave(update_fields=["race_legality"])
+    label = "ILLEGAL" if event.race_legality == "illegal" else "LEGAL"
+    await ctx.reply(
+        f"<Title>Race legality updated</>\n"
+        f"{event.name} is now <Highlight>{label}</>."
+    )

@@ -152,6 +152,10 @@ async def _upsert_game_event(event_data: dict):
             game_event.race_setup = race_setup
         if tt_class:
             game_event.tt_class = tt_class
+            # A TT-classed event is an illegal race by default (Yuuka
+            # 2026-09-27); admins can flip it back with /racelegality.
+            if game_event.race_legality != "illegal":
+                game_event.race_legality = "illegal"
         if not game_event.scheduled_event and scheduled_event:
             game_event.scheduled_event = scheduled_event
         await game_event.asave()
@@ -192,6 +196,7 @@ async def _upsert_game_event(event_data: dict):
             scheduled_event=scheduled_event,
             auto_created=(owner is None),
             tt_class=tt_class,
+            race_legality="illegal" if tt_class else "legal",
         )
 
     return game_event, transition
@@ -442,12 +447,13 @@ async def _reconcile_event_players(
         # Start-line DQ remains the only start-time enforcement; ~60 s in,
         # the announcement fires and everyone inside the event gets the
         # star Wanted (grant_race_wanted inside announce_illegal_race).
-        # Gated on tt_class — only illegal (TT-classed) races get any of
-        # this; ordinary events racing must stay clean (Yuuka 2026-09-27:
-        # "ALL events are getting this wanted thing applied"). The
-        # suspect-tick race pass filters tt_class__isnull=False the same
-        # way.
-        if game_event.tt_class_id is not None:
+        # Gated on race_legality — only ILLEGAL races get any of this;
+        # ordinary events racing must stay clean (Yuuka 2026-09-27:
+        # "ALL events are getting this wanted thing applied"). Defaults
+        # to legal; TT-classed events are stamped illegal by the
+        # auto-poster and admins can flip it with /racelegality. The
+        # suspect-tick race pass filters race_legality the same way.
+        if game_event.race_legality == "illegal":
             await _disqualify_illegal_starters(
                 http_client_mod, game_event, live_event, discord_client,
             )
