@@ -1,6 +1,7 @@
 """Tests for the paid /tp2marker command and its finance helpers."""
 
 from contextlib import contextmanager
+from datetime import timedelta
 from unittest.mock import AsyncMock, MagicMock, patch
 
 from django.test import SimpleTestCase, TestCase
@@ -292,6 +293,48 @@ class Tp2MarkerCommandTestCase(TestCase):
             await cmd_tp2marker(ctx, "")
         ctx.reply.assert_awaited_once()
         self.assertIn("police duty", ctx.reply.await_args[0][0])
+        mock_fee.assert_not_called()
+        mock_tp.assert_not_called()
+
+    async def test_pending_wanted_grace_refused(self):
+        """A player inside the wanted-grace window cannot pay-teleport away."""
+        from django.utils import timezone as tz
+
+        from amc.models import PendingWanted
+
+        character = await self._make_character()
+        await PendingWanted.objects.acreate(
+            character=character,
+            apply_at=tz.now() + timedelta(seconds=30),
+            trigger_amount=100_000,
+        )
+        ctx = make_ctx(
+            character,
+            self._player_info(
+                character, CustomDestinationAbsoluteLocation=dict(MARKER)
+            ),
+        )
+        with command_patches() as (mock_tp, mock_fee, _refund, _terrain):
+            await cmd_tp2marker(ctx, "")
+        ctx.reply.assert_awaited_once()
+        self.assertIn("blocked", ctx.reply.await_args[0][0])
+        mock_fee.assert_not_called()
+        mock_tp.assert_not_called()
+
+    async def test_manual_no_teleport_flag_refused(self):
+        character = await self._make_character()
+        character.no_teleport = True
+        await character.asave(update_fields=["no_teleport"])
+        ctx = make_ctx(
+            character,
+            self._player_info(
+                character, CustomDestinationAbsoluteLocation=dict(MARKER)
+            ),
+        )
+        with command_patches() as (mock_tp, mock_fee, _refund, _terrain):
+            await cmd_tp2marker(ctx, "")
+        ctx.reply.assert_awaited_once()
+        self.assertIn("blocked", ctx.reply.await_args[0][0])
         mock_fee.assert_not_called()
         mock_tp.assert_not_called()
 

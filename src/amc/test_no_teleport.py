@@ -129,6 +129,38 @@ class EffectiveFlagSyncTests(TestCase):
         await _sync_create(PoliceSession, character=character)
         assert await self._sync(character) is True
 
+    async def test_pending_wanted_pushes_true(self):
+        """Login re-assert inside the 30s grace must KEEP the lock.
+
+        Regression: sync computed effective from the Wanted table only, so a
+        logout/login during the grace window pushed False and unlocked the
+        player (no Wanted row exists yet — only PendingWanted).
+        """
+        from amc.models import PendingWanted
+
+        character = await self._make()
+        await _sync_create(
+            PendingWanted,
+            character=character,
+            apply_at=timezone.now() + timedelta(seconds=30),
+            trigger_amount=100_000,
+        )
+        assert await self._sync(character) is True
+
+    async def test_is_teleport_locked_pending(self):
+        from amc.models import PendingWanted
+        from amc.no_teleport import is_teleport_locked
+
+        character = await self._make()
+        assert await is_teleport_locked(character) is False
+        await _sync_create(
+            PendingWanted,
+            character=character,
+            apply_at=timezone.now() + timedelta(seconds=30),
+            trigger_amount=100_000,
+        )
+        assert await is_teleport_locked(character) is True
+
     async def test_wanted_creation_pushes_flag(self):
         from amc.criminals import create_or_refresh_wanted
 
