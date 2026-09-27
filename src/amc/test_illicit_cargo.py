@@ -752,16 +752,21 @@ class ShouldTriggerWantedRollTests(TestCase):
             mock_rng.random.return_value = WANTED_TRIGGER_FLOOR_CHANCE + 0.001
             self.assertFalse(should_trigger_wanted(50_000, 20_000_000, 0))
 
-    def test_guarantee_bypasses_roll_and_attenuation(self):
-        """A >= 1M haul is wanted outright — even point-blank under a cop."""
+    def test_guarantee_attenuates_with_cop_proximity(self):
+        """A >= 1M haul is wanted unless the cop-proximity attenuation
+        suppresses it: far cop → certain, point-blank → only the 5% floor."""
         from amc.special_cargo import should_trigger_wanted
 
         with patch("amc.special_cargo.random") as mock_rng:
             mock_rng.random.return_value = 0.9999
-            self.assertTrue(should_trigger_wanted(1_000_000, 0, 0))
+            self.assertTrue(should_trigger_wanted(1_000_000, 0, None))
             self.assertTrue(should_trigger_wanted(10_000_000, 50_000_000, 5_000))
-            # the RNG is never consulted on the guarantee path
-            mock_rng.random.assert_not_called()
+            # point-blank: attenuated guarantee collapses to the floor → miss
+            self.assertFalse(should_trigger_wanted(1_000_000, 0, 0))
+            mock_rng.random.return_value = (
+                0.049 + 0.05 * 0.9999
+            )  # just below the attenuated chance at d≈0
+            self.assertTrue(should_trigger_wanted(1_000_000, 0, 0))
 
     def test_marked_triggers_regardless_of_pay_and_score(self):
         """A /markwanted flag: any illicit delivery triggers (far cop → no
