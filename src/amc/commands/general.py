@@ -85,6 +85,18 @@ async def cmd_help(ctx: CommandContext):
 
             msg += f"<Highlight>{name}</> - {desc}{shorthand_str}\n<Secondary></>\n"
 
+    msg += _("""<Title>Getting Started</>
+
+<Bold>Cops v Criminals</>
+<Small>Run illicit cargo for the underground, dodge the police, sell at the drop points. You need the Schedule I client mod - download it from our Discord.</>
+
+<Bold>Underground Races</>
+<Small>Street races are listed in the in-game event menu - type /events to see them. Join before the race starts, there is no mid-race entry. Racing an illegal TT-classed street race makes you a police suspect - outrun the cops or pay the price.</>
+
+<Bold>Discord</>
+<Small>discord.gg/aseanmotorclub - mod downloads, events, leaderboards and community.</>
+""")
+
     await ctx.reply(msg)
     await BotInvocationLog.objects.acreate(
         timestamp=ctx.timestamp, character=ctx.character, prompt="help"
