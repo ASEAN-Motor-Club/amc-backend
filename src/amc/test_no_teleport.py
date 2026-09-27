@@ -129,6 +129,52 @@ class EffectiveFlagSyncTests(TestCase):
         await _sync_create(PoliceSession, character=character)
         assert await self._sync(character) is True
 
+    async def test_on_duty_police_mode_is_reset_cargo_keep(self):
+        """freeman 2026-09-27: police lock ONLY the cargo-kept roadside flow."""
+        from amc.models import PoliceSession
+        from amc.no_teleport import MODE_RESET_CARGO_KEEP, teleport_lock_mode
+
+        character = await self._make()
+        await _sync_create(PoliceSession, character=character)
+        assert await teleport_lock_mode(character) == MODE_RESET_CARGO_KEEP
+
+        with patch(
+            "amc.mod_server.set_no_teleport", new_callable=AsyncMock
+        ) as mock_set:
+            from amc.no_teleport import sync_no_teleport
+
+            await sync_no_teleport(character, AsyncMock())
+        assert mock_set.await_args[0][2] is True
+        assert mock_set.await_args[0][3] == MODE_RESET_CARGO_KEEP
+
+    async def test_wanted_mode_is_all(self):
+        from amc.models import Wanted
+        from amc.no_teleport import MODE_ALL, teleport_lock_mode
+
+        character = await self._make()
+        await _sync_create(
+            Wanted, character=character, wanted_remaining=600, amount=0
+        )
+        assert await teleport_lock_mode(character) == MODE_ALL
+
+    async def test_police_with_wanted_escalates_to_all(self):
+        """Any ALL-source (wanted/grace/manual) wins over the police mode."""
+        from amc.models import PoliceSession, Wanted
+        from amc.no_teleport import MODE_ALL, teleport_lock_mode
+
+        character = await self._make()
+        await _sync_create(PoliceSession, character=character)
+        await _sync_create(
+            Wanted, character=character, wanted_remaining=600, amount=0
+        )
+        assert await teleport_lock_mode(character) == MODE_ALL
+
+    async def test_manual_flag_mode_is_all(self):
+        from amc.no_teleport import MODE_ALL, teleport_lock_mode
+
+        character = await self._make(no_teleport=True)
+        assert await teleport_lock_mode(character) == MODE_ALL
+
     async def test_pending_wanted_pushes_true(self):
         """Login re-assert inside the 30s grace must KEEP the lock.
 
