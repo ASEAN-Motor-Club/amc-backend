@@ -137,9 +137,14 @@ async def record_confiscation_for_level(
     """
     from amc.models import PoliceWhitelist
 
-    row, _created = await PoliceWhitelist.objects.aget_or_create(
-        player_id=character.player_id
+    row = (
+        await PoliceWhitelist.objects.filter(player_id=character.player_id)
+        .afirst()
     )
+    if row is None:
+        # Not whitelisted — no level tracking (do NOT recreate a removed
+        # entry; that would silently re-whitelist and reset their level).
+        return
 
     old_level = calculate_police_level(row.police_confiscated_total)
 

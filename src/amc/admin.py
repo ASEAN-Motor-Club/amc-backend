@@ -162,7 +162,11 @@ class PoliceWhitelistAdmin(admin.ModelAdmin):
         "added_by",
         "added_at",
     ]
-    search_fields = ["player"]
+    search_fields = [
+        "player__unique_id",
+        "player__characters__name",
+        "player__discord_user_id",
+    ]
     list_select_related = ["player", "added_by"]
     autocomplete_fields = ["player", "added_by"]
     readonly_fields = ["added_at"]

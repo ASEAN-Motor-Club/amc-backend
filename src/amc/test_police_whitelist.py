@@ -29,16 +29,16 @@ async def _make_officer(name: str, guid: str, total: int = 0):
 @pytest.mark.django_db
 @pytest.mark.asyncio
 @patch("amc.police.refresh_player_name", new_callable=AsyncMock)
-async def test_confiscation_upserts_player_whitelist_row(mock_refresh):
-    """Confiscating for a character updates the PLAYER's whitelist total."""
+async def test_confiscation_without_whitelist_no_resurrection(mock_refresh):
+    """Confiscating for an un-whitelisted player does NOT create a row —
+    removing an officer mid-duty must not silently re-whitelist them."""
     from amc.police import record_confiscation_for_level
 
     player, character = await _make_officer("OfficerOne", "guid-wl-upsert")
 
     await record_confiscation_for_level(character, 20_000, session=MagicMock())
 
-    row = await PoliceWhitelist.objects.aget(player=player)
-    assert row.police_confiscated_total == 20_000
+    assert not await PoliceWhitelist.objects.filter(player=player).aexists()
 
 
 @pytest.mark.django_db
@@ -59,6 +59,23 @@ async def test_confiscation_total_persists_across_characters(mock_refresh):
 
     row = await PoliceWhitelist.objects.aget(player=player)
     assert row.police_confiscated_total == 50_000
+
+
+@pytest.mark.django_db
+@pytest.mark.asyncio
+@patch("amc.police.refresh_player_name", new_callable=AsyncMock)
+async def test_confiscation_updates_existing_whitelist_row(mock_refresh):
+    """Whitelisted officer: confiscation lands on the PLAYER's row."""
+    from amc.police import record_confiscation_for_level
+
+    player, character = await _make_officer(
+        "OfficerOne", "guid-wl-upsert2", total=10_000
+    )
+
+    await record_confiscation_for_level(character, 20_000, session=MagicMock())
+
+    row = await PoliceWhitelist.objects.aget(player=player)
+    assert row.police_confiscated_total == 30_000
 
 
 @pytest.mark.django_db

@@ -1,4 +1,5 @@
 from django.db import migrations
+from django.db.models import Sum
 
 
 def seed_whitelist(apps, schema_editor):
@@ -7,8 +8,10 @@ def seed_whitelist(apps, schema_editor):
     Seed criteria: any PoliceSession on any of the player's characters, or any
     character with a non-zero confiscation total. The total is the SUM across
     the player's characters (freeman, 2026-09-27) — lifetime confiscations.
+
+    Three queries total: session players, per-player SUM aggregation, bulk
+    insert (ignore_conflicts keeps any pre-existing rows intact).
     """
-    Player = apps.get_model("amc", "Player")
     Character = apps.get_model("amc", "Character")
     PoliceSession = apps.get_model("amc", "PoliceSession")
     PoliceWhitelist = apps.get_model("amc", "PoliceWhitelist")
@@ -16,20 +19,21 @@ def seed_whitelist(apps, schema_editor):
     session_players = set(
         PoliceSession.objects.values_list("character__player_id", flat=True)
     )
-    confiscating_players = set(
-        Character.objects.filter(police_confiscated_total__gt=0)
-        .values_list("player_id", flat=True)
+    totals = (
+        Character.objects.filter(player_id__in=session_players)
+        .values("player_id")
+        .annotate(total_sum=Sum("police_confiscated_total"))
     )
-    for player_id in sorted(session_players | confiscating_players):
-        total = sum(
-            Character.objects.filter(player_id=player_id)
-            .exclude(police_confiscated_total__isnull=True)
-            .values_list("police_confiscated_total", flat=True)
-        )
-        PoliceWhitelist.objects.get_or_create(
-            player_id=player_id,
-            defaults={"police_confiscated_total": total},
-        )
+    PoliceWhitelist.objects.bulk_create(
+        (
+            PoliceWhitelist(
+                player_id=row["player_id"],
+                police_confiscated_total=row["total_sum"] or 0,
+            )
+            for row in totals
+        ),
+        ignore_conflicts=True,
+    )
 
 
 def unseed(apps, schema_editor):
