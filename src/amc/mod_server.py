@@ -219,21 +219,32 @@ async def set_pinned_announcement(session, message):
 
 
 async def broadcast_server_message(session, message):
-    """In-game chat announcement via the game API (Yuuka 2026-09-27).
+    """Server announcement = chat line on the ANNOUNCE category (1).
 
-    ``session`` is the GAME API client (ctx['http_client'],
-    GAME_SERVER_API_URL) — NOT the mod webserver. This is the same
-    /chat path police promotions, promos and job notifications use:
-    a colored chat-line announcement, no blocking popup.
+    Verified live (Yuuka 2026-09-27): only /players/{uniqueId}/chat with
+    Category=1 renders in-game. Dead ends ruled out by her eyes:
+    game-API /chat (native, succeeded=true, invisible), mod
+    /messages/announce (ServerAnnounce, ok, invisible), per-character
+    system messages (204, invisible), popups (visible but obstructive).
 
-    Ruled out live earlier: mod ``/messages/system`` without a guid is
-    dropped; per-character system messages return 204 but render
-    nothing; ``/messages/announce`` returns ok (admin controller) but
-    renders nothing; mod ``/messages/popup`` renders but obstructs.
+    The chat posts via one online player's controller (the mod has no
+    console controller), so we borrow the first online player's
+    UniqueID as donor. EMTChatCategory: 0 Normal, 1 Announce.
     """
-    from amc.game_server import announcement_request
-
-    await announcement_request(message, session, type="message", color="FFFF00")
+    players = await get_players(session)
+    donor = next(
+        (p.get("UniqueID") for p in players or [] if p.get("UniqueID")),
+        None,
+    )
+    if donor is None:
+        return  # nobody online to see or donate a controller
+    await _write_limiter.acquire()
+    async with session.post(
+        f"/players/{donor}/chat",
+        json={"Message": message, "Category": 1},
+    ) as resp:
+        if resp.status != 204:
+            raise Exception(f"announce chat failed: {resp.status}")
 
 
 async def teleport_player(
