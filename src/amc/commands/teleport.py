@@ -655,13 +655,6 @@ async def cmd_tp2marker(ctx: CommandContext, verification_code: str = ""):
         await ctx.reply(_("Teleporting is disabled while in RP mode."))
         return
 
-    # Teleport-lock (manual flag / wanted / wanted-grace): paid self-teleport
-    # is a mod-endpoint call that takes a TeleportAllow token, so the
-    # mod-side no-teleport enforcement does not see it — refuse here.
-    if await is_teleport_locked(ctx.character):
-        await ctx.reply(_("Teleporting is blocked right now."))
-        return
-
     is_on_duty = await PoliceSession.objects.filter(
         character=ctx.character, ended_at__isnull=True
     ).aexists()
@@ -669,6 +662,13 @@ async def cmd_tp2marker(ctx: CommandContext, verification_code: str = ""):
         await ctx.reply(
             _("Custom destination teleport is restricted while on police duty.")
         )
+        return
+
+    # Teleport-lock (manual flag / wanted / wanted-grace): paid self-teleport
+    # is a mod-endpoint call that takes a TeleportAllow token, so the
+    # mod-side no-teleport enforcement does not see it — refuse here.
+    if await is_teleport_locked(ctx.character):
+        await ctx.reply(_("Teleporting is blocked right now."))
         return
 
     is_on_foot = player_info.get("VehicleKey") == "None"
