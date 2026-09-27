@@ -48,7 +48,7 @@ async def test_confiscation_total_persists_across_characters(mock_refresh):
     """Level totals are per player — a new character reads the same row."""
     from amc.police import record_confiscation_for_level
 
-    player, first = await _make_officer(
+    player, _first = await _make_officer(
         "OfficerOne", "guid-wl-cross", total=49_999
     )
     second = await sync_to_async(CharacterFactory)(
@@ -69,11 +69,9 @@ async def test_confiscation_level_up_refreshes_and_announces(
     mock_refresh, mock_announce
 ):
     """Crossing POLICE_LEVEL_STEP refreshes the name and announces promotion."""
-    import asyncio
-
     from amc.police import record_confiscation_for_level
 
-    player, character = await _make_officer(
+    _player, character = await _make_officer(
         "OfficerOne", "guid-wl-levelup", total=49_999
     )
 
@@ -110,7 +108,6 @@ def _ctx_for(player, character, admin=False):
 async def test_police_requires_whitelist(mock_msg):
     """A non-whitelisted player cannot go on duty."""
     from amc.command_framework import registry
-
     from amc.commands.police import cmd_police  # ensure module registered
 
     assert cmd_police is not None
@@ -154,8 +151,6 @@ async def test_police_whitelisted_passes_gate(mock_msg):
 @pytest.mark.asyncio
 @patch("amc.commands.police.get_players")
 async def test_police_whitelist_add_and_remove(mock_players):
-    from asgiref.sync import sync_to_async
-
     from amc.command_framework import registry
 
     admin_player, _ = await _make_officer("TheAdmin", "guid-wl-admin")
