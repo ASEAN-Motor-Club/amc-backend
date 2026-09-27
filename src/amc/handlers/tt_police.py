@@ -33,6 +33,23 @@ RACE_ALERT_MESSAGE = "An Illegal race is happening! Check Events!"
 _ALERT_MAX_POLLS = 10  # announce on the first tick where the event races
 _alert_tasks: set[asyncio.Task] = set()
 _announced_race_guids: set[str] = set()
+# First sighting of the event RACING (monotonic). The announcement + star
+# Wanted land only after RACE_ALERT_DELAY_SECONDS of actual racing
+# (Yuuka 2026-09-27: "triggered immediately, not after 60 seconds").
+_race_first_seen: dict[str, float] = {}
+
+
+def _arm_or_gate(game_event) -> bool:
+    """Track racing duration; True only once the event has raced >= 60 s."""
+    import time as _time
+
+    guid = game_event.guid
+    now = _time.monotonic()
+    first = _race_first_seen.setdefault(guid, now)
+    if now - first < RACE_ALERT_DELAY_SECONDS:
+        return False
+    _race_first_seen.pop(guid, None)
+    return True
 
 
 async def ensure_announced(http_client_mod, game_event) -> bool:
@@ -56,6 +73,10 @@ async def ensure_announced(http_client_mod, game_event) -> bool:
     )
     if not racing:
         _announced_race_guids.discard(guid)
+        _race_first_seen.pop(guid, None)
+        return False
+    # 60 s of actual racing before the announcement + stars land.
+    if not _arm_or_gate(game_event):
         return False
     _announced_race_guids.add(guid)
     return True
@@ -147,7 +168,7 @@ async def announce_illegal_race(
                 if match.get("State") != 2:
                     continue
                 await broadcast_server_message(
-                    http_client_game or http_client_mod, RACE_ALERT_MESSAGE
+                    http_client_game, RACE_ALERT_MESSAGE
                 )
                 _announced_race_guids.add(game_event.guid)
                 # Yuuka 2026-09-27 rework: the announcement IS the moment the
