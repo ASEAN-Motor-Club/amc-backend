@@ -45,6 +45,7 @@ BASE_DECAY_PER_TICK = Wanted.INITIAL_WANTED_LEVEL / BASE_WANTED_DURATION  # = 1.
 
 # Trigger-source markers for Wanted.origin. NULL = illicit-cargo trigger.
 WANTED_ORIGIN_FUGITIVE_PASSENGER = "fugitive_passenger"
+WANTED_ORIGIN_EVENT_RACE = "event_race"
 
 # Bounty growth is DISABLED (WANTED_MIN_BOUNTY = 0) — Wanted.amount stays 0.
 # The growth spec below is retained as an unexercised code path description.
@@ -663,6 +664,9 @@ async def create_or_refresh_wanted(
     wanted_stars: int | None = None,
     set_by=None,
     origin: str | None = None,
+    mod_vehicles_allowed: bool = False,
+    bounty: int | None = None,
+    notify: bool = True,
 ) -> tuple[Wanted, bool]:
     """Create or refresh a Wanted record for the given character.
 
@@ -703,37 +707,55 @@ async def create_or_refresh_wanted(
         # for the whole chase — score growth mid-chase never re-prices it.
         active_wanted.wanted_remaining = initial_wanted
         active_wanted.initial_heat = initial_wanted
+        # mod-allow upgrade is one-way: once a record opts in (race
+        # enforcement), later refreshes from other paths keep it — the
+        # despawn pass must never re-arm on a refresh.
+        if mod_vehicles_allowed and not active_wanted.mod_vehicles_allowed:
+            active_wanted.mod_vehicles_allowed = True
         # Backfill the trigger origin only when the record doesn't carry one
         # yet — never overwrite an existing marker (refreshes from other
         # trigger types keep the original classification).
         if origin and active_wanted.origin != origin:
             active_wanted.origin = origin
             await active_wanted.asave(
-                update_fields=["wanted_remaining", "initial_heat", "origin"]
+                update_fields=[
+                    "wanted_remaining", "initial_heat", "origin",
+                    "mod_vehicles_allowed",
+                ]
+            )
+        elif mod_vehicles_allowed:
+            await active_wanted.asave(
+                update_fields=[
+                    "wanted_remaining", "initial_heat", "mod_vehicles_allowed",
+                ]
             )
         else:
             await active_wanted.asave(
                 update_fields=["wanted_remaining", "initial_heat"]
             )
     else:
-        if set_by is None:
+        if bounty is not None:
+            # Explicit bounty (race enforcement is flag-only, bounty 0).
+            bounty_value = bounty
+        elif set_by is None:
             # Fresh system trigger (illicit-cargo / fugitive): the bounty is
             # 10% of the criminal score at the moment of the trigger (exact
             # integer math, floored). WANTED_MIN_BOUNTY (0) can only raise it.
-            bounty = max(
+            bounty_value = max(
                 amount, WANTED_MIN_BOUNTY, character.criminal_score // 10
             )
         else:
             # Police-set wanted (/setwanted) is a FLAG ONLY — jail enforcement
             # needs no bounty (plan §8.3).
-            bounty = 0
+            bounty_value = 0
         active_wanted = await Wanted.objects.acreate(
             character=character,
             wanted_remaining=initial_wanted,
             initial_heat=initial_wanted,
-            amount=bounty,
+            amount=bounty_value,
             set_by=set_by,
             origin=origin,
+            mod_vehicles_allowed=mod_vehicles_allowed,
         )
         created = True
         # Teleport lock: invisible flag replaces the R name tag.
@@ -742,13 +764,14 @@ async def create_or_refresh_wanted(
         push_no_teleport_later(character, http_client_mod, True)
 
     await refresh_player_name(character, http_client_mod)
-    asyncio.create_task(
-        send_system_message(
-            http_client_mod,
-            "You are wanted. Police are closing in!",
-            character_guid=character.guid,
+    if notify:
+        asyncio.create_task(
+            send_system_message(
+                http_client_mod,
+                "You are wanted. Police are closing in!",
+                character_guid=character.guid,
+            )
         )
-    )
 
     # Set the player as a suspect in-game so police can chase them
     if http_client_mod and character.guid:
@@ -920,11 +943,21 @@ async def tick_wanted_countdown(http_client, http_client_mod, http_client_mgmt=N
         # Fugitive-passenger carve-out (Hamster 2026-09-27): these triggers
         # are the crime — the delivery itself was the offense, so they survive
         # dormant ticks like admin flags and re-enter the normal speed law
-        # once a cop is back on duty.
+        # once a cop is back on duty. Event-race origin shares the exemption
+        # (Yuuka 2026-09-27): the race IS the enforcement — its wanteds are
+        # refreshed by the race pass regardless of cop presence.
         fugitive_flags = [
-            w for w in organic if w.origin == WANTED_ORIGIN_FUGITIVE_PASSENGER
+            w
+            for w in organic
+            if w.origin
+            in (WANTED_ORIGIN_FUGITIVE_PASSENGER, WANTED_ORIGIN_EVENT_RACE)
         ]
-        organic = [w for w in organic if w.origin != WANTED_ORIGIN_FUGITIVE_PASSENGER]
+        organic = [
+            w
+            for w in organic
+            if w.origin
+            not in (WANTED_ORIGIN_FUGITIVE_PASSENGER, WANTED_ORIGIN_EVENT_RACE)
+        ]
         if due_pendings:
             # Pending triggers are organic work in flight — the dormant rule
             # applies to them too: they never apply with zero effective cops
@@ -1096,6 +1129,10 @@ async def tick_wanted_countdown(http_client, http_client_mod, http_client_mgmt=N
         # (transition from not-in-modded → in-modded).  Players who
         # were already in a modded vehicle when they became wanted are
         # seeded into _last_modded_vehicle_guids by create_or_refresh_wanted.
+        # mod_vehicles_allowed records (race enforcement) are skipped
+        # entirely — the race must not strip players' modded vehicles.
+        if wanted.mod_vehicles_allowed:
+            continue
         currently_in_modded = False
         if http_client_mod:
             try:
@@ -1522,16 +1559,15 @@ async def refresh_suspect_tags(http_client_mod, http_client_game=None) -> None:
         except Exception:
             logger.warning("costume make_suspect failed for %s", rec.name)
 
-    # --- Illegal-race pass (Yuuka 2026-09-27: badge until RACE FINISH) ---
-    # The suspect GE caps at ~60 s server-side, so persistence requires
-    # re-applying every tick. Scope: events RACING (state 2) — the badge
-    # is applied at the start transition and re-applied here until the
-    # race finishes (state 3) or the row closes; transition-out below
-    # clears it. State-1 (ready) rows are deliberately NOT included: TT
-    # rows sit at state 1 forever between runs, which caused the
-    # "infinitely wanted (not in an event)" report. The SE-window bound
-    # was also wrong (and SE links are unreliable on posted events —
-    # their re-serialized setup hashes to a fresh RaceSetup row).
+    # --- Illegal-race pass (Yuuka 2026-09-27 full rework) ---
+    # Scope: events RACING (state 2). At ~60 s after start the announcement
+    # fires (first tick or the SSE alert task that sees it racing) and every
+    # online participant gets a REAL Wanted row (stars; origin 'event_race',
+    # mod_vehicles_allowed=True, bounty 0). Every later tick REFRESHES the
+    # countdown (no announcement, no "you are wanted" popup) until the race
+    # finishes (state 3) / the player leaves (participant row pruned) / the
+    # event ends — then the normal speed-law decay runs and the star decays
+    # naturally (never force-cleared here).
     race_guids: set[str] = set()
     live_race_events = GameEvent.objects.filter(
         tt_class__isnull=False,
@@ -1540,36 +1576,62 @@ async def refresh_suspect_tags(http_client_mod, http_client_game=None) -> None:
     ).prefetch_related("participants__character")
 
     async for race_event in live_race_events:
-        for participant in race_event.participants.all():
-            char = participant.character
-            if (
-                char
-                and char.guid
-                and char.last_online
-                and char.last_online >= online_cutoff
-            ):
-                race_guids.add(char.guid)
+        online_participants = [
+            p.character
+            for p in race_event.participants.all()
+            if p.character
+            and p.character.guid
+            and p.character.last_online
+            and p.character.last_online >= online_cutoff
+        ]
+        race_guids.update(c.guid for c in online_participants)
 
-        # Announcement guarantee (Yuuka 2026-09-27: "still not giving the
-        # announcement"): the SSE-hook alert task can lose the race with a
-        # worker restart (observed: worker restart raced the event start).
-        # The first tick that sees the event racing announces, once per
-        # event guid, regardless of which path detected the start.
+        # Announcement + first wanted grant (once per event guid, whichever
+        # path — this tick or the SSE alert task — sees the race first).
         try:
             from amc.mod_server import broadcast_server_message
             from amc.handlers.tt_police import (
                 RACE_ALERT_MESSAGE,
+                grant_race_wanted,
                 ensure_announced,
             )
 
             if await ensure_announced(http_client_mod, race_event):
                 await broadcast_server_message(
-                    http_client_game or http_client_mod, RACE_ALERT_MESSAGE
+                    http_client_mod, RACE_ALERT_MESSAGE
                 )
+                await grant_race_wanted(http_client_mod, race_event)
         except Exception:
             logger.warning(
                 "race-pass announce failed for %s", race_event.guid, exc_info=True
             )
+
+        # Refresh pass: top up the countdown on every race-origin Wanted of
+        # online participants while the event races. notify=False (the
+        # announcement already went out; no per-tick popups). This is also
+        # what re-asserts the suspect GE so stars stay visible (60 s cap).
+        for char in online_participants:
+            try:
+                wanted = await Wanted.objects.filter(
+                    character=char,
+                    expired_at__isnull=True,
+                    origin=WANTED_ORIGIN_EVENT_RACE,
+                ).afirst()
+                if wanted is None:
+                    continue
+                await create_or_refresh_wanted(
+                    char,
+                    http_client_mod,
+                    origin=WANTED_ORIGIN_EVENT_RACE,
+                    mod_vehicles_allowed=True,
+                    bounty=0,
+                    notify=False,
+                )
+            except Exception:
+                logger.warning(
+                    "race wanted refresh failed for %s", char.name,
+                    exc_info=True,
+                )
 
     for guid in sorted(race_guids - wanted_guids - costume_guids):
         try:

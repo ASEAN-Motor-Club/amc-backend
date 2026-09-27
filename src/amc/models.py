@@ -692,10 +692,23 @@ class Wanted(models.Model):
         blank=True,
         help_text=(
             "What triggered this wanted: NULL = illicit cargo, "
-            "'fugitive_passenger' = guild fugitive passenger. "
-            "Fugitive-origin records are exempt from the dormant amnesty — "
-            "they persist through dormant ticks and resume normal decay "
-            "once a cop is back on duty (Hamster 2026-09-27)."
+            "'fugitive_passenger' = guild fugitive passenger, "
+            "'event_race' = illegal-race event enforcement (Yuuka "
+            "2026-09-27). Fugitive-origin records are exempt from the "
+            "dormant amnesty — they persist through dormant ticks and "
+            "resume normal decay once a cop is back on duty (Hamster "
+            "2026-09-27). Event-race origin shares the dormant exemption "
+            "(the race IS the enforcement, cops or not)."
+        ),
+    )
+    mod_vehicles_allowed = models.BooleanField(
+        default=False,
+        help_text=(
+            "When True, the wanted-tick modded-vehicle despawn pass skips "
+            "this record (Yuuka 2026-09-27): the race enforcement must not "
+            "despawn players' modded vehicles. Anchored to the "
+            "event-race origin but kept as its own field so other "
+            "future origins can opt in per record."
         ),
     )
 

@@ -26,7 +26,7 @@ from amc.handlers.tt_police import (
     RACE_ALERT_DELAY_SECONDS,
     RACE_ALERT_MESSAGE,
     announce_illegal_race,
-    mark_racers_wanted,
+    grant_race_wanted,
 )
 from amc.models import Character, GameEvent, RaceSetup, ScheduledEvent
 from amc.test_auto_tt import (  # noqa: F401  (fixtures shared)
@@ -51,53 +51,51 @@ async def _make_character(name, player_id, guid):
 
 
 @pytest.mark.asyncio
-@patch("amc.handlers.tt_police.make_suspect", new_callable=AsyncMock)
-async def test_all_racers_flagged_except_dqd(suspect_mock, db):
+@patch("amc.criminals.create_or_refresh_wanted", new_callable=AsyncMock)
+async def test_grant_wanted_all_online_participants(grant_mock, db):
+    from amc.criminals import WANTED_ORIGIN_EVENT_RACE
+
     await _make_character("Alice", 1, "GUIDPOL000000000000000000000001")
     await _make_character("Bob", 2, "GUIDPOL000000000000000000000002")
     event = await sync_to_async(GameEvent.objects.create)(
-        guid="GUIDPOL0000000000000000000000E", name="Police Test [TT-270]", state=2
+        guid="GUIDPOL000000000000000000000E", name="Police Test [TT-270]", state=2
     )
-    marked = await mark_racers_wanted(
-        object(),
-        event,
-        {"Players": [
-            _player("GUIDPOL000000000000000000000001", "1", "Alice"),
-            _player("GUIDPOL000000000000000000000002", "2", "Bob"),
-            _player("GUIDPOL000000000000000000000003", "3", "DQdDan"),
-        ]},
-        disqualified=["DQdDan"],
-    )
-    assert marked == ["Alice", "Bob"]
-    assert suspect_mock.await_count == 2
-    assert {c.args[1] for c in suspect_mock.await_args_list} == {
+    for guid in (
         "GUIDPOL000000000000000000000001",
         "GUIDPOL000000000000000000000002",
-    }
-    # No wanted rows may be created by the race-start flag (no stars).
-    from amc.models import Wanted
-
-    assert not await Wanted.objects.aexists()
+    ):
+        char = await Character.objects.aget(guid=guid)
+        char.last_online = timezone.now()
+        await char.asave()
+        await sync_to_async(event.participants.create)(character=char, rank=0)
+    granted = await grant_race_wanted(object(), event)
+    assert sorted(granted) == [
+        "GUIDPOL000000000000000000000001",
+        "GUIDPOL000000000000000000000002",
+    ]
+    assert grant_mock.await_count == 2
+    kwargs = grant_mock.await_args_list[0].kwargs
+    assert kwargs["origin"] == WANTED_ORIGIN_EVENT_RACE
+    assert kwargs["mod_vehicles_allowed"] is True
+    assert kwargs["bounty"] == 0
 
 
 @pytest.mark.asyncio
-@patch("amc.handlers.tt_police.make_suspect", new_callable=AsyncMock)
-async def test_unknown_character_skipped_others_flagged(suspect_mock, db):
-    await _make_character("Alice", 1, "GUIDPOL000000000000000000000001")
+@patch("amc.criminals.create_or_refresh_wanted", new_callable=AsyncMock)
+async def test_grant_wanted_skips_offline(grant_mock, db):
+    alice, _, _, _ = await _make_character(
+        "Alice", 1, "GUIDPOL000000000000000000000001"
+    )
+    # force offline
+    alice.last_online = timezone.now() - timezone.timedelta(minutes=30)
+    await alice.asave()
     event = await sync_to_async(GameEvent.objects.create)(
         guid="GUIDPOL000000000000000000000F", name="Police Test 2 [TT-140]", state=2
     )
-    marked = await mark_racers_wanted(
-        object(),
-        event,
-        {"Players": [
-            _player("GUIDPOL000000000000000000000001", "1", "Alice"),
-            _player("GUIDPOLGHOST00000000000000000001", "9", "Ghost"),
-        ]},
-        disqualified=[],
-    )
-    assert marked == ["Alice"]
-    assert suspect_mock.await_count == 1
+    await sync_to_async(event.participants.create)(character=alice, rank=0)
+    granted = await grant_race_wanted(object(), event)
+    assert granted == []
+    assert grant_mock.await_count == 0
 
 
 @pytest.mark.asyncio
