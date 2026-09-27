@@ -422,9 +422,6 @@ class Character(models.Model):
         help_text="Item key of the worn costume; NULL when not wearing one.",
     )
 
-    # Police
-    police_confiscated_total = models.PositiveBigIntegerField(default=0)
-
     # Wealth tax crossover DM — sent once when tax > interest, 30-day cooldown
     crossover_warning_sent_at = models.DateTimeField(null=True, blank=True)
 
