@@ -15,7 +15,7 @@ ol.proj.addProjection(customProjection);
 
 const baseLayer = new ol.layer.Tile({
     source: new ol.source.XYZ({
-        url: "https://www.aseanmotorclub.com/map_tiles/719/{z}_{x}_{y}.avif",
+        url: "https://www.aseanmotorclub.com/map_tiles/719a/colors/{z}_{x}_{y}.avif",
         projection: customProjection,
         minZoom: 2,
         maxZoom: 5,
