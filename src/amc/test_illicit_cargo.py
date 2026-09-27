@@ -598,12 +598,23 @@ class WantedTriggerChanceTests(TestCase):
     """
 
     def test_guarantee_at_one_million(self):
-        from amc.special_cargo import WANTED_GUARANTEE_PAY, wanted_trigger_chance
+        from amc.special_cargo import (
+            WANTED_GUARANTEE_PAY,
+            WANTED_TRIGGER_FLOOR_CHANCE,
+            wanted_trigger_chance,
+        )
 
         self.assertEqual(wanted_trigger_chance(WANTED_GUARANTEE_PAY, 0, None), 1.0)
         self.assertEqual(wanted_trigger_chance(10_000_000, 0, None), 1.0)
-        # Guarantee overrides the cop attenuation too.
-        self.assertEqual(wanted_trigger_chance(WANTED_GUARANTEE_PAY, 20_000_000, 0), 1.0)
+        # Guarantee is attenuated by cop proximity like any other chance
+        # (freeman 2026-09-27): point-blank collapses to the floor.
+        self.assertEqual(
+            wanted_trigger_chance(WANTED_GUARANTEE_PAY, 20_000_000, 0),
+            WANTED_TRIGGER_FLOOR_CHANCE,
+        )
+        self.assertLess(
+            wanted_trigger_chance(WANTED_GUARANTEE_PAY, 20_000_000, 500), 0.5
+        )
         # Just below the threshold is NOT guaranteed.
         self.assertLess(wanted_trigger_chance(WANTED_GUARANTEE_PAY - 1, 20_000_000, None), 1.0)
 
@@ -763,9 +774,7 @@ class ShouldTriggerWantedRollTests(TestCase):
             self.assertTrue(should_trigger_wanted(10_000_000, 50_000_000, 5_000))
             # point-blank: attenuated guarantee collapses to the floor → miss
             self.assertFalse(should_trigger_wanted(1_000_000, 0, 0))
-            mock_rng.random.return_value = (
-                0.049 + 0.05 * 0.9999
-            )  # just below the attenuated chance at d≈0
+            mock_rng.random.return_value = 0.049  # just under the 5% floor
             self.assertTrue(should_trigger_wanted(1_000_000, 0, 0))
 
     def test_marked_triggers_regardless_of_pay_and_score(self):
