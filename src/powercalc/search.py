@@ -3,7 +3,7 @@
 Two-phase evaluation for speed in pure stdlib:
 
 1. Grid pass: every candidate combination is sampled on a coarse rpm-ratio
-   grid (81 points over [0, 1.25]) using precomputed per-engine curve
+   grid (81 points over [0, 1.0]) using precomputed per-engine curve
    samples. Flat-profile turbos (Base == Boost, 22 of the 27 known turbos)
    are exact scalars on torque, so their peak is the NA peak times the
    scalar -- one grid pass per (engine, intake) covers all of them.
@@ -33,7 +33,7 @@ from .model import (
     turbo_spool,
 )
 
-_GRID_STEPS = 80  # 81 points over [0, 1.25]
+_GRID_STEPS = 80  # 81 points over [0, 1.0]
 _RPM2KW = 2.0 * math.pi / 60.0 / 1000.0
 
 Branch = str | None  # None | "na" | "turbo" | "eco" | "ev"

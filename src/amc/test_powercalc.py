@@ -20,7 +20,7 @@ DYNO = provenance()["validation"]
 
 
 def test_versions_present():
-    assert model_version() == "1.0.0"
+    assert model_version() == "1.1.0"
     assert data_version() == "2026.09.3"
 
 
@@ -32,6 +32,18 @@ def test_golden_dyno_case():
     assert res.peak_power_rpm == pytest.approx(ig["peak_power_rpm"], abs=20)
     assert res.peak_torque_nm == pytest.approx(ig["peak_torque_nm"], rel=0.01)
     assert res.peak_torque_rpm == pytest.approx(ig["peak_torque_rpm"], abs=20)
+
+
+def test_golden_integra_dyno_case():
+    """Second validated dyno case (Yuuka 2026-09-27) that pinned the power
+    sweep to MaxRPM: uncapped, this setup read 285.9 hp @ 11250 rpm."""
+    res = compute_setup(
+        "Integrai4", intake_part="SuperchargerStage2", turbo_part="Turbocharger_EcoStage2"
+    )
+    ig = provenance()["validation_integra"]["in_game"]
+    assert res.peak_power_hp == pytest.approx(ig["peak_power_hp"], rel=0.01)
+    assert res.peak_power_rpm == pytest.approx(ig["peak_power_rpm"], abs=200)
+    assert res.peak_torque_nm == pytest.approx(ig["peak_torque_nm"], rel=0.01)
 
 
 def test_rating_vanilla_240hp_stock():
@@ -287,7 +299,8 @@ def test_teh_engine_pack_ratings():
         "FerrariV12": 800.0,   # 1000 Nm * V12 curve @ 8000 rpm
         "ScaniaV8": 724.0,     # 3711 Nm diesel truck curve @ 2500 rpm
         "I4Miata": 180.8,      # vanilla SOHC curve @ 7000 rpm
-        "Hellcatv8": 638.0,
+        # capped at MaxRPM since the 2026-09-27 Integra dyno validation
+        "Hellcatv8": 573.5,
     }
     for engine, hp in cases.items():
         res = compute_setup(engine)

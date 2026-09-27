@@ -1,12 +1,15 @@
 """Motor Town engine power/torque model.
 
 Reverse-engineered from the 0.7.19 client pak (engine DataAssets +
-VehicleParts/Engines DataTables) and validated against an in-game dyno run
-(2026-09-01) to <0.2%:
+VehicleParts/Engines DataTables) and validated against in-game dyno runs to <0.2%:
 
     FordSmalBlock302_V8_5L_240HP + Intake 201 + Turbocharger_Stage1
       in-game: 412.3 Nm @4364 / 293.0 hp @6212
       model:   413.0 Nm @4355 / 293.2 hp @6216
+
+    TehPack Integrai4 + SuperchargerStage2 + Turbocharger_EcoStage2
+      in-game: 219.0 Nm @7620 / 271.0 hp @8990 (2026-09-27)
+      model:   219.0 Nm @7812 / 271.4 hp @9000
 
 Composition (r = rpm / MaxRPM):
 
@@ -17,9 +20,10 @@ Composition (r = rpm / MaxRPM):
   uses g=10, NOT 9.80665; the naive conversion silently inflates every
   engine by ~2%).
 - The torque curve X axis is the rpm/MaxRPM ratio. Curves carry an
-  overspeed tail key (e.g. (5, 0.175)) past r=1.0; evaluating the curve
-  over its FULL key range is load-bearing -- clamping it at r=1.0
-  overstates peaks by 30-70%. Only the intake and turbo multipliers are
+  overspeed tail key (e.g. (5, 0.175)) past r=1.0, but the game never
+  revs past MaxRPM -- the POWER sweep is bounded at r=1.0 (validated:
+  IntegraI4 dyno peak 271.0 hp @ 8990 rpm vs model 271.4 @ 9000, and
+  uncapped it drifted to 285.9 @ 11250). Intake/turbo multipliers are
   evaluated at min(r, 1.0).
 - Intake: UNCLAMPED linear ramp eff(r) = 1 + Slope * (r - BaseRPMRatio).
 - Turbo: spool ramps from BaseTorqueMultiplier to TorqueMultiplier as
@@ -42,7 +46,7 @@ from dataclasses import dataclass, field
 GCM_TO_NM = 1e-4  # g=10 (validated). Do NOT "fix" to 9.80665e-5.
 KW_TO_HP = 1.34102
 W_PER_HP = 745.699872
-SWEEP_MAX_RATIO = 1.25  # validated sweep upper bound, in MaxRPM ratios
+SWEEP_MAX_RATIO = 1.0  # the game never revs past MaxRPM (dyno-validated)
 SWEEP_STEPS = 1000  # 1001 points, matches the validated dyno reproduction
 
 _LINEAR = "RCIM_Linear"

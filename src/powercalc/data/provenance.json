@@ -1,6 +1,6 @@
 {
   "schema": "powercalc-provenance/1",
-  "model_version": "1.0.0",
+  "model_version": "1.1.0",
   "data_version": "2026.09.3",
   "generated": "2026-09-10",
   "validation": {
@@ -19,6 +19,24 @@
       "peak_power_rpm": 6216
     },
     "residual": "value <0.2%, rpm <10"
+  },
+  "validation_integra": {
+    "method": "in-game dyno comparison (Yuuka, 2026-09-27)",
+    "case": "TehPack Integrai4 + SuperchargerStage2 + Turbocharger_EcoStage2",
+    "in_game": {
+      "peak_torque_nm": 219.0,
+      "peak_torque_rpm": 7620,
+      "peak_power_hp": 271.0,
+      "peak_power_rpm": 8990
+    },
+    "model": {
+      "peak_torque_nm": 219.0,
+      "peak_torque_rpm": 7812,
+      "peak_power_hp": 271.4,
+      "peak_power_rpm": 9000
+    },
+    "residual": "value <0.2%, rpm <200",
+    "note": "Drove the SWEEP_MAX_RATIO 1.25 -> 1.0 fix: the game never revs past MaxRPM; the uncapped model rode the curve overspeed tail and over-counted."
   },
   "sources": {
     "more_tuning": {
