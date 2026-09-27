@@ -17,6 +17,7 @@ Speed-based wanted law (2026-09 rework, corrected 2026-09-20):
   - Offline suspects (while armed): no decay, wanted persists indefinitely.
 """
 
+import asyncio
 import math
 import time
 import pytest
@@ -3609,24 +3610,30 @@ async def test_race_suspect_while_racing_cleared_on_finish(make_suspect_mock):
         Character,
         GameEvent,
         GameEventCharacter,
+        Player,
         TTClass,
     )
 
-    tt, _ = await sync_to_async(TTClass.objects.get_or_create)(
+    # ORM writes here MUST use the native async methods (acreate/aupdate):
+    # sync_to_async-wrapped writes run on the executor thread's connection,
+    # outside pytest-django's per-test transaction — they COMMIT and leak
+    # rows (Player 777 / this GameEvent) into later tests in the full
+    # suite, failing test_delivery_stats_cog and test_events downstream.
+    tt, _ = await TTClass.objects.aget_or_create(
         name="TT-480", defaults={"max_hp": 480}
     )
     char, *_ = await Character.objects.aget_or_create_character_player(
         "RacerX", 777, character_guid="GUIDRACE00000000000000000000001"
     )
-    await sync_to_async(Character.objects.filter(pk=char.pk).update)(last_online=now)
-    event = await sync_to_async(GameEvent.objects.create)(
+    await Character.objects.filter(pk=char.pk).aupdate(last_online=now)
+    event = await GameEvent.objects.acreate(
         guid="GUIDRACE000000000000000000000E",
         name="Racing TT (001) [TT-480]",
         state=2,
         tt_class=tt,
         race_legality="illegal",
     )
-    await sync_to_async(GameEventCharacter.objects.create)(
+    await GameEventCharacter.objects.acreate(
         game_event=event, character=char, rank=0
     )
     await refresh_suspect_tags(AsyncMock())
@@ -3634,7 +3641,32 @@ async def test_race_suspect_while_racing_cleared_on_finish(make_suspect_mock):
 
     # Race finished (state 3) -> re-apply stops, badge transitioned out
     make_suspect_mock.reset_mock()
-    await sync_to_async(GameEvent.objects.filter(pk=event.pk).update)(state=3)
+    await GameEvent.objects.filter(pk=event.pk).aupdate(state=3)
     with patch("amc.criminals.clear_suspect", new_callable=AsyncMock):
         await refresh_suspect_tags(AsyncMock())
     make_suspect_mock.assert_not_awaited()
+
+    # Cleanup regardless of transaction semantics: fire-and-forget task
+    # chains (push_no_teleport_later, announce_illicit_delivery) write in
+    # autocommit outside pytest-django's per-test transaction, and rows
+    # from this test (Player 777, the race GameEvent) LEAK into the test
+    # DB — poisoning test_delivery_stats_cog and test_events downstream in
+    # full-suite runs. Drain pending chains, then delete every row the
+    # test may have created.
+    for _ in range(5):
+        pending = [
+            t for t in asyncio.all_tasks() if t is not asyncio.current_task()
+        ]
+        if not pending:
+            break
+        await asyncio.wait_for(
+            asyncio.gather(*pending, return_exceptions=True), timeout=2
+        )
+    await GameEvent.objects.filter(
+        guid="GUIDRACE000000000000000000000E"
+    ).adelete()
+    await Character.objects.filter(
+        guid="GUIDRACE00000000000000000000001"
+    ).adelete()
+    await Player.objects.filter(unique_id=777).adelete()
+    await TTClass.objects.filter(name="TT-480").adelete()
