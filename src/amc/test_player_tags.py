@@ -743,7 +743,11 @@ async def test_refresh_player_name_police_level_scales_with_confiscations(
         player=player,
         name="TestPlayer",
         guid="test-guid-police-p2",
-        police_confiscated_total=50_000,
+    )
+    from amc.models import PoliceWhitelist
+
+    await PoliceWhitelist.objects.acreate(
+        player=player, police_confiscated_total=50_000
     )
 
     await PoliceSession.objects.acreate(character=character)
@@ -771,7 +775,11 @@ async def test_refresh_player_name_police_off_duty_confiscations_no_p_tag(
         player=player,
         name="TestPlayer",
         guid="test-guid-police-retired",
-        police_confiscated_total=150_000,
+    )
+    from amc.models import PoliceWhitelist
+
+    await PoliceWhitelist.objects.acreate(
+        player=player, police_confiscated_total=150_000
     )
 
     session = MagicMock()

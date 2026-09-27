@@ -5,7 +5,13 @@ from django.utils import timezone
 
 from amc.command_framework import registry, CommandContext
 from amc.game_server import get_players
-from amc.models import Character, Wanted, WantedSystemConfig
+from amc.models import (
+    Character,
+    Wanted,
+    WantedSystemConfig,
+    PoliceWhitelist,
+    PoliceSession,
+)
 from amc.mod_server import (
     get_player,
     get_player_customization,
@@ -56,6 +62,23 @@ async def cmd_police(ctx: CommandContext, verification_code: str = ""):
             character_guid=ctx.character.guid,
         )
     else:
+        # Whitelist gate — only whitelisted players may go on duty. Sits on
+        # the ACTIVATION branch only: an officer removed mid-duty can still
+        # run /police again to go off duty.
+        whitelisted = await PoliceWhitelist.objects.filter(
+            player_id=ctx.character.player_id
+        ).aexists()
+        if not whitelisted:
+            await send_system_message(
+                ctx.http_client_mod,
+                _(
+                    "You are not on the police roster. Ask an admin to add "
+                    "you with /police_whitelist."
+                ),
+                character_guid=ctx.character.guid,
+            )
+            return
+
         # Wanted criminals may not become police
         has_wanted = await Wanted.objects.filter(
             character=ctx.character, expired_at__isnull=True
@@ -396,5 +419,77 @@ async def cmd_setwanted(ctx: CommandContext, target_player_name: str):
     await ctx.announce(
         f"{target_character.name} has been marked as wanted by {ctx.character.name}!"
     )
+
+
+@registry.register(
+    "/police_whitelist",
+    description=gettext_lazy(
+        "Add/remove a player from the police roster (admin only)"
+    ),
+    category="Admin",
+)
+async def cmd_police_whitelist(ctx: CommandContext, target_player_name: str):
+    # Only game admins can use this command
+    if not ctx.player_info or not ctx.player_info.get("bIsAdmin"):
+        return
+
+    players = await get_players(ctx.http_client)
+    target_pid = fuzzy_find_player(players, target_player_name)
+    if not target_pid:
+        await ctx.reply(
+            _(
+                "<Title>Player not found</>\n\n"
+                "Please make sure you typed the name correctly."
+            )
+        )
+        return
+
+    target_player_data = next(
+        (p for pid, p in players if str(pid) == str(target_pid)), None
+    )
+    if not target_player_data:
+        return
+
+    try:
+        target_character = await Character.objects.aget(
+            guid=target_player_data["character_guid"]
+        )
+    except Character.DoesNotExist:
+        await ctx.reply(_("Character not found in database."))
+        return
+
+    target_player_id = target_character.player_id
+    existing = await PoliceWhitelist.objects.filter(
+        player_id=target_player_id
+    ).afirst()
+
+    if existing:
+        await PoliceWhitelist.objects.filter(pk=existing.pk).adelete()
+        # Safety: end any active police sessions across ALL of the player's
+        # characters so a removed officer can't stay on duty.
+        sessions = PoliceSession.objects.filter(
+            character__player_id=target_player_id, ended_at__isnull=True
+        )
+        async for session_row in sessions.select_related("character"):
+            await deactivate_police(
+                session_row.character, ctx.http_client_mod
+            )
+        await ctx.reply(
+            _(
+                "<Title>Removed</>\n\n{name} has been removed from the "
+                "police roster."
+            ).format(name=target_character.name)
+        )
+    else:
+        await PoliceWhitelist.objects.acreate(
+            player_id=target_player_id,
+            added_by_id=ctx.character.player_id,
+        )
+        await ctx.reply(
+            _(
+                "<Title>Added</>\n\n{name} has been added to the police "
+                "roster and can now use /police."
+            ).format(name=target_character.name)
+        )
 
 

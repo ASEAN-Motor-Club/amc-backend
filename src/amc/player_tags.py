@@ -169,13 +169,20 @@ async def refresh_player_name(
     except Exception:
         pass
 
-    # P tag: active police session; level derives from lifetime confiscations
-    # (P1 minimum while on duty).
+    # P tag: active police session; level derives from the player's lifetime
+    # confiscations on the whitelist row (P1 minimum while on duty).
     from amc.police import is_police as check_police, calculate_police_level
 
     police_level = 0
     if await check_police(character):
-        police_level = calculate_police_level(character.police_confiscated_total)
+        from amc.models import PoliceWhitelist
+
+        total = (
+            await PoliceWhitelist.objects.filter(player_id=character.player_id)
+            .values_list("police_confiscated_total", flat=True)
+            .afirst()
+        ) or 0
+        police_level = calculate_police_level(total)
 
     # Police duty shares the R tag: an on-duty officer is teleport-locked
     # server-side exactly like RP players and wanted suspects.

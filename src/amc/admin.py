@@ -24,6 +24,7 @@ from .models import (
     Company,
     CompassTuningConfig,
     WantedSystemConfig,
+    PoliceWhitelist,
     PlayerChatLog,
     PlayerRestockDepotLog,
     PlayerVehicleLog,
@@ -150,6 +151,21 @@ class PlayerTeamInlineAdmin(admin.TabularInline):
     model = TeamMembership
     show_change_link = True
     autocomplete_fields = ["character"]
+
+
+@admin.register(PoliceWhitelist)
+class PoliceWhitelistAdmin(admin.ModelAdmin):
+    list_display = [
+        "id",
+        "player",
+        "police_confiscated_total",
+        "added_by",
+        "added_at",
+    ]
+    search_fields = ["player"]
+    list_select_related = ["player", "added_by"]
+    autocomplete_fields = ["player", "added_by"]
+    readonly_fields = ["added_at"]
 
 
 @admin.register(Player)

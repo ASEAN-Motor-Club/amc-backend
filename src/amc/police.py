@@ -124,21 +124,30 @@ async def deactivate_police(character, session):
 async def record_confiscation_for_level(
     character, amount, http_client=None, session=None
 ):
-    """Increment confiscated total and check for level-up.
+    """Increment the PLAYER's whitelist confiscation total and check level-up.
+
+    The total lives on PoliceWhitelist (per player), so an officer's level
+    persists across their characters.
 
     Args:
-        character: The officer's Character model.
+        character: The officer's Character model (resolves the player).
         amount: Amount confiscated.
         http_client: HTTP client for announcements.
         session: HTTP client for mod server (name refresh).
     """
-    old_level = calculate_police_level(character.police_confiscated_total)
+    from amc.models import PoliceWhitelist
 
-    character.police_confiscated_total = F("police_confiscated_total") + int(amount)
-    await character.asave(update_fields=["police_confiscated_total"])
-    await character.arefresh_from_db(fields=["police_confiscated_total"])
+    row, _created = await PoliceWhitelist.objects.aget_or_create(
+        player_id=character.player_id
+    )
 
-    new_level = calculate_police_level(character.police_confiscated_total)
+    old_level = calculate_police_level(row.police_confiscated_total)
+
+    row.police_confiscated_total = F("police_confiscated_total") + int(amount)
+    await row.asave(update_fields=["police_confiscated_total"])
+    await row.arefresh_from_db(fields=["police_confiscated_total"])
+
+    new_level = calculate_police_level(row.police_confiscated_total)
     if new_level != old_level:
         await refresh_player_name(character, session)
 
