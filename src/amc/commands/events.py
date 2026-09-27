@@ -202,9 +202,10 @@ async def cmd_countdown(ctx: CommandContext):
     category="Events",
 )
 async def cmd_race_legality(ctx: CommandContext):
-    # Admin-only (same gate as the other Admin-category commands)
-    if not ctx.player_info or not ctx.player_info.get("bIsAdmin"):
-        return
+    # Available to everyone (Yuuka 2026-09-27: "make it available for
+    # no admins too") — but only the event OWNER (or an admin) may
+    # flip it, so random players can't sabotage other people's races.
+    is_admin = bool(ctx.player_info and ctx.player_info.get("bIsAdmin"))
 
     event = await (
         GameEvent.objects.filter(
@@ -221,6 +222,12 @@ async def cmd_race_legality(ctx: CommandContext):
     if not event:
         await ctx.reply(
             "<Title>No event</>\nYou are not inside an active event."
+        )
+        return
+
+    if not is_admin and event.owner_id != ctx.character.id:
+        await ctx.reply(
+            "<Title>Not your event</>\nOnly the event owner can change its legality."
         )
         return
 
