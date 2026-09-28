@@ -19,7 +19,7 @@ from django.utils import timezone
 from amc.criminals import tick_wanted_countdown
 from amc.factories import CharacterFactory, PlayerFactory
 from amc.models import PendingWanted, Wanted
-from amc.no_teleport import push_no_teleport
+from amc.no_teleport import FULL_BLOCKS, push_no_teleport
 from amc.webhook import process_event
 
 
@@ -75,14 +75,14 @@ class PushNoTeleportTests(TestCase):
             side_effect=Exception("mod down"),
         ):
             # must not raise
-            await push_no_teleport(character, AsyncMock(), True)
+            await push_no_teleport(character, AsyncMock(), FULL_BLOCKS)
 
     async def test_push_without_client_or_guid_is_noop(self):
         character = await _make_character()
         with patch(
             "amc.mod_server.set_no_teleport", new_callable=AsyncMock
         ) as mock_set:
-            await push_no_teleport(character, None, True)
+            await push_no_teleport(character, None, FULL_BLOCKS)
             mock_set.assert_not_awaited()
 
 
@@ -103,27 +103,31 @@ class EffectiveFlagSyncTests(TestCase):
         ) as mock_set:
             await sync_no_teleport(character, AsyncMock())
         self.assertTrue(mock_set.await_args, "push never fired")
-        return mock_set.await_args[0][2]
+        return mock_set.await_args[0][2]  # the pushed block set (or None)
 
-    async def test_nothing_active_pushes_false(self):
+    async def test_nothing_active_pushes_none(self):
         character = await self._make()
-        assert await self._sync(character) is False
+        assert await self._sync(character) is None
 
-    async def test_manual_flag_pushes_true(self):
+    async def test_manual_flag_pushes_full_blocks(self):
+        from amc.no_teleport import FULL_BLOCKS
+
         character = await self._make(no_teleport=True)
-        assert await self._sync(character) is True
+        assert await self._sync(character) == FULL_BLOCKS
 
-    async def test_active_wanted_pushes_true(self):
+    async def test_active_wanted_pushes_full_blocks(self):
         from amc.models import Wanted
+        from amc.no_teleport import FULL_BLOCKS
 
         character = await self._make()
         await _sync_create(
             Wanted, character=character, wanted_remaining=600, amount=0
         )
-        assert await self._sync(character) is True
+        assert await self._sync(character) == FULL_BLOCKS
 
-    async def test_on_duty_police_pushes_true(self):
+    async def test_on_duty_police_pushes_narrow_blocks(self):
         from amc.models import PoliceSession, Wanted
+        from amc.no_teleport import POLICE_NEAR_BLOCKS
 
         character = await self._make()
         await _sync_create(PoliceSession, character=character)
@@ -133,18 +137,18 @@ class EffectiveFlagSyncTests(TestCase):
         await _sync_create(
             Wanted, character=other, wanted_remaining=600, amount=0
         )
-        assert await self._sync(character) is True
+        assert await self._sync(character) == POLICE_NEAR_BLOCKS
 
-    async def test_on_duty_police_mode_is_reset_cargo_keep(self):
-        """On-duty police get the narrow reset_cargo_keep lock; the wanted
-        tick's distance gate refines it (clear when >500 m from every
-        wanted — freeman 2026-09-28 PR2)."""
+    async def test_on_duty_police_block_set_is_narrow(self):
+        """On-duty police get the narrow block set (cargo-kept roadside reset
+        blocked only); the wanted tick's distance gate refines it (clear when
+        >500 m from every wanted — freeman 2026-09-28 PR2)."""
         from amc.models import PoliceSession
-        from amc.no_teleport import MODE_RESET_CARGO_KEEP, teleport_lock_mode
+        from amc.no_teleport import POLICE_NEAR_BLOCKS, teleport_lock_blocks
 
         character = await self._make()
         await _sync_create(PoliceSession, character=character)
-        assert await teleport_lock_mode(character) == MODE_RESET_CARGO_KEEP
+        assert await teleport_lock_blocks(character) == POLICE_NEAR_BLOCKS
 
         with patch(
             "amc.mod_server.set_no_teleport", new_callable=AsyncMock
@@ -152,24 +156,23 @@ class EffectiveFlagSyncTests(TestCase):
             from amc.no_teleport import sync_no_teleport
 
             await sync_no_teleport(character, AsyncMock())
-        assert mock_set.await_args[0][2] is True
-        assert mock_set.await_args[0][3] == MODE_RESET_CARGO_KEEP
+        assert mock_set.await_args[0][2] == POLICE_NEAR_BLOCKS
 
-    async def test_wanted_mode_is_all(self):
+    async def test_wanted_block_set_is_full(self):
         from amc.models import Wanted
-        from amc.no_teleport import MODE_ALL, teleport_lock_mode
+        from amc.no_teleport import FULL_BLOCKS, teleport_lock_blocks
 
         character = await self._make()
         await _sync_create(
             Wanted, character=character, wanted_remaining=600, amount=0
         )
-        assert await teleport_lock_mode(character) == MODE_ALL
+        assert await teleport_lock_blocks(character) == FULL_BLOCKS
 
     async def test_on_duty_police_with_live_wanted_is_narrow(self):
-        """A live wanted elsewhere does not change the police narrow mode;
+        """A live wanted elsewhere does not change the police narrow set;
         the 500 m distance refinement is the wanted-tick's job."""
         from amc.models import PoliceSession, Wanted
-        from amc.no_teleport import MODE_RESET_CARGO_KEEP, teleport_lock_mode
+        from amc.no_teleport import POLICE_NEAR_BLOCKS, teleport_lock_blocks
 
         character = await self._make()
         await _sync_create(PoliceSession, character=character)
@@ -178,25 +181,25 @@ class EffectiveFlagSyncTests(TestCase):
         await _sync_create(
             Wanted, character=other, wanted_remaining=600, amount=0
         )
-        assert await teleport_lock_mode(character) == MODE_RESET_CARGO_KEEP
+        assert await teleport_lock_blocks(character) == POLICE_NEAR_BLOCKS
 
-    async def test_police_with_wanted_escalates_to_all(self):
-        """Any ALL-source (wanted/grace/manual) wins over the police mode."""
+    async def test_police_with_wanted_escalates_to_full(self):
+        """Any full-lock source (wanted/grace/manual) wins over the police set."""
         from amc.models import PoliceSession, Wanted
-        from amc.no_teleport import MODE_ALL, teleport_lock_mode
+        from amc.no_teleport import FULL_BLOCKS, teleport_lock_blocks
 
         character = await self._make()
         await _sync_create(PoliceSession, character=character)
         await _sync_create(
             Wanted, character=character, wanted_remaining=600, amount=0
         )
-        assert await teleport_lock_mode(character) == MODE_ALL
+        assert await teleport_lock_blocks(character) == FULL_BLOCKS
 
-    async def test_manual_flag_mode_is_all(self):
-        from amc.no_teleport import MODE_ALL, teleport_lock_mode
+    async def test_manual_flag_block_set_is_full(self):
+        from amc.no_teleport import FULL_BLOCKS, teleport_lock_blocks
 
         character = await self._make(no_teleport=True)
-        assert await teleport_lock_mode(character) == MODE_ALL
+        assert await teleport_lock_blocks(character) == FULL_BLOCKS
 
     async def test_pending_wanted_pushes_true(self):
         """Login re-assert inside the 30s grace must KEEP the lock.
@@ -214,7 +217,9 @@ class EffectiveFlagSyncTests(TestCase):
             apply_at=timezone.now() + timedelta(seconds=30),
             trigger_amount=100_000,
         )
-        assert await self._sync(character) is True
+        from amc.no_teleport import FULL_BLOCKS
+
+        assert await self._sync(character) == FULL_BLOCKS
 
     async def test_is_teleport_locked_pending(self):
         from amc.models import PendingWanted
@@ -239,7 +244,9 @@ class EffectiveFlagSyncTests(TestCase):
         ) as mock_push:
             await create_or_refresh_wanted(character, AsyncMock(), amount=0)
         mock_push.assert_awaited()
-        self.assertIs(mock_push.await_args_list[0][0][2], True)
+        from amc.no_teleport import FULL_BLOCKS
+
+        self.assertEqual(mock_push.await_args_list[0][0][2], FULL_BLOCKS)
 
     async def test_police_activation_pushes_flag(self):
         """With a live wanted on the server, /police activation arms the
@@ -260,15 +267,17 @@ class EffectiveFlagSyncTests(TestCase):
             await activate_police(character, mod)
             await deactivate_police(character, mod)
         states = [c.args[2] for c in mock_push.await_args_list]
-        self.assertEqual(states, [True, False])
+        from amc.no_teleport import POLICE_NEAR_BLOCKS
+
+        self.assertEqual(states, [POLICE_NEAR_BLOCKS, None])
 
 
     async def test_cached_push_transition_only_and_invalidation(self):
-        """push_no_teleport_cached fires only when (enabled, mode) changes;
+        """push_no_teleport_cached fires only when the block set changes;
         sync_no_teleport pops the cache entry so the tick re-asserts."""
         from amc.no_teleport import (
-            MODE_ALL,
-            MODE_WANTED_ROADSIDE,
+            FULL_BLOCKS,
+            WANTED_ROADSIDE_BLOCKS,
             _pushed_lock_state,
             push_no_teleport_cached,
             sync_no_teleport,
@@ -279,15 +288,14 @@ class EffectiveFlagSyncTests(TestCase):
         with patch(
             "amc.no_teleport.push_no_teleport", new_callable=AsyncMock
         ) as mock_push:
-            await push_no_teleport_cached(character, mod, True, MODE_ALL)
-            await push_no_teleport_cached(character, mod, True, MODE_ALL)
+            await push_no_teleport_cached(character, mod, FULL_BLOCKS)
+            await push_no_teleport_cached(character, mod, dict(FULL_BLOCKS))
             await push_no_teleport_cached(
-                character, mod, True, MODE_WANTED_ROADSIDE
+                character, mod, WANTED_ROADSIDE_BLOCKS
             )
-        assert mock_push.await_count == 2  # second identical call was a no-op
-        assert _pushed_lock_state[character.guid] == (
-            True,
-            MODE_WANTED_ROADSIDE,
+        assert mock_push.await_count == 2  # second identical set was a no-op
+        assert _pushed_lock_state[character.guid] == tuple(
+            sorted(WANTED_ROADSIDE_BLOCKS.items())
         )
 
         with patch(
@@ -300,7 +308,7 @@ class EffectiveFlagSyncTests(TestCase):
             "amc.no_teleport.push_no_teleport", new_callable=AsyncMock
         ) as mock_push:
             await push_no_teleport_cached(
-                character, mod, True, MODE_WANTED_ROADSIDE
+                character, mod, WANTED_ROADSIDE_BLOCKS
             )
         assert mock_push.await_count == 1  # invalidated -> re-pushed
 
@@ -355,7 +363,9 @@ class GraceWindowFlagTests(TestCase):
                 http_client_mod=mod_client,
             )
 
-        mock_push.assert_called_once_with(character, mod_client, True)
+        from amc.no_teleport import FULL_BLOCKS
+
+        mock_push.assert_called_once_with(character, mod_client, FULL_BLOCKS)
         self.assertIsNotNone(
             await PendingWanted.objects.filter(character=character).afirst()
         )
@@ -414,7 +424,7 @@ class GraceWindowFlagTests(TestCase):
         self.assertIsNotNone(wanted)
         mock_push.assert_awaited_once()
         self.assertEqual(mock_push.await_args[0][0].pk, character.pk)
-        self.assertIs(mock_push.await_args[0][2], False)
+        self.assertIsNone(mock_push.await_args[0][2])
 
     async def test_dormant_drop_clears_flag(self):
         player = await _sync_create(PlayerFactory)()
@@ -440,4 +450,4 @@ class GraceWindowFlagTests(TestCase):
         )
         mock_push.assert_awaited_once()
         self.assertEqual(mock_push.await_args[0][0].pk, character.pk)
-        self.assertIs(mock_push.await_args[0][2], False)
+        self.assertIsNone(mock_push.await_args[0][2])

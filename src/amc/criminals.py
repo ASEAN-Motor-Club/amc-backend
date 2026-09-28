@@ -26,9 +26,9 @@ from amc.mod_detection import detect_custom_parts, POLICE_DUTY_WHITELIST
 from amc.mod_server import clear_suspect, despawn_player_vehicle, force_exit_vehicle, get_player, get_player_customization, get_player_last_vehicle, get_player_last_vehicle_parts, make_suspect, send_system_message, show_popup
 from amc.player_tags import refresh_player_name
 from amc.no_teleport import (
-    MODE_ALL,
-    MODE_RESET_CARGO_KEEP,
-    MODE_WANTED_ROADSIDE,
+    FULL_BLOCKS,
+    POLICE_NEAR_BLOCKS,
+    WANTED_ROADSIDE_BLOCKS,
     _pushed_lock_state,
     push_no_teleport_cached,
     push_no_teleport,
@@ -819,9 +819,9 @@ async def create_or_refresh_wanted(
         )
         created = True
         # Teleport lock: invisible flag replaces the R name tag.
-        from amc.no_teleport import push_no_teleport_later
+        from amc.no_teleport import FULL_BLOCKS, push_no_teleport_later
 
-        push_no_teleport_later(character, http_client_mod, True)
+        push_no_teleport_later(character, http_client_mod, FULL_BLOCKS)
 
     await refresh_player_name(character, http_client_mod)
     if notify:
@@ -891,7 +891,7 @@ async def apply_pending_wanted(pending, http_client, http_client_mod) -> None:
     await pending.adelete()
     # Grace-window teleport lock no longer needed: the wanted is live (its
     # stars carry the visible R tag from here on).
-    await push_no_teleport(character, http_client_mod, False)
+    await push_no_teleport(character, http_client_mod, None)
     if created and http_client:
         from django.core.cache import cache
 
@@ -1036,7 +1036,7 @@ async def tick_wanted_countdown(http_client, http_client_mod, http_client_mgmt=N
             # Strip the teleport lock the pending carried (flag cleared; the
             # dormant rule drops the trigger entirely).
             for p in due_pendings:
-                await push_no_teleport(p.character, http_client_mod, False)
+                await push_no_teleport(p.character, http_client_mod, None)
         if organic:
             await Wanted.objects.filter(
                 id__in=[w.id for w in organic]
@@ -1388,15 +1388,15 @@ async def tick_wanted_countdown(http_client, http_client_mod, http_client_mgmt=N
 
     # ------------------------------------------------------------------
     # Roadside-reset distance gate (freeman 2026-09-28 PR2): refine the
-    # no-teleport lock MODE per wanted suspect / on-duty cop by live
+    # no-teleport BLOCK SET per wanted suspect / on-duty cop by live
     # distance (transition-only pushes).
-    #   wanted suspect: MODE_WANTED_ROADSIDE (cargo-kept roadside reset
-    #     allowed, cargo-strip pinned) while every on-duty cop is beyond
-    #     the 500 m gate; MODE_ALL while a cop is close. No cops on duty
-    #     counts as far. Manual admin flags are never downgraded here.
-    #   on-duty cop: MODE_RESET_CARGO_KEEP (cargo-strip reset always
-    #     allowed, cargo-kept roadside locked) while within 500 m of an
-    #     active wanted; cleared (unrestricted) when none is.
+    #   wanted suspect: WANTED_ROADSIDE_BLOCKS (cargo-kept roadside reset
+    #     allowed, everything else blocked) while every on-duty cop is
+    #     beyond the 500 m gate; FULL_BLOCKS while a cop is close. No cops
+    #     on duty counts as far. Manual admin flags are never downgraded.
+    #   on-duty cop: POLICE_NEAR_BLOCKS (cargo-strip reset always allowed,
+    #     cargo-kept roadside locked) while within 500 m of an active
+    #     wanted; cleared (unrestricted) when none is.
     # A cop who is themselves wanted, manually flagged, or under a
     # pending-wanted grace is skipped — those locks belong to
     # sync_no_teleport.
@@ -1419,9 +1419,9 @@ async def tick_wanted_countdown(http_client, http_client_mod, http_client_mgmt=N
             )
             far = _cops_far(min_d, _roadside_far_state.get(guid))
             _roadside_far_state[guid] = far
-            mode = MODE_WANTED_ROADSIDE if far else MODE_ALL
+            blocks = WANTED_ROADSIDE_BLOCKS if far else FULL_BLOCKS
             await push_no_teleport_cached(
-                wanted.character, http_client_mod, True, mode
+                wanted.character, http_client_mod, blocks
             )
 
         pending_guids = {
@@ -1451,11 +1451,11 @@ async def tick_wanted_countdown(http_client, http_client_mod, http_client_mgmt=N
             )
             if near_wanted:
                 await push_no_teleport_cached(
-                    cop_char, http_client_mod, True, MODE_RESET_CARGO_KEEP
+                    cop_char, http_client_mod, POLICE_NEAR_BLOCKS
                 )
             else:
                 await push_no_teleport_cached(
-                    cop_char, http_client_mod, False, MODE_ALL
+                    cop_char, http_client_mod, None
                 )
 
         # Prune the refinement caches for characters that left this tick's

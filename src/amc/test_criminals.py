@@ -3899,17 +3899,17 @@ class RoadsideResetGateTests(TestCase):
 
     @staticmethod
     def _pushed_modes(mock_push):
-        """guid -> last (enabled, mode) pushed this tick."""
+        """guid -> last block set pushed this tick."""
         out = {}
         for c in mock_push.await_args_list:
-            out[c.args[0].guid] = (c.args[2], c.args[3])
+            out[c.args[0].guid] = c.args[2]
         return out
 
     async def test_wanted_no_cops_gets_roadside_allowance(
         self, mock_sys_msg, mock_refresh
     ):
-        """No cops on duty: the wanted suspect gets wanted_roadside."""
-        from amc.no_teleport import MODE_WANTED_ROADSIDE
+        """No cops on duty: the wanted suspect gets the roadside block set."""
+        from amc.no_teleport import WANTED_ROADSIDE_BLOCKS
 
         criminal = await self._setup_criminal(wanted_remaining=300)
         players = _make_players_list(
@@ -3917,14 +3917,14 @@ class RoadsideResetGateTests(TestCase):
         )
         mock_push = await self._tick(players, None)
         pushed = self._pushed_modes(mock_push)
-        self.assertEqual(pushed[criminal.guid], (True, MODE_WANTED_ROADSIDE))
+        self.assertEqual(pushed[criminal.guid], WANTED_ROADSIDE_BLOCKS)
 
     async def test_wanted_cop_close_gets_full_lock(
         self, mock_sys_msg, mock_refresh
     ):
-        """Cop within 500 m: wanted suspect pushed MODE_ALL, cop pushed
-        reset_cargo_keep."""
-        from amc.no_teleport import MODE_ALL, MODE_RESET_CARGO_KEEP
+        """Cop within 500 m: wanted suspect pushed FULL_BLOCKS, cop pushed
+        POLICE_NEAR_BLOCKS."""
+        from amc.no_teleport import FULL_BLOCKS, POLICE_NEAR_BLOCKS
 
         criminal = await self._setup_criminal(wanted_remaining=300)
         officer = await self._setup_police()
@@ -3934,15 +3934,15 @@ class RoadsideResetGateTests(TestCase):
         ])
         mock_push = await self._tick(players, None)
         pushed = self._pushed_modes(mock_push)
-        self.assertEqual(pushed[criminal.guid], (True, MODE_ALL))
-        self.assertEqual(pushed[officer.guid], (True, MODE_RESET_CARGO_KEEP))
+        self.assertEqual(pushed[criminal.guid], FULL_BLOCKS)
+        self.assertEqual(pushed[officer.guid], POLICE_NEAR_BLOCKS)
 
     async def test_wanted_cop_far_gets_allowance_and_cop_cleared(
         self, mock_sys_msg, mock_refresh
     ):
-        """Cop beyond 505 m: wanted suspect gets wanted_roadside, cop is
+        """Cop beyond 505 m: wanted suspect gets the roadside set, cop is
         cleared (unrestricted)."""
-        from amc.no_teleport import MODE_ALL, MODE_WANTED_ROADSIDE
+        from amc.no_teleport import WANTED_ROADSIDE_BLOCKS
 
         criminal = await self._setup_criminal(wanted_remaining=300)
         officer = await self._setup_police()
@@ -3952,11 +3952,11 @@ class RoadsideResetGateTests(TestCase):
         ])
         mock_push = await self._tick(players, None)
         pushed = self._pushed_modes(mock_push)
-        self.assertEqual(pushed[criminal.guid], (True, MODE_WANTED_ROADSIDE))
-        self.assertEqual(pushed[officer.guid], (False, MODE_ALL))
+        self.assertEqual(pushed[criminal.guid], WANTED_ROADSIDE_BLOCKS)
+        self.assertIsNone(pushed[officer.guid])
 
     async def test_manual_flag_not_downgraded(self, mock_sys_msg, mock_refresh):
-        """A manually flagged wanted keeps MODE_ALL; the tick never pushes."""
+        """A manually flagged wanted keeps the full lock; the tick never pushes."""
         criminal = await self._setup_criminal(wanted_remaining=300)
         criminal.no_teleport = True
         await criminal.asave()
@@ -3969,7 +3969,7 @@ class RoadsideResetGateTests(TestCase):
     async def test_hysteresis_at_gate_boundary(self, mock_sys_msg, mock_refresh):
         """Once far, the allowance survives down to the 500 m gate; regaining
         it after going near requires >505 m."""
-        from amc.no_teleport import MODE_ALL, MODE_WANTED_ROADSIDE
+        from amc.no_teleport import FULL_BLOCKS, WANTED_ROADSIDE_BLOCKS
 
         criminal = await self._setup_criminal(wanted_remaining=10_000)
         officer = await self._setup_police()
@@ -3993,10 +3993,15 @@ class RoadsideResetGateTests(TestCase):
             await tick_at(_COP_IN_GATE)       # 400 m — near
             await tick_at(_COP_HYSTERESIS)    # 502 m — still near (needs >505)
 
-        modes = [c.args[3] for c in mock_push.await_args_list if c.args[0].guid == criminal.guid]
+        modes = [c.args[2] for c in mock_push.await_args_list if c.args[0].guid == criminal.guid]
         self.assertEqual(
             modes,
-            [MODE_WANTED_ROADSIDE, MODE_WANTED_ROADSIDE, MODE_ALL, MODE_ALL],
+            [
+                WANTED_ROADSIDE_BLOCKS,
+                WANTED_ROADSIDE_BLOCKS,
+                FULL_BLOCKS,
+                FULL_BLOCKS,
+            ],
         )
 
     async def test_pushes_are_transition_only(self, mock_sys_msg, mock_refresh):
