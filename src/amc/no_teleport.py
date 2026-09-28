@@ -34,9 +34,11 @@ async def teleport_lock_mode(character) -> str | None:
     """Effective lock MODE for one character, or None when unlocked.
 
     Priority: manual flag / wanted / wanted-grace (PendingWanted) all yield
-    MODE_ALL. On-duty police alone yields MODE_RESET_CARGO_KEEP — police stay
-    able to use cargo-strip resets; only the cargo-kept roadside flow is
-    blocked (freeman 2026-09-27). Any ALL-source wins over police.
+    MODE_ALL. On-duty police yields MODE_RESET_CARGO_KEEP ONLY while a live
+    wanted criminal exists on the server (freeman 2026-09-27: outside active
+    chases there is nothing to enforce, so police are fully unlocked) —
+    police stay able to use cargo-strip resets; only the cargo-kept roadside
+    flow is blocked. Any ALL-source wins over police.
     """
     from amc.models import PendingWanted, PoliceSession, Wanted
 
@@ -53,7 +55,11 @@ async def teleport_lock_mode(character) -> str | None:
     if await PoliceSession.objects.filter(
         character=character, ended_at__isnull=True
     ).aexists():
-        return MODE_RESET_CARGO_KEEP
+        if await Wanted.objects.filter(
+            expired_at__isnull=True, wanted_remaining__gt=0
+        ).aexists():
+            return MODE_RESET_CARGO_KEEP
+        return None
     return None
 
 
