@@ -101,6 +101,11 @@ LOGOUT_PROXIMITY_RANGE = 200_000  # 2km in game units — no effect beyond this
 # distance = infinity (F(D) = 3.0x decay, A(D) = 1/3x growth).
 WANTED_SPEED_PIVOT_KMH = 50.0     # above: wanted grows; below: wanted decays
 WANTED_LAW_RATE = 1.0 / 50.0      # s of wanted per (km/h from pivot) per second
+# On-foot law (freeman 2026-09-28): same |S - pivot| shape, own pivot/rate —
+# standing still on foot decays exactly like a parked vehicle
+# (5 × 1/5 = 1.0 s/s), 5 km/h is the no-change point, above it heat grows.
+WANTED_ON_FOOT_PIVOT_KMH = 5.0
+WANTED_ON_FOOT_RATE = 1.0 / 5.0   # s of wanted per (km/h from pivot) per second
 HIDE_DECAY_MAX_MULT = 3.0         # F(D) ceiling — far-parked decay multiplier
 WANTED_ACCRUAL_MIN_MULT = 1 / 3   # A(D) floor — far-speeding growth multiplier
 WANTED_DISTANCE_SCALE_M = 2000.0  # metres past the cap for half the swing
@@ -897,7 +902,11 @@ _compute_stars = compute_stars
 async def tick_wanted_countdown(http_client, http_client_mod, http_client_mgmt=None) -> None:
     """Single tick of the wanted countdown. Called from an arq cron.
 
-    Speed-based wanted law (2026-09 rework, corrected 2026-09-20):
+    Speed-based wanted law (2026-09 rework, corrected 2026-09-20;
+    on-foot pivot added freeman 2026-09-28):
+        on foot:                 pivot 5 km/h at 1/5 rate — standing still
+                                 decays 1.0 s/s (same as a parked vehicle),
+                                 above 5 km/h heat grows
         running (S >= 50 km/h):  wanted GROWS at (S - 50)/50 * A(D) s per
                                  second, capped at INITIAL_WANTED_LEVEL (5★);
                                  A(D) falls from 1.0x at the 500 m near cap
@@ -1059,13 +1068,17 @@ async def tick_wanted_countdown(http_client, http_client_mod, http_client_mgmt=N
     # Speed telemetry from the mod management API (game units/s).
     # Missing entry or unavailable API -> treat as stationary (full decay).
     speed_map: dict[str, float] = {}
+    on_foot_guids: set[str] = set()  # no vehicle → on-foot law (5 km/h pivot)
     if http_client_mgmt:
         try:
             mgmt_locations = await get_players_locations(http_client_mgmt)
         except Exception:  # noqa: BLE001 — graceful degradation to stationary
             mgmt_locations = None
         if mgmt_locations:
-            speed_map = {e["CharacterGuid"]: e["Speed"] for e in mgmt_locations}
+            for e in mgmt_locations:
+                speed_map[e["CharacterGuid"]] = e["Speed"]
+                if not e.get("VehicleKey"):
+                    on_foot_guids.add(e["CharacterGuid"])
 
     # Identify on-duty police officers (only if we have locations)
     cop_locations = []
@@ -1224,12 +1237,14 @@ async def tick_wanted_countdown(http_client, http_client_mod, http_client_mgmt=N
         if currently_in_modded:
             _current_modded_guids.add(sus_guid)
 
-        # --- Speed-based wanted law (corrected 2026-09-20) ---
-        # Running (>= 50 km/h): grow, scaled by A(D) — speeding far builds
-        # wanted SLOWER (1/3x floor), never faster (near cap = 1.0x).
-        # Hiding (< 50 km/h): decay, scaled by F(D) — hiding far clears
-        # FASTER (3x ceiling), and near cops decay runs at the base rate.
-        # No gate, no floor: the meter always moves with the suspect's speed.
+        # --- Speed-based wanted law (corrected 2026-09-20; on-foot pivot
+        # added 2026-09-28) ---
+        # Running (>= 50 km/h in a vehicle): grow, scaled by A(D) — speeding
+        # far builds wanted SLOWER (1/3x floor), never faster (near cap =
+        # 1.0x). Hiding (< 50 km/h, in a vehicle): decay, scaled by F(D) —
+        # hiding far clears FASTER (3x ceiling), and near cops decay runs at
+        # the base rate. On foot: own law below (5 km/h pivot, 1/5 rate).
+        # No gate, no floor: the meter always moves with the speed.
         speed_units = speed_map.get(sus_guid.upper(), 0.0)
         speed_kmh = speed_units * 0.036  # game units/s -> km/h
 
@@ -1271,10 +1286,17 @@ async def tick_wanted_countdown(http_client, http_client_mod, http_client_mgmt=N
                     + evasion_quality_gain(min_dist, speed_kmh),
                 )
 
-            if speed_kmh >= WANTED_SPEED_PIVOT_KMH:
+            # On-foot law (freeman 2026-09-28): same |S - pivot| shape,
+            # own pivot (5 km/h) and rate — standing still on foot decays at
+            # the same 1.0 s/s as a parked vehicle.
+            on_foot = sus_guid.upper() in on_foot_guids
+            pivot = WANTED_ON_FOOT_PIVOT_KMH if on_foot else WANTED_SPEED_PIVOT_KMH
+            law_rate = WANTED_ON_FOOT_RATE if on_foot else WANTED_LAW_RATE
+
+            if speed_kmh >= pivot:
                 growth = (
-                    (speed_kmh - WANTED_SPEED_PIVOT_KMH)
-                    * WANTED_LAW_RATE
+                    (speed_kmh - pivot)
+                    * law_rate
                     * TICK_INTERVAL
                 )
                 if min_dist is not None:
@@ -1292,8 +1314,8 @@ async def tick_wanted_countdown(http_client, http_client_mod, http_client_mgmt=N
                 else:
                     mult = 1.0
                 decay = (
-                    (WANTED_SPEED_PIVOT_KMH - speed_kmh)
-                    * WANTED_LAW_RATE
+                    (pivot - speed_kmh)
+                    * law_rate
                     * mult
                     * TICK_INTERVAL
                 )

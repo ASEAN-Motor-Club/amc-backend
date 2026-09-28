@@ -560,7 +560,8 @@ class WantedCountdownTickTests(TestCase):
         )
         # 100 km/h in game units/s (speed_units * 0.036 = km/h)
         mgmt_entries = [
-            {"CharacterGuid": criminal.guid.upper(), "Speed": 100 / 0.036}
+            {"CharacterGuid": criminal.guid.upper(), "Speed": 100 / 0.036,
+             "VehicleKey": "Sedan"}
         ]
         mock_http = AsyncMock()
         mock_http_mod = AsyncMock()
@@ -885,7 +886,7 @@ class WantedCountdownTickTests(TestCase):
     ):
         """Suspect moving at 100 km/h → +1.0 s of wanted per tick."""
         criminal = await self._setup_criminal(wanted_remaining=300)
-        mock_locs.return_value = [_make_mgmt_entry(criminal.guid, 2778)]  # ≈100 km/h
+        mock_locs.return_value = [_make_mgmt_entry(criminal.guid, 2778, "Sedan")]  # ≈100 km/h, in vehicle
         players = _make_players_list(
             [_make_player_data(criminal.player.unique_id, criminal.guid, *_SUSPECT_LOC)]
         )
@@ -907,7 +908,7 @@ class WantedCountdownTickTests(TestCase):
     ):
         """Wanted growth caps at INITIAL_WANTED_LEVEL (5 stars = 600 s)."""
         criminal = await self._setup_criminal(wanted_remaining=595)
-        mock_locs.return_value = [_make_mgmt_entry(criminal.guid, 2778)]  # ≈100 km/h
+        mock_locs.return_value = [_make_mgmt_entry(criminal.guid, 2778, "Sedan")]  # ≈100 km/h, in vehicle
         players = _make_players_list(
             [_make_player_data(criminal.player.unique_id, criminal.guid, *_SUSPECT_LOC)]
         )
@@ -928,7 +929,7 @@ class WantedCountdownTickTests(TestCase):
         """The 500 m gate freezes DECAY only — running still accrues near cops."""
         criminal = await self._setup_criminal(wanted_remaining=300)
         officer = await self._setup_police()
-        mock_locs.return_value = [_make_mgmt_entry(criminal.guid, 2778)]  # ≈100 km/h
+        mock_locs.return_value = [_make_mgmt_entry(criminal.guid, 2778, "Sedan")]  # ≈100 km/h, in vehicle
         sx, sy, sz = _SUSPECT_LOC
         players = _make_players_list([
             _make_player_data(officer.player.unique_id, officer.guid, *_COP_MED),
@@ -952,7 +953,7 @@ class WantedCountdownTickTests(TestCase):
         the nearest cop 3 km away accrues at A(3 km) ≈ 0.63× the near rate."""
         criminal = await self._setup_criminal(wanted_remaining=300)
         officer = await self._setup_police()
-        mock_locs.return_value = [_make_mgmt_entry(criminal.guid, 2778)]  # ≈100 km/h
+        mock_locs.return_value = [_make_mgmt_entry(criminal.guid, 2778, "Sedan")]  # ≈100 km/h, in vehicle
         sx, sy, sz = _SUSPECT_LOC
         players_far = _make_players_list([
             _make_player_data(officer.player.unique_id, officer.guid, *_COP_3KM),
@@ -1003,7 +1004,7 @@ class WantedCountdownTickTests(TestCase):
     ):
         """Creeping at 45 km/h decays at (50-45)/50 = 0.1 s/s (no cops)."""
         criminal = await self._setup_criminal(wanted_remaining=300)
-        mock_locs.return_value = [_make_mgmt_entry(criminal.guid, 1250)]  # 45 km/h
+        mock_locs.return_value = [_make_mgmt_entry(criminal.guid, 1250, "Sedan")]  # 45 km/h, in vehicle
         players = _make_players_list(
             [_make_player_data(criminal.player.unique_id, criminal.guid, *_SUSPECT_LOC)]
         )
@@ -1017,6 +1018,52 @@ class WantedCountdownTickTests(TestCase):
         wanted = await Wanted.objects.aget(character=criminal)
         # 10 ticks × 0.1 × F(no cops = 1.0) = 1.0
         self.assertAlmostEqual(wanted.wanted_remaining, 299, delta=0.5)
+
+    # -------------------------------------------------------------------
+    # On-foot law (freeman 2026-09-28): pivot 5 km/h, rate 1/5 — standing
+    # still decays exactly like a parked vehicle; above 5 grows.
+    # -------------------------------------------------------------------
+
+    async def _run_on_foot_ticks(self, wanted_remaining, speed, mock_locs, mock_sys_msg, mock_refresh):
+        """Shared on-foot law runner (mocks come from the caller's @patch)."""
+        criminal = await self._setup_criminal(wanted_remaining=wanted_remaining)
+        mock_locs.return_value = [_make_mgmt_entry(criminal.guid, speed)]  # on foot
+        players = _make_players_list(
+            [_make_player_data(criminal.player.unique_id, criminal.guid, *_SUSPECT_LOC)]
+        )
+        mock_http = AsyncMock()
+        mock_http_mod = AsyncMock()
+        with patch("amc.criminals.get_players", new_callable=AsyncMock, return_value=players):
+            for _ in range(10):
+                await tick_wanted_countdown(mock_http, mock_http_mod, AsyncMock())
+        return await Wanted.objects.aget(character=criminal)
+
+    @patch("amc.criminals.get_players_locations", new_callable=AsyncMock)
+    async def test_on_foot_standing_decays_like_parked(
+        self, mock_locs, mock_sys_msg, mock_refresh,
+    ):
+        """On foot standing still decays exactly like a parked vehicle:
+        (5-0) × 1/5 = 1.0 s/s (freeman 2026-09-28)."""
+        wanted = await self._run_on_foot_ticks(300, 0, mock_locs, mock_sys_msg, mock_refresh)
+        self.assertAlmostEqual(wanted.wanted_remaining, 290, delta=0.1)
+        self.assertIsNone(wanted.expired_at)
+
+    @patch("amc.criminals.get_players_locations", new_callable=AsyncMock)
+    async def test_on_foot_at_5kmh_no_change(
+        self, mock_locs, mock_sys_msg, mock_refresh,
+    ):
+        """On foot at the 5 km/h pivot → heat frozen (no decay, no growth)."""
+        wanted = await self._run_on_foot_ticks(300, 139, mock_locs, mock_sys_msg, mock_refresh)
+        self.assertAlmostEqual(wanted.wanted_remaining, 300, delta=0.01)
+        self.assertIsNone(wanted.expired_at)
+
+    @patch("amc.criminals.get_players_locations", new_callable=AsyncMock)
+    async def test_on_foot_above_5kmh_gains(
+        self, mock_locs, mock_sys_msg, mock_refresh,
+    ):
+        """On foot above 5 km/h grows: (10-5) × 1/5 = 1.0 s/s at 10 km/h."""
+        wanted = await self._run_on_foot_ticks(300, 278, mock_locs, mock_sys_msg, mock_refresh)
+        self.assertAlmostEqual(wanted.wanted_remaining, 310, delta=0.1)
 
     # -----------------------------------------------------------------------
     # Dormant amnesty flow details
@@ -2935,12 +2982,16 @@ class ClearSuspectTests(TestCase):
         self.assertNotIn(character.guid, _last_suspect_guids)
 
 
-def _make_mgmt_entry(character_guid, speed):
-    """Build a fake entry matching get_players_locations() output format."""
+def _make_mgmt_entry(character_guid, speed, vehicle_key=None):
+    """Build a fake entry matching get_players_locations() output format.
+
+    vehicle_key=None means ON FOOT (VehicleKey absent in real telemetry) —
+    the on-foot law applies. Pass a truthy key for in-vehicle suspects.
+    """
     return {
         "CharacterGuid": character_guid.upper(),
         "Location": {"X": 0, "Y": 0, "Z": 0},
-        "VehicleKey": None,
+        "VehicleKey": vehicle_key if vehicle_key else "",
         "Yaw": 0,
         "Speed": speed,
         "Velocity": {"X": 0, "Y": 0, "Z": 0},
@@ -3193,7 +3244,7 @@ class CompassTickTests(TestCase):
             _make_player_data(officer.player.unique_id, officer.guid, *_COMPASS_COP_3KM),
         ])
         mock_get_locations.return_value = [
-            _make_mgmt_entry(criminal.guid, 5556),  # ≈200 km/h
+            _make_mgmt_entry(criminal.guid, 5556, "Sedan"),  # ≈200 km/h, in vehicle
         ]
         mock_police.return_value = _AsyncList([officer])
         mock_http = AsyncMock()
@@ -3239,7 +3290,7 @@ class CompassTickTests(TestCase):
 
         # 80 km/h: same 10 s since last send → past the 3 s interval
         mock_get_locations.return_value = [
-            _make_mgmt_entry(criminal.guid, 2222),  # ≈80 km/h
+            _make_mgmt_entry(criminal.guid, 2222, "Sedan"),  # ≈80 km/h, in vehicle
         ]
         await tick_police_suspect_locations(mock_http, mock_http_mod, mock_http_mgmt)
         mock_sys_msg.assert_awaited_once()
@@ -3541,7 +3592,7 @@ class CompassTickTests(TestCase):
             _make_player_data(officer.player.unique_id, officer.guid, *_COMPASS_COP_3KM),
         ])
         mock_get_locations.return_value = [
-            _make_mgmt_entry(criminal.guid, 5556),  # uppercase in speed map
+            _make_mgmt_entry(criminal.guid, 5556, "Sedan"),  # uppercase in speed map
         ]
         mock_police.return_value = _AsyncList([officer])
         mock_http = AsyncMock()
