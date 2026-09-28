@@ -23,8 +23,9 @@ from amc.mod_server import (
     transfer_money,
 )
 from amc_finance.services import (
-    record_treasury_confiscation_income,
+    record_pd_fund_confiscation_income,
 )
+from django.conf import settings
 from amc.pipeline.profit import on_player_profit
 from amc.police import (
     get_active_police_characters,
@@ -213,7 +214,7 @@ async def execute_arrest(
                     str(suspect_char.player_id),
                 )
 
-                await record_treasury_confiscation_income(
+                await record_pd_fund_confiscation_income(
                     confiscated_amount, "Police Confiscation"
                 )
 
@@ -232,8 +233,12 @@ async def execute_arrest(
                         continue
                     active_police.append(officer)
                 if active_police:
-                    per_officer_money = max(
-                        1, confiscated_amount // len(active_police)
+                    per_officer_money = (
+                        int(
+                            confiscated_amount
+                            * settings.POLICE_CONFISCATION_OFFICER_SHARE
+                        )
+                        // len(active_police)
                     )
                     for officer in active_police:
                         await record_confiscation_for_level(
@@ -242,6 +247,8 @@ async def execute_arrest(
                             http_client=http_client,
                             session=http_client_mod,
                         )
+                        if per_officer_money <= 0:
+                            continue
                         await transfer_money(
                             http_client_mod,
                             int(per_officer_money),

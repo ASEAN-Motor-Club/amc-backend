@@ -79,6 +79,7 @@ from amc.subsidies import subsidise_player, set_aside_player_savings  # noqa: F4
 from amc_finance.loans import repay_loan_for_profit  # noqa: F401
 from amc_finance.services import (
     get_treasury_fund_balance,
+    record_pd_fund_confiscation_income,  # noqa: F401
     record_treasury_confiscation_income,  # noqa: F401
     send_fund_to_player_wallet,  # noqa: F401
 )
