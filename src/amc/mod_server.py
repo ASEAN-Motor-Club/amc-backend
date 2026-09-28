@@ -452,20 +452,30 @@ _patrol_payments_cache_ts: float = 0
 
 
 class _WriteRateLimiter:
-    """Ensures a minimum gap between write (POST/PUT/DELETE) requests."""
+    """Ensures a minimum gap between write (POST/PUT/DELETE) requests.
+
+    Keeps one asyncio.Lock + timestamp per event loop: the module-level
+    singleton was a single Lock whose waiters bind to the loop that first
+    awaited it, so acquires from another loop (arq worker vs Discord bot
+    after a restart) raised "bound to a different event loop".
+    """
 
     def __init__(self, min_interval_ms: float = 500):
-        self._lock = asyncio.Lock()
         self._min_interval = min_interval_ms / 1000
-        self._last_request_time = 0.0
+        self._per_loop: dict[int, tuple[asyncio.Lock, list[float]]] = {}
 
     async def acquire(self):
-        async with self._lock:
-            now = asyncio.get_running_loop().time()
-            elapsed = now - self._last_request_time
+        loop = asyncio.get_running_loop()
+        state = self._per_loop.get(id(loop))
+        if state is None:
+            state = (asyncio.Lock(), [0.0])
+            self._per_loop[id(loop)] = state
+        lock, last_holder = state
+        async with lock:
+            elapsed = loop.time() - last_holder[0]
             if elapsed < self._min_interval:
                 await asyncio.sleep(self._min_interval - elapsed)
-            self._last_request_time = asyncio.get_running_loop().time()
+            last_holder[0] = loop.time()
 
 
 _write_limiter = _WriteRateLimiter(min_interval_ms=500)
