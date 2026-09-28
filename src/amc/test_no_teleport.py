@@ -123,20 +123,27 @@ class EffectiveFlagSyncTests(TestCase):
         assert await self._sync(character) is True
 
     async def test_on_duty_police_pushes_true(self):
-        from amc.models import PoliceSession
+        from amc.models import PoliceSession, Wanted
 
         character = await self._make()
         await _sync_create(PoliceSession, character=character)
+        # police lock only arms while a wanted criminal is live (freeman
+        # 2026-09-27) — give the server one so the flag pushes
+        other = await self._make()
+        await _sync_create(
+            Wanted, character=other, wanted_remaining=600, amount=0
+        )
         assert await self._sync(character) is True
 
-    async def test_on_duty_police_mode_is_reset_cargo_keep(self):
-        """freeman 2026-09-27: police lock ONLY the cargo-kept roadside flow."""
+    async def test_on_duty_police_without_live_wanted_is_unlocked(self):
+        """freeman 2026-09-27: police are only locked while a wanted criminal
+        is live on the server — no active chases, nothing to enforce."""
         from amc.models import PoliceSession
-        from amc.no_teleport import MODE_RESET_CARGO_KEEP, teleport_lock_mode
+        from amc.no_teleport import teleport_lock_mode
 
         character = await self._make()
         await _sync_create(PoliceSession, character=character)
-        assert await teleport_lock_mode(character) == MODE_RESET_CARGO_KEEP
+        assert await teleport_lock_mode(character) is None
 
         with patch(
             "amc.mod_server.set_no_teleport", new_callable=AsyncMock
@@ -144,8 +151,7 @@ class EffectiveFlagSyncTests(TestCase):
             from amc.no_teleport import sync_no_teleport
 
             await sync_no_teleport(character, AsyncMock())
-        assert mock_set.await_args[0][2] is True
-        assert mock_set.await_args[0][3] == MODE_RESET_CARGO_KEEP
+        assert mock_set.await_args[0][2] is False
 
     async def test_wanted_mode_is_all(self):
         from amc.models import Wanted
@@ -156,6 +162,20 @@ class EffectiveFlagSyncTests(TestCase):
             Wanted, character=character, wanted_remaining=600, amount=0
         )
         assert await teleport_lock_mode(character) == MODE_ALL
+
+    async def test_on_duty_police_with_live_wanted_is_reset_cargo_keep(self):
+        """Any live wanted on the server arms the police reset_cargo_keep lock."""
+        from amc.models import PoliceSession, Wanted
+        from amc.no_teleport import MODE_RESET_CARGO_KEEP, teleport_lock_mode
+
+        character = await self._make()
+        await _sync_create(PoliceSession, character=character)
+        # someone else is wanted — not this character
+        other = await self._make()
+        await _sync_create(
+            Wanted, character=other, wanted_remaining=600, amount=0
+        )
+        assert await teleport_lock_mode(character) == MODE_RESET_CARGO_KEEP
 
     async def test_police_with_wanted_escalates_to_all(self):
         """Any ALL-source (wanted/grace/manual) wins over the police mode."""
@@ -219,9 +239,17 @@ class EffectiveFlagSyncTests(TestCase):
         self.assertIs(mock_push.await_args_list[0][0][2], True)
 
     async def test_police_activation_pushes_flag(self):
+        """With a live wanted on the server, /police activation arms the
+        reset_cargo_keep lock and deactivation clears it."""
+        from amc.models import Wanted
         from amc.police import activate_police, deactivate_police
 
         character = await self._make()
+        # a wanted criminal live on the server arms the police lock
+        other = await self._make()
+        await _sync_create(
+            Wanted, character=other, wanted_remaining=600, amount=0
+        )
         mod = AsyncMock()
         with patch(
             "amc.no_teleport.push_no_teleport", new_callable=AsyncMock
