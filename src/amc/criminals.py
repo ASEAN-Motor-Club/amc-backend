@@ -25,7 +25,15 @@ from amc.models import (
 from amc.mod_detection import detect_custom_parts, POLICE_DUTY_WHITELIST
 from amc.mod_server import clear_suspect, despawn_player_vehicle, force_exit_vehicle, get_player, get_player_customization, get_player_last_vehicle, get_player_last_vehicle_parts, make_suspect, send_system_message, show_popup
 from amc.player_tags import refresh_player_name
-from amc.no_teleport import push_no_teleport, sync_no_teleport
+from amc.no_teleport import (
+    FULL_BLOCKS,
+    POLICE_NEAR_BLOCKS,
+    WANTED_ROADSIDE_BLOCKS,
+    _pushed_lock_state,
+    push_no_teleport_cached,
+    push_no_teleport,
+    sync_no_teleport,
+)
 from amc.special_cargo import WANTED_MIN_BOUNTY
 
 SUSPECT_COSTUMES = getattr(settings, "SUSPECT_COSTUMES", frozenset())
@@ -52,6 +60,31 @@ _underwater_since: dict[str, float] = {}
 def _now() -> float:
     """Clock indirection so tests can advance the grace timer."""
     return time.monotonic()
+
+
+# ---------------------------------------------------------------------------
+# Roadside-reset distance gate (freeman 2026-09-28 PR2)
+# ---------------------------------------------------------------------------
+# 100 game units = 1 m.
+ROADSIDE_GATE_UNITS = 50_000      # 500 m: cops within this of a wanted
+ROADSIDE_RELEASE_UNITS = 50_500   # 505 m: hysteresis before the allowance returns
+
+# guid -> last computed "cops far" state for a wanted suspect (hysteresis).
+_roadside_far_state: dict[str, bool] = {}
+
+
+def _cops_far(min_dist: float | None, prev_far: bool | None) -> bool:
+    """Hysteresis wrapper around the 500 m gate.
+
+    Gaining the roadside allowance requires > ROADSIDE_RELEASE_UNITS; losing
+    it happens at <= ROADSIDE_GATE_UNITS, so a suspect hovering at the
+    boundary does not flap the mod flag every tick.
+    """
+    if min_dist is None:
+        return True  # no cops on duty: unobserved -> allowance on
+    if prev_far:
+        return min_dist > ROADSIDE_GATE_UNITS
+    return min_dist > ROADSIDE_RELEASE_UNITS
 
 
 # Time-based decay reference — online suspects clear in BASE_WANTED_DURATION
@@ -786,9 +819,9 @@ async def create_or_refresh_wanted(
         )
         created = True
         # Teleport lock: invisible flag replaces the R name tag.
-        from amc.no_teleport import push_no_teleport_later
+        from amc.no_teleport import FULL_BLOCKS, push_no_teleport_later
 
-        push_no_teleport_later(character, http_client_mod, True)
+        push_no_teleport_later(character, http_client_mod, FULL_BLOCKS)
 
     await refresh_player_name(character, http_client_mod)
     if notify:
@@ -858,7 +891,7 @@ async def apply_pending_wanted(pending, http_client, http_client_mod) -> None:
     await pending.adelete()
     # Grace-window teleport lock no longer needed: the wanted is live (its
     # stars carry the visible R tag from here on).
-    await push_no_teleport(character, http_client_mod, False)
+    await push_no_teleport(character, http_client_mod, None)
     if created and http_client:
         from django.core.cache import cache
 
@@ -1003,7 +1036,7 @@ async def tick_wanted_countdown(http_client, http_client_mod, http_client_mgmt=N
             # Strip the teleport lock the pending carried (flag cleared; the
             # dormant rule drops the trigger entirely).
             for p in due_pendings:
-                await push_no_teleport(p.character, http_client_mod, False)
+                await push_no_teleport(p.character, http_client_mod, None)
         if organic:
             await Wanted.objects.filter(
                 id__in=[w.id for w in organic]
@@ -1082,6 +1115,7 @@ async def tick_wanted_countdown(http_client, http_client_mod, http_client_mgmt=N
 
     # Identify on-duty police officers (only if we have locations)
     cop_locations = []
+    police_sessions = []
     if locations:
         online_threshold = timezone.now() - timedelta(seconds=60)
         police_sessions = [
@@ -1351,6 +1385,86 @@ async def tick_wanted_countdown(http_client, http_client_mod, http_client_mgmt=N
     live_guids = {w.character.guid for w in wanted_list}
     for gone in [g for g in _underwater_since if g not in live_guids]:
         _underwater_since.pop(gone, None)
+
+    # ------------------------------------------------------------------
+    # Roadside-reset distance gate (freeman 2026-09-28 PR2): refine the
+    # no-teleport BLOCK SET per wanted suspect / on-duty cop by live
+    # distance (transition-only pushes).
+    #   wanted suspect: WANTED_ROADSIDE_BLOCKS (cargo-kept roadside reset
+    #     allowed, everything else blocked) while every on-duty cop is
+    #     beyond the 500 m gate; FULL_BLOCKS while a cop is close. No cops
+    #     on duty counts as far. Manual admin flags are never downgraded.
+    #   on-duty cop: POLICE_NEAR_BLOCKS (cargo-strip reset always allowed,
+    #     cargo-kept roadside locked) while within 500 m of an active
+    #     wanted; cleared (unrestricted) when none is.
+    # A cop who is themselves wanted, manually flagged, or under a
+    # pending-wanted grace is skipped — those locks belong to
+    # sync_no_teleport.
+    # ------------------------------------------------------------------
+    if http_client_mod:
+        wanted_locs = {
+            w.character.guid: locations[w.character.guid][1]
+            for w in wanted_list
+            if w.character.guid in locations
+        }
+        for wanted in wanted_list:
+            guid = wanted.character.guid
+            if wanted.character.no_teleport or guid not in locations:
+                continue
+            sus_loc = locations[guid][1]
+            min_d = (
+                min(_distance_3d(sus_loc, cl) for cl in cop_locations)
+                if cop_locations
+                else None
+            )
+            far = _cops_far(min_d, _roadside_far_state.get(guid))
+            _roadside_far_state[guid] = far
+            blocks = WANTED_ROADSIDE_BLOCKS if far else FULL_BLOCKS
+            await push_no_teleport_cached(
+                wanted.character, http_client_mod, blocks
+            )
+
+        pending_guids = {
+            g
+            async for g in PendingWanted.objects.values_list(
+                "character__guid", flat=True
+            )
+            if g
+        }
+        refined_cop_guids = set()
+        for ps in police_sessions:
+            cop_char = ps.character
+            guid = cop_char.guid
+            if not guid or guid not in locations:
+                continue
+            if (
+                cop_char.no_teleport
+                or guid in wanted_locs
+                or guid in pending_guids
+            ):
+                continue
+            refined_cop_guids.add(guid)
+            cop_loc = locations[guid][1]
+            near_wanted = any(
+                _distance_3d(cop_loc, wl) <= ROADSIDE_GATE_UNITS
+                for wl in wanted_locs.values()
+            )
+            if near_wanted:
+                await push_no_teleport_cached(
+                    cop_char, http_client_mod, POLICE_NEAR_BLOCKS
+                )
+            else:
+                await push_no_teleport_cached(
+                    cop_char, http_client_mod, None
+                )
+
+        # Prune the refinement caches for characters that left this tick's
+        # scope (wanted cleared, duty ended, offline).
+        live_refined = set(wanted_locs) | refined_cop_guids
+        for gone in [g for g in _roadside_far_state if g not in live_refined]:
+            _roadside_far_state.pop(gone, None)
+        for gone in [g for g in _pushed_lock_state if g not in live_refined]:
+            _pushed_lock_state.pop(gone, None)
 
     # Bulk save — must happen BEFORE refresh_player_name so it reads correct DB state
     # (the bounty in `amount` is frozen at trigger time — the tick never touches it)

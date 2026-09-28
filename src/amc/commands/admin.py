@@ -1434,7 +1434,7 @@ async def cmd_noteleport(ctx: CommandContext, target_player_name: str):
     character/vehicle teleport + respawn RPCs for the flagged GUID. Persisted
     on Character.no_teleport and re-asserted on every login.
     """
-    from amc.no_teleport import push_no_teleport
+    from amc.no_teleport import FULL_BLOCKS, push_no_teleport
 
     if not ctx.player_info or not ctx.player_info.get("bIsAdmin"):
         return
@@ -1468,7 +1468,9 @@ async def cmd_noteleport(ctx: CommandContext, target_player_name: str):
     target_character.no_teleport = not target_character.no_teleport
     await target_character.asave(update_fields=["no_teleport"])
     await push_no_teleport(
-        target_character, ctx.http_client_mod, target_character.no_teleport
+        target_character,
+        ctx.http_client_mod,
+        FULL_BLOCKS if target_character.no_teleport else None,
     )
 
     state = "locked" if target_character.no_teleport else "unlocked"
