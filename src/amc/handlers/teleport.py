@@ -115,7 +115,6 @@ async def handle_reset_vehicle(event, player, character, ctx):
             character.last_location is not None
             and character.last_online is not None
         )
-        open("/tmp/rf2.log","a").write(f"fresh={location_fresh} age={(now-character.last_online).total_seconds() if character.last_online else None}\n")
         if location_fresh and now - character.last_online <= timedelta(
             seconds=LOCATION_FRESHNESS_SECONDS
         ):
