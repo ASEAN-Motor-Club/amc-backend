@@ -155,21 +155,22 @@ class CharacterSelect(ui.Select):
             )
             return
 
-        try:
-            await register_player_withdrawal(net_cost, character, player)
-        except ValueError as e:
-            await interaction.followup.send(f"Bank error: {e}", ephemeral=True)
-            return
+        if net_cost > 0:
+            try:
+                await register_player_withdrawal(net_cost, character, player)
+            except ValueError as e:
+                await interaction.followup.send(f"Bank error: {e}", ephemeral=True)
+                return
 
-        try:
-            await transfer_money(
-                mod_session, net_cost, "House Rent", str(player.unique_id)
-            )
-        except Exception:
-            logger.warning(
-                "Failed to transfer wallet compensation for %s", character.guid,
-                exc_info=True,
-            )
+            try:
+                await transfer_money(
+                    mod_session, net_cost, "House Rent", str(player.unique_id)
+                )
+            except Exception:
+                logger.warning(
+                    "Failed to transfer wallet compensation for %s", character.guid,
+                    exc_info=True,
+                )
 
         try:
             await rent_house(mod_session, house_guid, character.guid)
@@ -179,7 +180,8 @@ class CharacterSelect(ui.Select):
             )
             return
 
-        await record_treasury_rent_income(net_cost, f"House Rent — {character.guid}")
+        if net_cost > 0:
+            await record_treasury_rent_income(net_cost, f"House Rent — {character.guid}")
 
         embed = discord.Embed(
             title="House Rented",

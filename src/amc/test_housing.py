@@ -296,6 +296,79 @@ class ExtendConfirmViewConfirmTests(TestCase):
         self.assertIn("rent health 1.0", market_field.value)
 
 
+class HandleBuyZeroNetCostTests(TestCase):
+    """Regression: /house buy with a 100% rebate produced net_cost = 0 and the
+    unguarded register_player_withdrawal(0) raised "Withdrawal amount must be
+    positive" — the player saw "Bank error" and the house was never rented.
+    """
+
+    @patch("amc_cogs.housing.get_market_multiplier", return_value=(1.0, DEFAULT_MARKET_BREAKDOWN))
+    @patch("amc_cogs.housing.get_player_bank_balance", new_callable=AsyncMock)
+    @patch("amc_cogs.housing.is_player_online", new_callable=AsyncMock, return_value=True)
+    async def test_full_rebate_buy_succeeds_without_withdrawal(self, mock_online, mock_balance, mock_market):
+        player = await sync_to_async(PlayerFactory)()
+        character = await sync_to_async(CharacterFactory)(
+            player=player, guid="c" * 32
+        )
+
+        await HousingLicense.objects.acreate(
+            character=character, house_key=None, rebate_pct=Decimal("100.00")
+        )
+        # Earnings cover the entire rent → rebate = rent → net_cost = 0
+        now = timezone.now()
+        for i in range(100):
+            await Delivery.objects.acreate(
+                character=character,
+                timestamp=now - timedelta(days=i % 30),
+                cargo_key="SmallBox",
+                quantity=1,
+                payment=1000,
+                subsidy=0,
+            )
+        mock_balance.return_value = Decimal(100000)
+
+        house_data = {
+            "HouseGuid": "house-789",
+            "HousegKey": "TestHouse_03",
+            "Net_OwnerCharacterGuid": "",
+        }
+        rent_info = {
+            "Cost": 1000,
+            "HousingPlotRentalPriceRatio": 5.0,
+            "MaxHousingPlotRentalDays": 15,
+        }
+
+        select = CharacterSelect(
+            characters=[character],
+            action="buy",
+            house_data=house_data,
+            rent_info=rent_info,
+            houses=[house_data],
+        )
+        interaction = AsyncMock()
+        interaction.client.http_client_mod = AsyncMock()
+        interaction.client.http_client_game = AsyncMock()
+
+        with (
+            patch("amc_cogs.housing.register_player_withdrawal", new_callable=AsyncMock) as mock_withdraw,
+            patch("amc_cogs.housing.transfer_money", new_callable=AsyncMock) as mock_transfer,
+            patch("amc_cogs.housing.rent_house", new_callable=AsyncMock) as mock_rent,
+            patch("amc_cogs.housing.record_treasury_rent_income", new_callable=AsyncMock) as mock_treasury,
+        ):
+            await select._handle_buy(interaction, character)
+
+        # net_cost = 0 → no bank movement at all
+        mock_withdraw.assert_not_called()
+        mock_transfer.assert_not_called()
+        mock_treasury.assert_not_called()
+        # The house is still rented
+        mock_rent.assert_called_once()
+        # Success embed, not a "Bank error" message
+        kwargs = interaction.followup.send.call_args[1]
+        self.assertIn("embed", kwargs)
+        self.assertEqual(kwargs["embed"].title, "House Rented")
+
+
 class HandleExtendRebateCalculationTests(TestCase):
     """Tests for rebate calculation in CharacterSelect._handle_extend.
 
