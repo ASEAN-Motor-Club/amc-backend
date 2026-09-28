@@ -302,16 +302,19 @@ class WorkerSettings:
         # in-game announce fires only when at least one POST /events
         # actually reached the game server (the old version announced
         # unconditionally, producing "TT is up!" with no events).
-        # Interval: DAILY at 01:30:15 UTC = 08:30 +07 (Yuuka 2026-09-28:
+        # Interval: DAILY at 08:30:15 server-local (+07) (Yuuka 2026-09-28:
         # align the event rotation with the server restart hour so
-        # restart-days roll over cleanly). Was hourly at :00:15 (3h
-        # pre-2026-09-22, 10-min during staging testing); silent no-op
-        # when the slot target is already filled or no window-active TT
-        # ScheduledEvent exists.
+        # restart-days roll over cleanly). NOTE: arq cron evaluates in the
+        # worker's LOCAL timezone, not UTC — the first attempt (hour=1,
+        # 2026-09-28 #293) fired at 01:30 +07, proven by the Discord post
+        # timestamp of event 7245 (01:30:20 +07). Was hourly at :00:15
+        # (3h pre-2026-09-22, 10-min during staging testing); silent
+        # no-op when the slot target is already filled or no
+        # window-active TT ScheduledEvent exists.
         # pyrefly: ignore [bad-argument-type]
         cron(
             post_random_events,
-            hour=1,
+            hour=8,
             minute=30,
             second=15,
         ),
