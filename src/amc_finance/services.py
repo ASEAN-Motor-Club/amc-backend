@@ -349,6 +349,38 @@ async def record_treasury_confiscation_income(
     )
 
 
+async def record_pd_fund_confiscation_income(
+    amount, description="Police Confiscation"
+):
+    """Credit the Police Department Fund via confiscation.
+
+    Dr. Police Department Fund / Cr. Confiscation Revenue. Unlike
+    player_donation, this does NOT increment total_donations.
+    """
+    pd_fund, _ = await Account.objects.aget_or_create(
+        account_type=Account.AccountType.ASSET,
+        book=Account.Book.GOVERNMENT,
+        character=None,
+        name="Police Department Fund",
+    )
+    confiscation_revenue, _ = await Account.objects.aget_or_create(
+        account_type=Account.AccountType.REVENUE,
+        book=Account.Book.GOVERNMENT,
+        character=None,
+        name="Confiscation Revenue",
+    )
+
+    await sync_to_async(create_journal_entry)(
+        timezone.now(),
+        description,
+        None,
+        [
+            {"account": confiscation_revenue, "debit": 0, "credit": amount},
+            {"account": pd_fund, "debit": amount, "credit": 0},
+        ],
+    )
+
+
 async def record_treasury_rent_income(amount, description="House Rent"):
     """Record rent payment as treasury revenue (Dr. Treasury Fund / Cr. Rent Revenue)."""
     treasury_fund, _ = await Account.objects.aget_or_create(

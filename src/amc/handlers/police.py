@@ -34,13 +34,13 @@ from amc.mod_server import (
     transfer_money,
 )
 from amc.game_server import announce, get_players
+from django.conf import settings
 from amc_finance.services import (
-    record_treasury_confiscation_income,
+    record_pd_fund_confiscation_income,
     send_fund_to_player_wallet,
 )
 
 logger = logging.getLogger("amc.webhook.handlers.police")
-
 
 # ---------------------------------------------------------------------------
 # ServerArrivedAtPolicePatrolPoint
@@ -315,8 +315,8 @@ async def handle_pickup_cargo(event, player, character, ctx):
             str(previous_owner.player.unique_id),
         )
 
-    # 3. Credit treasury
-    await record_treasury_confiscation_income(payment, "Police Confiscation")
+    # 3. Credit the Police Department Fund
+    await record_pd_fund_confiscation_income(payment, "Police Confiscation")
 
     # 4. Debounced announcement
     if ctx.http_client:
@@ -339,18 +339,21 @@ async def handle_pickup_cargo(event, player, character, ctx):
         character, payment, http_client=ctx.http_client, session=ctx.http_client_mod
     )
 
-    # 6. Reward officer with confiscated amount
-    if ctx.http_client_mod:
+    # 6. Reward officer with the configured share of the confiscated amount
+    officer_reward = int(payment * settings.POLICE_CONFISCATION_OFFICER_SHARE)
+    if officer_reward > 0 and ctx.http_client_mod:
         await transfer_money(
             ctx.http_client_mod,
-            int(payment),
+            officer_reward,
             "Confiscation Reward",
             str(character.player.unique_id),
         )
-        await send_fund_to_player_wallet(payment, character, "Confiscation Reward")
+        await send_fund_to_player_wallet(
+            officer_reward, character, "Confiscation Reward"
+        )
         await send_system_message(
             ctx.http_client_mod,
-            f"You earned ${payment:,} confiscation reward.",
+            f"You earned ${officer_reward:,} confiscation reward.",
             character_guid=character.guid,
         )
 

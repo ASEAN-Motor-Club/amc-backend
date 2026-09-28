@@ -83,7 +83,7 @@ def _faction_patches():
         "amc.commands.faction.teleport_player": AsyncMock(),
         "amc.commands.faction.force_exit_vehicle": AsyncMock(),
         "amc.commands.faction.transfer_money": AsyncMock(),
-        "amc.commands.faction.record_treasury_confiscation_income": AsyncMock(),
+        "amc.commands.faction.record_pd_fund_confiscation_income": AsyncMock(),
         "amc.commands.faction.send_fund_to_player_wallet": AsyncMock(),
         "amc.commands.faction.refresh_player_name": AsyncMock(),
         "amc.commands.faction.show_popup": AsyncMock(),
@@ -199,7 +199,7 @@ class PortalWantedJailTests(TestCase):
         with patch("amc.commands.faction.teleport_player", faction_tp_mock), \
              patch("amc.commands.faction.force_exit_vehicle", new_callable=AsyncMock), \
              patch("amc.commands.faction.transfer_money", new_callable=AsyncMock), \
-             patch("amc.commands.faction.record_treasury_confiscation_income", new_callable=AsyncMock), \
+             patch("amc.commands.faction.record_pd_fund_confiscation_income", new_callable=AsyncMock), \
              patch("amc.commands.faction.send_fund_to_player_wallet", new_callable=AsyncMock), \
              patch("amc.commands.faction.refresh_player_name", new_callable=AsyncMock), \
              patch("amc.commands.faction.show_popup", new_callable=AsyncMock), \

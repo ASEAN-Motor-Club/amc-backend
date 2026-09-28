@@ -305,7 +305,7 @@ class ArrestScoreNegationTests(TestCase):
             patch("amc.commands.faction.clear_suspect", new_callable=AsyncMock),
             patch("amc.commands.faction.transfer_money", new_callable=AsyncMock) as mock_transfer,
             patch(
-                "amc.commands.faction.record_treasury_confiscation_income",
+                "amc.commands.faction.record_pd_fund_confiscation_income",
                 new_callable=AsyncMock,
             ),
             patch("amc.commands.faction.on_player_profit", new_callable=AsyncMock),

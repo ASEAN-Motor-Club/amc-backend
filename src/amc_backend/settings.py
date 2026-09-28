@@ -547,6 +547,13 @@ POLICE_COSTUMES = frozenset(
     os.environ.get("POLICE_COSTUMES", "Costume_Police_01,Costume_Police_02").split(",")
 )
 
+# Fraction (0.0–1.0) of confiscated money paid out to police officers as a
+# reward; the remainder goes to the Police Department Fund. 0.0 = all money
+# is deposited into the PD fund, nothing goes to individual officers.
+POLICE_CONFISCATION_OFFICER_SHARE = float(
+    os.environ.get("POLICE_CONFISCATION_OFFICER_SHARE", "0")
+)
+
 RENT_REBATE_LOOKBACK_DAYS = int(os.environ.get("RENT_REBATE_LOOKBACK_DAYS", "15"))
 
 HOUSING_MARKET_REFERENCE_PLAYERS = int(os.environ.get("HOUSING_MARKET_REFERENCE_PLAYERS", "10"))
