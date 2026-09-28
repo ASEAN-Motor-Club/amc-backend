@@ -3827,3 +3827,212 @@ async def test_race_suspect_while_racing_cleared_on_finish(make_suspect_mock):
     ).adelete()
     await Player.objects.filter(unique_id=777).adelete()
     await TTClass.objects.filter(name="TT-480").adelete()
+
+
+# ---------------------------------------------------------------------------
+# Roadside-reset distance gate (freeman 2026-09-28 PR2)
+# ---------------------------------------------------------------------------
+
+_COP_IN_GATE   = (5000 + 40_000, 5000, 0)   # 400 m  — inside the 500 m gate
+_COP_HYSTERESIS = (5000 + 50_200, 5000, 0)  # 502 m  — >500 but <=505 (sticky)
+_COP_PAST_GATE = (5000 + 60_000, 5000, 0)   # 600 m  — beyond the release band
+
+
+@patch("amc.criminals.refresh_player_name", new_callable=AsyncMock)
+@patch("amc.criminals.send_system_message", new_callable=AsyncMock)
+class RoadsideResetGateTests(TestCase):
+    """tick_wanted_countdown refines the no-teleport lock MODE by distance:
+    wanted suspects get wanted_roadside (cargo-kept roadside allowed) while
+    every cop is beyond 500 m, all while chased close; cops get
+    reset_cargo_keep near a wanted and are cleared beyond it."""
+
+    def setUp(self):
+        from amc.criminals import _roadside_far_state, _underwater_since
+        from amc.no_teleport import _pushed_lock_state
+        _roadside_far_state.clear()
+        _pushed_lock_state.clear()
+        _underwater_since.clear()
+        _last_star_notified.clear()
+        _last_suspect_guids.clear()
+        armed = patch(
+            "amc.criminals.active_police_present",
+            new_callable=AsyncMock,
+            return_value=True,
+        )
+        self.armed_mock = armed.start()
+        self.addCleanup(armed.stop)
+
+    async def _setup_criminal(self, wanted_remaining=300):
+        player = await sync_to_async(PlayerFactory)()
+        character = await sync_to_async(CharacterFactory)(
+            player=player,
+            last_online=timezone.now(),
+        )
+        await character.asave(update_fields=["last_online"])
+        await Wanted.objects.acreate(
+            character=character,
+            wanted_remaining=wanted_remaining,
+        )
+        return character
+
+    async def _setup_police(self):
+        player = await sync_to_async(PlayerFactory)()
+        officer = await sync_to_async(CharacterFactory)(
+            player=player,
+            last_online=timezone.now(),
+        )
+        await officer.asave(update_fields=["last_online"])
+        await PoliceSession.objects.acreate(character=officer)
+        return officer
+
+    async def _tick(self, players, _push=None):
+        mock_http = AsyncMock()
+        mock_http_mod = AsyncMock()
+        with (
+            patch("amc.criminals.get_players", new_callable=AsyncMock, return_value=players),
+            patch(
+                "amc.criminals.push_no_teleport_cached", new_callable=AsyncMock
+            ) as mock_push,
+        ):
+            await tick_wanted_countdown(mock_http, mock_http_mod)
+        return mock_push
+
+    @staticmethod
+    def _pushed_modes(mock_push):
+        """guid -> last (enabled, mode) pushed this tick."""
+        out = {}
+        for c in mock_push.await_args_list:
+            out[c.args[0].guid] = (c.args[2], c.args[3])
+        return out
+
+    async def test_wanted_no_cops_gets_roadside_allowance(
+        self, mock_sys_msg, mock_refresh
+    ):
+        """No cops on duty: the wanted suspect gets wanted_roadside."""
+        from amc.no_teleport import MODE_WANTED_ROADSIDE
+
+        criminal = await self._setup_criminal(wanted_remaining=300)
+        players = _make_players_list(
+            [_make_player_data(criminal.player.unique_id, criminal.guid, *_SUSPECT_LOC)]
+        )
+        mock_push = await self._tick(players, None)
+        pushed = self._pushed_modes(mock_push)
+        self.assertEqual(pushed[criminal.guid], (True, MODE_WANTED_ROADSIDE))
+
+    async def test_wanted_cop_close_gets_full_lock(
+        self, mock_sys_msg, mock_refresh
+    ):
+        """Cop within 500 m: wanted suspect pushed MODE_ALL, cop pushed
+        reset_cargo_keep."""
+        from amc.no_teleport import MODE_ALL, MODE_RESET_CARGO_KEEP
+
+        criminal = await self._setup_criminal(wanted_remaining=300)
+        officer = await self._setup_police()
+        players = _make_players_list([
+            _make_player_data(criminal.player.unique_id, criminal.guid, *_SUSPECT_LOC),
+            _make_player_data(officer.player.unique_id, officer.guid, *_COP_IN_GATE),
+        ])
+        mock_push = await self._tick(players, None)
+        pushed = self._pushed_modes(mock_push)
+        self.assertEqual(pushed[criminal.guid], (True, MODE_ALL))
+        self.assertEqual(pushed[officer.guid], (True, MODE_RESET_CARGO_KEEP))
+
+    async def test_wanted_cop_far_gets_allowance_and_cop_cleared(
+        self, mock_sys_msg, mock_refresh
+    ):
+        """Cop beyond 505 m: wanted suspect gets wanted_roadside, cop is
+        cleared (unrestricted)."""
+        from amc.no_teleport import MODE_ALL, MODE_WANTED_ROADSIDE
+
+        criminal = await self._setup_criminal(wanted_remaining=300)
+        officer = await self._setup_police()
+        players = _make_players_list([
+            _make_player_data(criminal.player.unique_id, criminal.guid, *_SUSPECT_LOC),
+            _make_player_data(officer.player.unique_id, officer.guid, *_COP_PAST_GATE),
+        ])
+        mock_push = await self._tick(players, None)
+        pushed = self._pushed_modes(mock_push)
+        self.assertEqual(pushed[criminal.guid], (True, MODE_WANTED_ROADSIDE))
+        self.assertEqual(pushed[officer.guid], (False, MODE_ALL))
+
+    async def test_manual_flag_not_downgraded(self, mock_sys_msg, mock_refresh):
+        """A manually flagged wanted keeps MODE_ALL; the tick never pushes."""
+        criminal = await self._setup_criminal(wanted_remaining=300)
+        criminal.no_teleport = True
+        await criminal.asave()
+        players = _make_players_list(
+            [_make_player_data(criminal.player.unique_id, criminal.guid, *_SUSPECT_LOC)]
+        )
+        mock_push = await self._tick(players, None)
+        self.assertNotIn(criminal.guid, self._pushed_modes(mock_push))
+
+    async def test_hysteresis_at_gate_boundary(self, mock_sys_msg, mock_refresh):
+        """Once far, the allowance survives down to the 500 m gate; regaining
+        it after going near requires >505 m."""
+        from amc.no_teleport import MODE_ALL, MODE_WANTED_ROADSIDE
+
+        criminal = await self._setup_criminal(wanted_remaining=10_000)
+        officer = await self._setup_police()
+        mock_http = AsyncMock()
+        mock_http_mod = AsyncMock()
+        with (
+            patch("amc.criminals.get_players", new_callable=AsyncMock) as mock_gp,
+            patch(
+                "amc.criminals.push_no_teleport_cached", new_callable=AsyncMock
+            ) as mock_push,
+        ):
+            async def tick_at(cop_xy):
+                mock_gp.return_value = _make_players_list([
+                    _make_player_data(criminal.player.unique_id, criminal.guid, *_SUSPECT_LOC),
+                    _make_player_data(officer.player.unique_id, officer.guid, *cop_xy),
+                ])
+                await tick_wanted_countdown(mock_http, mock_http_mod)
+
+            await tick_at(_COP_PAST_GATE)     # far
+            await tick_at(_COP_HYSTERESIS)    # 502 m — still far (was far)
+            await tick_at(_COP_IN_GATE)       # 400 m — near
+            await tick_at(_COP_HYSTERESIS)    # 502 m — still near (needs >505)
+
+        modes = [c.args[3] for c in mock_push.await_args_list if c.args[0].guid == criminal.guid]
+        self.assertEqual(
+            modes,
+            [MODE_WANTED_ROADSIDE, MODE_WANTED_ROADSIDE, MODE_ALL, MODE_ALL],
+        )
+
+    async def test_pushes_are_transition_only(self, mock_sys_msg, mock_refresh):
+        """Identical consecutive ticks do not re-POST the mod flag."""
+        criminal = await self._setup_criminal(wanted_remaining=10_000)
+        mock_http = AsyncMock()
+        mock_http_mod = AsyncMock()
+        players = _make_players_list(
+            [_make_player_data(criminal.player.unique_id, criminal.guid, *_SUSPECT_LOC)]
+        )
+        with (
+            patch("amc.criminals.get_players", new_callable=AsyncMock, return_value=players),
+            patch("amc.mod_server.set_no_teleport", new_callable=AsyncMock) as mock_set,
+        ):
+            await tick_wanted_countdown(mock_http, mock_http_mod)
+            await tick_wanted_countdown(mock_http, mock_http_mod)
+        self.assertEqual(mock_set.await_count, 1)
+
+    async def test_cache_invalidated_by_sync(self, mock_sys_msg, mock_refresh):
+        """A foreign sync_no_teleport push forces the tick to re-push even if
+        the computed state did not change."""
+        from amc.no_teleport import _pushed_lock_state, sync_no_teleport
+
+        criminal = await self._setup_criminal(wanted_remaining=10_000)
+        mock_http = AsyncMock()
+        mock_http_mod = AsyncMock()
+        players = _make_players_list(
+            [_make_player_data(criminal.player.unique_id, criminal.guid, *_SUSPECT_LOC)]
+        )
+        with (
+            patch("amc.criminals.get_players", new_callable=AsyncMock, return_value=players),
+            patch("amc.mod_server.set_no_teleport", new_callable=AsyncMock) as mock_set,
+        ):
+            await tick_wanted_countdown(mock_http, mock_http_mod)
+            first_count = mock_set.await_count
+            await sync_no_teleport(criminal, mock_http_mod)  # foreign push (MODE_ALL)
+            self.assertNotIn(criminal.guid, _pushed_lock_state)
+            await tick_wanted_countdown(mock_http, mock_http_mod)
+        self.assertGreater(mock_set.await_count, first_count)

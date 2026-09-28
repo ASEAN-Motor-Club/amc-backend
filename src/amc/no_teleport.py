@@ -7,11 +7,19 @@ involvement, so the flag reveals nothing about wanted status (unlike the
 
 Lock MODES (freeman 2026-09-27: "allow different types of teleport blocking"):
 - ``MODE_ALL`` — block every movement RPC. Used for wanted / wanted-grace /
-  manual admin holds.
+  manual admin holds, and for wanted suspects while a cop is within the
+  roadside gate distance (no roadside allowance while the chase is close).
+- ``MODE_WANTED_ROADSIDE`` — same full teleport lock as ``MODE_ALL`` EXCEPT
+  ``ServerResetVehicleAt``: the cargo-kept roadside flow (bRemoveCargo=false)
+  passes, the cargo-strip flow (bRemoveCargo=true) is pinned. Used for wanted
+  suspects while every on-duty cop is beyond the 500 m gate (freeman
+  2026-09-28: "cops > 500m = roadside reset teleport allowed").
 - ``MODE_RESET_CARGO_KEEP`` — block ONLY ``ServerResetVehicleAt`` with
   ``bRemoveCargo=false`` (the cargo-kept roadside flow that teleports the
   vehicle with its cargo); ``bRemoveCargo=true`` passes and the other three
-  movement RPCs are unaffected. Used for on-duty police.
+  movement RPCs are unaffected. Used for on-duty police while they are within
+  500 m of an active wanted (freeman 2026-09-28: police may roadside-reset
+  with cargo-strip always, cargo-kept only when >500 m from wanteds).
 
 The backend is the source of truth:
 - Manual flags persist on ``Character.no_teleport`` (admin /noteleport) and are
@@ -19,6 +27,11 @@ The backend is the source of truth:
   restart clears it).
 - The wanted-grace window pushes the flag transiently while a PendingWanted
   exists, and clears it at apply/drop.
+- The wanted-tick refines the mode by police distance every tick
+  (``push_no_teleport_cached`` — transition-only pushes); every
+  ``sync_no_teleport`` invalidates the tick's cache entry so a foreign push
+  (login, /noteleport, duty change, wanted create/clear) is re-asserted
+  correctly on the next tick.
 """
 
 import asyncio
@@ -27,17 +40,22 @@ import logging
 logger = logging.getLogger(__name__)
 
 MODE_ALL = "all"
+MODE_WANTED_ROADSIDE = "wanted_roadside"
 MODE_RESET_CARGO_KEEP = "reset_cargo_keep"
+
+# Last (enabled, mode) state the wanted-tick pushed per guid. The tick only
+# pushes on transitions; sync_no_teleport pops the entry so the next tick
+# re-pushes its computed state after any foreign push.
+_pushed_lock_state: dict[str, tuple[bool, str]] = {}
 
 
 async def teleport_lock_mode(character) -> str | None:
     """Effective lock MODE for one character, or None when unlocked.
 
     Priority: manual flag / wanted / wanted-grace (PendingWanted) all yield
-    MODE_ALL. On-duty police TEMPORARILY yield MODE_ALL unconditionally
-    (freeman 2026-09-28) until mod rc14 with the narrow-mode enforcement is
-    live on prod; the long-term intent is the wanted-gated
-    MODE_RESET_CARGO_KEEP (see the commented branch below).
+    MODE_ALL. On-duty police yield MODE_RESET_CARGO_KEEP (cargo-strip resets
+    always allowed; cargo-kept roadside locked pending the wanted-tick's
+    distance refinement, which clears or keeps it per the 500 m gate).
     """
     from amc.models import PendingWanted, PoliceSession, Wanted
 
@@ -54,17 +72,14 @@ async def teleport_lock_mode(character) -> str | None:
     if await PoliceSession.objects.filter(
         character=character, ended_at__isnull=True
     ).aexists():
-        # TEMPORARY (freeman 2026-09-28): push MODE_ALL for on-duty police —
-        # the narrow mode needs mod rc14 (PR #33) which only activates at the
-        # 08:30+07 timer; until then rc13 ignores ServerTeleportCharacter for
-        # narrow mode. Revert to the wanted-gated reset_cargo_keep below once
-        # rc14 is live on prod.
-        # if await Wanted.objects.filter(
-        #     expired_at__isnull=True, wanted_remaining__gt=0
-        # ).aexists():
-        #     return MODE_RESET_CARGO_KEEP
-        # return None
-        return MODE_ALL
+        # Police get the narrow lock (freeman 2026-09-28 PR2 spec): the
+        # cargo-strip ServerResetVehicleAt always passes, the cargo-kept
+        # roadside flow is locked until the wanted-tick's distance gate
+        # clears it (>500 m from every active wanted). Requires the
+        # wanted_roadside mod rc for full enforcement; older mods either
+        # ignore the narrow mode's TP effect or reject unknown modes with
+        # the previous flag state left intact (best-effort pushes).
+        return MODE_RESET_CARGO_KEEP
     return None
 
 
@@ -101,6 +116,25 @@ def push_no_teleport_later(
     asyncio.create_task(push_no_teleport(character, http_client_mod, enabled, mode))
 
 
+async def push_no_teleport_cached(
+    character, http_client_mod, enabled: bool, mode: str = MODE_ALL
+) -> None:
+    """Transition-only push for the wanted-tick's per-second refinement.
+
+    Skips the HTTP call when the (enabled, mode) pair for this guid was
+    already pushed by a previous tick. ``sync_no_teleport`` pops the cache
+    entry, so any foreign push (login re-assert, /noteleport, duty change,
+    wanted create/clear) is followed by a fresh tick push of whatever the
+    distance gate computes.
+    """
+    prev = _pushed_lock_state.get(character.guid)
+    if prev == (enabled, mode):
+        return
+    await push_no_teleport(character, http_client_mod, enabled, mode)
+    if http_client_mod and character.guid:
+        _pushed_lock_state[character.guid] = (enabled, mode)
+
+
 async def is_teleport_locked(character) -> bool:
     """DB-truth teleport lock: manual flag OR on-duty police OR wanted OR
     wanted-grace (PendingWanted).
@@ -124,4 +158,9 @@ async def sync_no_teleport(character, http_client_mod) -> None:
     wanted create/expire/arrest-clear, pending-wanted apply/drop).
     """
     mode = await teleport_lock_mode(character)
+    # Invalidate the wanted-tick's transition cache: whatever we push here
+    # (login, duty change, wanted create/clear, /noteleport), the next tick
+    # must re-push its own distance-gated state instead of trusting a stale
+    # "already pushed" entry.
+    _pushed_lock_state.pop(character.guid, None)
     await push_no_teleport(character, http_client_mod, mode is not None, mode or MODE_ALL)
