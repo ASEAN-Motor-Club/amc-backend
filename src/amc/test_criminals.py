@@ -2880,9 +2880,12 @@ class CompassTickTests(TestCase):
     """Tests for tick_police_suspect_locations under the per-officer
     speed-and-distance cadence:
 
-        solo = 1 / (D * (S + 20 km/h) * COMPASS_C)
-        clamped to [COMPASS_MIN_INTERVAL, COMPASS_MAX_INTERVAL]
+        base = max_interval × (1 − (1 − far_mult)·w)   (parked-near ceiling)
+        solo = max(base × 20 / (S + 20), min_interval)  (speed multiplier)
         effective = solo × min(N, 2)   (N = officers beyond their own ring)
+
+    w saturates 0→1 with distance past the 500 m near cap: parked-near is
+    the slowest case (20 s), distance only speeds updates up.
 
     An officer inside the suspect's close close ring receives a fixed
     "<ring>m proximity ping (every max_interval, no bearing, not
@@ -3007,11 +3010,11 @@ class CompassTickTests(TestCase):
     # Cadence law — interval values at representative D x S points
     # -------------------------------------------------------------------
 
-    async def test_stationary_600m_interval_clamped_15s(
+    async def test_stationary_600m_interval_near_ceiling_20s(
         self, mock_get_players, mock_get_locations, mock_police, mock_sys_msg,
     ):
-        """Stationary suspect at 600 m: raw 1/(600*20*C) ≈ 55.6 s → clamped
-        to the 15 s ceiling."""
+        """Stationary suspect at 600 m: base ≈ 19.3 s (just past the near
+        cap) → silent at t-18, sends at t-21."""
         criminal = await self._setup_criminal()
         officer = await self._setup_police()
 
@@ -3029,23 +3032,23 @@ class CompassTickTests(TestCase):
         await tick_police_suspect_locations(mock_http, mock_http_mod, mock_http_mgmt)
         mock_sys_msg.assert_awaited_once()
 
-        # 13 s since last send → not yet
-        _last_compass_sent[(officer.guid, criminal.guid)] = time.monotonic() - 13
+        # 18 s since last send → not yet
+        _last_compass_sent[(officer.guid, criminal.guid)] = time.monotonic() - 18
         mock_sys_msg.reset_mock()
         await tick_police_suspect_locations(mock_http, mock_http_mod, mock_http_mgmt)
         mock_sys_msg.assert_not_called()
 
-        # 16 s since last send → sends again
-        _last_compass_sent[(officer.guid, criminal.guid)] = time.monotonic() - 16
+        # 21 s since last send → sends again
+        _last_compass_sent[(officer.guid, criminal.guid)] = time.monotonic() - 21
         mock_sys_msg.reset_mock()
         await tick_police_suspect_locations(mock_http, mock_http_mod, mock_http_mgmt)
         mock_sys_msg.assert_awaited_once()
 
-    async def test_stationary_1km_interval_clamped_15s(
+    async def test_stationary_1km_interval_17s(
         self, mock_get_players, mock_get_locations, mock_police, mock_sys_msg,
     ):
-        """Stationary suspect at 1 km → raw 1/(1000*20*C) ≈ 33.3 s → clamped
-        to the 15 s ceiling."""
+        """Stationary suspect at 1 km → base 17 s (w=0.2): silent at t-15,
+        sends at t-18."""
         criminal = await self._setup_criminal()
         officer = await self._setup_police()
 
@@ -3063,14 +3066,14 @@ class CompassTickTests(TestCase):
         await tick_police_suspect_locations(mock_http, mock_http_mod, mock_http_mgmt)
         mock_sys_msg.assert_awaited_once()
 
-        # 13 s since last send → not yet
-        _last_compass_sent[(officer.guid, criminal.guid)] = time.monotonic() - 13
+        # 15 s since last send → not yet
+        _last_compass_sent[(officer.guid, criminal.guid)] = time.monotonic() - 15
         mock_sys_msg.reset_mock()
         await tick_police_suspect_locations(mock_http, mock_http_mod, mock_http_mgmt)
         mock_sys_msg.assert_not_called()
 
-        # 16 s since last send → sends again
-        _last_compass_sent[(officer.guid, criminal.guid)] = time.monotonic() - 16
+        # 18 s since last send → sends again
+        _last_compass_sent[(officer.guid, criminal.guid)] = time.monotonic() - 18
         mock_sys_msg.reset_mock()
         await tick_police_suspect_locations(mock_http, mock_http_mod, mock_http_mgmt)
         mock_sys_msg.assert_awaited_once()
@@ -3078,7 +3081,7 @@ class CompassTickTests(TestCase):
     async def test_fast_far_clamped_to_3s(
         self, mock_get_players, mock_get_locations, mock_police, mock_sys_msg,
     ):
-        """3 km + 200 km/h → base 5.6 s × 20/220 ≈ 0.5 → floored at 3 s."""
+        """3 km + 200 km/h → base 11.7 s × 20/220 ≈ 1.1 s → floored at 3 s."""
         criminal = await self._setup_criminal()
         officer = await self._setup_police()
 
@@ -3112,7 +3115,9 @@ class CompassTickTests(TestCase):
     async def test_speed_speeds_up_updates_at_same_distance(
         self, mock_get_players, mock_get_locations, mock_police, mock_sys_msg,
     ):
-        """1 km out: stationary clamps to 15 s, an 80 km/h suspect updates in 3 s."""
+        """1 km out: stationary sits at the 17 s base, an 80 km/h suspect
+        updates in 3.4 s — at the same t-10 checkpoint the parked suspect
+        stays silent while the runner gets a bearing."""
         criminal = await self._setup_criminal()
         officer = await self._setup_police()
 
@@ -3183,7 +3188,8 @@ class CompassTickTests(TestCase):
         self, mock_get_players, mock_get_locations, mock_police, mock_sys_msg,
     ):
         """Editing the admin singleton changes the cadence on the next tick:
-        max_interval 6 s → a parked 1 km suspect updates every 6 s."""
+        max_interval 6 s → a parked 1 km suspect's base is 5.1 s (6 × 0.85
+        at w=0.2) — silent at t-5, sends at t-7."""
         criminal = await self._setup_criminal()
         officer = await self._setup_police()
 
@@ -3217,8 +3223,8 @@ class CompassTickTests(TestCase):
     ):
         """Two officers, both >200 m: pair keys throttle independently —
         with the force budget each interval is solo × N(=2): the 1 km
-        officer (30 s effective) stays quiet at t-25 while the 3 km
-        officer (11.1 s effective) receives."""
+        officer (34 s effective) stays quiet at t-25 while the 3 km
+        officer (23.3 s effective) receives."""
         criminal = await self._setup_criminal()
         officer_1km = await self._setup_police()
         officer_3km = await self._setup_police()
@@ -3250,8 +3256,8 @@ class CompassTickTests(TestCase):
     async def test_two_cops_share_one_budget(
         self, mock_get_players, mock_get_locations, mock_police, mock_sys_msg,
     ):
-        """Two officers both at 1 km, stationary suspect: solo 15 s × N(=2)
-        → each waits 30 s. Both fire on first contact, then neither until
+        """Two officers both at 1 km, stationary suspect: solo 17 s × N(=2)
+        → each waits 34 s. Both fire on first contact, then neither until
         the effective interval elapses."""
         criminal = await self._setup_criminal()
         officer_a = await self._setup_police()
@@ -3272,7 +3278,7 @@ class CompassTickTests(TestCase):
         await tick_police_suspect_locations(mock_http, mock_http_mod, mock_http_mgmt)
         self.assertEqual(mock_sys_msg.await_count, 2)
 
-        # 25 s since last send: past the SOLO 15 s but inside 2 × 15 = 30 s
+        # 25 s since last send: past the SOLO 17 s but inside 2 × 17 = 34 s
         now = time.monotonic()
         _last_compass_sent[(officer_a.guid, criminal.guid)] = now - 25
         _last_compass_sent[(officer_b.guid, criminal.guid)] = now - 25
@@ -3280,7 +3286,7 @@ class CompassTickTests(TestCase):
         await tick_police_suspect_locations(mock_http, mock_http_mod, mock_http_mgmt)
         mock_sys_msg.assert_not_called()
 
-        # 35 s since last send: past the effective 30 s → both fire again
+        # 35 s since last send: past the effective 34 s → both fire again
         now = time.monotonic()
         _last_compass_sent[(officer_a.guid, criminal.guid)] = now - 35
         _last_compass_sent[(officer_b.guid, criminal.guid)] = now - 35

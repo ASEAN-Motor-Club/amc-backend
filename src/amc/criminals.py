@@ -238,14 +238,18 @@ def wanted_accrual_multiplier(dist_units: float) -> float:
     return 1.0 - (1.0 - WANTED_ACCRUAL_MIN_MULT) * _distance_weight(dist_units)
 
 # Compass cadence — per-officer interval from THAT officer's distance to the
-# suspect and the suspect's speed:
-#   base = 1 / (D * 20 * COMPASS.c), clamped [min, max]   (parked-suspect law)
-#   interval = max(base * 20 / (S + 20), min)             (speed multiplier)
-# Distance no longer diverges near the ring (the old (D - 500 m) hyperbola
-# made the final approach blind — freeman 2026-09-20). The parked-suspect
-# distance law sets the base; SPEED multiplies it after the clamp, so near
-# cops a runner breaks well below the parked ceiling while a parked
-# suspect's cadence is unchanged. Speed can only ever speed updates up.
+# suspect and the suspect's speed (freeman 2026-09-27 rework):
+#   base = max_interval * (1 - (1 - far_mult) * w)     (parked-suspect law)
+#   interval = max(base * 20 / (S + 20), min)          (speed multiplier)
+# w is the shared saturating distance weight (0 at the 500 m near cap, →1
+# far away, half at +2 km — see _distance_weight). A NEAR + parked suspect
+# is the SLOWEST case (the full max_interval ceiling); distance only ever
+# SPEEDS updates up from there (down to far_mult × max_interval when parked
+# far away), because a far suspect is the one worth tracking. The speed
+# multiplier then stacks on top, so a moving suspect updates faster than a
+# parked one at the same distance and "staying still" matters at every
+# range. Invariants: interval non-increasing in distance, non-increasing
+# in speed, never below min_interval.
 # An officer inside the suspect's ring gets a fixed "<ring>m proximity ping
 # every max_interval instead of a bearing — the final-search phase, which
 # doubles as the suspect-facing covert tell.
@@ -256,7 +260,7 @@ def wanted_accrual_multiplier(dist_units: float) -> float:
 @dataclass(frozen=True)
 class CompassConfig:
     name: str
-    c: float                 # Hz per (metre * km/h)
+    far_mult: float          # parked-far base as a fraction of max_interval
     min_interval: float      # seconds — SOLO floor; effective floor min×budget
     max_interval: float      # seconds — SOLO ceiling; effective ceiling max×budget
     ring_distance: int       # game units — close ring ("<200m" ping, no bearing)
@@ -266,9 +270,9 @@ class CompassConfig:
 COMPASS_CONFIGS: dict[str, CompassConfig] = {
     "A": CompassConfig(
         name="A",
-        c=3.0e-6,            # 2x the 2026-09-20 first-pass value
+        far_mult=0.25,       # parked-far base = 25% of the ceiling (5 s at 20 s)
         min_interval=3.0,
-        max_interval=15.0,
+        max_interval=20.0,
         ring_distance=20_000,
         budget_cap=2,
     ),
@@ -292,11 +296,8 @@ def compass_interval_seconds(
 ) -> float:
     """Per-officer compass update interval for a suspect beyond the close
     ring (the caller handles ring distances with the fixed '<200m' ping)."""
-    d_m = dist_units / 100.0
-    base = min(
-        max(1.0 / (d_m * 20.0 * tuning.c), tuning.min_interval),
-        tuning.max_interval,
-    )
+    w = _distance_weight(dist_units)
+    base = tuning.max_interval * (1.0 - (1.0 - tuning.far_mult) * w)
     return max(base * 20.0 / (speed_kmh + 20.0), tuning.min_interval)
 
 # Tracks the last notified star level per character guid
@@ -1720,22 +1721,25 @@ async def tick_police_suspect_locations(http_client, http_client_mod, http_clien
     Update cadence is per-officer, keyed on THAT officer's distance to the
     suspect and the suspect's speed:
 
-        base = 1 / (D * 20 * COMPASS.c), clamped [3 s, 15 s]  (parked law)
-        solo = max(base * 20 / (S + 20), 3 s)                 (speed multiplier)
+        base = max_interval * (1 - (1 - far_mult) * w)        (parked law)
+        solo = max(base * 20 / (S + 20), min_interval)        (speed multiplier)
 
-    Speed multiplies AFTER the distance clamp, so near cops a runner breaks
-    well below the parked ceiling (100 km/h: 5x faster, to the floor) while
-    a parked suspect's cadence is distance-law only; speed never slows
-    updates. The result is then scaled by the FORCE BUDGET: the interval is
+    w saturates 0→1 with distance past the 500 m near cap, so parked-near
+    is the SLOWEST case (the full max_interval ceiling) and distance only
+    speeds updates up from there (down to far_mult × max_interval parked
+    far away). Speed multiplies AFTER the base, so a moving suspect
+    updates faster than a parked one at the same distance while speed
+    never slows updates. The result is then scaled by the FORCE BUDGET:
+    the interval is
     multiplied by min(N, COMPASS.budget_cap), where N is the number of
     on-duty officers beyond their own 200 m ring for that suspect. The force's
     total flash rate for one suspect stays at ONE cop's rate up to the cap —
     extra cops split the budget instead of multiplying it, but a large force
     is never SLOWER per cop than a pair (the uncapped ×N made a 4-cop
-    response 4× blinder per cop; freeman, 2026-09-20). Effective range
-    [3×min(N,2), 15×min(N,2)] s. An officer inside the suspect's 200 m
+    response 4× blinder per cop; freeman, 2026-09-20). An officer inside the
+    suspect's 200 m
     close ring gets a fixed "<ring>m proximity ping every tuning.max_interval
-    (15 s) instead of a bearing — no budget, no speed effect, and ring cops
+    instead of a bearing — no budget, no speed effect, and ring cops
     don't count into other officers' budgets. Missing speed
     telemetry degrades to the stationary cadence.
     """

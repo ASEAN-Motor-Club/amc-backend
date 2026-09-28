@@ -1178,7 +1178,7 @@ class JobPostingConfigAdmin(admin.ModelAdmin):
 class CompassTuningConfigAdmin(admin.ModelAdmin):
     list_display = [
         "config_name",
-        "c",
+        "far_mult",
         "min_interval",
         "max_interval",
         "ring_distance",
