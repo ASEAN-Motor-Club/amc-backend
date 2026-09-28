@@ -34,11 +34,10 @@ async def teleport_lock_mode(character) -> str | None:
     """Effective lock MODE for one character, or None when unlocked.
 
     Priority: manual flag / wanted / wanted-grace (PendingWanted) all yield
-    MODE_ALL. On-duty police yields MODE_RESET_CARGO_KEEP ONLY while a live
-    wanted criminal exists on the server (freeman 2026-09-27: outside active
-    chases there is nothing to enforce, so police are fully unlocked) —
-    police stay able to use cargo-strip resets; only the cargo-kept roadside
-    flow is blocked. Any ALL-source wins over police.
+    MODE_ALL. On-duty police TEMPORARILY yield MODE_ALL unconditionally
+    (freeman 2026-09-28) until mod rc14 with the narrow-mode enforcement is
+    live on prod; the long-term intent is the wanted-gated
+    MODE_RESET_CARGO_KEEP (see the commented branch below).
     """
     from amc.models import PendingWanted, PoliceSession, Wanted
 
@@ -55,11 +54,17 @@ async def teleport_lock_mode(character) -> str | None:
     if await PoliceSession.objects.filter(
         character=character, ended_at__isnull=True
     ).aexists():
-        if await Wanted.objects.filter(
-            expired_at__isnull=True, wanted_remaining__gt=0
-        ).aexists():
-            return MODE_RESET_CARGO_KEEP
-        return None
+        # TEMPORARY (freeman 2026-09-28): push MODE_ALL for on-duty police —
+        # the narrow mode needs mod rc14 (PR #33) which only activates at the
+        # 08:30+07 timer; until then rc13 ignores ServerTeleportCharacter for
+        # narrow mode. Revert to the wanted-gated reset_cargo_keep below once
+        # rc14 is live on prod.
+        # if await Wanted.objects.filter(
+        #     expired_at__isnull=True, wanted_remaining__gt=0
+        # ).aexists():
+        #     return MODE_RESET_CARGO_KEEP
+        # return None
+        return MODE_ALL
     return None
 
 

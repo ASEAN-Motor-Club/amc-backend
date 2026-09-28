@@ -135,15 +135,15 @@ class EffectiveFlagSyncTests(TestCase):
         )
         assert await self._sync(character) is True
 
-    async def test_on_duty_police_without_live_wanted_is_unlocked(self):
-        """freeman 2026-09-27: police are only locked while a wanted criminal
-        is live on the server — no active chases, nothing to enforce."""
+    async def test_on_duty_police_without_live_wanted_is_all(self):
+        """TEMPORARY freeman 2026-09-28: police push MODE_ALL until mod rc14
+        (narrow-mode enforcement) is live on prod. Long-term: unlocked."""
         from amc.models import PoliceSession
-        from amc.no_teleport import teleport_lock_mode
+        from amc.no_teleport import MODE_ALL, teleport_lock_mode
 
         character = await self._make()
         await _sync_create(PoliceSession, character=character)
-        assert await teleport_lock_mode(character) is None
+        assert await teleport_lock_mode(character) == MODE_ALL
 
         with patch(
             "amc.mod_server.set_no_teleport", new_callable=AsyncMock
@@ -151,7 +151,8 @@ class EffectiveFlagSyncTests(TestCase):
             from amc.no_teleport import sync_no_teleport
 
             await sync_no_teleport(character, AsyncMock())
-        assert mock_set.await_args[0][2] is False
+        assert mock_set.await_args[0][2] is True
+        assert mock_set.await_args[0][3] == MODE_ALL
 
     async def test_wanted_mode_is_all(self):
         from amc.models import Wanted
@@ -163,10 +164,10 @@ class EffectiveFlagSyncTests(TestCase):
         )
         assert await teleport_lock_mode(character) == MODE_ALL
 
-    async def test_on_duty_police_with_live_wanted_is_reset_cargo_keep(self):
-        """Any live wanted on the server arms the police reset_cargo_keep lock."""
+    async def test_on_duty_police_with_live_wanted_is_all(self):
+        """TEMPORARY: wanted-gated narrow mode disabled until mod rc14."""
         from amc.models import PoliceSession, Wanted
-        from amc.no_teleport import MODE_RESET_CARGO_KEEP, teleport_lock_mode
+        from amc.no_teleport import MODE_ALL, teleport_lock_mode
 
         character = await self._make()
         await _sync_create(PoliceSession, character=character)
@@ -175,7 +176,7 @@ class EffectiveFlagSyncTests(TestCase):
         await _sync_create(
             Wanted, character=other, wanted_remaining=600, amount=0
         )
-        assert await teleport_lock_mode(character) == MODE_RESET_CARGO_KEEP
+        assert await teleport_lock_mode(character) == MODE_ALL
 
     async def test_police_with_wanted_escalates_to_all(self):
         """Any ALL-source (wanted/grace/manual) wins over the police mode."""
