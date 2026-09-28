@@ -37,6 +37,22 @@ TICK_INTERVAL = 1.0  # seconds between ticks (matches cron cadence)
 # Underwater auto-arrest threshold (game units)
 UNDERWATER_Z_THRESHOLD = -22455
 
+# Underwater-arrest grace (freeman 2026-09-28): a wanted suspect is
+# auto-arrested only after being CONTINUOUSLY below the threshold for this
+# long. Wall-clock based (monotonic), so it is independent of tick cadence.
+UNDERWATER_GRACE_SECONDS = 15.0
+
+# guid -> monotonic timestamp of the first tick below the threshold.
+# Per-process memory by design: the wanted tick loop is single-process, and
+# a backend restart simply grants a fresh grace window (same class of
+# behavior as _last_modded_vehicle_guids).
+_underwater_since: dict[str, float] = {}
+
+
+def _now() -> float:
+    """Clock indirection so tests can advance the grace timer."""
+    return time.monotonic()
+
 
 # Time-based decay reference — online suspects clear in BASE_WANTED_DURATION
 # seconds at the base rate (a stationary suspect at the 500 m near cap).
@@ -1092,8 +1108,27 @@ async def tick_wanted_countdown(http_client, http_client_mod, http_client_mgmt=N
 
         _, sus_loc, _ = locations[sus_guid]
 
-        # Underwater suspects are automatically arrested
+        # Underwater suspects are automatically arrested after a grace
+        # period of continuous submersion (freeman 2026-09-28). A warning
+        # system message fires once per dive, when the timer starts.
         if sus_loc[2] < UNDERWATER_Z_THRESHOLD:
+            now_mono = _now()
+            first = _underwater_since.setdefault(sus_guid, now_mono)
+            if first == now_mono and http_client_mod:
+                try:
+                    await send_system_message(
+                        http_client_mod,
+                        "You are wanted! Get out of the water or you will be arrested.",
+                        character_guid=sus_guid,
+                    )
+                except Exception:  # the warning must never break the tick
+                    logger.exception(
+                        "underwater grace warning failed for %s",
+                        wanted.character.name,
+                    )
+            if now_mono - first < UNDERWATER_GRACE_SECONDS:
+                _last_star_notified.pop(sus_guid, None)
+                continue
             if http_client_mod:
                 targets = {
                     sus_guid: (
@@ -1128,7 +1163,11 @@ async def tick_wanted_countdown(http_client, http_client_mod, http_client_mgmt=N
                         wanted.character.name,
                     )
             _last_star_notified.pop(sus_guid, None)
+            _underwater_since.pop(sus_guid, None)
             continue
+
+        # Back above the threshold — reset the grace timer
+        _underwater_since.pop(sus_guid, None)
 
         # Modded-vehicle despawn for wanted players
         # Only despawn when a wanted player *enters* a modded vehicle
@@ -1284,6 +1323,12 @@ async def tick_wanted_countdown(http_client, http_client_mod, http_client_mgmt=N
     # Update modded-vehicle tracking for next tick
     _last_modded_vehicle_guids.clear()
     _last_modded_vehicle_guids.update(_current_modded_guids)
+
+    # Prune underwater-grace timers for suspects no longer wanted
+    # (arrest/expiry/pull-over cleared them out of wanted_list this tick)
+    live_guids = {w.character.guid for w in wanted_list}
+    for gone in [g for g in _underwater_since if g not in live_guids]:
+        _underwater_since.pop(gone, None)
 
     # Bulk save — must happen BEFORE refresh_player_name so it reads correct DB state
     # (the bounty in `amount` is frozen at trigger time — the tick never touches it)

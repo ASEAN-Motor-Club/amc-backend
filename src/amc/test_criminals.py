@@ -1232,13 +1232,15 @@ class WantedCountdownTickTests(TestCase):
     # Underwater auto-arrest
     # -----------------------------------------------------------------------
 
-    async def test_underwater_criminal_gets_arrested(
+    async def test_underwater_within_grace_no_arrest(
         self,
         mock_sys_msg,
         mock_refresh,
     ):
-        """Criminal below UNDERWATER_Z_THRESHOLD is automatically arrested."""
-        from amc.criminals import UNDERWATER_Z_THRESHOLD
+        """Criminal below the threshold within UNDERWATER_GRACE_SECONDS is not arrested."""
+        from amc.criminals import UNDERWATER_Z_THRESHOLD, _underwater_since
+
+        _underwater_since.clear()
 
         criminal = await self._setup_criminal(wanted_remaining=200)
         sx, sy, _sz = _SUSPECT_LOC
@@ -1248,11 +1250,51 @@ class WantedCountdownTickTests(TestCase):
         ])
         mock_http = AsyncMock()
         mock_http_mod = AsyncMock()
+        clock = {"t": 1000.0}
+
+        with (
+            patch("amc.criminals.get_players", new_callable=AsyncMock, return_value=players),
+            patch("amc.criminals.execute_arrest", new_callable=AsyncMock) as mock_arrest,
+            patch("amc.criminals._now", side_effect=lambda: clock["t"]),
+        ):
+            await tick_wanted_countdown(mock_http, mock_http_mod)
+            clock["t"] += 14.0  # still inside the 15 s grace window
+            await tick_wanted_countdown(mock_http, mock_http_mod)
+
+        mock_arrest.assert_not_called()
+        # Warning system message sent exactly once (on the first submerging tick)
+        mock_sys_msg.assert_awaited_once()
+        self.assertIn("Get out of the water", mock_sys_msg.call_args.args[1])
+        self.assertEqual(
+            mock_sys_msg.call_args.kwargs["character_guid"], criminal.guid
+        )
+        mock_refresh.assert_not_called()
+
+    async def test_underwater_after_grace_arrested(
+        self,
+        mock_sys_msg,
+        mock_refresh,
+    ):
+        """Criminal continuously below the threshold for >= 15 s is auto-arrested."""
+        from amc.criminals import UNDERWATER_Z_THRESHOLD, _underwater_since
+
+        criminal = await self._setup_criminal(wanted_remaining=200)
+        sx, sy, _sz = _SUSPECT_LOC
+        underwater_z = UNDERWATER_Z_THRESHOLD - 1
+        players = _make_players_list([
+            _make_player_data(criminal.player.unique_id, criminal.guid, sx, sy, underwater_z),
+        ])
+        mock_http = AsyncMock()
+        mock_http_mod = AsyncMock()
+        clock = {"t": 1000.0}
 
         with (
             patch("amc.criminals.get_players", new_callable=AsyncMock, return_value=players),
             patch("amc.criminals.execute_arrest", new_callable=AsyncMock, return_value=([criminal.name], 1000)) as mock_arrest,
+            patch("amc.criminals._now", side_effect=lambda: clock["t"]),
         ):
+            await tick_wanted_countdown(mock_http, mock_http_mod)
+            clock["t"] += 15.0  # grace window fully elapsed while still underwater
             await tick_wanted_countdown(mock_http, mock_http_mod)
 
         mock_arrest.assert_awaited_once()
@@ -1260,9 +1302,53 @@ class WantedCountdownTickTests(TestCase):
         self.assertIsNone(call_kwargs["officer_character"])
         self.assertEqual(call_kwargs["http_client"], mock_http)
         self.assertEqual(call_kwargs["http_client_mod"], mock_http_mod)
-        # No star-change messages or refresh calls for arrested player
-        mock_sys_msg.assert_not_called()
+        # Warning fired on the first tick only — not again on the arrest tick
+        mock_sys_msg.assert_awaited_once()
         mock_refresh.assert_not_called()
+        # Arrest clears the grace timer
+        self.assertNotIn(criminal.guid, _underwater_since)
+
+    async def test_underwater_resurface_resets_grace(
+        self,
+        mock_sys_msg,
+        mock_refresh,
+    ):
+        """Resurfacing restarts the grace timer: a quick re-dive gets a fresh window."""
+        from amc.criminals import UNDERWATER_Z_THRESHOLD, _underwater_since
+
+        _underwater_since.clear()
+        criminal = await self._setup_criminal(wanted_remaining=200)
+        sx, sy, _sz = _SUSPECT_LOC
+        underwater_z = UNDERWATER_Z_THRESHOLD - 1
+        mock_http = AsyncMock()
+        mock_http_mod = AsyncMock()
+        clock = {"t": 1000.0}
+
+        with (
+            patch("amc.criminals.get_players", new_callable=AsyncMock) as mock_get_players,
+            patch("amc.criminals.execute_arrest", new_callable=AsyncMock) as mock_arrest,
+            patch("amc.criminals._now", side_effect=lambda: clock["t"]),
+        ):
+            mock_get_players.return_value = _make_players_list([
+                _make_player_data(criminal.player.unique_id, criminal.guid, sx, sy, underwater_z),
+            ])
+            await tick_wanted_countdown(mock_http, mock_http_mod)  # dive #1 (timer starts)
+            clock["t"] += 5.0
+            mock_get_players.return_value = _make_players_list([
+                _make_player_data(criminal.player.unique_id, criminal.guid, sx, sy, 0),
+            ])
+            await tick_wanted_countdown(mock_http, mock_http_mod)  # resurfaced — timer reset
+            clock["t"] += 1.0
+            mock_get_players.return_value = _make_players_list([
+                _make_player_data(criminal.player.unique_id, criminal.guid, sx, sy, underwater_z),
+            ])
+            await tick_wanted_countdown(mock_http, mock_http_mod)  # dive #2 (fresh timer)
+            clock["t"] += 13.0  # only 13 s into dive #2
+            await tick_wanted_countdown(mock_http, mock_http_mod)
+
+        mock_arrest.assert_not_called()
+        # One warning per dive: dive #1 and dive #2 each warned once
+        self.assertEqual(mock_sys_msg.await_count, 2)
 
     async def test_criminal_at_threshold_not_arrested(
         self,
@@ -1287,6 +1373,7 @@ class WantedCountdownTickTests(TestCase):
             await tick_wanted_countdown(mock_http, mock_http_mod)
 
         mock_arrest.assert_not_called()
+        mock_sys_msg.assert_not_called()
         wanted = await Wanted.objects.aget(character=criminal)
         self.assertLess(wanted.wanted_remaining, 200)  # normal decay happened
 
@@ -1313,6 +1400,7 @@ class WantedCountdownTickTests(TestCase):
             await tick_wanted_countdown(mock_http, mock_http_mod)
 
         mock_arrest.assert_not_called()
+        mock_sys_msg.assert_not_called()
         wanted = await Wanted.objects.aget(character=criminal)
         self.assertLess(wanted.wanted_remaining, 200)  # normal decay happened
 
@@ -1321,8 +1409,8 @@ class WantedCountdownTickTests(TestCase):
         mock_sys_msg,
         mock_refresh,
     ):
-        """If execute_arrest raises, the tick continues for other players."""
-        from amc.criminals import UNDERWATER_Z_THRESHOLD
+        """If execute_arrest raises after the grace window, the tick continues."""
+        from amc.criminals import UNDERWATER_Z_THRESHOLD, _underwater_since
 
         criminal_a = await self._setup_criminal(wanted_remaining=200)
         criminal_b = await self._setup_criminal(wanted_remaining=200)
@@ -1334,14 +1422,20 @@ class WantedCountdownTickTests(TestCase):
         ])
         mock_http = AsyncMock()
         mock_http_mod = AsyncMock()
+        clock = {"t": 1000.0}
 
         with (
             patch("amc.criminals.get_players", new_callable=AsyncMock, return_value=players),
             patch("amc.criminals.execute_arrest", new_callable=AsyncMock, side_effect=ValueError("Jail not configured")) as mock_arrest,
+            patch("amc.criminals._now", side_effect=lambda: clock["t"]),
         ):
-            await tick_wanted_countdown(mock_http, mock_http_mod)
+            await tick_wanted_countdown(mock_http, mock_http_mod)  # dive — grace starts
+            clock["t"] += 15.0
+            await tick_wanted_countdown(mock_http, mock_http_mod)  # grace over — arrest attempt fails
 
         mock_arrest.assert_awaited_once()
+        # The failed arrest still cleared criminal_a's grace timer
+        self.assertNotIn(criminal_a.guid, _underwater_since)
         # criminal_b should still have decayed normally
         wanted_b = await Wanted.objects.aget(character=criminal_b)
         self.assertLess(wanted_b.wanted_remaining, 200)
