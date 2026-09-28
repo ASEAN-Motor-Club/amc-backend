@@ -25,7 +25,7 @@ def _make_db(tmp_path):
         CREATE TABLE vehicle_weights (
             vehicle_id INTEGER, chassis_mass_kg REAL, blueprint_path TEXT);
         CREATE TABLE vehicle_parts (
-            name TEXT, part_type TEXT, mass_kg REAL);
+            id TEXT, name TEXT, part_type TEXT, mass_kg REAL);
         """
     )
     conn.executemany(
@@ -36,13 +36,16 @@ def _make_db(tmp_path):
             (3, None, "Default__Barebones_C"),  # NULL mass excluded by query
         ],
     )
+    # Real regen shape: `name` is a display/hash string (or NULL) and the
+    # game's part Key equals `id` — masses must resolve by id first.
     conn.executemany(
-        "INSERT INTO vehicle_parts VALUES (?,?,?)",
+        "INSERT INTO vehicle_parts VALUES (?,?,?,?)",
         [
-            ("201", "Intake", 12.0),
-            ("Damper200", "Suspension_Damper", 8.0),
-            ("WheelSpacer50", "WheelSpacer", 1.2),
-            ("Turbocharger_Stage1", "Turbocharger", 15.0),
+            ("201", "38A0EDDD425EB71B36C13587752411BF", "Intake", 12.0),
+            ("Damper200", None, "Suspension_Damper", 8.0),
+            ("WheelSpacer50", "WheelSpacer50", "WheelSpacer", 1.2),
+            ("Turbocharger_Stage1", None, "Turbocharger", 15.0),
+            ("BasicTire", None, "Tire", 10.0),  # NULL name, id-only
         ],
     )
     conn.commit()
@@ -107,6 +110,14 @@ class TestChassisMass:
 class TestPartMass:
     def test_exact_row(self, weight_db):
         assert vw.part_mass("201") == 12.0
+
+    def test_id_keyed_with_hash_name(self, weight_db):
+        # real regen output: name is a hash, id is the part Key
+        assert vw.part_mass("201") == 12.0
+
+    def test_id_keyed_with_null_name(self, weight_db):
+        assert vw.part_mass("BasicTire") == 10.0
+        assert vw.part_mass("Damper200") == 8.0
 
     def test_tuning_family_base_fallback(self, weight_db):
         # Damper200_200 -> base row Damper200 (Suspension_Damper is a family)

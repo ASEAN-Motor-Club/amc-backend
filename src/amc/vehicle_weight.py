@@ -107,7 +107,13 @@ def _load_chassis_masses() -> dict[str, float]:
 
 
 def _load_part_masses() -> tuple[dict[str, float], dict[str, float]]:
-    """(all part masses, tuning-family base-row masses), cached, lowercased."""
+    """(all part masses, tuning-family base-row masses), cached, lowercased.
+
+    Keyed by the part ``id`` — the game's part ``Key`` equals the
+    ``vehicle_parts.id`` row (regen output stores display/hash strings in
+    ``name``, so ``name`` is only a secondary fallback, never the primary
+    key).
+    """
     global _part_masses, _part_mass_bases
     if _part_masses is not None and _part_mass_bases is not None:
         return _part_masses, _part_mass_bases
@@ -116,13 +122,19 @@ def _load_part_masses() -> tuple[dict[str, float], dict[str, float]]:
     try:
         conn = sqlite3.connect(f"file:{GAME_DB_PATH}?mode=ro", uri=True, timeout=5)
         try:
-            for name, ptype, mass in conn.execute(
-                "SELECT name, part_type, mass_kg FROM vehicle_parts "
-                "WHERE name IS NOT NULL AND mass_kg IS NOT NULL"
+            for pid, name, ptype, mass in conn.execute(
+                "SELECT id, name, part_type, mass_kg FROM vehicle_parts "
+                "WHERE mass_kg IS NOT NULL"
             ):
-                exact[str(name).lower()] = float(mass)
-                if ptype in _TUNING_FAMILIES:
-                    bases[str(name).lower()] = float(mass)
+                if pid is not None:
+                    exact[str(pid).lower()] = float(mass)
+                    if ptype in _TUNING_FAMILIES:
+                        bases[str(pid).lower()] = float(mass)
+                # secondary fallback: some rows only carry a display name
+                if name is not None and str(name).lower() not in exact:
+                    exact[str(name).lower()] = float(mass)
+                    if ptype in _TUNING_FAMILIES:
+                        bases[str(name).lower()] = float(mass)
         finally:
             conn.close()
     except Exception as e:  # noqa: BLE001 — degrade to empty
