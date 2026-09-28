@@ -166,22 +166,28 @@ def _evasion_announce_text(name: str, bounty: int, quality: float) -> str:
     return f"{name} is no longer wanted by police"
 
 
-# --- Star scaling with delivery size (freeman 2026-09-25) ---
-# A chase is issued at max(5, delivery // 100k) stars — the 5★ floor never
-# shrinks, big illicit hauls issue MORE stars. Stars are display + meter
-# size only: arrests/confiscation/decay are identical at every star count.
-# WANTED_STARS_PER_100K and WANTED_STAR_FLOOR live on the Wanted model.
+# --- Star scaling with delivery size (freeman 2026-09-28 tier table) ---
+# A chase is issued at 3★ minimum, +1 star per crossed threshold in
+# Wanted.WANTED_STAR_TIERS, then +1★ per full $250k above $1M. Stars are
+# display + meter size only: arrests/confiscation/decay are identical at
+# every star count.
 
 
 def wanted_stars_for_delivery(delivery_amount: float) -> int:
     """Stars a chase is issued at for a given illicit delivery payment.
 
-    Floor 5★; +1 star per full $100k of delivery (e.g. $800k → 8★).
+    Floor 3★ (Wanted.WANTED_STAR_FLOOR); the payment crosses each tier in
+    Wanted.WANTED_STAR_TIERS for +1 star; above the last tier, +1 star per
+    full Wanted.WANTED_STAR_BEYOND_STEP (e.g. $1M → 11★, $1.25M → 12★).
     """
-    return max(
-        Wanted.WANTED_STAR_FLOOR,
-        int(delivery_amount) // Wanted.WANTED_STAR_STEP_AMOUNT,
-    )
+    pay = int(delivery_amount)
+    stars = Wanted.WANTED_STAR_FLOOR
+    for threshold, tier_stars in Wanted.WANTED_STAR_TIERS:
+        if pay >= threshold:
+            stars = tier_stars
+    if stars == Wanted.WANTED_STAR_TIERS[-1][1] and pay > Wanted.WANTED_STAR_TIERS[-1][0]:
+        stars += (pay - Wanted.WANTED_STAR_TIERS[-1][0]) // Wanted.WANTED_STAR_BEYOND_STEP
+    return stars
 
 
 def initial_heat_for_stars(stars: int) -> int:

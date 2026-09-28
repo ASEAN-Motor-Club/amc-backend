@@ -142,23 +142,35 @@ class ComputeStarsTests(TestCase):
 
 
 class DeliveryScaledStarsTests(TestCase):
-    """Scale-with-delivery (freeman 2026-09-25): floor 5★, +1 star per full
-    $100k of illicit delivery. Stars are meter size + display only."""
+    """Scale-with-delivery tier table (freeman 2026-09-28): floor 3★, +1 star
+    per crossed threshold (150k→4, 200k→5, 350k→6 … 750k→10, 1M→11), then
+    +1★ per full $250k above $1M. Stars are meter size + display only."""
 
-    def test_floor_is_5_stars(self):
-        for amount in (0, 10_000, 499_999, 500_000):
-            self.assertEqual(wanted_stars_for_delivery(amount), 5, amount)
+    def test_floor_is_3_stars(self):
+        for amount in (0, 10_000, 50_000, 149_999):
+            self.assertEqual(wanted_stars_for_delivery(amount), 3, amount)
 
-    def test_one_star_per_full_100k(self):
-        # the 5★ floor covers the first $500k; 6★ starts at $600k
-        self.assertEqual(wanted_stars_for_delivery(600_000), 6)
-        self.assertEqual(wanted_stars_for_delivery(800_000), 8)
-        self.assertEqual(wanted_stars_for_delivery(1_500_000), 15)
-        self.assertEqual(wanted_stars_for_delivery(999_999.99), 9)
+    def test_tier_thresholds(self):
+        # Anchors read as "at payment X you have N stars" (>= threshold):
+        # 350_000 → 6, 750_000 → 10 per the spec.
+        self.assertEqual(wanted_stars_for_delivery(150_000), 4)
+        self.assertEqual(wanted_stars_for_delivery(150_001), 4)
+        self.assertEqual(wanted_stars_for_delivery(200_000), 5)
+        self.assertEqual(wanted_stars_for_delivery(349_999), 5)
+        self.assertEqual(wanted_stars_for_delivery(350_000), 6)
+        self.assertEqual(wanted_stars_for_delivery(750_000), 10)
+        self.assertEqual(wanted_stars_for_delivery(999_999), 10)
+
+    def test_beyond_1m_every_250k(self):
+        self.assertEqual(wanted_stars_for_delivery(1_000_000), 11)
+        self.assertEqual(wanted_stars_for_delivery(1_249_999), 11)
+        self.assertEqual(wanted_stars_for_delivery(1_250_000), 12)
+        self.assertEqual(wanted_stars_for_delivery(1_500_000), 13)
+        self.assertEqual(wanted_stars_for_delivery(10_000_000), 47)
 
     def test_initial_heat_matches_star_bands(self):
-        self.assertEqual(initial_heat_for_stars(5), 600)
-        self.assertEqual(initial_heat_for_stars(8), 960)
+        self.assertEqual(initial_heat_for_stars(3), 360)
+        self.assertEqual(initial_heat_for_stars(11), 1320)
 
     def test_compute_stars_uncapped_above_5(self):
         self.assertEqual(_compute_stars(960), 8)

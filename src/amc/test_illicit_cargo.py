@@ -86,7 +86,9 @@ class IllicitCargoWantedTests(TestCase):
         )
         await process_event(event, player, character)
         await created.arefresh_from_db()
-        self.assertEqual(created.wanted_remaining, Wanted.INITIAL_WANTED_LEVEL)
+        # Refresh resets to full heat for the delivery size: $5k → 3★ floor
+        # (tier table) → 3 × 120 = 360.
+        self.assertEqual(created.wanted_remaining, 360)
 
     @patch("amc.special_cargo.record_treasury_expense", new_callable=AsyncMock)
     async def test_cocaine_does_not_auto_create_wanted(
@@ -181,8 +183,9 @@ class IllicitCargoWantedTests(TestCase):
             )
         ]
         self.assertEqual(len(wanted_records), 1, "Should not create a second wanted")
+        # Refresh resets to full heat for the delivery size: $5k → 3★ → 360.
         self.assertEqual(
-            wanted_records[0].wanted_remaining, Wanted.INITIAL_WANTED_LEVEL
+            wanted_records[0].wanted_remaining, 360
         )
 
     # ------------------------------------------------------------------
@@ -1067,4 +1070,5 @@ class WantedTriggerRestoreTests(TestCase):
         mock_roll.assert_not_called()
         mock_cops.assert_not_awaited()
         await seeded.arefresh_from_db()
-        self.assertEqual(seeded.wanted_remaining, Wanted.INITIAL_WANTED_LEVEL)
+        # Refresh resets to full heat for the delivery size: $5k → 3★ → 360.
+        self.assertEqual(seeded.wanted_remaining, 360)

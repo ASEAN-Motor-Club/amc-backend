@@ -135,7 +135,8 @@ class GracePeriodApplyTests(TestCase):
         self.assertIsNotNone(wanted)
         # Bounty = 10% of the criminal score at apply (creation path).
         self.assertEqual(wanted.amount, 5_000)
-        self.assertEqual(wanted.wanted_remaining, Wanted.INITIAL_WANTED_LEVEL)
+        # $100k trigger → 3★ tier floor → 3 × 120 = 360 heat.
+        self.assertEqual(wanted.wanted_remaining, 360)
         # The pending row is consumed.
         still_pending = await PendingWanted.objects.filter(
             character=character
@@ -231,7 +232,8 @@ class GracePeriodApplyTests(TestCase):
             character=character, expired_at__isnull=True
         ).afirst()
         self.assertIsNotNone(wanted)
-        self.assertEqual(wanted.wanted_remaining, Wanted.INITIAL_WANTED_LEVEL)
+        # $100k trigger → 3★ tier floor → 3 × 120 = 360 heat.
+        self.assertEqual(wanted.wanted_remaining, 360)
         self.assertEqual(wanted.amount, 0)  # admin flag stays bounty-free
         still_pending = await PendingWanted.objects.filter(
             character=character

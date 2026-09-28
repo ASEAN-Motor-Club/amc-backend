@@ -633,14 +633,26 @@ class Wanted(models.Model):
     associated with this wanted record (used for confiscation calculations).
     """
 
-    INITIAL_WANTED_LEVEL = 600  # 5★ floor — see WANTED_STAR_FLOOR in criminals.py
+    INITIAL_WANTED_LEVEL = 600  # 5★-worth of heat; historical reference value
 
-    # Scale-with-delivery (freeman 2026-09-25): a chase is issued at
-    # max(5, delivery // 100_000) stars; initial_heat records the heat value
-    # it was issued at (stars × LEVEL_PER_STAR) so the running-growth cap in
-    # tick_wanted_countdown matches the issued chase, not the 5★ floor.
-    WANTED_STAR_FLOOR = 5
-    WANTED_STAR_STEP_AMOUNT = 100_000  # $100k of illicit delivery per extra star
+    # Scale-with-delivery tier table (freeman 2026-09-28): a chase is issued
+    # at 3★ minimum, then +1 star as the illicit delivery payment crosses each
+    # threshold below; beyond the last threshold, +1 star per full
+    # WANTED_STAR_BEYOND_STEP. initial_heat records the heat value the chase
+    # was issued at (stars × LEVEL_PER_STAR) so the running-growth cap in
+    # tick_wanted_countdown matches the issued chase.
+    WANTED_STAR_FLOOR = 3
+    WANTED_STAR_BEYOND_STEP = 250_000  # +1★ per $250k above $1M
+    WANTED_STAR_TIERS = (  # (payment threshold, stars issued at/above it)
+        (150_000, 4),
+        (200_000, 5),
+        (350_000, 6),
+        (450_000, 7),
+        (550_000, 8),
+        (650_000, 9),
+        (750_000, 10),
+        (1_000_000, 11),
+    )
 
     # 1/r² decay constants (game units; 100 units = 1 metre)
     REF_DISTANCE = 20_000  # 200m — distance where decay_rate = 1.0/tick
