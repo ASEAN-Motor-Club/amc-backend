@@ -808,6 +808,17 @@ async def handle_change_event_state(event, player, character, ctx):
         event_data.get("EventGuid"), game_event.state, transition,
     )
 
+    # Any transition that is NOT into racing drops the pending 60s
+    # illegal-race alert sleeper for this guid (finish / between-run reset)
+    # — one timer at a time, measured from the LATEST start (Yuuka
+    # 2026-09-28: stacked sleepers announced 3x and mis-timed across a
+    # Start→Ready→Start toggle). The racing transition re-arms its own
+    # fresh timer via announce_illegal_race below.
+    if transition and transition[1] != 2:
+        from amc.handlers.tt_police import cancel_pending_race_alert
+
+        cancel_pending_race_alert(event_data.get("EventGuid"))
+
     # Process all players (audit rule same as the AddEvent hook: a fresh
     # row in a Ready payload = a join, e.g. an event re-opened into the
     # lobby state).
