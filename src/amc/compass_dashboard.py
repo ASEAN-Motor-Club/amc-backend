@@ -25,7 +25,7 @@ log = logging.getLogger(__name__)
 
 _CONFIG_FIELDS = (
     "config_name",
-    "c",
+    "far_mult",
     "min_interval",
     "max_interval",
     "ring_distance",
@@ -42,7 +42,7 @@ def _serialize(cfg: CompassTuningConfig) -> dict:
     return {
         "id": cfg.pk,
         "config_name": cfg.config_name,
-        "c": cfg.c,
+        "far_mult": cfg.far_mult,
         "min_interval": cfg.min_interval,
         "max_interval": cfg.max_interval,
         "ring_distance": cfg.ring_distance,
@@ -103,5 +103,5 @@ def _apply_fields(cfg: CompassTuningConfig, data: dict) -> None:
             setattr(cfg, field, data[field])
     if cfg.min_interval <= 0 or cfg.max_interval < cfg.min_interval:
         raise ValueError("max_interval must be >= min_interval > 0")
-    if cfg.c <= 0 or cfg.budget_cap < 1:
-        raise ValueError("c must be > 0 and budget_cap >= 1")
+    if not (0.0 < cfg.far_mult <= 1.0) or cfg.budget_cap < 1:
+        raise ValueError("far_mult must be in (0, 1] and budget_cap >= 1")

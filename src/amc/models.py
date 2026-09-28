@@ -3374,17 +3374,21 @@ class CompassTuningConfig(models.Model):
         default="A",
         help_text="Label of which tuning preset (A, B, ...) these values match.",
     )
-    c = models.FloatField(
-        default=3.0e-6,
-        help_text="Compass frequency constant: Hz per (metre * km/h). Higher = faster everywhere.",
+    far_mult = models.FloatField(
+        default=0.25,
+        help_text=(
+            "Parked-far base as a fraction of max_interval: base = "
+            "max_interval * (1 - (1 - far_mult) * w), w saturating 0→1 with "
+            "distance past the 500 m near cap. Must be in (0, 1]."
+        ),
     )
     min_interval = models.FloatField(
         default=3.0,
         help_text="SOLO floor in seconds (fastest possible bearing per cop).",
     )
     max_interval = models.FloatField(
-        default=15.0,
-        help_text="SOLO ceiling in seconds (parked suspect); also the <200m close-ping interval.",
+        default=20.0,
+        help_text="SOLO parked-near ceiling in seconds (also the <200m close-ping interval).",
     )
     ring_distance = models.IntegerField(
         default=20_000,
@@ -3426,9 +3430,9 @@ class CompassTuningConfig(models.Model):
         if row is None:
             row = await cls.objects.acreate(
                 config_name="A",
-                c=3.0e-6,
+                far_mult=0.25,
                 min_interval=3.0,
-                max_interval=15.0,
+                max_interval=20.0,
                 ring_distance=20_000,
                 budget_cap=2,
                 active=True,
