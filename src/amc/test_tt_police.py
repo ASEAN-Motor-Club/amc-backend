@@ -43,11 +43,13 @@ def _clean_alert_state():
     tt_police._alert_tasks.clear()
     tt_police._announced_race_guids.clear()
     tt_police._race_first_seen.clear()
+    tt_police._alert_targets.clear()
     tt_police._announce_locks.clear()
     yield
     tt_police._alert_tasks.clear()
     tt_police._announced_race_guids.clear()
     tt_police._race_first_seen.clear()
+    tt_police._alert_targets.clear()
     tt_police._announce_locks.clear()
 
 
@@ -116,19 +118,34 @@ async def test_grant_wanted_skips_offline(grant_mock, db):
 @patch("amc.handlers.tt_police.broadcast_server_message", new_callable=AsyncMock)
 @patch("amc.handlers.tt_police.get_events", new_callable=AsyncMock)
 async def test_alert_fires_when_still_racing(get_events_mock, send_mock, db):
+    # 5-waypoint route, progress already at the final waypoint (idx 4):
+    # every roll in [1..4] is satisfied -> announces.
     get_events_mock.return_value = [
-        {"EventGuid": "GUIDPOL000000000000000000000E", "State": 2}
+        _racing_payload(5, section_index=4)
     ]
     event = await sync_to_async(GameEvent.objects.create)(
         guid="GUIDPOL000000000000000000000E", name="Alert Test [TT-350]", state=2
     )
 
-    with patch.object(tt_police, "RACE_ALERT_DELAY_SECONDS", 0):
+    with patch.object(tt_police, "RACE_ALERT_CHECK_INTERVAL", 0):
         await announce_illegal_race(object(), event)
         await _flush_tasks()
     send_mock.assert_awaited_once()
     assert RACE_ALERT_DELAY_SECONDS == 60  # production value untouched
     assert RACE_ALERT_MESSAGE == "An Illegal race is happening! Check Events!"
+
+
+def _racing_payload(waypoints, section_index):
+    return {
+        "EventGuid": "GUIDPOL000000000000000000000E",
+        "State": 2,
+        "RaceSetup": {
+            "Route": {"Waypoints": [{"Location": {"X": i}} for i in range(waypoints)]}
+        },
+        "Players": [
+            {"PlayerName": "Racer", "SectionIndex": section_index}
+        ],
+    }
 
 
 async def _flush_tasks():
@@ -152,14 +169,15 @@ async def test_rearm_replaces_the_timer_single_announcement(
     # Yuuka 2026-09-28: repeated starts stacked independent sleepers that
     # EACH announced. Re-arming must cancel the previous sleeper so only
     # ONE announcement lands, no matter how often the race is started.
+    # 5 waypoints, final SectionIndex — any roll in [1..4] satisfied.
     get_events_mock.return_value = [
-        {"EventGuid": "GUIDPOL000000000000000000000E", "State": 2}
+        _racing_payload(5, section_index=4)
     ]
     event = await sync_to_async(GameEvent.objects.create)(
         guid="GUIDPOL000000000000000000000E", name="Alert Re-arm [TT-270]", state=2
     )
 
-    with patch.object(tt_police, "RACE_ALERT_DELAY_SECONDS", 0):
+    with patch.object(tt_police, "RACE_ALERT_CHECK_INTERVAL", 0):
         for _ in range(3):
             await announce_illegal_race(object(), event)
         await _flush_tasks()
@@ -168,7 +186,7 @@ async def test_rearm_replaces_the_timer_single_announcement(
 
     # Between-run reset: cancel kills the sleeper outright — no send.
     tt_police._announced_race_guids.clear()
-    with patch.object(tt_police, "RACE_ALERT_DELAY_SECONDS", 30):
+    with patch.object(tt_police, "RACE_ALERT_CHECK_INTERVAL", 30):
         await announce_illegal_race(object(), event)
     tt_police.cancel_pending_race_alert(event.guid)
     await _flush_tasks()
@@ -180,6 +198,7 @@ async def test_rearm_replaces_the_timer_single_announcement(
 @patch("amc.handlers.tt_police.broadcast_server_message", new_callable=AsyncMock)
 @patch("amc.handlers.tt_police.get_events", new_callable=AsyncMock)
 async def test_alert_silent_when_event_not_racing(get_events_mock, send_mock, db):
+    # State 1 payload (no Route key at all) — the re-arm path.
     get_events_mock.return_value = [
         {"EventGuid": "GUIDPOL000000000000000000000E", "State": 1}
     ]
@@ -187,10 +206,48 @@ async def test_alert_silent_when_event_not_racing(get_events_mock, send_mock, db
         guid="GUIDPOL000000000000000000000E", name="Alert Test 2 [TT-480]", state=1
     )
 
-    with patch.object(tt_police, "RACE_ALERT_DELAY_SECONDS", 0):
+    with patch.object(tt_police, "RACE_ALERT_CHECK_INTERVAL", 0):
         await announce_illegal_race(object(), event)
         await _flush_tasks()
     send_mock.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+@patch("amc.handlers.tt_police.broadcast_server_message", new_callable=AsyncMock)
+@patch("amc.handlers.tt_police.get_events", new_callable=AsyncMock)
+async def test_alert_silent_below_rolled_fraction(
+    get_events_mock, send_mock, db
+):
+    # Yuuka 2026-09-28: trigger is 50-100% of checkpoints passed. Pin the
+    # roll at 100% (4 of 5 waypoints) and check that mid-route progress
+    # stays silent.
+    get_events_mock.return_value = [
+        _racing_payload(5, section_index=2)
+    ]
+    event = await sync_to_async(GameEvent.objects.create)(
+        guid="GUIDPOL000000000000000000000E", name="Alert Low [TT-350]", state=2
+    )
+    with patch.object(tt_police, "RACE_ALERT_CHECK_INTERVAL", 0), patch.object(
+        tt_police, "RACE_ALERT_MIN_FRACTION", 0.9999
+    ), patch.object(tt_police, "RACE_ALERT_MAX_FRACTION", 0.9999):
+        await announce_illegal_race(object(), event)
+        await _flush_tasks()
+    send_mock.assert_not_awaited()
+    # The rolled target persisted for the run (not re-rolled per sighting).
+    assert event.guid in tt_police._alert_targets
+
+
+def test_roll_target_bounds():
+    for _ in range(200):
+        t = tt_police._roll_target(_racing_payload(45, section_index=0))
+        assert t is not None and 1 <= t <= 44
+
+
+def test_roll_target_no_waypoints():
+    assert tt_police._roll_target({"State": 2}) is None
+    assert tt_police._roll_target(
+        {"RaceSetup": {"Route": {"Waypoints": []}}}
+    ) is None
 
 
 def _rot_config(route_name, laps):
