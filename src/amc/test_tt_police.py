@@ -37,6 +37,20 @@ from amc.test_auto_tt import (  # noqa: F401  (fixtures shared)
 pytestmark = pytest.mark.django_db
 
 
+@pytest.fixture(autouse=True)
+def _clean_alert_state():
+    """Isolate the module-level alert registries between tests."""
+    tt_police._alert_tasks.clear()
+    tt_police._announced_race_guids.clear()
+    tt_police._race_first_seen.clear()
+    tt_police._announce_locks.clear()
+    yield
+    tt_police._alert_tasks.clear()
+    tt_police._announced_race_guids.clear()
+    tt_police._race_first_seen.clear()
+    tt_police._announce_locks.clear()
+
+
 def _player(guid, unique_id, name):
     return {
         "CharacterId": {"CharacterGuid": guid, "UniqueNetId": unique_id},
@@ -127,6 +141,39 @@ async def _flush_tasks():
         await asyncio.wait_for(
             asyncio.gather(*pending, return_exceptions=True), timeout=10
         )
+
+
+@pytest.mark.asyncio
+@patch("amc.handlers.tt_police.broadcast_server_message", new_callable=AsyncMock)
+@patch("amc.handlers.tt_police.get_events", new_callable=AsyncMock)
+async def test_rearm_replaces_the_timer_single_announcement(
+    get_events_mock, send_mock, db
+):
+    # Yuuka 2026-09-28: repeated starts stacked independent sleepers that
+    # EACH announced. Re-arming must cancel the previous sleeper so only
+    # ONE announcement lands, no matter how often the race is started.
+    get_events_mock.return_value = [
+        {"EventGuid": "GUIDPOL000000000000000000000E", "State": 2}
+    ]
+    event = await sync_to_async(GameEvent.objects.create)(
+        guid="GUIDPOL000000000000000000000E", name="Alert Re-arm [TT-270]", state=2
+    )
+
+    with patch.object(tt_police, "RACE_ALERT_DELAY_SECONDS", 0):
+        for _ in range(3):
+            await announce_illegal_race(object(), event)
+        await _flush_tasks()
+    send_mock.assert_awaited_once()
+    assert not tt_police._alert_tasks  # registry drained
+
+    # Between-run reset: cancel kills the sleeper outright — no send.
+    tt_police._announced_race_guids.clear()
+    with patch.object(tt_police, "RACE_ALERT_DELAY_SECONDS", 30):
+        await announce_illegal_race(object(), event)
+    tt_police.cancel_pending_race_alert(event.guid)
+    await _flush_tasks()
+    send_mock.assert_awaited_once()  # still the single original send
+    assert not tt_police._alert_tasks
 
 
 @pytest.mark.asyncio
