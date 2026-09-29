@@ -43,6 +43,11 @@ ILLICIT_CARGO_KEYS: set[str] = {
     "CocaineBags",
     "LiquidCocaine",
     "MoonshineBottles",
+    "MethBase",
+    "CrystalMeth",
+    "HiddenMethBed",
+    "HiddenMethSofa",
+    "HiddenMethArmchair",
 }
 
 # Wanted trigger chance (freeman design 2026-09-23 — 1M guarantee + ratio
@@ -469,6 +474,11 @@ SPECIAL_CARGO_HANDLERS: dict[str, SpecialCargoHandler] = {
     "CocaineBags": handle_contraband_cargo,
     "LiquidCocaine": handle_contraband_cargo,
     "MoonshineBottles": handle_contraband_cargo,
+    "MethBase": handle_contraband_cargo,
+    "CrystalMeth": handle_contraband_cargo,
+    "HiddenMethBed": handle_contraband_cargo,
+    "HiddenMethSofa": handle_contraband_cargo,
+    "HiddenMethArmchair": handle_contraband_cargo,
 }
 
 
