@@ -767,32 +767,20 @@ async def create_or_refresh_wanted(
         # for the whole chase — score growth mid-chase never re-prices it.
         active_wanted.wanted_remaining = initial_wanted
         active_wanted.initial_heat = initial_wanted
-        # mod-allow upgrade is one-way: once a record opts in (race
-        # enforcement), later refreshes from other paths keep it — the
-        # despawn pass must never re-arm on a refresh.
-        if mod_vehicles_allowed and not active_wanted.mod_vehicles_allowed:
-            active_wanted.mod_vehicles_allowed = True
-        # Backfill the trigger origin only when the record doesn't carry one
-        # yet — never overwrite an existing marker (refreshes from other
-        # trigger types keep the original classification).
-        if origin and active_wanted.origin != origin:
-            active_wanted.origin = origin
-            await active_wanted.asave(
-                update_fields=[
-                    "wanted_remaining", "initial_heat", "origin",
-                    "mod_vehicles_allowed",
-                ]
-            )
-        elif mod_vehicles_allowed:
-            await active_wanted.asave(
-                update_fields=[
-                    "wanted_remaining", "initial_heat", "mod_vehicles_allowed",
-                ]
-            )
-        else:
-            await active_wanted.asave(
-                update_fields=["wanted_remaining", "initial_heat"]
-            )
+        # mod_vehicles_allowed is only ever SET on create (acreate below).
+        # A refresh must never arm it — a race grant landing on an already
+        # wanted (organic) player would otherwise disable the modded-vehicle
+        # despawn enforcement mid-chase (thomas hole, 2026-09-29). Existing
+        # True values are simply preserved (we never write the field here).
+        # Origin + mod_vehicles_allowed are ONLY set at creation (acreate
+        # below).  A refresh never reclassifies or re-arms: a race grant
+        # landing on an already-wanted (organic) player must not flip the
+        # origin to 'event_race' nor enable the mod-vehicles allowance —
+        # either would disable the modded-vehicle despawn enforcement
+        # mid-chase (thomas hole, 2026-09-29).
+        await active_wanted.asave(
+            update_fields=["wanted_remaining", "initial_heat"]
+        )
     else:
         if bounty is not None:
             # Explicit bounty (race enforcement is flag-only, bounty 0).
