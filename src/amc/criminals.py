@@ -4,7 +4,6 @@ import math
 import os
 import time
 from dataclasses import dataclass
-
 from datetime import timedelta
 
 from django.conf import settings
@@ -13,28 +12,41 @@ from django.utils import timezone
 
 from amc.commands.faction import _build_player_locations, _distance_3d, execute_arrest
 from amc.game_server import announce, get_players, get_players_locations
+from amc.mod_detection import POLICE_DUTY_WHITELIST, detect_custom_parts
+from amc.mod_server import (
+    clear_suspect,
+    despawn_player_vehicle,
+    force_exit_vehicle,
+    get_player,
+    get_player_customization,
+    get_player_last_vehicle,
+    get_player_last_vehicle_parts,
+    make_suspect,
+    send_system_message,
+    show_popup,
+)
 from amc.models import (
     Character,
     CompassTuningConfig,
     GameEvent,
+    GameEventCharacter,
     PendingWanted,
     PoliceSession,
     Wanted,
     WantedSystemConfig,
 )
-from amc.mod_detection import detect_custom_parts, POLICE_DUTY_WHITELIST
-from amc.mod_server import clear_suspect, despawn_player_vehicle, force_exit_vehicle, get_player, get_player_customization, get_player_last_vehicle, get_player_last_vehicle_parts, make_suspect, send_system_message, show_popup
-from amc.player_tags import refresh_player_name
 from amc.no_teleport import (
     FULL_BLOCKS,
     POLICE_NEAR_BLOCKS,
     WANTED_ROADSIDE_BLOCKS,
     _pushed_lock_state,
-    push_no_teleport_cached,
     push_no_teleport,
+    push_no_teleport_cached,
     sync_no_teleport,
 )
+from amc.player_tags import refresh_player_name
 from amc.special_cargo import WANTED_MIN_BOUNTY
+from amc.tt_rules import evaluate_tt_parts
 
 SUSPECT_COSTUMES = getattr(settings, "SUSPECT_COSTUMES", frozenset())
 
@@ -920,6 +932,45 @@ def compute_stars(wanted_remaining: float) -> int:
 _compute_stars = compute_stars
 
 
+async def _race_restriction_caps(wanted_list: list) -> dict[str, int]:
+    """Map suspect guid -> max_hp cap of the most recent classed illegal race
+    the character participated in (the CURRENT event while racing, the same
+    event between runs, or the previous event after it ends — all resolved as
+    "most recent by last_updated").
+
+    Only meaningful for Wanted records carrying ``mod_vehicles_allowed``:
+    their blanket despawn exemption is narrowed to the event's own
+    restrictions (Yuuka 2026-09-29) — a star earned during a race does not
+    license a build the event itself would disqualify. Characters with no
+    classed illegal race on record stay blanket-exempt (there is no rule
+    set to violate).
+    """
+    chars = [w.character_id for w in wanted_list if w.mod_vehicles_allowed]
+    if not chars:
+        return {}
+    caps_by_char: dict[int, int] = {}
+    rows = (
+        GameEventCharacter.objects.filter(
+            character_id__in=chars,
+            game_event__tt_class__isnull=False,
+            game_event__race_legality="illegal",
+        )
+        .select_related("game_event__tt_class")
+        .order_by("-game_event__last_updated")
+    )
+    async for row in rows:
+        if row.character_id in caps_by_char:
+            continue
+        tt_class = row.game_event.tt_class
+        if tt_class is not None:
+            caps_by_char[row.character_id] = tt_class.max_hp
+    out: dict[str, int] = {}
+    for w in wanted_list:
+        if w.mod_vehicles_allowed and w.character.guid and w.character_id in caps_by_char:
+            out[w.character.guid] = caps_by_char[w.character_id]
+    return out
+
+
 async def tick_wanted_countdown(http_client, http_client_mod, http_client_mgmt=None) -> None:
     """Single tick of the wanted countdown. Called from an arq cron.
 
@@ -1132,6 +1183,7 @@ async def tick_wanted_countdown(http_client, http_client_mod, http_client_mgmt=N
     evaded_qualities: dict[str, float] = {}  # guid → meter at expiry
     star_change_notifications = []  # (wanted, message) for deferred processing
     _current_modded_guids: set[str] = set()  # modded vehicle state this tick
+    race_caps = await _race_restriction_caps(wanted_list)
 
     for wanted in wanted_list:
         sus_guid = wanted.character.guid
@@ -1209,10 +1261,21 @@ async def tick_wanted_countdown(http_client, http_client_mod, http_client_mgmt=N
         # (transition from not-in-modded → in-modded).  Players who
         # were already in a modded vehicle when they became wanted are
         # seeded into _last_modded_vehicle_guids by create_or_refresh_wanted.
-        # mod_vehicles_allowed records (race enforcement) skip ONLY the
-        # despawn check — the decay law must still run for them.
+        # mod_vehicles_allowed records (race enforcement) skip the despawn
+        # check ONLY while their vehicle complies with the restrictions of
+        # their most recent classed illegal race (current/previous event,
+        # Yuuka 2026-09-29): a star earned during a race does not license a
+        # build the event itself would disqualify (same evaluate_tt_parts
+        # rule set as the start-line DQ). Records with no classed race on
+        # record keep the blanket allowance.
+        restriction_cap = (
+            race_caps.get(sus_guid) if wanted.mod_vehicles_allowed else None
+        )
+        need_mod_check = (
+            not wanted.mod_vehicles_allowed or restriction_cap is not None
+        )
         currently_in_modded = False
-        if not wanted.mod_vehicles_allowed and http_client_mod:
+        if need_mod_check and http_client_mod:
             try:
                 last_vehicle, parts_data = await asyncio.gather(
                     get_player_last_vehicle(http_client_mod, sus_guid),
@@ -1220,36 +1283,48 @@ async def tick_wanted_countdown(http_client, http_client_mod, http_client_mgmt=N
                 )
                 main_vehicle = last_vehicle.get("vehicle")
                 if main_vehicle:
-                    whitelist = None
-                    is_on_duty = await PoliceSession.objects.filter(
-                        character=wanted.character, ended_at__isnull=True
-                    ).aexists()
-                    if is_on_duty:
-                        whitelist = POLICE_DUTY_WHITELIST
-                    custom_parts = detect_custom_parts(
-                        parts_data.get("parts", []), whitelist=whitelist
-                    )
-                    if custom_parts:
-                        currently_in_modded = True
-                        if sus_guid not in _last_modded_vehicle_guids:
-                            try:
-                                await force_exit_vehicle(http_client_mod, sus_guid)
-                                await despawn_player_vehicle(http_client_mod, sus_guid)
-                                await show_popup(
-                                    http_client_mod,
-                                    "Your modded vehicle has been despawned because you are wanted by police.",
-                                    character_guid=sus_guid,
-                                    player_id=str(wanted.character.player.unique_id),
-                                )
-                                logger.info(
-                                    "modded vehicle despawn: %s",
-                                    wanted.character.name,
-                                )
-                            except Exception:
-                                logger.exception(
-                                    "modded vehicle despawn failed for %s",
-                                    wanted.character.name,
-                                )
+                    if not wanted.mod_vehicles_allowed:
+                        whitelist = None
+                        is_on_duty = await PoliceSession.objects.filter(
+                            character=wanted.character, ended_at__isnull=True
+                        ).aexists()
+                        if is_on_duty:
+                            whitelist = POLICE_DUTY_WHITELIST
+                        custom_parts = detect_custom_parts(
+                            parts_data.get("parts", []), whitelist=whitelist
+                        )
+                        if custom_parts:
+                            currently_in_modded = True
+                    else:
+                        violations = evaluate_tt_parts(
+                            parts_data.get("parts", []), restriction_cap
+                        )
+                        if violations:
+                            logger.info(
+                                "race-restricted modded vehicle: %s (%s)",
+                                wanted.character.name,
+                                "; ".join(violations),
+                            )
+                            currently_in_modded = True
+                    if currently_in_modded and sus_guid not in _last_modded_vehicle_guids:
+                        try:
+                            await force_exit_vehicle(http_client_mod, sus_guid)
+                            await despawn_player_vehicle(http_client_mod, sus_guid)
+                            await show_popup(
+                                http_client_mod,
+                                "Your modded vehicle has been despawned because you are wanted by police.",
+                                character_guid=sus_guid,
+                                player_id=str(wanted.character.player.unique_id),
+                            )
+                            logger.info(
+                                "modded vehicle despawn: %s",
+                                wanted.character.name,
+                            )
+                        except Exception:
+                            logger.exception(
+                                "modded vehicle despawn failed for %s",
+                                wanted.character.name,
+                            )
             except Exception:
                 logger.debug(
                     "tick_wanted_countdown: mod check failed for %s, skipping",
@@ -1777,12 +1852,12 @@ async def refresh_suspect_tags(http_client_mod, http_client_game=None) -> None:
         # Announcement + first wanted grant (once per event guid, whichever
         # path — this tick or the SSE alert task — sees the race first).
         try:
-            from amc.mod_server import broadcast_server_message
             from amc.handlers.tt_police import (
                 RACE_ALERT_MESSAGE,
-                grant_race_wanted,
                 ensure_announced,
+                grant_race_wanted,
             )
+            from amc.mod_server import broadcast_server_message
 
             if await ensure_announced(http_client_mod, race_event):
                 # game-API client: the announcement goes through the native
