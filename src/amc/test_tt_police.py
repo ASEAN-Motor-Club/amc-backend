@@ -41,13 +41,13 @@ pytestmark = pytest.mark.django_db
 def _clean_alert_state():
     """Isolate the module-level alert registries between tests."""
     tt_police._alert_tasks.clear()
-    tt_police._announced_race_guids.clear()
+    tt_police._announced_runs.clear()
     tt_police._race_first_seen.clear()
     tt_police._alert_targets.clear()
     tt_police._announce_locks.clear()
     yield
     tt_police._alert_tasks.clear()
-    tt_police._announced_race_guids.clear()
+    tt_police._announced_runs.clear()
     tt_police._race_first_seen.clear()
     tt_police._alert_targets.clear()
     tt_police._announce_locks.clear()
@@ -185,13 +185,53 @@ async def test_rearm_replaces_the_timer_single_announcement(
     assert not tt_police._alert_tasks  # registry drained
 
     # Between-run reset: cancel kills the sleeper outright — no send.
-    tt_police._announced_race_guids.clear()
+    tt_police._announced_runs.clear()
     with patch.object(tt_police, "RACE_ALERT_CHECK_INTERVAL", 30):
         await announce_illegal_race(object(), event)
     tt_police.cancel_pending_race_alert(event.guid)
     await _flush_tasks()
     send_mock.assert_awaited_once()  # still the single original send
     assert not tt_police._alert_tasks
+
+
+@pytest.mark.asyncio
+@patch("amc.handlers.tt_police.broadcast_server_message", new_callable=AsyncMock)
+@patch("amc.handlers.tt_police.get_events", new_callable=AsyncMock)
+async def test_rearm_fires_again_on_a_new_run_row(
+    get_events_mock, send_mock, db
+):
+    # Yuuka 2026-09-29: the game reuses ONE EventGuid across re-runs, with
+    # one GameEvent row per run. The old guid-set dedup announced at most
+    # once per worker lifetime — run 2+ of the same setup silently got no
+    # star. Dedup is per row (pk): the same run must stay silent, the next
+    # run's row must announce again.
+    get_events_mock.return_value = [_racing_payload(5, section_index=4)]
+    run1 = await sync_to_async(GameEvent.objects.create)(
+        guid="GUIDPOL000000000000000000000E",
+        name="Rearm Run1 [TT-270]",
+        state=2,
+    )
+    with patch.object(tt_police, "RACE_ALERT_CHECK_INTERVAL", 0):
+        await announce_illegal_race(object(), run1)
+        await _flush_tasks()
+    send_mock.assert_awaited_once()
+
+    # Same run again (hook + tick both fire) — still exactly one send.
+    with patch.object(tt_police, "RACE_ALERT_CHECK_INTERVAL", 0):
+        await announce_illegal_race(object(), run1)
+        await _flush_tasks()
+    send_mock.assert_awaited_once()
+
+    # Next run: NEW row, same guid — must announce again.
+    run2 = await sync_to_async(GameEvent.objects.create)(
+        guid="GUIDPOL000000000000000000000E",
+        name="Rearm Run2 [TT-270]",
+        state=2,
+    )
+    with patch.object(tt_police, "RACE_ALERT_CHECK_INTERVAL", 0):
+        await announce_illegal_race(object(), run2)
+        await _flush_tasks()
+    assert send_mock.await_count == 2
 
 
 @pytest.mark.asyncio

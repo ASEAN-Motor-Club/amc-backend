@@ -40,7 +40,13 @@ RACE_ALERT_MAX_FRACTION = 1.0
 RACE_ALERT_CHECK_INTERVAL = 15  # hook-task progress poll cadence
 RACE_ALERT_MAX_CHECKS = 40  # give the task 10 min; the 30s tick backstops
 _alert_tasks: dict[str, asyncio.Task] = {}
-_announced_race_guids: set[str] = set()
+# Announced dedup is PER RUN, not per guid: the game reuses the same
+# EventGuid across re-runs of one setup, with ONE GameEvent row per run
+# (prod 2026-09-29: six runs on guid 85061EFE…, only the first ever
+# granted a star). Maps guid -> the announced GameEvent row pk; a new
+# run creates a new row, so a fresh pk re-arms even when the finish
+# hook was missed.
+_announced_runs: dict[str, int] = {}
 # Serializes the ensure_announced decide-and-mark section per guid: the SSE
 # alert task (fires at t+60s) and the 30s suspect-tick race pass both call
 # it, and the check-and-add spans awaits — without the lock both paths can
@@ -106,18 +112,21 @@ def _arm_or_gate(guid: str) -> bool:
 
 
 async def ensure_announced(http_client_mod, game_event) -> bool:
-    """True exactly once per event guid — the caller sends the broadcast.
+    """True exactly once per RUN (guid + run token) — the caller sends the
+    broadcast.
 
     Shared de-dup between the SSE-hook alert task and the
     refresh_suspect_tags race pass (Yuuka 2026-09-27: the announcement
     must fire even when the hook path loses the race to a worker
-    restart). Race events loop back to state 1 between runs, so a guid
-    is re-armed whenever the event is seen non-racing.
+    restart). The game REUSES one EventGuid across re-runs of a setup
+    (one GameEvent ROW per run), so the dedup token is the row's pk —
+    a guid announced for a PREVIOUS run must not block the next run.
     """
     guid = game_event.guid
+    token = game_event.pk
     lock = _announce_locks.setdefault(guid, asyncio.Lock())
     async with lock:
-        if guid in _announced_race_guids:
+        if _announced_runs.get(guid) == token:
             return False
         # Re-arm: if the event is no longer racing (finished/reset), forget
         # it. get_events returns the EVENT LIST (or None) — NOT a
@@ -126,9 +135,9 @@ async def ensure_announced(http_client_mod, game_event) -> bool:
         live = events or []
         match = next((ev for ev in live if ev.get("EventGuid") == guid), None)
         if match is None or match.get("State") != 2:
-            # Re-arm: finished/reset/vanished — forget the guid AND this
-            # run's rolled target so the next run rolls fresh.
-            _announced_race_guids.discard(guid)
+            # Re-arm: finished/reset/vanished — forget the run token AND
+            # this run's rolled target so the next run rolls fresh.
+            _announced_runs.pop(guid, None)
             _race_first_seen.pop(guid, None)
             _alert_targets.pop(guid, None)
             return False
@@ -138,7 +147,7 @@ async def ensure_announced(http_client_mod, game_event) -> bool:
         # no waypoint data.
         if not _progress_gate(guid, match):
             return False
-        _announced_race_guids.add(guid)
+        _announced_runs[guid] = token
         return True
 
 
