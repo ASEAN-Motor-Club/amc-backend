@@ -1,6 +1,7 @@
 import asyncio
 import logging
 import math
+import os
 from typing import Any, cast
 import urllib.parse
 import aiohttp
@@ -256,12 +257,27 @@ async def is_player_online(player_id, session, password=""):
 async def announcement_request(
     message, session, password="", type="message", color=None
 ):
+    # The game rejects /chat with succeeded=false "Invalid password" when
+    # the request carries no credential — with the HostWebAPI password
+    # enforcement an empty password makes EVERY broadcast silently die
+    # (HTTP 200, nothing renders). Operators set the real password via
+    # GAME_SERVER_API_PASSWORD; the empty default keeps hosts without a
+    # configured password unchanged.
+    password = password or os.environ.get("GAME_SERVER_API_PASSWORD", "")
     params = {"message": message}
     if type:
         params["type"] = type
     if color is not None:
         params["color"] = color
-    return await game_api_request(session, "/chat", method="post", params=params)
+    resp = await game_api_request(session, "/chat", method="post", params=params)
+    # A 200 with succeeded=false is a REJECTION, not a delivery — log it or
+    # the channel dies silently (2026-09-29: /chat password enforcement
+    # killed every illegal-race announcement with zero journal evidence).
+    if isinstance(resp, dict) and resp.get("succeeded") is False:
+        logger.warning(
+            "game API /chat rejected the request: %s", resp.get("message")
+        )
+    return resp
 
 
 async def announce(
