@@ -1463,14 +1463,32 @@ class ScheduledEventAssociationTests(TestCase):
         self.assertEqual(game_event.scheduled_event_id, scheduled_event.id)
 
     async def test_no_association_after_window(self):
+        # Player-created event (owner resolves) outside any SE window:
+        # no SE link — a rogue setup copy must not inherit an SE's results.
         await self._make_scheduled_event(
             time_trial=False, started_minutes_ago=120, ends_in_minutes=-60
+        )
+        await sync_to_async(CharacterFactory)(
+            player__unique_id=int(PLAYER_ID), guid=CHAR_GUID
         )
         event_data = _make_event_data(state=1)
         game_event, _ = await _upsert_game_event(event_data)
         await game_event.arefresh_from_db()
 
         self.assertIsNone(game_event.scheduled_event_id)
+
+    async def test_auto_event_links_latest_se_after_window(self):
+        # Auto-posted event (no owner) outside any window: the daily 08:30
+        # rotation picks from the whole SE pool, so link the setup's most
+        # recent SE (Yuuka 2026-09-30) instead of orphaning it.
+        scheduled_event = await self._make_scheduled_event(
+            time_trial=False, started_minutes_ago=120, ends_in_minutes=-60
+        )
+        event_data = _make_event_data(state=1, players=[])
+        game_event, _ = await _upsert_game_event(event_data)
+        await game_event.arefresh_from_db()
+
+        self.assertEqual(game_event.scheduled_event_id, scheduled_event.id)
 
 
 # ---------------------------------------------------------------------------
