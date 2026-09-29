@@ -20,10 +20,10 @@ Speed-based wanted law (2026-09 rework, corrected 2026-09-20):
 import asyncio
 import math
 import time
-import pytest
 from datetime import timedelta
 from unittest.mock import AsyncMock, patch
 
+import pytest
 from asgiref.sync import sync_to_async
 from django.test import TestCase
 from django.utils import timezone
@@ -38,6 +38,7 @@ from amc.criminals import (
     _compute_stars,
     _costume_reconciled_guids,
     _last_compass_sent,
+    _last_modded_vehicle_guids,
     _last_star_notified,
     _last_suspect_guids,
     active_police_present,
@@ -4174,3 +4175,189 @@ class CreateOrRefreshWantedOriginTests(TestCase):
         self.assertEqual(refreshed.origin, "event_race")
         self.assertTrue(refreshed.mod_vehicles_allowed)
         self.assertEqual(refreshed.wanted_remaining, Wanted.INITIAL_WANTED_LEVEL)
+
+
+@patch("amc.criminals.refresh_player_name", new_callable=AsyncMock)
+@patch("amc.criminals.send_system_message", new_callable=AsyncMock)
+class RaceWantedRestrictionTests(TestCase):
+    """Race wanteds (mod_vehicles_allowed=True) keep the blanket modded-despawn
+    exemption ONLY while the vehicle complies with the most recent classed
+    illegal race's restrictions (current/previous event, Yuuka 2026-09-29).
+    A build the event itself would disqualify goes through the same
+    force-exit + despawn schedule as the organic modded-vehicle pass.
+    """
+
+    def setUp(self):
+        _last_star_notified.clear()
+        _last_suspect_guids.clear()
+        _last_modded_vehicle_guids.clear()
+        armed = patch(
+            "amc.criminals.active_police_present",
+            new_callable=AsyncMock,
+            return_value=True,
+        )
+        self.armed_mock = armed.start()
+        self.addCleanup(armed.stop)
+
+    async def _setup_race_wanted(self):
+        player = await sync_to_async(PlayerFactory)()
+        character = await sync_to_async(CharacterFactory)(
+            player=player,
+            last_online=timezone.now(),
+        )
+        await character.asave(update_fields=["last_online"])
+        await Wanted.objects.acreate(
+            character=character,
+            wanted_remaining=300,
+            origin="event_race",
+            mod_vehicles_allowed=True,
+        )
+        return character
+
+    async def _add_classed_race(self, character, max_hp, minutes_ago=0):
+        from amc.models import GameEvent, GameEventCharacter, TTClass
+
+        tt_class = await sync_to_async(TTClass.objects.create)(
+            name=f"TT-{max_hp}-race-restrict-{max_hp}-{timezone.now().timestamp()}",
+            max_hp=max_hp,
+        )
+        event = await sync_to_async(GameEvent.objects.create)(
+            name=f"Illegal race {tt_class.name}",
+            guid=f"RACEGUID{max_hp:05d}{int(timezone.now().timestamp()) % 10**9:09d}",
+            state=3,
+            race_legality="illegal",
+            tt_class=tt_class,
+        )
+        if minutes_ago:
+            event.last_updated = timezone.now() - timedelta(minutes=minutes_ago)
+            await event.asave()
+        await sync_to_async(GameEventCharacter.objects.create)(
+            character=character, game_event=event, rank=1
+        )
+        return event
+
+    async def _tick(self, criminal, parts):
+        players = _make_players_list(
+            [_make_player_data(criminal.player.unique_id, criminal.guid, *_SUSPECT_LOC)]
+        )
+        mock_http = AsyncMock()
+        mock_http_mod = AsyncMock()
+        with (
+            patch("amc.criminals.get_players", new_callable=AsyncMock, return_value=players),
+            patch(
+                "amc.criminals.get_player_last_vehicle",
+                new_callable=AsyncMock,
+                return_value={"vehicle": {"id": 1}},
+            ),
+            patch(
+                "amc.criminals.get_player_last_vehicle_parts",
+                new_callable=AsyncMock,
+                return_value={"parts": parts},
+            ),
+            patch("amc.criminals.force_exit_vehicle", new_callable=AsyncMock) as mock_exit,
+            patch("amc.criminals.despawn_player_vehicle", new_callable=AsyncMock) as mock_despawn,
+            patch("amc.criminals.show_popup", new_callable=AsyncMock),
+        ):
+            await tick_wanted_countdown(mock_http, mock_http_mod)
+        return mock_exit, mock_despawn
+
+    @pytest.mark.asyncio
+    async def test_overpower_build_in_recent_race_is_despawned(
+        self, mock_sys_msg, mock_refresh
+    ):
+        criminal = await self._setup_race_wanted()
+        # vanilla 240hp engine in the most recent 140hp class -> DQ-grade build
+        await self._add_classed_race(criminal, max_hp=140)
+        mock_exit, mock_despawn = await self._tick(
+            criminal, [{"Slot": 2, "Key": "SmallBlock_240HP"}]
+        )
+        mock_exit.assert_awaited_once()
+        mock_despawn.assert_awaited_once()
+
+    @pytest.mark.asyncio
+    async def test_compliant_build_keeps_blanket_allowance(
+        self, mock_sys_msg, mock_refresh
+    ):
+        criminal = await self._setup_race_wanted()
+        await self._add_classed_race(criminal, max_hp=480)
+        mock_exit, mock_despawn = await self._tick(
+            criminal, [{"Slot": 2, "Key": "SmallBlock_240HP"}]
+        )
+        mock_exit.assert_not_called()
+        mock_despawn.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_no_classed_race_keeps_blanket_allowance(
+        self, mock_sys_msg, mock_refresh
+    ):
+        criminal = await self._setup_race_wanted()
+        mock_http_mod = AsyncMock()
+        players = _make_players_list(
+            [_make_player_data(criminal.player.unique_id, criminal.guid, *_SUSPECT_LOC)]
+        )
+        with (
+            patch("amc.criminals.get_players", new_callable=AsyncMock, return_value=players),
+            patch(
+                "amc.criminals.get_player_last_vehicle",
+                new_callable=AsyncMock,
+            ) as mock_last_vehicle,
+            patch("amc.criminals.force_exit_vehicle", new_callable=AsyncMock) as mock_exit,
+        ):
+            await tick_wanted_countdown(AsyncMock(), mock_http_mod)
+        # No restricted event -> the race pass never even fetches parts.
+        mock_last_vehicle.assert_not_called()
+        mock_exit.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_most_recent_event_restrictions_win(
+        self, mock_sys_msg, mock_refresh
+    ):
+        criminal = await self._setup_race_wanted()
+        # older event was a 480 class (build would be legal there)...
+        await self._add_classed_race(criminal, max_hp=480, minutes_ago=60)
+        # ...but the most recent one is a 140 class (build violates it)
+        await self._add_classed_race(criminal, max_hp=140, minutes_ago=5)
+        mock_exit, mock_despawn = await self._tick(
+            criminal, [{"Slot": 2, "Key": "SmallBlock_240HP"}]
+        )
+        mock_exit.assert_awaited_once()
+        mock_despawn.assert_awaited_once()
+
+    @pytest.mark.asyncio
+    async def test_organic_wanted_still_uses_custom_parts_rule(
+        self, mock_sys_msg, mock_refresh
+    ):
+        player = await sync_to_async(PlayerFactory)()
+        criminal = await sync_to_async(CharacterFactory)(
+            player=player, last_online=timezone.now()
+        )
+        await criminal.asave(update_fields=["last_online"])
+        await Wanted.objects.acreate(character=criminal, wanted_remaining=300)
+        # Organic records must NOT be restricted by race classes: an
+        # under-cap stock build with a modded (unknown) part still despawns.
+        mock_http_mod = AsyncMock()
+        players = _make_players_list(
+            [_make_player_data(criminal.player.unique_id, criminal.guid, *_SUSPECT_LOC)]
+        )
+        with (
+            patch("amc.criminals.get_players", new_callable=AsyncMock, return_value=players),
+            patch(
+                "amc.criminals.get_player_last_vehicle",
+                new_callable=AsyncMock,
+                return_value={"vehicle": {"id": 1}},
+            ),
+            patch(
+                "amc.criminals.get_player_last_vehicle_parts",
+                new_callable=AsyncMock,
+                return_value={"parts": [{"Slot": 2, "Key": "SmallBlock_90HP"}]},
+            ),
+            patch(
+                "amc.criminals.detect_custom_parts",
+                return_value=[{"key": "mod_part", "slot_value": 0}],
+            ),
+            patch("amc.criminals.force_exit_vehicle", new_callable=AsyncMock) as mock_exit,
+            patch("amc.criminals.despawn_player_vehicle", new_callable=AsyncMock),
+            patch("amc.criminals.show_popup", new_callable=AsyncMock),
+        ):
+            await tick_wanted_countdown(AsyncMock(), mock_http_mod)
+        mock_exit.assert_awaited_once()
