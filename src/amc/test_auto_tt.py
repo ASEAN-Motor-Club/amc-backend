@@ -126,7 +126,10 @@ async def _clean_slate():
 
 @pytest.mark.asyncio
 @patch("amc.events.announce", new_callable=AsyncMock)
-async def test_expired_window_events_not_posted(announce_mock, db):
+async def test_expired_window_events_still_posted(announce_mock, db):
+    # Yuuka 2026-09-30: the pool is the whole pinned-class SE table, NOT
+    # window-active rows — the daily rotation owns the event's lifetime,
+    # so an expired window no longer blocks posting.
     now = timezone.now()
     await _clean_slate()
     race = await _make_race("Expired TT route")
@@ -140,8 +143,9 @@ async def test_expired_window_events_not_posted(announce_mock, db):
     )
     mod = FakeModClient()
     await post_random_events({"http_client_mod": mod, "http_client": AsyncMock()})
-    assert mod.posts == []
-    announce_mock.assert_not_awaited()
+    assert len(mod.posts) == 1
+    assert mod.posts[0]["EventName"].startswith("Expired TT")
+    announce_mock.assert_awaited_once()
 
 
 @pytest.mark.asyncio

@@ -1040,14 +1040,15 @@ async def post_random_events(ctx):
         .values_list("race_setup_id", flat=True)
     )
 
-    # Only resurrect scheduled events whose [start_time, end_time] window is
-    # live right now:
-    #  - _upsert_game_event links scheduled_event ONLY inside the window
-    #    (handlers/events.py), so an out-of-window auto event would land
-    #    with scheduled_event=None — orphaned from its scheduled event
-    #    (no SE-linked results/penalties).
-    #  - the in-game /events listing shows only filter_active_at() rows,
-    #    so the announce's "Use /events" hint would point at nothing.
+    # Pool = ALL pinned-class illegal-TT twins, not just window-active ones
+    # (Yuuka 2026-09-30: "nothing should expire hourly, everything should
+    # match the daily at 08:30 rotation"). The daily rotation owns each
+    # auto event's lifetime — posted -> live in the game's native event
+    # list until the next 08:30 rotation rotates it out — so picking by
+    # SE window would leave the rotation with zero candidates on days the
+    # window doesn't cover 01:30 UTC (the 08:30 +07 slot). handlers/
+    # events.py links the SE via an out-of-window fallback now, so the
+    # posted event keeps its SE-linked results.
     candidate_qs = (
         ScheduledEvent.objects.filter(
             time_trial=True,
@@ -1057,7 +1058,6 @@ async def post_random_events(ctx):
             # never be auto-criminalized (DQ/wanted/police) by rotation.
             tt_class__isnull=False,
         )
-        .filter_active_at(timezone.now())
         .exclude(race_setup_id__in=active_race_setup_ids)
         .select_related("race_setup", "tt_class")
         .order_by("?")
