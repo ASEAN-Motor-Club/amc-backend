@@ -4041,3 +4041,136 @@ class RoadsideResetGateTests(TestCase):
             self.assertNotIn(criminal.guid, _pushed_lock_state)
             await tick_wanted_countdown(mock_http, mock_http_mod)
         self.assertGreater(mock_set.await_count, first_count)
+
+
+class CreateOrRefreshWantedOriginTests(TestCase):
+    """Refresh-branch semantics for origin + mod_vehicles_allowed.
+
+    The refresh path must NEVER reclassify or re-arm an existing record
+    (classification and the mod-allowance are create-only):
+    a race grant landing on an already-wanted (organic) player must not
+    flip origin to 'event_race' nor set mod_vehicles_allowed=True — both
+    would disable the wanted-tick modded-vehicle despawn enforcement
+    mid-chase (thomas hole, 2026-09-29).
+    """
+
+    async def _make_wanted(self, origin="", mod_vehicles_allowed=False):
+        player = await sync_to_async(PlayerFactory)()
+        character = await sync_to_async(CharacterFactory)(player=player)
+        character.last_online = timezone.now()
+        await character.asave(update_fields=["last_online"])
+        wanted = await Wanted.objects.acreate(
+            character=character,
+            wanted_remaining=300,
+            initial_heat=600,
+            origin=origin,
+            mod_vehicles_allowed=mod_vehicles_allowed,
+        )
+        return character, wanted
+
+    @pytest.mark.asyncio
+    async def test_race_grant_on_organic_wanted_keeps_origin_and_mod_flag(self):
+        from amc.criminals import create_or_refresh_wanted
+
+        character, wanted = await self._make_wanted()
+        mock_http_mod = AsyncMock()
+        with (
+            patch("amc.criminals.refresh_player_name", new_callable=AsyncMock),
+            patch("amc.criminals.send_system_message", new_callable=AsyncMock),
+            patch("amc.criminals.make_suspect", new_callable=AsyncMock),
+            patch(
+                "amc.criminals.get_player_last_vehicle",
+                new_callable=AsyncMock,
+                return_value={"vehicle": None},
+            ),
+            patch(
+                "amc.criminals.get_player_last_vehicle_parts",
+                new_callable=AsyncMock,
+                return_value={"parts": []},
+            ),
+        ):
+            active, created = await create_or_refresh_wanted(
+                character,
+                mock_http_mod,
+                origin="event_race",
+                mod_vehicles_allowed=True,
+                bounty=0,
+                notify=False,
+            )
+        self.assertFalse(created)
+        refreshed = await Wanted.objects.aget(pk=wanted.pk)
+        self.assertEqual(refreshed.origin, "")  # never reclassified
+        self.assertFalse(refreshed.mod_vehicles_allowed)  # NOT re-armed
+        self.assertEqual(active.pk, wanted.pk)
+
+    @pytest.mark.asyncio
+    async def test_refresh_never_backfills_empty_origin(self):
+        """An organic wanted carries origin NULL — a race grant refreshing it
+        must NOT classify it as event_race (classification is create-only)."""
+        from amc.criminals import create_or_refresh_wanted
+
+        character, wanted = await self._make_wanted(origin="")
+        mock_http_mod = AsyncMock()
+        with (
+            patch("amc.criminals.refresh_player_name", new_callable=AsyncMock),
+            patch("amc.criminals.send_system_message", new_callable=AsyncMock),
+            patch("amc.criminals.make_suspect", new_callable=AsyncMock),
+            patch(
+                "amc.criminals.get_player_last_vehicle",
+                new_callable=AsyncMock,
+                return_value={"vehicle": None},
+            ),
+            patch(
+                "amc.criminals.get_player_last_vehicle_parts",
+                new_callable=AsyncMock,
+                return_value={"parts": []},
+            ),
+        ):
+            await create_or_refresh_wanted(
+                character,
+                mock_http_mod,
+                origin="event_race",
+                mod_vehicles_allowed=True,
+                bounty=0,
+                notify=False,
+            )
+        refreshed = await Wanted.objects.aget(pk=wanted.pk)
+        self.assertEqual(refreshed.origin, "")  # never reclassified
+        self.assertFalse(refreshed.mod_vehicles_allowed)  # refresh never arms it
+
+    @pytest.mark.asyncio
+    async def test_refresh_preserves_existing_mod_allow(self):
+        from amc.criminals import create_or_refresh_wanted
+
+        character, wanted = await self._make_wanted(
+            origin="event_race", mod_vehicles_allowed=True
+        )
+        mock_http_mod = AsyncMock()
+        with (
+            patch("amc.criminals.refresh_player_name", new_callable=AsyncMock),
+            patch("amc.criminals.send_system_message", new_callable=AsyncMock),
+            patch("amc.criminals.make_suspect", new_callable=AsyncMock),
+            patch(
+                "amc.criminals.get_player_last_vehicle",
+                new_callable=AsyncMock,
+                return_value={"vehicle": None},
+            ),
+            patch(
+                "amc.criminals.get_player_last_vehicle_parts",
+                new_callable=AsyncMock,
+                return_value={"parts": []},
+            ),
+        ):
+            await create_or_refresh_wanted(
+                character,
+                mock_http_mod,
+                origin="",
+                mod_vehicles_allowed=False,
+                bounty=0,
+                notify=False,
+            )
+        refreshed = await Wanted.objects.aget(pk=wanted.pk)
+        # Existing race record survives a plain refresh untouched.
+        self.assertEqual(refreshed.origin, "event_race")
+        self.assertTrue(refreshed.mod_vehicles_allowed)
+        self.assertEqual(refreshed.wanted_remaining, Wanted.INITIAL_WANTED_LEVEL)
