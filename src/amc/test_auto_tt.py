@@ -9,6 +9,10 @@ Key behaviors under test (2026-09-22 revival):
   "TT is up!" with no events actually created).
 """
 
+import re
+
+# Auto-posted TT names carry the class tag: "Live TT [TT-480]".
+import re as _re
 from datetime import timedelta
 from unittest.mock import AsyncMock, patch
 
@@ -25,10 +29,6 @@ from amc.models import (
     RaceSetup,
     ScheduledEvent,
 )
-
-# Auto-posted TT names carry the class tag: "Live TT [TT-480]".
-import re as _re
-import re
 
 
 def base_event_name(name):
@@ -124,7 +124,7 @@ async def _clean_slate():
     await sync_to_async(GameEvent.objects.all().delete)()
 
 
-async def _ug_template(name, race, start, end):
+async def _ug_template(name, race, start, end, time_trial=True):
     """Underground championship template (rotation pool, no pinned class)."""
     from amc.config import UNDERGROUND_CHAMPIONSHIP_NAME
     from amc.models import Championship
@@ -135,7 +135,7 @@ async def _ug_template(name, race, start, end):
     return await sync_to_async(ScheduledEvent.objects.create)(
         name=name,
         race_setup=race,
-        time_trial=True,
+        time_trial=time_trial,
         tt_class=None,
         championship=champ,
         start_time=start,
@@ -257,6 +257,36 @@ async def _make_auto_event(guid, name="Auto TT", state=1):
 
 @pytest.mark.asyncio
 @patch("amc.events.announce", new_callable=AsyncMock)
+async def test_sprint_template_posted_and_mirrored(announce_mock, db):
+    """Yuuka 2026-09-30: the pool is TTs AND sprints — an underground
+    sprint template (time_trial=False) posts the same way: rolled class
+    tag, EventType 1 race, and the mirror carries time_trial=False."""
+    from amc.config import UNDERGROUND_CHAMPIONSHIP_NAME
+    now = timezone.now()
+    await _clean_slate()
+    race = await _make_race("Shitbox Sprint route")
+    await _ug_template(
+        "Shitbox Sprint", race, now - timedelta(hours=1), now + timedelta(hours=1),
+        time_trial=False,
+    )
+    mod = FakeModClient()
+    await post_random_events({"http_client_mod": mod, "http_client": AsyncMock()})
+    assert mod.posts and mod.posts[0]["EventName"].startswith("Shitbox Sprint (")
+    assert _re.search(r"\[TT-\d+\]$", mod.posts[0]["EventName"])
+    assert mod.posts[0]["EventType"] == 1
+    # Mirror: same shape as TT mirrors but time_trial=False.
+    mirror = await ScheduledEvent.objects.filter(
+        is_rotation_instance=True
+    ).select_related("championship").afirst()
+    assert mirror is not None
+    assert mirror.time_trial is False
+    assert mirror.tt_class_id is not None
+    assert mirror.championship.name == UNDERGROUND_CHAMPIONSHIP_NAME
+    announce_mock.assert_awaited_once()
+    assert "underground racing events" in announce_mock.await_args.args[0]
+
+@pytest.mark.asyncio
+@patch("amc.events.announce", new_callable=AsyncMock)
 async def test_vanished_event_row_closed(announce_mock, db):
     """The game silently deletes unclaimed owner-less events — a Ready auto
     row whose guid is absent from the live list must be closed so its slot
@@ -328,9 +358,10 @@ async def test_joined_event_not_rotated(announce_mock, remove_mock, db):
 # /events and /setup_event command behavior
 # ---------------------------------------------------------------------------
 
-from amc.command_framework import CommandContext, registry  # noqa: E402
-from unittest.mock import MagicMock, patch as sync_patch  # noqa: E402
+from unittest.mock import MagicMock  # noqa: E402
+from unittest.mock import patch as sync_patch  # noqa: E402
 
+from amc.command_framework import CommandContext, registry  # noqa: E402
 
 
 def _make_ctx():
