@@ -69,12 +69,26 @@ async def setup_event(timestamp, player_id, scheduled_event, http_client_mod):
     # restrictions — the popup shows none and DQ/enforcement stays ours.
     instance = await _next_tt_instance_number()
     event_name = f"{scheduled_event.name} ({instance:03d})"
-    # Pinned TT class (illegal-TT twin): the [TT-xxx] name tag is what the
-    # SSE hook parses into GameEvent.tt_class, which arms the start-line
-    # DQ / wanted / police flow. Classless SEs (championships etc.) post
-    # with no tag and are never criminalized.
+    # TT class: the [TT-xxx] name tag is what the SSE hook parses into
+    # GameEvent.tt_class, which arms the start-line DQ / wanted / police
+    # flow (and the mod-side HP cap + vanilla-tire rule). Sources:
+    #   1. A pinned class on the SE (manual illegal-TT SEs like #51).
+    #   2. Underground templates (championship pool) ROLL a class per
+    #      created event, same as the rotation (#246 made /setup_event
+    #      the player-driven illegal-TT path; #307's classless-template
+    #      rework dropped pinned classes, so the roll is what restores
+    #      it — Yuuka 2026-09-30: "you missed something").
+    # Anything else (championships, RP events) stays classless and is
+    # never criminalized.
+    tt_class = None
     if getattr(scheduled_event, "tt_class_id", None):
-        event_name = f"{event_name} [{scheduled_event.tt_class.name}]"
+        tt_class = scheduled_event.tt_class
+    elif scheduled_event.championship_id and (
+        scheduled_event.championship.name == UNDERGROUND_CHAMPIONSHIP_NAME
+    ):
+        tt_class = await TTClass.objects.order_by("?").afirst()
+    if tt_class:
+        event_name = f"{event_name} [{tt_class.name}]"
 
     data = {
         "EventGuid": generate_guid(),
