@@ -145,16 +145,19 @@ async def ensure_announced(http_client_mod, game_event) -> bool:
 async def grant_race_wanted(http_client_mod, game_event) -> list[str]:
     """Grant real Wanted (stars) to every online participant of the event.
 
-    Yuuka 2026-09-27 rework: at race start nobody is flagged; ~60 s after
-    start the announcement fires and ALL players inside the event get a
-    real Wanted row (the star status) — origin 'event_race',
-    mod_vehicles_allowed=True (the wanted-tick despawn pass skips them),
-    bounty 0 (flag-only; race enforcement is not a confiscation source).
+    Yuuka 2026-09-27 rework: at race start nobody is flagged; at the
+    announcement (checkpoint-progression gate, rolled 50-100% of the
+    route per run) ALL players inside the event get a real Wanted row
+    (the star status) — origin 'event_race', mod_vehicles_allowed=True
+    (the wanted-tick despawn pass skips them), bounty 0 (flag-only; race
+    enforcement is not a confiscation source).
 
-    The refresh loop in refresh_suspect_tags keeps topping the countdown
-    up every 30 s until the race finishes / the player leaves / the
-    event ends; after that the normal speed-law decay takes over
-    (the star decays naturally — no forced clear).
+    NO suspect GE for event wanteds (freeman 2026-09-30: "don't use
+    make_suspect for event wanted") — create_or_refresh_wanted skips
+    make_suspect for this origin and the wanted pass excludes them, so
+    racers stay visible on the map; hiding = costume. Stars are granted
+    ONCE and decay at the plain 1/s countdown (no top-up since
+    2026-09-30); a long race can expire its own wanted mid-run.
     """
     granted: list[str] = []
     from amc.criminals import (
