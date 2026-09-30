@@ -35,6 +35,7 @@ from amc.models import (
     TTClass,
 )
 from amc.utils import skip_if_running
+from amc_finance.services import check_treasury_floor, send_fund_to_player_wallet
 
 
 def generate_guid():
@@ -932,12 +933,19 @@ def _underground_description(tt_class, checkpoints: int) -> str:
 
     first = checkpoints * BLOOD_MONEY_PER_CHECKPOINT
     flat = underground_blood_money(checkpoints, 5)
-    return (
+    lines = [
         f"Underground street race — {tt_class.name}: max {tt_class.max_hp} HP, "
-        f"vanilla tires only, {' & '.join(UNDERGROUND_VEHICLE_TYPES)} vehicles only.\n"
-        f"Blood Money: 1st {first} → halves each place → flat {flat} from 5th on. "
-        f"Respect: {checkpoints * RESPECT_PER_CHECKPOINT}."
-    )
+        f"vanilla tires only, {' & '.join(UNDERGROUND_VEHICLE_TYPES)} vehicles only."
+    ]
+    if BLOOD_MONEY_PER_CHECKPOINT > 0:
+        lines.append(
+            f"Blood Money: 1st {first} → halves each place → flat {flat} from 5th on. "
+            f"Respect: {checkpoints * RESPECT_PER_CHECKPOINT}."
+        )
+    else:
+        # Rate 0 = payouts disabled pending community discussion.
+        lines.append(f"Respect: {checkpoints * RESPECT_PER_CHECKPOINT}.")
+    return "\n".join(lines)
 
 
 @skip_if_running
@@ -1034,12 +1042,31 @@ async def pay_underground_rotation_rewards(ctx, live_guids: set[str] | None):
             character = row.character
             try:
                 if amount > 0:
-                    await transfer_money(
-                        http_client_mod,
-                        amount,
-                        f"Blood Money — {game_event.name} (P{position})",
-                        str(character.player_id),
-                    )
+                    # Treasury-funded: the government loses the money. Skip
+                    # BOTH the game transfer and the ledger entry when the
+                    # Treasury Fund would breach its floor (same pattern as
+                    # subsidise_player) — no payout from thin air.
+                    if not await check_treasury_floor(amount):
+                        failed.append(
+                            f"{character.name}=P{position}:{amount}:treasury"
+                        )
+                        print(
+                            f"Underground payout: treasury at floor, skipping "
+                            f"{character.name} ({game_event.name} P{position})"
+                        )
+                    else:
+                        await transfer_money(
+                            http_client_mod,
+                            amount,
+                            f"Blood Money — {game_event.name} (P{position})",
+                            str(character.player_id),
+                        )
+                        # Ledger: Dr Treasury Expenses / Cr Treasury Fund.
+                        await send_fund_to_player_wallet(
+                            amount,
+                            character,
+                            f"Blood Money — {game_event.name} (P{position})",
+                        )
                 if RESPECT_PER_CHECKPOINT > 0:
                     character.respect = (character.respect or 0) + (
                         checkpoints * RESPECT_PER_CHECKPOINT

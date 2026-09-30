@@ -13,8 +13,8 @@ import pytest
 from asgiref.sync import sync_to_async
 from django.utils import timezone
 
+from amc import config as config_mod
 from amc.config import (
-    BLOOD_MONEY_PER_CHECKPOINT,
     UNDERGROUND_CHAMPIONSHIP_NAME,
     underground_blood_money,
 )
@@ -51,23 +51,33 @@ ROUTE = {
 
 async def test_blood_money_ladder():
     c = 4  # checkpoints
-    rate = BLOOD_MONEY_PER_CHECKPOINT
-    assert underground_blood_money(c, 1) == 4 * rate
-    assert underground_blood_money(c, 2) == 2 * rate
-    assert underground_blood_money(c, 3) == rate
-    assert underground_blood_money(c, 4) == rate // 2
-    assert underground_blood_money(c, 5) == rate // 4
-    assert underground_blood_money(c, 6) == underground_blood_money(c, 5)
-    assert underground_blood_money(c, 50) == underground_blood_money(c, 5)
+    rate = 4000  # explicit — BLOOD_MONEY_PER_CHECKPOINT is 0 right now
+    assert underground_blood_money(c, 1, rate) == 4 * rate
+    assert underground_blood_money(c, 2, rate) == 2 * rate
+    assert underground_blood_money(c, 3, rate) == rate
+    assert underground_blood_money(c, 4, rate) == rate // 2
+    assert underground_blood_money(c, 5, rate) == rate // 4
+    assert underground_blood_money(c, 6, rate) == underground_blood_money(c, 5, rate)
+    assert underground_blood_money(c, 50, rate) == underground_blood_money(c, 5, rate)
+
+
+@pytest.mark.asyncio
+async def test_blood_money_rate_zero_disables_payouts():
+    """Yuuka 2026-09-30: BLOOD_MONEY_PER_CHECKPOINT = 0 while the rate is
+    under community discussion — the ladder pays nothing and the payout
+    pass transfers nothing (amount > 0 guard)."""
+    assert underground_blood_money(9, 1, 0) == 0
+    assert underground_blood_money(9, 5, 0) == 0
 
 
 async def test_blood_money_odd_checkpoints_floors():
     # 5 checkpoints x 4000 = 20000; halves: 10000, 5000, 2500, 1250
-    assert underground_blood_money(5, 1) == 20000
-    assert underground_blood_money(5, 3) == 5000
-    assert underground_blood_money(5, 4) == 2500
-    assert underground_blood_money(5, 5) == 1250
-    assert underground_blood_money(5, 7) == 1250
+    rate = 4000
+    assert underground_blood_money(5, 1, rate) == 20000
+    assert underground_blood_money(5, 3, rate) == 5000
+    assert underground_blood_money(5, 4, rate) == 2500
+    assert underground_blood_money(5, 5, rate) == 1250
+    assert underground_blood_money(5, 7, rate) == 1250
 
 
 async def test_vehicle_type_violation_text():
@@ -78,6 +88,27 @@ async def test_vehicle_type_violation_text():
 # --------------------------------------------------------------------------
 # Rotation-end payout
 # --------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+@patch("amc.events.send_fund_to_player_wallet", new_callable=AsyncMock)
+@patch("amc.events.check_treasury_floor", new_callable=AsyncMock, return_value=False)
+@patch("amc.events.transfer_money", new_callable=AsyncMock)
+async def test_payout_skipped_when_treasury_at_floor(transfer_mock, floor_mock, ledger_mock, monkeypatch, db):
+    """Treasury-funded payouts: when the Treasury Fund would breach its
+    floor, BOTH the game transfer and the ledger entry are skipped (same
+    gating pattern as subsidise_player) — the event still settles once."""
+    monkeypatch.setattr(config_mod, "BLOOD_MONEY_PER_CHECKPOINT", 4000)
+    event, _mirror = await _underground_world("5")
+    await _racer(event, "A0005", 501, "BrokeGovt", laps=1, finished=True, net_time=3.0)
+    await pay_underground_rotation_rewards(
+        {"http_client_mod": object()}, live_guids=set()
+    )
+    transfer_mock.assert_not_awaited()
+    ledger_mock.assert_not_awaited()
+    await event.arefresh_from_db()
+    assert event.rewards_paid is True  # settled regardless
+    await _cleanup_world(event, _mirror)
 
 
 async def _underground_world(suffix: str):
@@ -155,8 +186,11 @@ async def _racer(event, guid_suffix, unique_id, name, laps, finished, net_time):
 
 
 @pytest.mark.asyncio
+@patch("amc.events.send_fund_to_player_wallet", new_callable=AsyncMock)
+@patch("amc.events.check_treasury_floor", new_callable=AsyncMock, return_value=True)
 @patch("amc.events.transfer_money", new_callable=AsyncMock)
-async def test_payout_ladder_by_finish_order(transfer_mock, db):
+async def test_payout_ladder_by_finish_order(transfer_mock, floor_mock, ledger_mock, monkeypatch, db):
+    monkeypatch.setattr(config_mod, "BLOOD_MONEY_PER_CHECKPOINT", 4000)
     event, _mirror = await _underground_world("1")
     await _racer(event, "A0001", 101, "Racer1", laps=1, finished=True, net_time=10.0)
     await _racer(event, "B0002", 102, "Racer2", laps=1, finished=True, net_time=20.0)
@@ -170,18 +204,26 @@ async def test_payout_ladder_by_finish_order(transfer_mock, db):
     )
 
     amounts = [call.args[1] for call in transfer_mock.await_args_list]
-    rate = BLOOD_MONEY_PER_CHECKPOINT  # 4 checkpoints: 16000, 8000, 4000, 2000, 1000, 1000
+    rate = 4000  # 4 checkpoints: 16000, 8000, 4000, 2000, 1000, 1000
     assert amounts == [
         4 * rate, 2 * rate, rate, rate // 2, rate // 4, rate // 4,
     ]
+    # Treasury pipe: every game transfer is mirrored by a ledger entry
+    # (Dr Treasury Expenses / Cr Treasury Fund — the government loses it).
+    ledger_amounts = [call.args[0] for call in ledger_mock.await_args_list]
+    assert ledger_amounts == amounts
+    assert ledger_mock.await_count == transfer_mock.await_count == 6
     await event.arefresh_from_db()
     assert event.rewards_paid is True
     await _cleanup_world(event, _mirror)
 
 
 @pytest.mark.asyncio
+@patch("amc.events.send_fund_to_player_wallet", new_callable=AsyncMock)
+@patch("amc.events.check_treasury_floor", new_callable=AsyncMock, return_value=True)
 @patch("amc.events.transfer_money", new_callable=AsyncMock)
-async def test_payout_skips_non_racers_and_live_events(transfer_mock, db):
+async def test_payout_skips_non_racers_and_live_events(transfer_mock, floor_mock, ledger_mock, monkeypatch, db):
+    monkeypatch.setattr(config_mod, "BLOOD_MONEY_PER_CHECKPOINT", 4000)
     event, _mirror = await _underground_world("2")
     # Lobby joiner who never raced -> no money.
     await _racer(event, "A0001", 201, "LobbyGuy", laps=0, finished=False, net_time=None)
@@ -217,8 +259,11 @@ async def test_payout_skips_non_racers_and_live_events(transfer_mock, db):
 
 
 @pytest.mark.asyncio
+@patch("amc.events.send_fund_to_player_wallet", new_callable=AsyncMock)
+@patch("amc.events.check_treasury_floor", new_callable=AsyncMock, return_value=True)
 @patch("amc.events.transfer_money", new_callable=AsyncMock)
-async def test_payout_is_idempotent(transfer_mock, db):
+async def test_payout_is_idempotent(transfer_mock, floor_mock, ledger_mock, monkeypatch, db):
+    monkeypatch.setattr(config_mod, "BLOOD_MONEY_PER_CHECKPOINT", 4000)
     event, _mirror = await _underground_world("3")
     await _racer(event, "A0001", 301, "Solo", laps=1, finished=True, net_time=7.0)
     ctx = {"http_client_mod": object()}
@@ -231,8 +276,11 @@ async def test_payout_is_idempotent(transfer_mock, db):
 
 
 @pytest.mark.asyncio
+@patch("amc.events.send_fund_to_player_wallet", new_callable=AsyncMock)
+@patch("amc.events.check_treasury_floor", new_callable=AsyncMock, return_value=True)
 @patch("amc.events.transfer_money", new_callable=AsyncMock)
-async def test_payout_transfer_failure_contained(transfer_mock, db):
+async def test_payout_transfer_failure_contained(transfer_mock, floor_mock, ledger_mock, monkeypatch, db):
+    monkeypatch.setattr(config_mod, "BLOOD_MONEY_PER_CHECKPOINT", 4000)
     event, _mirror = await _underground_world("4")
     c1 = await _racer(event, "A0001", 401, "Winner", laps=1, finished=True, net_time=1.0)
     c2 = await _racer(event, "B0002", 402, "RunnerUp", laps=1, finished=True, net_time=2.0)
