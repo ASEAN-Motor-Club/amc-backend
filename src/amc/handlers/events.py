@@ -647,10 +647,11 @@ async def crosscheck_live_events(http_client_mod, discord_client=None) -> list[s
     # payload is authoritative — a DB row still in Ready/Racing whose guid
     # is NOT in it is orphaned: the game deletes events silently on
     # restart/rotation/crash and no hook ever fires for that, so the row
-    # sits at state=2 forever. Any ILLEGAL row in that condition also keeps
-    # its participants' suspect badge re-applied every 30 s suspect tick
-    # (seen live 2026-09-30: an orphaned Illegal-TT row re-flagged a player
-    # for a full day across relogs). Close them as finished after a
+    # sits at state=2 forever — and a Wanted granted by that pass never
+    # decays either (nothing re-grants or refreshes it, and the race pass
+    # filters on state=2, so the flag froze mid-decay) (seen live
+    # 2026-09-30: an orphaned Illegal-TT row kept a player's race wanted
+    # alive for a full day across relogs). Close them as finished after a
     # staleness grace: last_updated stops advancing exactly when the event
     # vanishes (a live row is saved by the start/join reconciles, and a
     # racing row by its start transition), so the grace doubles as a

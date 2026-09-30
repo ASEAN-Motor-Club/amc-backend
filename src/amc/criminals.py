@@ -833,8 +833,17 @@ async def create_or_refresh_wanted(
             )
         )
 
-    # Set the player as a suspect in-game so police can chase them
-    if http_client_mod and character.guid:
+    # Set the player as a suspect in-game so police can chase them.
+    # event_race wanteds NEVER get the suspect GE (freeman 2026-09-30:
+    # "don't use make_suspect for event wanted") — the badge/overlay/marker
+    # is our separate GE injection into the native suspect flow, and the
+    # Wanted row alone owns the race flag lifecycle. Racers stay visible
+    # on the map; hiding = costume (costume pass still flags).
+    if (
+        http_client_mod
+        and character.guid
+        and origin != WANTED_ORIGIN_EVENT_RACE
+    ):
         try:
             await make_suspect(http_client_mod, character.guid)
         except Exception:
@@ -1047,8 +1056,9 @@ async def tick_wanted_countdown(http_client, http_client_mod, http_client_mgmt=N
         # are the crime — the delivery itself was the offense, so they survive
         # dormant ticks like admin flags and re-enter the normal speed law
         # once a cop is back on duty. Event-race origin shares the exemption
-        # (Yuuka 2026-09-27): the race IS the enforcement — its wanteds are
-        # refreshed by the race pass regardless of cop presence.
+        # (Yuuka 2026-09-27): the race IS the enforcement — its wanteds
+        # decay on their plain countdown regardless of cop presence (no
+        # refresh pass since 2026-09-30).
         fugitive_flags = [
             w
             for w in organic
@@ -1775,6 +1785,14 @@ async def refresh_suspect_tags(http_client_mod, http_client_game=None) -> None:
         sus_guid = wanted.character.guid
         if not sus_guid:
             continue
+        # event_race wanteds are excluded from the suspect GE entirely
+        # (freeman 2026-09-30: "don't use make_suspect for event wanted") —
+        # no badge, no marker, no Net_Suspects entry; the wanted pass keeps
+        # them out of the tracked set so the transition-out pass has
+        # nothing to clear either. Costume still flags them via the
+        # costume pass below (the approved hiding opt-out).
+        if wanted.origin == WANTED_ORIGIN_EVENT_RACE:
+            continue
         # Pass at least CRIMINAL_SUSPECT_DURATION so the duration never
         # collapses to 1 s for a nearly-cleared suspect.  The
         # mod currently clamps to 60 s anyway, but this future-proofs the
@@ -1839,15 +1857,6 @@ async def refresh_suspect_tags(http_client_mod, http_client_game=None) -> None:
     ).prefetch_related("participants__character")
 
     async for race_event in live_race_events:
-        online_participants = [
-            p.character
-            for p in race_event.participants.all()
-            if p.character
-            and p.character.guid
-            and p.character.last_online
-            and p.character.last_online >= online_cutoff
-        ]
-
         # Announcement + first wanted grant (once per event guid, whichever
         # path — this tick or the SSE alert task — sees the race first).
         try:
@@ -1870,39 +1879,14 @@ async def refresh_suspect_tags(http_client_mod, http_client_game=None) -> None:
                 "race-pass announce failed for %s", race_event.guid, exc_info=True
             )
 
-        # Refresh pass: top up the countdown on every race-origin Wanted of
-        # online participants while the event races. notify=False (the
-        # announcement already went out; no per-tick popups). The suspect
-        # GE itself is NOT applied here — it is owned entirely by the
-        # Wanted row: the wanted pass above re-applies it every tick while
-        # the Wanted is active and the countdown expiry clears it
-        # (freeman 2026-09-30: no separate in-event GE application).
-        for char in online_participants:
-            try:
-                wanted = await Wanted.objects.filter(
-                    character=char,
-                    expired_at__isnull=True,
-                    origin=WANTED_ORIGIN_EVENT_RACE,
-                ).afirst()
-                if wanted is None:
-                    continue
-                await create_or_refresh_wanted(
-                    char,
-                    http_client_mod,
-                    origin=WANTED_ORIGIN_EVENT_RACE,
-                    mod_vehicles_allowed=True,
-                    bounty=0,
-                    notify=False,
-                )
-            except Exception:
-                logger.warning(
-                    "race wanted refresh failed for %s", char.name,
-                    exc_info=True,
-                )
-
-    # (No bare race-pass GE: a race participant without an active
-    # event_race Wanted gets NO suspect badge — the Wanted system is the
-    # single owner of the GE lifecycle.)
+        # (No refresh pass — STANDING RULING, do not re-add: stars are
+        # granted ONCE at the announcement and decay at the plain 1/s
+        # countdown from that moment (criminals.py decay branch, Yuuka
+        # 2026-09-27 "stars didn't seem to decrease"). A long race can
+        # expire its own wanted mid-run — intended semantics.)
+        # (No bare race-pass GE either: event wanteds get NO suspect GE —
+        # the make_suspect exclusion in the wanted pass + the
+        # create_or_refresh_wanted skip own that contract.)
 
     # --- Reconciliation: one-shot costume hydration for online characters ---
     unreconciled_criminals = Character.objects.filter(

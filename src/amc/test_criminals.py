@@ -3761,11 +3761,12 @@ class CompassTickTests(TestCase):
 @patch("amc.criminals.clear_suspect", new_callable=AsyncMock)
 @patch("amc.criminals.make_suspect", new_callable=AsyncMock)
 async def test_race_participant_ge_owned_by_wanted_row(make_suspect_mock, clear_mock):
-    """freeman 2026-09-30: an illegal race itself applies NO suspect GE —
-    the GE lifecycle is owned entirely by the event_race Wanted row. A
-    bare online participant (no Wanted) never gets the badge, and once
-    the Wanted row expires the GE is transitioned out even while the
-    race is still live (state 2)."""
+    """freeman 2026-09-30: event wanteds NEVER get the suspect GE ("don't
+    use make_suspect for event wanted"). A bare online participant gets
+    no badge; an active event_race Wanted still gets NO badge (the Wanted
+    row alone owns the flag, stars are the [W] name tag); only an ORGANIC
+    wanted on the same character is badged by the wanted pass, and its
+    expiry is transitioned out even while the race is live (state 2)."""
     now = timezone.now()
     from amc.models import (
         Character,
@@ -3803,17 +3804,27 @@ async def test_race_participant_ge_owned_by_wanted_row(make_suspect_mock, clear_
     make_suspect_mock.assert_not_awaited()
     clear_mock.assert_not_awaited()
 
-    # Active event_race Wanted -> the WANTED pass applies/refreshes the GE.
+    # Active event_race Wanted -> STILL no suspect GE (freeman 2026-09-30:
+    # "don't use make_suspect for event wanted" — the Wanted row alone owns
+    # the flag; racers stay visible on the map). The wanted pass keeps
+    # event_race rows out of the tracked set, so nothing is transitioned
+    # out either.
     wanted = await Wanted.objects.acreate(
         character=char, amount=0, wanted_remaining=600, initial_heat=600,
         origin="event_race",
     )
+    await refresh_suspect_tags(AsyncMock())
+    make_suspect_mock.assert_not_awaited()
+    clear_mock.assert_not_awaited()
+
+    # An ORGANIC wanted on the same character -> the wanted pass DOES
+    # apply the GE (a real suspect stays badged even while racing).
+    await Wanted.objects.filter(pk=wanted.pk).aupdate(origin="")
     make_suspect_mock.reset_mock()
     await refresh_suspect_tags(AsyncMock())
     assert make_suspect_mock.await_count >= 1
 
-    # Wanted expires (countdown ran out) -> the GE is transitioned out even
-    # while the race is still live (race_guids no longer shields racers).
+    # Organic wanted expires -> the GE is transitioned out.
     make_suspect_mock.reset_mock()
     await Wanted.objects.filter(pk=wanted.pk).aupdate(
         expired_at=timezone.now(), wanted_remaining=0
@@ -3846,6 +3857,52 @@ async def test_race_participant_ge_owned_by_wanted_row(make_suspect_mock, clear_
     ).adelete()
     await Player.objects.filter(unique_id=777).adelete()
     await TTClass.objects.filter(name="TT-480").adelete()
+
+
+@pytest.mark.asyncio
+@pytest.mark.django_db
+@patch("amc.criminals.make_suspect", new_callable=AsyncMock)
+@patch("amc.criminals.clear_suspect", new_callable=AsyncMock)
+async def test_race_wanted_countdown_not_topped_up_while_racing(
+    make_suspect_mock, clear_mock
+):
+    """STANDING RULING (freeman 2026-09-30): the race pass grants ONCE at
+    the announcement and never tops the countdown up while the event
+    races — stars decay at the plain 1/s countdown from grant, and a long
+    race can expire its own wanted mid-run. Pin: refresh_suspect_tags
+    with a live illegal state-2 event leaves the race wanted's
+    wanted_remaining untouched (the old refresh pass reset it to 600)."""
+    from amc.factories import CharacterFactory
+    from amc.models import Character, GameEvent, GameEventCharacter, Wanted
+
+    now = timezone.now()
+    char = await sync_to_async(CharacterFactory)(
+        guid="GEVENTNOP2", name="pogie2"
+    )
+    await Character.objects.filter(pk=char.pk).aupdate(last_online=now)
+    event = await GameEvent.objects.acreate(
+        guid="GUIDNOP000000000000000000000002",
+        name="No-top-up pin event",
+        race_legality="illegal",
+        state=2,
+        start_time=now,
+    )
+    await GameEventCharacter.objects.acreate(
+        game_event=event, character=char, rank=0
+    )
+    wanted = await Wanted.objects.acreate(
+        character=char, amount=0, wanted_remaining=400, initial_heat=600,
+        origin="event_race",
+    )
+    await refresh_suspect_tags(AsyncMock())
+    row = await Wanted.objects.aget(pk=wanted.pk)
+    assert row.wanted_remaining == 400  # untouched — no top-up, no decay here
+
+    # Cleanup: async ORM rows persist across tests on this stack.
+    await GameEvent.objects.filter(
+        guid="GUIDNOP000000000000000000000002"
+    ).adelete()
+    await Character.objects.filter(guid="GEVENTNOP2").adelete()
 
 
 # ---------------------------------------------------------------------------
