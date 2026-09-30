@@ -3758,11 +3758,14 @@ class CompassTickTests(TestCase):
 
 @pytest.mark.asyncio
 @pytest.mark.django_db
+@patch("amc.criminals.clear_suspect", new_callable=AsyncMock)
 @patch("amc.criminals.make_suspect", new_callable=AsyncMock)
-async def test_race_suspect_while_racing_cleared_on_finish(make_suspect_mock):
-    """Badge re-applies while the race runs (state 2) and clears at
-    finish (state 3); ready rows (state 1) never re-apply — TT rows sit
-    at state 1 forever between runs (Yuuka 2026-09-27)."""
+async def test_race_participant_ge_owned_by_wanted_row(make_suspect_mock, clear_mock):
+    """freeman 2026-09-30: an illegal race itself applies NO suspect GE —
+    the GE lifecycle is owned entirely by the event_race Wanted row. A
+    bare online participant (no Wanted) never gets the badge, and once
+    the Wanted row expires the GE is transitioned out even while the
+    race is still live (state 2)."""
     now = timezone.now()
     from amc.models import (
         Character,
@@ -3794,15 +3797,30 @@ async def test_race_suspect_while_racing_cleared_on_finish(make_suspect_mock):
     await GameEventCharacter.objects.acreate(
         game_event=event, character=char, rank=0
     )
+
+    # Bare online participant, no Wanted -> NO suspect GE, ever.
+    await refresh_suspect_tags(AsyncMock())
+    make_suspect_mock.assert_not_awaited()
+    clear_mock.assert_not_awaited()
+
+    # Active event_race Wanted -> the WANTED pass applies/refreshes the GE.
+    wanted = await Wanted.objects.acreate(
+        character=char, amount=0, wanted_remaining=600, initial_heat=600,
+        origin="event_race",
+    )
+    make_suspect_mock.reset_mock()
     await refresh_suspect_tags(AsyncMock())
     assert make_suspect_mock.await_count >= 1
 
-    # Race finished (state 3) -> re-apply stops, badge transitioned out
+    # Wanted expires (countdown ran out) -> the GE is transitioned out even
+    # while the race is still live (race_guids no longer shields racers).
     make_suspect_mock.reset_mock()
-    await GameEvent.objects.filter(pk=event.pk).aupdate(state=3)
-    with patch("amc.criminals.clear_suspect", new_callable=AsyncMock):
-        await refresh_suspect_tags(AsyncMock())
+    await Wanted.objects.filter(pk=wanted.pk).aupdate(
+        expired_at=timezone.now(), wanted_remaining=0
+    )
+    await refresh_suspect_tags(AsyncMock())
     make_suspect_mock.assert_not_awaited()
+    clear_mock.assert_awaited_once()
 
     # Cleanup regardless of transaction semantics: fire-and-forget task
     # chains (push_no_teleport_later, announce_illicit_delivery) write in

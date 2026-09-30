@@ -1830,8 +1830,8 @@ async def refresh_suspect_tags(http_client_mod, http_client_game=None) -> None:
     # countdown (no announcement, no "you are wanted" popup) until the race
     # finishes (state 3) / the player leaves (participant row pruned) / the
     # event ends — then the normal speed-law decay runs and the star decays
-    # naturally (never force-cleared here).
-    race_guids: set[str] = set()
+    # naturally (never force-cleared here). The suspect GE is never applied
+    # in this pass — the Wanted row owns it end to end (freeman 2026-09-30).
     live_race_events = GameEvent.objects.filter(
         race_legality="illegal",
         state=2,
@@ -1847,7 +1847,6 @@ async def refresh_suspect_tags(http_client_mod, http_client_game=None) -> None:
             and p.character.last_online
             and p.character.last_online >= online_cutoff
         ]
-        race_guids.update(c.guid for c in online_participants)
 
         # Announcement + first wanted grant (once per event guid, whichever
         # path — this tick or the SSE alert task — sees the race first).
@@ -1873,8 +1872,11 @@ async def refresh_suspect_tags(http_client_mod, http_client_game=None) -> None:
 
         # Refresh pass: top up the countdown on every race-origin Wanted of
         # online participants while the event races. notify=False (the
-        # announcement already went out; no per-tick popups). This is also
-        # what re-asserts the suspect GE so stars stay visible (60 s cap).
+        # announcement already went out; no per-tick popups). The suspect
+        # GE itself is NOT applied here — it is owned entirely by the
+        # Wanted row: the wanted pass above re-applies it every tick while
+        # the Wanted is active and the countdown expiry clears it
+        # (freeman 2026-09-30: no separate in-event GE application).
         for char in online_participants:
             try:
                 wanted = await Wanted.objects.filter(
@@ -1898,13 +1900,9 @@ async def refresh_suspect_tags(http_client_mod, http_client_game=None) -> None:
                     exc_info=True,
                 )
 
-    for guid in sorted(race_guids - wanted_guids - costume_guids):
-        try:
-            await make_suspect(
-                http_client_mod, guid, duration_seconds=CRIMINAL_SUSPECT_DURATION,
-            )
-        except Exception:
-            logger.warning("race suspect re-apply failed for %s", guid)
+    # (No bare race-pass GE: a race participant without an active
+    # event_race Wanted gets NO suspect badge — the Wanted system is the
+    # single owner of the GE lifecycle.)
 
     # --- Reconciliation: one-shot costume hydration for online characters ---
     unreconciled_criminals = Character.objects.filter(
@@ -1949,9 +1947,11 @@ async def refresh_suspect_tags(http_client_mod, http_client_game=None) -> None:
     # module-level comment.  This keeps costume criminals immune to the
     # last_online-lag flicker bug while still preventing false clears on
     # wanted-to-costume transitions via the combined diff here.
-    # race_guids included: a racer whose wanted/costume status cleared must
-    # not lose the badge while the race is still live.
-    currently_suspect = wanted_guids | costume_guids | race_guids
+    # race_guids deliberately NOT included (freeman 2026-09-30): the GE
+    # belongs to the Wanted row — when the race-origin Wanted expires the
+    # GE must expire with it, so a racer whose wanted cleared IS
+    # transitioned out even while the race is still live.
+    currently_suspect = wanted_guids | costume_guids
     transitioned_out = _last_suspect_guids - currently_suspect
     for guid in transitioned_out:
         try:
