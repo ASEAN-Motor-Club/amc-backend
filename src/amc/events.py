@@ -981,7 +981,7 @@ async def _mirror_posted_event(
         championship=await _underground_championship(),
         description=description,
         description_in_game=description,
-        time_trial=True,
+        time_trial=scheduled_event.time_trial,
         tt_class=tt_class,
         is_rotation_instance=True,
     )
@@ -1222,15 +1222,15 @@ async def post_random_events(ctx):
 
     # Pool = Jeju Underground Street Racing TEMPLATES (Yuuka 2026-09-29):
     # hand-made duplicates of the original SEs living in the underground
-    # championship, with NO pinned class — the class ROLLS per post. The
-    # old pinned-class twin filter is gone (twins were cleaned up);
-    # mirrored instance rows (is_rotation_instance=True) are never
-    # candidates. No window gate (#301): the daily rotation owns each
-    # auto event's lifetime, and handlers/events.py links the SE via the
-    # out-of-window fallback.
+    # championship — time trials AND sprints (Yuuka 2026-09-30: "rework
+    # them", sprint templates join the pool) — with NO pinned class; the
+    # class ROLLS per post (it is the HP cap that arms DQ/enforcement).
+    # The old pinned-class twin filter is gone; mirrored instance rows
+    # (is_rotation_instance=True) are never candidates. No window gate
+    # (#301): the daily rotation owns each auto event's lifetime, and
+    # handlers/events.py links the SE via the out-of-window fallback.
     candidate_qs = (
         ScheduledEvent.objects.filter(
-            time_trial=True,
             race_setup__isnull=False,
             tt_class__isnull=True,
             is_rotation_instance=False,
@@ -1325,7 +1325,7 @@ async def post_random_events(ctx):
     # "New time trial events available!" with no events existing.
     if posted_names:
         await announce(
-            f"New time trial events available: {', '.join(posted_names)}! "
-            f"Use /events to see them.",
+            f"New underground racing events available: "
+            f"{', '.join(posted_names)}! Use /events to see them.",
             ctx["http_client"],
         )
