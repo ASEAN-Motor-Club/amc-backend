@@ -21,8 +21,8 @@ from amc.criminals import (
     BASE_DECAY_PER_TICK,
     TICK_INTERVAL,
     WANTED_EVASION_MAX_BONUS,
-    create_or_refresh_wanted,
     _evasion_announce_text,
+    create_or_refresh_wanted,
     evasion_proximity_term,
     evasion_quality_gain,
     evasion_speed_term,
@@ -870,13 +870,10 @@ class EvasionBonusTests(TestCase):
         mock_clear,
         mock_announce,
     ):
-        """Race wanteds decay at the base 1/s countdown regardless of speed.
-
-        The speed law would RE-GROW heat while the ex-racer drives
-        (>50 km/h accrues), so the star never visibly dropped after the
-        race (Yuuka 2026-09-27). No evasion bonus either.
-        """
-        from amc.criminals import WANTED_ORIGIN_EVENT_RACE, BASE_DECAY_PER_TICK
+        """Race wanteds decay through the STANDARD law (Yuuka 2026-09-30:
+        "pipe into Schedule 1's") — driving re-grows heat, hiding decays,
+        natural expiry grants the evasion bonus like any organic wanted."""
+        from amc.criminals import WANTED_ORIGIN_EVENT_RACE
 
         player, character = await self._setup_evader(score=50_000)
         mock_get_players.return_value = self._players_for(player, character)
@@ -891,9 +888,10 @@ class EvasionBonusTests(TestCase):
         await tick_wanted_countdown(AsyncMock(), AsyncMock())
 
         await wanted.arefresh_from_db()
-        # Exactly one base-rate tick of decay — no speed-law regrowth.
-        self.assertAlmostEqual(wanted.wanted_remaining, 600 - BASE_DECAY_PER_TICK)
-        # No evasion: race wanteds never enter evaded_characters.
+        # Stationary suspect, no cop in range → mult 1.0 → base 1 s/s decay.
+        self.assertLess(wanted.wanted_remaining, 600)
+        # No cop ever chased → quality 0 → evasion bonus $0, same as organic
+        # (freeman 2026-09-26: the bonus measures the chase).
         await character.arefresh_from_db(fields=["criminal_score"])
         self.assertEqual(character.criminal_score, 50_000)
 
@@ -914,7 +912,8 @@ class EvasionBonusTests(TestCase):
         mock_clear,
         mock_announce,
     ):
-        """Event-race wanteds share the fugitive dormant carve-out."""
+        """Event-race wanteds clear while dormant like organic heat
+        (Yuuka 2026-09-30: standard-law match)."""
         from amc.criminals import WANTED_ORIGIN_EVENT_RACE
 
         player, character = await self._setup_evader(score=50_000)
@@ -930,4 +929,4 @@ class EvasionBonusTests(TestCase):
         await tick_wanted_countdown(AsyncMock(), AsyncMock())
 
         await wanted.arefresh_from_db()
-        self.assertIsNone(wanted.expired_at)  # survives dormant ticks
+        self.assertIsNotNone(wanted.expired_at)  # cleared while dormant

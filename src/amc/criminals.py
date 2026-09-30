@@ -1055,21 +1055,19 @@ async def tick_wanted_countdown(http_client, http_client_mod, http_client_mgmt=N
         # Fugitive-passenger carve-out (Hamster 2026-09-27): these triggers
         # are the crime — the delivery itself was the offense, so they survive
         # dormant ticks like admin flags and re-enter the normal speed law
-        # once a cop is back on duty. Event-race origin shares the exemption
-        # (Yuuka 2026-09-27): the race IS the enforcement — its wanteds
-        # decay on their plain countdown regardless of cop presence (no
-        # refresh pass since 2026-09-30).
+        # once a cop is back on duty. (Event-race wanteds shared the
+        # exemption until 2026-09-30 — Yuuka: "pipe into Schedule 1's";
+        # they now decay through the standard law and clear while dormant
+        # like any other organic heat.)
         fugitive_flags = [
             w
             for w in organic
-            if w.origin
-            in (WANTED_ORIGIN_FUGITIVE_PASSENGER, WANTED_ORIGIN_EVENT_RACE)
+            if w.origin == WANTED_ORIGIN_FUGITIVE_PASSENGER
         ]
         organic = [
             w
             for w in organic
-            if w.origin
-            not in (WANTED_ORIGIN_FUGITIVE_PASSENGER, WANTED_ORIGIN_EVENT_RACE)
+            if w.origin != WANTED_ORIGIN_FUGITIVE_PASSENGER
         ]
         if due_pendings:
             # Pending triggers are organic work in flight — the dormant rule
@@ -1366,75 +1364,66 @@ async def tick_wanted_countdown(http_client, http_client_mod, http_client_mgmt=N
             # (A = WANTED_ACCRUAL_MIN_MULT = 1/3x).
             min_dist = math.inf
 
-        # Event-race wanteds: plain countdown decay (Yuuka 2026-09-27
-        # "stars didn't seem to decrease"). The speed law would RE-GROW
-        # heat to the cap while the ex-racer drives (>50 km/h accrues),
-        # so the star never visibly dropped after the race. Race flags
-        # decay at the base 1/s countdown regardless of speed, never
-        # grow, and get no chase-quality accrual / evasion bonus — this
-        # is not an evasion chase.
-        if wanted.origin == WANTED_ORIGIN_EVENT_RACE:
+        # Event-race wanteds use the STANDARD decay law (Yuuka 2026-09-30:
+        # "pipe into Schedule 1's" — the pak granted native wanteds that
+        # decayed with the game's law; the flat 1/s countdown special case
+        # from 2026-09-27 is retired, and re-growth while driving is
+        # intended). They keep their creation-side differences: stars
+        # gained at the announce gate, bounty 0, no suspect GE (#306).
+        # Chase-quality accrual (freeman 2026-09-26): while an ORGANIC
+        # wanted is active and a real cop is in play (min_dist finite —
+        # police-independent mode's inf means nobody is chasing), the
+        # meter absorbs proximity + speed. Admin /setwanted flags never
+        # accrue — their expiry is not an evasion.
+        if wanted.set_by_id is None and min_dist is not None:
+            wanted.chase_quality = min(
+                1.0,
+                wanted.chase_quality
+                + evasion_quality_gain(min_dist, speed_kmh),
+            )
+
+        # On-foot law (freeman 2026-09-28): same |S - pivot| shape,
+        # own pivot (5 km/h) and rate — standing still on foot decays at
+        # the same 1.0 s/s as a parked vehicle.
+        on_foot = sus_guid.upper() in on_foot_guids
+        pivot = WANTED_ON_FOOT_PIVOT_KMH if on_foot else WANTED_SPEED_PIVOT_KMH
+        law_rate = WANTED_ON_FOOT_RATE if on_foot else WANTED_LAW_RATE
+
+        if speed_kmh >= pivot:
+            growth = (
+                (speed_kmh - pivot)
+                * law_rate
+                * TICK_INTERVAL
+            )
+            if min_dist is not None:
+                growth *= wanted_accrual_multiplier(min_dist)
+            wanted.wanted_remaining = min(
+                float(wanted.initial_heat),
+                wanted.wanted_remaining + growth,
+            )
+        else:
+            # Distance never slows decay: F(D) >= 1.0 everywhere (clamped
+            # at the 500 m near cap), so point-blank hiding decays at the
+            # plain speed-driven rate and hiding far clears faster.
+            if min_dist is not None:
+                mult = hide_decay_multiplier(min_dist)
+            else:
+                mult = 1.0
+            decay = (
+                (pivot - speed_kmh)
+                * law_rate
+                * mult
+                * TICK_INTERVAL
+            )
             wanted.wanted_remaining = max(
-                0.0, wanted.wanted_remaining - BASE_DECAY_PER_TICK
+                0.0, wanted.wanted_remaining - decay
             )
             if wanted.wanted_remaining <= 0:
                 expired_characters.append(wanted.character)
                 expired_bounties[wanted.character.guid] = wanted.amount
-        else:
-            # Chase-quality accrual (freeman 2026-09-26): while an ORGANIC
-            # wanted is active and a real cop is in play (min_dist finite —
-            # police-independent mode's inf means nobody is chasing), the
-            # meter absorbs proximity + speed. Admin /setwanted flags never
-            # accrue — their expiry is not an evasion.
-            if wanted.set_by_id is None and min_dist is not None:
-                wanted.chase_quality = min(
-                    1.0,
-                    wanted.chase_quality
-                    + evasion_quality_gain(min_dist, speed_kmh),
-                )
-
-            # On-foot law (freeman 2026-09-28): same |S - pivot| shape,
-            # own pivot (5 km/h) and rate — standing still on foot decays at
-            # the same 1.0 s/s as a parked vehicle.
-            on_foot = sus_guid.upper() in on_foot_guids
-            pivot = WANTED_ON_FOOT_PIVOT_KMH if on_foot else WANTED_SPEED_PIVOT_KMH
-            law_rate = WANTED_ON_FOOT_RATE if on_foot else WANTED_LAW_RATE
-
-            if speed_kmh >= pivot:
-                growth = (
-                    (speed_kmh - pivot)
-                    * law_rate
-                    * TICK_INTERVAL
-                )
-                if min_dist is not None:
-                    growth *= wanted_accrual_multiplier(min_dist)
-                wanted.wanted_remaining = min(
-                    float(wanted.initial_heat),
-                    wanted.wanted_remaining + growth,
-                )
-            else:
-                # Distance never slows decay: F(D) >= 1.0 everywhere (clamped
-                # at the 500 m near cap), so point-blank hiding decays at the
-                # plain speed-driven rate and hiding far clears faster.
-                if min_dist is not None:
-                    mult = hide_decay_multiplier(min_dist)
-                else:
-                    mult = 1.0
-                decay = (
-                    (pivot - speed_kmh)
-                    * law_rate
-                    * mult
-                    * TICK_INTERVAL
-                )
-                wanted.wanted_remaining = max(
-                    0.0, wanted.wanted_remaining - decay
-                )
-                if wanted.wanted_remaining <= 0:
-                    expired_characters.append(wanted.character)
-                    expired_bounties[wanted.character.guid] = wanted.amount
-                    if wanted.set_by_id is None:
-                        evaded_characters.append(wanted.character)
-                        evaded_qualities[wanted.character.guid] = wanted.chase_quality
+                if wanted.set_by_id is None:
+                    evaded_characters.append(wanted.character)
+                    evaded_qualities[wanted.character.guid] = wanted.chase_quality
 
         # Track star changes for deferred notification
         new_stars = _compute_stars(wanted.wanted_remaining)
