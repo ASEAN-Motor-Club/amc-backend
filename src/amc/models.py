@@ -362,6 +362,10 @@ class Character(models.Model):
     # Credit score: 0–200, default 100 (neutral). Affects loan fees.
     credit_score = models.IntegerField(default=100)
 
+    # Underground racing respect (Yuuka 2026-09-29). Lifetime counter,
+    # credited by the auto-poster's rotation-end payout. Rate currently 0.
+    respect = models.PositiveIntegerField(default=0)
+
     # Government Employee
     gov_employee_until = models.DateTimeField(null=True, blank=True)
     gov_employee_level = models.PositiveIntegerField(default=0)
@@ -1213,6 +1217,14 @@ class ScheduledEvent(models.Model):
         related_name="scheduled_events",
         help_text="Optional pinned TT power class; auto-posted events override per instance",
     )
+    is_rotation_instance = models.BooleanField(
+        default=False,
+        db_index=True,
+        help_text=(
+            "True = SE row mirrored from an auto-posted event instance "
+            "(never a rotation candidate); False = hand-made template."
+        ),
+    )
     staggered_start_delay = models.PositiveIntegerField(
         default=0,
         help_text="Delay between staggered start, in seconds. This can be overridden in the game",
@@ -1273,6 +1285,14 @@ class GameEvent(models.Model):
     )
     discord_message_id = models.PositiveBigIntegerField(null=True)
     owner = models.ForeignKey(Character, models.SET_NULL, null=True, blank=True)
+    rewards_paid = models.BooleanField(
+        default=False,
+        db_index=True,
+        help_text=(
+            "True once the underground rotation-end payout settled this event "
+            "(idempotency marker for the Blood Money/Respect payout)."
+        ),
+    )
 
     characters = models.ManyToManyField(
         Character, through="GameEventCharacter", related_name="game_events"

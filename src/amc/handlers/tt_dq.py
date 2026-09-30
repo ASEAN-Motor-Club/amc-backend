@@ -36,6 +36,8 @@ import logging
 import discord
 from django.conf import settings
 
+from amc.config import UNDERGROUND_VEHICLE_TYPES
+from amc.mod_detection import vehicle_type_for
 from amc.mod_server import (
     get_player_last_vehicle,
     get_player_last_vehicle_parts,
@@ -48,6 +50,13 @@ from amc.tt_rules import evaluate_tt_parts
 from amc.vehicles import format_vehicle_name
 
 logger = logging.getLogger(__name__)
+
+
+def vehicle_type_violation(vehicle_type: str | None) -> str:
+    """Human-readable violation line for the vehicle-type DQ rule."""
+    if vehicle_type:
+        return f"Vehicle type {vehicle_type} is not allowed (Small/Pickup only)"
+    return "Vehicle type could not be verified (allowed: Small/Pickup)"
 
 
 async def _disqualify_illegal_starters(
@@ -97,6 +106,12 @@ async def _disqualify_illegal_starters(
                 continue
 
             violations = evaluate_tt_parts(parts, max_hp)
+            vehicle_type = vehicle_type_for((vehicle or {}).get("fullName"))
+            if vehicle_type not in UNDERGROUND_VEHICLE_TYPES:
+                # Fail-closed: an unknown blueprint can't be verified, so it
+                # is a violation like the unknown-parts rule (Yuuka
+                # 2026-09-29: Small and Pickup only in underground races).
+                violations = violations + [vehicle_type_violation(vehicle_type)]
             if not violations:
                 continue
             candidates.append((guid, player_name, unique_net_id, violations, vehicle))

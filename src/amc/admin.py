@@ -198,7 +198,7 @@ class PlayerStatusLogInlineAdmin(admin.TabularInline):
 
 @admin.register(Character)
 class CharacterAdmin(admin.ModelAdmin):
-    list_display = ["name", "player__unique_id", "last_login", "total_session_time"]
+    list_display = ["name", "player__unique_id", "last_login", "total_session_time", "respect"]
     list_select_related = ["player"]
     search_fields = ["player__unique_id", "player__discord_user_id", "name", "guid"]
     list_filter = ["crossover_warning_sent_at"]
@@ -331,7 +331,7 @@ class LapSectionTimeInlineAdmin(admin.TabularInline):
 
 @admin.register(GameEvent)
 class GameEventAdmin(admin.ModelAdmin):
-    list_display = ["guid", "name", "start_time", "scheduled_event", "owner"]
+    list_display = ["guid", "name", "start_time", "scheduled_event", "owner", "rewards_paid"]
     inlines = [GameEventCharacterInlineAdmin]
 
 
@@ -439,6 +439,7 @@ class ScheduledEventAdmin(admin.ModelAdmin):
         "discord_event_id",
         "championship",
         "time_trial",
+        "is_rotation_instance",
     ]
     list_select_related = ["race_setup"]
     inlines = [GameEventInlineAdmin]

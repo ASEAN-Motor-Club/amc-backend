@@ -11,20 +11,28 @@ from django.db.models import Exists, F, OuterRef, Prefetch, Window
 from django.db.models.functions import RowNumber
 from django.utils import timezone
 
+from amc.config import (
+    RESPECT_PER_CHECKPOINT,
+    UNDERGROUND_CHAMPIONSHIP_NAME,
+    underground_blood_money,
+)
 from amc.game_server import announce
 from amc.mod_server import (
     remove_event,
     send_message_as_player,
     show_popup,
     teleport_player,
+    transfer_money,
 )
 from amc.models import (
+    Championship,
     Character,
     GameEvent,
     GameEventCharacter,
     LapSectionTime,
     RaceSetup,
     ScheduledEvent,
+    TTClass,
 )
 from amc.utils import skip_if_running
 
@@ -918,6 +926,141 @@ async def auto_starting_grid(http_client_mod, game_event):
 _TT_INSTANCE: int | None = None
 
 
+def _underground_description(tt_class, checkpoints: int) -> str:
+    """Requirements text the auto-poster writes on the mirrored SE."""
+    from amc.config import BLOOD_MONEY_PER_CHECKPOINT, UNDERGROUND_VEHICLE_TYPES
+
+    first = checkpoints * BLOOD_MONEY_PER_CHECKPOINT
+    flat = underground_blood_money(checkpoints, 5)
+    return (
+        f"Underground street race — {tt_class.name}: max {tt_class.max_hp} HP, "
+        f"vanilla tires only, {' & '.join(UNDERGROUND_VEHICLE_TYPES)} vehicles only.\n"
+        f"Blood Money: 1st {first} → halves each place → flat {flat} from 5th on. "
+        f"Respect: {checkpoints * RESPECT_PER_CHECKPOINT}."
+    )
+
+
+@skip_if_running
+async def _mirror_posted_event(
+    scheduled_event, tt_class, event_name: str, config: dict
+) -> ScheduledEvent:
+    """Mirror a posted underground instance as its own ScheduledEvent row.
+
+    The posted setup is the RE-SERIALIZED config (Location→Translation
+    waypoint rewrite), which hashes differently from the template's
+    original RaceSetup — mirror the setup row the hook will actually
+    resolve (same calculate_hash), then the SE link lands on this mirror
+    (newest start_time among SEs on that setup). Carries the rolled
+    class, the requirements text, and is_rotation_instance=True so it
+    can never become a rotation candidate itself.
+    """
+    from amc.models import RaceSetup
+
+    race_setup, _ = await RaceSetup.objects.aget_or_create(
+        hash=RaceSetup.calculate_hash(config),
+        defaults={
+            "config": config,
+            "name": config.get("Route", {}).get("RouteName"),
+        },
+    )
+    checkpoints = len((config.get("Route", {}).get("Waypoints")) or [])
+    description = _underground_description(tt_class, checkpoints)
+    return await ScheduledEvent.objects.acreate(
+        name=event_name,
+        start_time=timezone.now(),
+        end_time=timezone.now() + timedelta(days=14),
+        race_setup=race_setup,
+        championship=await _underground_championship(),
+        description=description,
+        description_in_game=description,
+        time_trial=True,
+        tt_class=tt_class,
+        is_rotation_instance=True,
+    )
+
+
+@skip_if_running
+async def _underground_championship() -> Championship:
+    champs, _ = await Championship.objects.aget_or_create(
+        name=UNDERGROUND_CHAMPIONSHIP_NAME,
+        defaults={"description": ""},
+    )
+    return champs
+
+
+@skip_if_running
+async def pay_underground_rotation_rewards(ctx, live_guids: set[str] | None):
+    """Rotation-end Blood Money / Respect payout (Yuuka 2026-09-29).
+
+    An underground event that is no longer live in-game and not yet paid
+    settles exactly once: every participant who actually raced (laps > 0)
+    gets Blood Money by finish position (halving ladder, flattened from
+    5th) plus Respect (rate 0 today). Idempotent via GameEvent.rewards_paid.
+    """
+    http_client_mod = ctx["http_client_mod"]
+    unpaid = GameEvent.objects.filter(
+        rewards_paid=False,
+        auto_created=True,
+        scheduled_event__championship__name=UNDERGROUND_CHAMPIONSHIP_NAME,
+        scheduled_event__is_rotation_instance=True,
+    ).select_related("scheduled_event", "scheduled_event__tt_class", "race_setup")
+    async for game_event in unpaid:
+        if live_guids is not None and game_event.guid in live_guids:
+            continue
+        # Claim the row FIRST — a single writer settles the payout.
+        claimed = await GameEvent.objects.filter(
+            pk=game_event.pk, rewards_paid=False
+        ).aupdate(rewards_paid=True)
+        if not claimed:
+            continue
+        checkpoints = len(
+            (game_event.race_setup.config.get("Route", {}).get("Waypoints")) or []
+        ) if game_event.race_setup else 0
+        racers = (
+            game_event.participants.filter(laps__gt=0)
+            .select_related("character")
+            .order_by(
+                "-finished",
+                F("net_time").asc(nulls_last=True),
+                "-laps",
+                "-section_index",
+            )
+        )
+        position = 0
+        paid, failed = [], []
+        async for row in racers:
+            position += 1
+            amount = underground_blood_money(checkpoints, position)
+            character = row.character
+            try:
+                if amount > 0:
+                    await transfer_money(
+                        http_client_mod,
+                        amount,
+                        f"Blood Money — {game_event.name} (P{position})",
+                        str(character.player_id),
+                    )
+                if RESPECT_PER_CHECKPOINT > 0:
+                    character.respect = (character.respect or 0) + (
+                        checkpoints * RESPECT_PER_CHECKPOINT
+                    )
+                    await character.asave(update_fields=["respect"])
+                paid.append(f"{character.name}=P{position}:{amount}")
+            except Exception as e:
+                # Per-racer containment: one failed transfer never blocks
+                # the rest. The event stays marked paid (no double-pay on
+                # retries) and the miss is logged loudly.
+                failed.append(f"{character.name}=P{position}:{amount}")
+                print(
+                    f"Underground payout: transfer FAILED for {character.name} "
+                    f"({game_event.name} P{position}, {amount}): {e}"
+                )
+        print(
+            f"Underground payout: {game_event.name} ({game_event.guid}) "
+            f"C={checkpoints} paid=[{', '.join(paid)}] failed=[{', '.join(failed)}]"
+        )
+
+
 @skip_if_running
 async def _next_tt_instance_number() -> int:
     """Monotonic counter for posted TT event instance names (001, 002, ...).
@@ -980,6 +1123,11 @@ async def post_random_events(ctx):
         print(f"Auto-TT: failed to fetch live events: {e}")
 
     if live_guids is not None:
+        # 0) Underground rotation-end payout: settle every classed
+        #    underground event that left the live list and was never paid
+        #    (Yuuka 2026-09-29 — rewards fire at rotation end, not per run).
+        await pay_underground_rotation_rewards(ctx, live_guids)
+
         # 1) Vanished events: the game silently deletes unclaimed owner-less
         #    events a few minutes after creation (observed 2026-09-22 on the
         #    test server — no RemoveEvent hook fires). Close their Ready,
@@ -1040,26 +1188,24 @@ async def post_random_events(ctx):
         .values_list("race_setup_id", flat=True)
     )
 
-    # Pool = ALL pinned-class illegal-TT twins, not just window-active ones
-    # (Yuuka 2026-09-30: "nothing should expire hourly, everything should
-    # match the daily at 08:30 rotation"). The daily rotation owns each
-    # auto event's lifetime — posted -> live in the game's native event
-    # list until the next 08:30 rotation rotates it out — so picking by
-    # SE window would leave the rotation with zero candidates on days the
-    # window doesn't cover 01:30 UTC (the 08:30 +07 slot). handlers/
-    # events.py links the SE via an out-of-window fallback now, so the
-    # posted event keeps its SE-linked results.
+    # Pool = Jeju Underground Street Racing TEMPLATES (Yuuka 2026-09-29):
+    # hand-made duplicates of the original SEs living in the underground
+    # championship, with NO pinned class — the class ROLLS per post. The
+    # old pinned-class twin filter is gone (twins were cleaned up);
+    # mirrored instance rows (is_rotation_instance=True) are never
+    # candidates. No window gate (#301): the daily rotation owns each
+    # auto event's lifetime, and handlers/events.py links the SE via the
+    # out-of-window fallback.
     candidate_qs = (
         ScheduledEvent.objects.filter(
             time_trial=True,
             race_setup__isnull=False,
-            # Illegal-TT twins only (Yuuka 2026-09-26): SEs without a pinned
-            # class are plain templates (championships, RP events) and must
-            # never be auto-criminalized (DQ/wanted/police) by rotation.
-            tt_class__isnull=False,
+            tt_class__isnull=True,
+            is_rotation_instance=False,
+            championship__name=UNDERGROUND_CHAMPIONSHIP_NAME,
         )
         .exclude(race_setup_id__in=active_race_setup_ids)
-        .select_related("race_setup", "tt_class")
+        .select_related("race_setup")
         .order_by("?")
     )
     # 0-lap events only for rotation (Yuuka 2026-09-26: "only rotate events
@@ -1090,12 +1236,16 @@ async def post_random_events(ctx):
         if not config.get("EngineKeys"):
             config["EngineKeys"] = []
 
-        # Class comes from the ScheduledEvent's pin (illegal-TT twin, Yuuka
-        # 2026-09-26) — no random roll. The class rides in the event-name
-        # tag ([TT-480]) — that tag is the only reliable per-instance
-        # channel: the DB GameEvent row is created later by the SSE hook,
-        # which parses the tag back into GameEvent.tt_class.
-        tt_class = scheduled_event.tt_class
+        # Class ROLLS per post (Yuuka 2026-09-29, back to the #190 behavior
+        # with the new 10-tier ladder — templates carry no pin). The class
+        # rides in the event-name tag ([TT-480]) — that tag is the only
+        # reliable per-instance channel: the DB GameEvent row is created
+        # later by the SSE hook, which parses the tag back into
+        # GameEvent.tt_class.
+        tt_class = await TTClass.objects.order_by("?").afirst()
+        if not tt_class:
+            print("Auto-TT: no TTClass rows exist — cannot post underground event")
+            continue
         # Per-instance counter so every posted event is uniquely named.
         # The game client matches posted events to its native event
         # templates by name (a native name like "Get The Priest! - Time
@@ -1108,8 +1258,8 @@ async def post_random_events(ctx):
             # Clear the setup's stale, class-conflicting restrictions
             # (Yuuka 2026-09-26: "the override should be to NONE, we rely
             # on our DQ checks (total hp)") — the game popup then shows no
-            # requirements and the start-line DQ (total-hp + vanilla-tires
-            # check) is the single source of enforcement.
+            # requirements and the start-line DQ (total-hp + vanilla-tires +
+            # vehicle-type check) is the single source of enforcement.
             config["EngineKeys"] = []
             config["VehicleKeys"] = []
 
@@ -1129,6 +1279,11 @@ async def post_random_events(ctx):
                         f"{scheduled_event.name}: {resp.status} {error_body}"
                     )
                 else:
+                    # Mirror the instance as its own SE row (admin panel:
+                    # rolled class, requirements text, reward totals).
+                    await _mirror_posted_event(
+                        scheduled_event, tt_class, event_name, config
+                    )
                     posted_names.append(scheduled_event.name)
         except Exception as e:
             print(f"Auto-TT: failed to post event {scheduled_event.name}: {e}")
