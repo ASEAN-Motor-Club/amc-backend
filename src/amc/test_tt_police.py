@@ -28,7 +28,8 @@ from amc.handlers.tt_police import (
     announce_illegal_race,
     grant_race_wanted,
 )
-from amc.models import Character, GameEvent, RaceSetup, ScheduledEvent
+from amc.config import UNDERGROUND_CHAMPIONSHIP_NAME
+from amc.models import Championship, Character, GameEvent, RaceSetup, ScheduledEvent
 from amc.test_auto_tt import (  # noqa: F401  (fixtures shared)
     FakeModClient,
     _race_config,
@@ -274,17 +275,16 @@ async def test_rotation_posts_zero_lap_events_only(announce_mock, db):
 
     sprint = await _make_setup("Sprint TT route", 0)
     circuit = await _make_setup("Circuit TT route", 3)
-    from amc.models import TTClass
-
-    cls, _ = await sync_to_async(TTClass.objects.get_or_create)(
-        name="TT-480", defaults={"max_hp": 480}
-    )
     for name, setup in (("Sprint SE", sprint), ("Circuit SE", circuit)):
+        champ, _ = await sync_to_async(Championship.objects.get_or_create)(
+            name=UNDERGROUND_CHAMPIONSHIP_NAME, defaults={"description": ""}
+        )
         await sync_to_async(ScheduledEvent.objects.create)(
             name=name,
             race_setup=setup,
             time_trial=True,
-            tt_class=cls,
+            tt_class=None,  # class rolls per post now (Yuuka 2026-09-29)
+            championship=champ,
             start_time=now - timedelta(hours=1),
             end_time=now + timedelta(hours=1),
         )

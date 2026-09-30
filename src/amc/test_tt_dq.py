@@ -88,11 +88,14 @@ async def test_no_tt_class_is_noop(kick, last_veh, last_parts, post, db):
 
 
 @pytest.mark.asyncio
+@patch("amc.handlers.tt_dq.vehicle_type_for", return_value="Small")
 @patch("amc.handlers.tt_dq._post_audit_embed", new_callable=AsyncMock)
 @patch("amc.handlers.tt_dq.get_player_last_vehicle_parts", new_callable=AsyncMock)
 @patch("amc.handlers.tt_dq.get_player_last_vehicle", new_callable=AsyncMock)
 @patch("amc.handlers.tt_dq.kick_player_from_event", new_callable=AsyncMock)
-async def test_compliant_player_not_kicked(kick, last_veh, last_parts, post, db):
+async def test_compliant_player_not_kicked(
+    kick, last_veh, last_parts, post, _vtype, db
+):
     event = await _make_tt_event(max_hp=270)  # 238.6hp fits TT-270
     last_veh.return_value = {"vehicle": {"fullName": "Vehicle_X_C"}}
     last_parts.return_value = {"parts": _ok_parts()}

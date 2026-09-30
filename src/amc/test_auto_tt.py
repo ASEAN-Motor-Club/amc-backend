@@ -124,6 +124,25 @@ async def _clean_slate():
     await sync_to_async(GameEvent.objects.all().delete)()
 
 
+async def _ug_template(name, race, start, end):
+    """Underground championship template (rotation pool, no pinned class)."""
+    from amc.config import UNDERGROUND_CHAMPIONSHIP_NAME
+    from amc.models import Championship
+
+    champ, _ = await sync_to_async(Championship.objects.get_or_create)(
+        name=UNDERGROUND_CHAMPIONSHIP_NAME, defaults={"description": ""}
+    )
+    return await sync_to_async(ScheduledEvent.objects.create)(
+        name=name,
+        race_setup=race,
+        time_trial=True,
+        tt_class=None,
+        championship=champ,
+        start_time=start,
+        end_time=end,
+    )
+
+
 @pytest.mark.asyncio
 @patch("amc.events.announce", new_callable=AsyncMock)
 async def test_expired_window_events_still_posted(announce_mock, db):
@@ -133,14 +152,7 @@ async def test_expired_window_events_still_posted(announce_mock, db):
     now = timezone.now()
     await _clean_slate()
     race = await _make_race("Expired TT route")
-    await sync_to_async(ScheduledEvent.objects.create)(
-        name="Expired TT",
-        race_setup=race,
-        time_trial=True,
-        tt_class=await _get_class(),
-        start_time=now - timedelta(days=30),
-        end_time=now - timedelta(days=1),
-    )
+    await _ug_template("Expired TT", race, now - timedelta(days=30), now - timedelta(days=1))
     mod = FakeModClient()
     await post_random_events({"http_client_mod": mod, "http_client": AsyncMock()})
     assert len(mod.posts) == 1
@@ -155,14 +167,7 @@ async def test_posted_names_carry_instance_numbers(announce_mock, db):
     now = timezone.now()
     await _clean_slate()
     race = await _make_race("Instance TT route")
-    await sync_to_async(ScheduledEvent.objects.create)(
-        name="Instance TT",
-        race_setup=race,
-        time_trial=True,
-        tt_class=await _get_class(),
-        start_time=now - timedelta(hours=1),
-        end_time=now + timedelta(hours=1),
-    )
+    await _ug_template("Instance TT", race, now - timedelta(hours=1), now + timedelta(hours=1))
     mod = FakeModClient()
     await post_random_events({"http_client_mod": mod, "http_client": AsyncMock()})
     assert re.fullmatch(
@@ -183,14 +188,7 @@ async def test_active_window_event_posted_and_announced(announce_mock, db):
     now = timezone.now()
     await _clean_slate()
     race = await _make_race("Live TT route")
-    await sync_to_async(ScheduledEvent.objects.create)(
-        name="Live TT",
-        race_setup=race,
-        time_trial=True,
-        tt_class=await _get_class(),
-        start_time=now - timedelta(hours=1),
-        end_time=now + timedelta(hours=1),
-    )
+    await _ug_template("Live TT", race, now - timedelta(hours=1), now + timedelta(hours=1))
     mod = FakeModClient()
     await post_random_events({"http_client_mod": mod, "http_client": AsyncMock()})
 
@@ -216,14 +214,7 @@ async def test_all_posts_fail_no_announce(announce_mock, db):
     now = timezone.now()
     await _clean_slate()
     race = await _make_race("Doomed TT route")
-    await sync_to_async(ScheduledEvent.objects.create)(
-        name="Doomed TT",
-        race_setup=race,
-        time_trial=True,
-        tt_class=await _get_class(),
-        start_time=now - timedelta(hours=1),
-        end_time=now + timedelta(hours=1),
-    )
+    await _ug_template("Doomed TT", race, now - timedelta(hours=1), now + timedelta(hours=1))
     mod = FakeModClient(fail_statuses={"Doomed TT": 400})
     await post_random_events({"http_client_mod": mod, "http_client": AsyncMock()})
 
@@ -243,14 +234,7 @@ async def test_announce_lists_only_posted_events(announce_mock, db):
     # the candidate pool entirely via the 0-lap filter; "Good TT" posts.
     for name, laps in (("Good TT", 0), ("Bad TT", 3)):
         race = await _make_race(f"{name} route", num_laps=laps)
-        await sync_to_async(ScheduledEvent.objects.create)(
-            name=name,
-            race_setup=race,
-            time_trial=True,
-            tt_class=await _get_class(),
-            start_time=now - timedelta(hours=1),
-            end_time=now + timedelta(hours=1),
-        )
+        await _ug_template(name, race, now - timedelta(hours=1), now + timedelta(hours=1))
     mod = FakeModClient(fail_statuses={"Bad TT": 500})
     await post_random_events({"http_client_mod": mod, "http_client": AsyncMock()})
 
@@ -281,14 +265,7 @@ async def test_vanished_event_row_closed(announce_mock, db):
     await _clean_slate()
     gone = await _make_auto_event("GUIDGONE00000000000000000000000")
     race = await _make_race("Live TT route")
-    await sync_to_async(ScheduledEvent.objects.create)(
-        name="Live TT",
-        race_setup=race,
-        time_trial=True,
-        tt_class=await _get_class(),
-        start_time=now - timedelta(hours=1),
-        end_time=now + timedelta(hours=1),
-    )
+    await _ug_template("Live TT", race, now - timedelta(hours=1), now + timedelta(hours=1))
     mod = FakeModClient()  # live list empty → the event has vanished
     await post_random_events({"http_client_mod": mod, "http_client": AsyncMock()})
 
@@ -307,14 +284,7 @@ async def test_unclaimed_live_event_rotated_out(announce_mock, remove_mock, db):
     await _clean_slate()
     await _make_auto_event("GUIDLIVE000000000000000000000000")
     race = await _make_race("Live TT route")
-    await sync_to_async(ScheduledEvent.objects.create)(
-        name="Live TT",
-        race_setup=race,
-        time_trial=True,
-        tt_class=await _get_class(),
-        start_time=now - timedelta(hours=1),
-        end_time=now + timedelta(hours=1),
-    )
+    await _ug_template("Live TT", race, now - timedelta(hours=1), now + timedelta(hours=1))
     mod = FakeModClient(live_events=[{"EventGuid": "GUIDLIVE000000000000000000000000"}])
     await post_random_events({"http_client_mod": mod, "http_client": AsyncMock()})
 
@@ -338,14 +308,7 @@ async def test_joined_event_not_rotated(announce_mock, remove_mock, db):
     await _clean_slate()
     ge = await _make_auto_event("GUIDJOIN000000000000000000000000")
     race = await _make_race("Live TT route")
-    await sync_to_async(ScheduledEvent.objects.create)(
-        name="Live TT",
-        race_setup=race,
-        time_trial=True,
-        tt_class=await _get_class(),
-        start_time=now - timedelta(hours=1),
-        end_time=now + timedelta(hours=1),
-    )
+    await _ug_template("Live TT", race, now - timedelta(hours=1), now + timedelta(hours=1))
     player = await sync_to_async(Player.objects.create)(unique_id=12345)
     character = await sync_to_async(Character.objects.create)(
         player=player, guid="AAAA0000", name="yuuka"
@@ -439,14 +402,7 @@ async def test_setup_event_no_arg_no_active_replies_no_events(setup_mock, db):
     now = timezone.now()
     await _clean_slate()
     race = await _make_race("Expired TT route")
-    await sync_to_async(ScheduledEvent.objects.create)(
-        name="Expired TT",
-        race_setup=race,
-        time_trial=True,
-        tt_class=await _get_class(),
-        start_time=now - timedelta(days=30),
-        end_time=now - timedelta(days=1),
-    )
+    await _ug_template("Expired TT", race, now - timedelta(days=30), now - timedelta(days=1))
     ctx = _make_ctx()
     executed = await registry.execute("/setup_event", ctx)
     assert executed is True
@@ -460,22 +416,8 @@ async def test_events_lists_only_active(setup_mock, db):
     now = timezone.now()
     await _clean_slate()
     race = await _make_race("Active TT route")
-    await sync_to_async(ScheduledEvent.objects.create)(
-        name="Active TT",
-        race_setup=race,
-        time_trial=True,
-        tt_class=await _get_class(),
-        start_time=now - timedelta(hours=1),
-        end_time=now + timedelta(hours=1),
-    )
-    await sync_to_async(ScheduledEvent.objects.create)(
-        name="Future TT",
-        race_setup=race,
-        time_trial=True,
-        tt_class=await _get_class(),
-        start_time=now + timedelta(days=3),
-        end_time=now + timedelta(days=4),
-    )
+    await _ug_template("Active TT", race, now - timedelta(hours=1), now + timedelta(hours=1))
+    await _ug_template("Future TT", race, now + timedelta(days=3), now + timedelta(days=4))
     ctx = _make_ctx()
     await registry.execute("/events", ctx)
     message = ctx.reply.await_args.args[0]

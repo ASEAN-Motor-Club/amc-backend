@@ -425,6 +425,22 @@ def _strip_part_suffix(key: str, stock_keys: set[str]) -> str:
     return key_lower
 
 
+def vehicle_type_for(vehicle_name: str | None) -> str | None:
+    """Map a vehicle fullName to its gamedata vehicle_type (public helper).
+
+    Blueprint extraction follows detect_incompatible_parts:
+    'Jemusi_C Default__Jemusi' -> 'Jemusi' -> type from the vehicles table.
+    Returns None when the name is empty or the blueprint is not in the DB.
+    """
+    if not vehicle_name:
+        return None
+    _load_compatibility_data()
+    if not _vehicle_type_map:
+        return None
+    blueprint_name = vehicle_name.split(" ")[0].replace("_C", "")
+    return _vehicle_type_map.get(blueprint_name)
+
+
 def detect_incompatible_parts(parts: list[dict], vehicle_name: str) -> list[dict]:
     """Check if parts are compatible with the vehicle type.
 
