@@ -354,6 +354,75 @@ async def test_joined_event_not_rotated(announce_mock, remove_mock, db):
     assert ge.state == 1
 
 
+class _SetupClient:
+    """Fake mod client for amc.events.setup_event: /events + /players GETs
+    and POST /events capture (responses are async context managers)."""
+
+    def __init__(self, player):
+        self.player = player
+        self.posts = []
+
+    def post(self, path, json=None):
+        self.posts.append(json)
+        return FakeResponse(201, {})
+
+    def get(self, path):
+        if path == "/events":
+            return FakeResponse(200, {"data": []})
+        if path.startswith("/players/"):
+            return FakeResponse(200, {"data": [self.player]})
+        return FakeResponse(404)
+
+
+@pytest.mark.asyncio
+async def test_setup_event_underground_template_rolls_class(db):
+    """Yuuka 2026-09-30: /setup_event on an underground template ROLLS a
+    class (the player-driven illegal-TT path the pinned-class twins used
+    to provide). The [TT-x] tag is what arms HP cap / tire kick / DQ /
+    wanted."""
+    from amc.events import setup_event
+
+    now = timezone.now()
+    await _clean_slate()
+    await _tt_class()
+    race = await _make_race("Underground template route")
+    template = await _ug_template(
+        "Quarry Chaos -TT", race, now - timedelta(hours=1), now + timedelta(hours=1)
+    )
+    client = _SetupClient({"CharacterGuid": "C" * 32})
+    ok = await setup_event(now, 42, template, client)
+    assert ok is True
+    assert _re.search(r"\[TT-\d+\]$", client.posts[0]["EventName"])
+    assert client.posts[0]["EventName"].startswith("Quarry Chaos -TT (")
+
+
+@pytest.mark.asyncio
+async def test_setup_event_classless_championship_stays_legal(db):
+    """Non-underground classless SEs are never criminalized by
+    /setup_event (Yuuka: SEs are reusable templates)."""
+    from amc.events import setup_event
+    from amc.models import Championship
+
+    now = timezone.now()
+    await _clean_slate()
+    champ, _ = await sync_to_async(Championship.objects.get_or_create)(
+        name="AMC Cup Season 3", defaults={"description": ""}
+    )
+    race = await _make_race("Legal template route")
+    template = await sync_to_async(ScheduledEvent.objects.create)(
+        name="Ara Grand Prix",
+        race_setup=race,
+        time_trial=False,
+        tt_class=None,
+        championship=champ,
+        start_time=now - timedelta(hours=1),
+        end_time=now + timedelta(hours=1),
+    )
+    client = _SetupClient({"CharacterGuid": "C" * 32})
+    await setup_event(now, 42, template, client)
+    assert "[TT-" not in client.posts[0]["EventName"]
+
+
 # ---------------------------------------------------------------------------
 # /events and /setup_event command behavior
 # ---------------------------------------------------------------------------
