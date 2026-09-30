@@ -17,6 +17,7 @@ import asyncio
 import logging
 import re
 import time
+from datetime import timedelta
 
 import discord
 from django.conf import settings
@@ -493,6 +494,11 @@ async def _reconcile_event_players(
 _crosscheck_consecutive_failures = 0
 _CROSSCHECK_FAILURE_LOG_EVERY = 12
 
+# Vanish-reap grace: how long a Ready/Racing row stays open after the live
+# /events payload stops listing its guid (5 s crosscheck cadence, so a
+# transient gap is far below this; the 2026-09-30 orphan sat for a day).
+_VANISH_REAP_GRACE_SECONDS = 10 * 60
+
 
 async def crosscheck_live_events(http_client_mod, discord_client=None) -> list[str]:
     """Poll live event state (``GET /events``) against the DB.
@@ -513,6 +519,11 @@ async def crosscheck_live_events(http_client_mod, discord_client=None) -> list[s
     * **Racing (state 2)** — read-only drift report: missing row, state
       drift, roster drift, wrong-vehicle/engine flag drift (unfinished
       participants only).
+
+    Reverse pass: after the live fetch, any DB row still in Ready/Racing
+    whose guid is NOT in the (successful) payload is orphaned — the game
+    deletes events silently on restart/rotation with no hook — and is
+    closed to finished once stale beyond ``_VANISH_REAP_GRACE_SECONDS``.
 
     Returns human-readable drift lines (empty list = in sync).
     """
@@ -631,6 +642,38 @@ async def crosscheck_live_events(http_client_mod, discord_client=None) -> list[s
                     f"{label}: flag drift {player.get('PlayerName', '?')}:"
                     f" {'; '.join(mismatches)}"
                 )
+
+    # Reverse pass (vanish-reap): the fetch above SUCCEEDED, so the live
+    # payload is authoritative — a DB row still in Ready/Racing whose guid
+    # is NOT in it is orphaned: the game deletes events silently on
+    # restart/rotation/crash and no hook ever fires for that, so the row
+    # sits at state=2 forever. Any ILLEGAL row in that condition also keeps
+    # its participants' suspect badge re-applied every 30 s suspect tick
+    # (seen live 2026-09-30: an orphaned Illegal-TT row re-flagged a player
+    # for a full day across relogs). Close them as finished after a
+    # staleness grace: last_updated stops advancing exactly when the event
+    # vanishes (a live row is saved by the start/join reconciles, and a
+    # racing row by its start transition), so the grace doubles as a
+    # guard against a momentary /events gap mid-run.
+    live_guids = {ev.get("EventGuid", "") for ev in events if ev.get("EventGuid")}
+    grace_deadline = timezone.now() - timedelta(
+        seconds=_VANISH_REAP_GRACE_SECONDS
+    )
+    async for orphan in GameEvent.objects.filter(
+        state__in=(1, 2),
+        last_updated__lt=grace_deadline,
+    ).exclude(guid__in=live_guids):
+        if not orphan.guid:
+            continue
+        logger.warning(
+            "Event crosscheck: closing orphaned event row %s (%s, state=%s,"
+            " last_updated=%s) — guid no longer live in-game",
+            orphan.id,
+            orphan.name,
+            orphan.state,
+            orphan.last_updated,
+        )
+        await GameEvent.objects.filter(pk=orphan.pk).aupdate(state=3)
     return drift
 
 

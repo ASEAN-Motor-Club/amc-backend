@@ -667,7 +667,9 @@ OTHER_GUID = "AABBCCDDEEFF00112233445566778899"
 @patch("amc.handlers.events.get_events", new_callable=AsyncMock)
 class CrosscheckTests(TestCase):
     """Ready events reconcile unconditionally from live state (the
-    1-year-ago monitor_events semantics); racing events are read-only."""
+    1-year-ago monitor_events semantics); racing events are read-only;
+    orphaned rows (guid no longer in a successful live fetch) are closed
+    after a staleness grace."""
 
     def _state_fetch(self, payload):
         """Mock the per-guid fetch the Ready reconcile performs."""
@@ -898,6 +900,52 @@ class CrosscheckTests(TestCase):
         mock_get_live.side_effect = Exception("mod down")
         self.assertEqual(await crosscheck_live_events(object()), [])
         self.assertEqual(await crosscheck_live_events(object()), [])
+
+    async def test_orphaned_racing_row_reaped_after_grace(self, mock_get_live):
+        """Vanish-reap: the game deletes events silently (restart /
+        rotation) and no hook fires — a DB row still Ready/Racing whose
+        guid is no longer in a SUCCESSFUL /events fetch is orphaned and
+        would sit at state=2 forever, re-applying its participants'
+        suspect badge every 30 s suspect tick (hidra 2026-09-30). Close
+        it as finished once it is stale beyond the grace."""
+        event_data = _make_event_data(state=2)
+        orphan, _ = await _upsert_game_event(event_data)
+        await GameEvent.objects.filter(pk=orphan.pk).aupdate(
+            last_updated=timezone.now() - timedelta(minutes=11)
+        )
+        mock_get_live.return_value = []  # fetch succeeded; event gone
+        drift = await crosscheck_live_events(object())
+        self.assertEqual(drift, [])
+        row = await GameEvent.objects.aget(pk=orphan.pk)
+        self.assertEqual(row.state, 3)
+
+    async def test_orphaned_racing_row_within_grace_not_reaped(self, mock_get_live):
+        """Grace guard: a row stale less than the reap window stays open —
+        a momentary /events gap mid-run must not close a racing run."""
+        event_data = _make_event_data(state=2)
+        orphan, _ = await _upsert_game_event(event_data)
+        await GameEvent.objects.filter(pk=orphan.pk).aupdate(
+            last_updated=timezone.now() - timedelta(minutes=2)
+        )
+        mock_get_live.return_value = []
+        drift = await crosscheck_live_events(object())
+        self.assertEqual(drift, [])
+        row = await GameEvent.objects.aget(pk=orphan.pk)
+        self.assertEqual(row.state, 2)
+
+    async def test_live_racing_row_never_reaped(self, mock_get_live):
+        """A guid present in the live payload is never reaped, no matter
+        how old its last_updated is (racing rows are only saved on the
+        start transition, so their last_updated ages legitimately)."""
+        event_data = _make_event_data(state=2)
+        racing, _ = await _upsert_game_event(event_data)
+        await GameEvent.objects.filter(pk=racing.pk).aupdate(
+            last_updated=timezone.now() - timedelta(hours=2)
+        )
+        mock_get_live.return_value = [event_data]
+        await crosscheck_live_events(object())
+        row = await GameEvent.objects.aget(pk=racing.pk)
+        self.assertEqual(row.state, 2)
 
 
 # ---------------------------------------------------------------------------
