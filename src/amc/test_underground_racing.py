@@ -14,6 +14,7 @@ from asgiref.sync import sync_to_async
 from django.utils import timezone
 
 from amc import config as config_mod
+from amc import events as events_mod
 from amc.config import (
     UNDERGROUND_CHAMPIONSHIP_NAME,
     underground_blood_money,
@@ -297,6 +298,29 @@ async def test_payout_transfer_failure_contained(transfer_mock, floor_mock, ledg
     await c1.arefresh_from_db()
     await c2.arefresh_from_db()
     assert c1.respect == 0  # RESPECT_PER_CHECKPOINT = 0 today
+
+
+@pytest.mark.asyncio
+@patch("amc.events.send_fund_to_player_wallet", new_callable=AsyncMock)
+@patch("amc.events.check_treasury_floor", new_callable=AsyncMock, return_value=True)
+@patch("amc.events.transfer_money", new_callable=AsyncMock)
+async def test_respect_pipes_to_criminal_score(transfer_mock, floor_mock, ledger_mock, monkeypatch, db):
+    """Yuuka 2026-09-30: underground respect feeds the CRIMINAL score —
+    the rap sheet counts the race and the criminal level derives live
+    from the score (same accrual pattern as illicit deliveries)."""
+    monkeypatch.setattr(config_mod, "BLOOD_MONEY_PER_CHECKPOINT", 4000)
+    monkeypatch.setattr(events_mod, "RESPECT_PER_CHECKPOINT", 100)
+    event, _mirror = await _underground_world("6")
+    char = await _racer(event, "A0006", 601, "RapSheet", laps=1, finished=True, net_time=4.0)
+    await Character.objects.filter(pk=char.pk).aupdate(criminal_score=50)
+    await pay_underground_rotation_rewards(
+        {"http_client_mod": object()}, live_guids=set()
+    )
+    await char.arefresh_from_db()
+    # 4 checkpoints x 100 respect + the seeded 50 score
+    assert char.respect == 400
+    assert char.criminal_score == 450
+    await _cleanup_world(event, _mirror)
 
 
 # --------------------------------------------------------------------------

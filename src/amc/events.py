@@ -1068,10 +1068,15 @@ async def pay_underground_rotation_rewards(ctx, live_guids: set[str] | None):
                             f"Blood Money — {game_event.name} (P{position})",
                         )
                 if RESPECT_PER_CHECKPOINT > 0:
-                    character.respect = (character.respect or 0) + (
-                        checkpoints * RESPECT_PER_CHECKPOINT
-                    )
-                    await character.asave(update_fields=["respect"])
+                    respect_amount = checkpoints * RESPECT_PER_CHECKPOINT
+                    character.respect = (character.respect or 0) + respect_amount
+                    # Criminal-level pipe (Yuuka 2026-09-30): underground
+                    # respect feeds the criminal score too — the rap sheet
+                    # counts the race, the level derives live from the
+                    # score (same F-expression accrual as illicit
+                    # deliveries in special_cargo).
+                    character.criminal_score = F("criminal_score") + respect_amount
+                    await character.asave(update_fields=["respect", "criminal_score"])
                 paid.append(f"{character.name}=P{position}:{amount}")
             except Exception as e:
                 # Per-racer containment: one failed transfer never blocks
