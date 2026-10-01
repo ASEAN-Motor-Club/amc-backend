@@ -32,12 +32,14 @@ from amc.models import (
 
 
 def base_event_name(name):
-    return _re.sub(r"\s*\[TT-\d+\]$", "", name or "")
+    name = _re.sub(r"\s*\[TT-\d+\]$", "", name or "")
+    return _re.sub(r"\s*-\s*IR\s*-\s*\d+$", "", name)
 
 
 def strip_instance_suffix(name):
     """Drop the per-instance "(NNN)" suffix (see amc.events)."""
-    return _re.sub(r"\s*\(\d{3}\)\s*(\[TT-\d+\])?$", "", name or "")
+    name = _re.sub(r"\s*\(\d{3}\)\s*(\[TT-\d+\])?$", "", name or "")
+    return _re.sub(r"\s*-\s*IR\s*-\s*\d+$", "", name)
 
 
 def _race_config(route_name):
@@ -163,24 +165,16 @@ async def test_expired_window_events_still_posted(announce_mock, db):
 
 @pytest.mark.asyncio
 @patch("amc.events.announce", new_callable=AsyncMock)
-async def test_posted_names_carry_instance_numbers(announce_mock, db):
-    """Every post gets a unique "(NNN)" instance suffix, incrementing."""
+async def test_ir_names_carry_class_not_counter(announce_mock, db):
+    """Classed posts use the IR format "<SE name> - IR - <HP>"
+    (Yuuka 2026-10-01); no per-instance counter in that name."""
     now = timezone.now()
     await _clean_slate()
     race = await _make_race("Instance TT route")
     await _ug_template("Instance TT", race, now - timedelta(hours=1), now + timedelta(hours=1))
     mod = FakeModClient()
     await post_random_events({"http_client_mod": mod, "http_client": AsyncMock()})
-    assert re.fullmatch(
-        r"Instance TT \(\d{3}\) \[TT-\d+\]", mod.posts[0]["EventName"]
-    )
-    first = int(re.search(r"\((\d{3})\)", mod.posts[0]["EventName"]).group(1))
-
-    # Second rotation (rotate-out the previous unclaimed event first)
-    await post_random_events({"http_client_mod": mod, "http_client": AsyncMock()})
-    second_name = mod.posts[-1]["EventName"]
-    second = int(re.search(r"\((\d{3})\)", second_name).group(1))
-    assert second == first + 1
+    assert re.fullmatch(r"Instance TT - IR - \d+", mod.posts[0]["EventName"])
 
 
 @pytest.mark.asyncio
@@ -196,7 +190,7 @@ async def test_active_window_event_posted_and_announced(announce_mock, db):
     posted = [p["EventName"] for p in mod.posts]
     assert [strip_instance_suffix(n) for n in posted] == ["Live TT"]
     # The random class tag rides in the posted event name.
-    assert _re.search(r"\[TT-\d+\]$", posted[0])
+    assert _re.search(r"- IR - \d+$", posted[0])
     payload = mod.posts[0]
     assert payload["EventType"] == 1
     # Location → Translation rename on waypoints
@@ -272,8 +266,8 @@ async def test_sprint_template_posted_and_mirrored(announce_mock, db):
     )
     mod = FakeModClient()
     await post_random_events({"http_client_mod": mod, "http_client": AsyncMock()})
-    assert mod.posts and mod.posts[0]["EventName"].startswith("Shitbox Sprint (")
-    assert _re.search(r"\[TT-\d+\]$", mod.posts[0]["EventName"])
+    assert mod.posts and mod.posts[0]["EventName"].startswith("Shitbox Sprint - IR - ")
+    assert _re.search(r"- IR - \d+$", mod.posts[0]["EventName"])
     assert mod.posts[0]["EventType"] == 1
     # Mirror: same shape as TT mirrors but time_trial=False.
     mirror = await ScheduledEvent.objects.filter(
@@ -414,8 +408,8 @@ async def test_setup_event_underground_template_rolls_class(db):
     client = _SetupClient({"CharacterGuid": "C" * 32})
     ok = await setup_event(now, 42, template, client)
     assert ok is True
-    assert _re.search(r"\[TT-\d+\]$", client.posts[0]["EventName"])
-    assert client.posts[0]["EventName"].startswith("Quarry Chaos -TT (")
+    assert _re.search(r"- IR - \d+$", client.posts[0]["EventName"])
+    assert client.posts[0]["EventName"].startswith("Quarry Chaos -TT - IR - ")
 
 
 @pytest.mark.asyncio
@@ -442,7 +436,7 @@ async def test_setup_event_classless_championship_stays_legal(db):
     )
     client = _SetupClient({"CharacterGuid": "C" * 32})
     await setup_event(now, 42, template, client)
-    assert "[TT-" not in client.posts[0]["EventName"]
+    assert "- IR -" not in client.posts[0]["EventName"]
 
 
 # ---------------------------------------------------------------------------
@@ -520,6 +514,18 @@ async def test_setup_event_no_arg_starts_active_event(setup_mock, db):
 
 
 @pytest.mark.asyncio
+@patch("amc.events.announce", new_callable=AsyncMock)
+async def test_ir_name_tag_parses_back_to_tt_class(announce_mock, db):
+    """The IR name format ("… - IR - 140") is the per-instance class
+    channel: the SSE upsert must parse it back into GameEvent.tt_class."""
+    from amc.handlers.events import _parse_tt_class_tag
+    cls, _ = await _tt_class("TT-140", max_hp=140)
+    assert (await _parse_tt_class_tag("Unbeatable Record - Time Trial - IR - 140")) == cls
+    assert (await _parse_tt_class_tag("Unbeatable Record - Time Trial - IR - 999")) is None
+    assert (await _parse_tt_class_tag("Unbeatable Record - Time Trial")) is None
+
+
+@pytest.mark.asyncio
 @sync_patch("amc.commands.events.setup_event", new_callable=AsyncMock)
 async def test_setup_event_skips_rotation_instance(setup_mock, db):
     """The daily rotation post (is_rotation_instance=True) is never a
@@ -564,12 +570,15 @@ async def test_events_lists_only_active(setup_mock, db):
     now = timezone.now()
     await _clean_slate()
     race = await _make_race("Active TT route")
-    await _ug_template("Active TT", race, now - timedelta(hours=1), now + timedelta(hours=1))
-    await _ug_template("Future TT", race, now + timedelta(days=3), now + timedelta(days=4))
+    await _se("Active TT", race, now - timedelta(hours=1), now + timedelta(hours=1))
+    # Underground templates are /setup_event targets, never listed:
+    await _ug_template("Hidden Template", race, now - timedelta(hours=1), now + timedelta(hours=1))
+    await _se("Future TT", race, now + timedelta(days=3), now + timedelta(days=4))
     ctx = _make_ctx()
     await registry.execute("/events", ctx)
     message = ctx.reply.await_args.args[0]
     assert "Active TT" in message
+    assert "Hidden Template" not in message
     assert "Future TT" not in message
 
 
