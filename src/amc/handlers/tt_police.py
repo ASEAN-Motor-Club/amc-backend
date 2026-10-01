@@ -26,6 +26,7 @@ from amc.mod_server import (
     broadcast_server_message,
     get_events,
 )
+
 logger = logging.getLogger(__name__)
 
 RACE_ALERT_DELAY_SECONDS = 60  # fallback time gate when waypoints are unknown
@@ -60,8 +61,8 @@ _alert_targets: dict[str, int | None] = {}
 def _roll_target(live_event: dict) -> int | None:
     """Roll this run's trigger index from the live payload, or None when
     the route has no waypoint data (caller falls back to the 60 s gate)."""
-    import random
     import math
+    import random
 
     try:
         waypoints = live_event["RaceSetup"]["Route"]["Waypoints"]
@@ -152,12 +153,12 @@ async def grant_race_wanted(http_client_mod, game_event) -> list[str]:
     (the wanted-tick despawn pass skips them), bounty 0 (flag-only; race
     enforcement is not a confiscation source).
 
-    NO suspect GE for event wanteds (freeman 2026-09-30: "don't use
-    make_suspect for event wanted") — create_or_refresh_wanted skips
-    make_suspect for this origin and the wanted pass excludes them, so
-    racers stay visible on the map; hiding = costume. Stars are granted
-    ONCE and decay at the plain 1/s countdown (no top-up since
-    2026-09-30); a long race can expire its own wanted mid-run.
+    The badge is Schedule 1's wanted system's own make_suspect —
+    create_or_refresh_wanted applies it for ALL origins including this
+    one (Yuuka 2026-10-01; the 2026-09-30 "no badge for event wanted"
+    exclusion was a misunderstanding and is removed). Stars are granted
+    ONCE and decay through the standard wanted law (no top-up); a long
+    race can expire its own wanted mid-run.
     """
     granted: list[str] = []
     from amc.criminals import (
@@ -191,8 +192,9 @@ async def grant_race_wanted(http_client_mod, game_event) -> list[str]:
 
 def online_cutoff_dt():
     """Online = seen in the last 90 s (matches the wanted pass cutoff)."""
-    from django.utils import timezone
     from datetime import timedelta
+
+    from django.utils import timezone
 
     return timezone.now() - timedelta(seconds=90)
 
