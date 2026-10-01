@@ -760,12 +760,22 @@ async def apply_interest_to_bank_accounts(
     )
 
 
-def _bulk_create_wealth_tax_entries(entries_to_create, reserves_account, now):
+def _bulk_create_wealth_tax_entries(
+    entries_to_create, reserves_account, reserves_funding_account, bank_equity_account, now
+):
     """Create all wealth tax journal entries in a single transaction.
 
-    Each entry debits the character's LIABILITY account (reducing balance)
-    and debits the Sovereign Reserves ASSET account (increasing balance).
-    Standard double-entry: ASSET balance += debit - credit.
+    Each entry is a balanced 4-leg journal (debits = credits):
+    - Debit the character's LIABILITY checking account (balance down)
+    - Debit the Sovereign Reserves ASSET account (balance up)
+    - Credit the Bank Equity EQUITY account (bank book balances the
+      checking debit: the bank's net worth rises by the tax taken)
+    - Credit the Sovereign Reserves Funding EQUITY account (government
+      book balances the reserves debit)
+
+    Equity accounts are used instead of revenue so the tax stays out of
+    the treasury-summary income sweep. Standard double-entry:
+    ASSET/EQUITY balances: debit for asset, credit for equity.
     """
     if not entries_to_create:
         return
@@ -785,6 +795,13 @@ def _bulk_create_wealth_tax_entries(entries_to_create, reserves_account, now):
                 debit=amount,
                 credit=0,
             )
+            # Credit the bank equity account (EQUITY: credit increases balance)
+            LedgerEntry.objects.create(
+                journal_entry=je,
+                account=bank_equity_account,
+                debit=0,
+                credit=amount,
+            )
             # Debit the reserves account (ASSET: debit increases balance)
             LedgerEntry.objects.create(
                 journal_entry=je,
@@ -792,9 +809,22 @@ def _bulk_create_wealth_tax_entries(entries_to_create, reserves_account, now):
                 debit=amount,
                 credit=0,
             )
+            # Credit the reserves funding equity (EQUITY: credit increases balance)
+            LedgerEntry.objects.create(
+                journal_entry=je,
+                account=reserves_funding_account,
+                debit=0,
+                credit=amount,
+            )
             account.balance = cast(Any, F("balance") - amount)
             account.save(update_fields=["balance"])
             total_tax += amount
+
+        # Standard EQUITY credit: balance += credit - debit = +total_tax
+        bank_equity_account.balance = cast(Any, F("balance") + total_tax)
+        bank_equity_account.save(update_fields=["balance"])
+        reserves_funding_account.balance = cast(Any, F("balance") + total_tax)
+        reserves_funding_account.save(update_fields=["balance"])
 
         # Standard ASSET debit: balance += debit - credit = +total_tax
         reserves_account.balance = cast(Any, F("balance") + total_tax)
@@ -813,6 +843,18 @@ async def apply_wealth_tax(ctx):
         book=Account.Book.GOVERNMENT,
         character=None,
         name="Sovereign Reserves",
+    )
+    reserves_funding_account, _ = await Account.objects.aget_or_create(
+        account_type=Account.AccountType.EQUITY,
+        book=Account.Book.GOVERNMENT,
+        character=None,
+        name="Sovereign Reserves Funding",
+    )
+    bank_equity_account, _ = await Account.objects.aget_or_create(
+        account_type=Account.AccountType.EQUITY,
+        book=Account.Book.BANK,
+        character=None,
+        name="Bank Equity",
     )
 
     now = timezone.now()
@@ -841,7 +883,11 @@ async def apply_wealth_tax(ctx):
             entries_to_create.append((account, Decimal(tax)))
 
     await sync_to_async(_bulk_create_wealth_tax_entries)(
-        entries_to_create, reserves_account, now
+        entries_to_create,
+        reserves_account,
+        reserves_funding_account,
+        bank_equity_account,
+        now,
     )
 
 

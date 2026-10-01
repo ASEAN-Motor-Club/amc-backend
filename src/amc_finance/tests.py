@@ -267,6 +267,29 @@ class WealthTaxTestCase(TestCase):
         je = await JournalEntry.objects.filter(description="Wealth Tax").afirst()
         self.assertIsNotNone(je)
 
+        # The journal must be balanced (4 legs: 2 debits + 2 credits).
+        je_entries = [e async for e in je.entries.all()]
+        total_debit = sum(e.debit for e in je_entries)
+        total_credit = sum(e.credit for e in je_entries)
+        self.assertEqual(total_debit, total_credit)
+        self.assertEqual(len(je_entries), 4)
+
+        # The balancing credits land on the equity accounts.
+        bank_equity = await Account.objects.aget(
+            account_type=Account.AccountType.EQUITY,
+            book=Account.Book.BANK,
+            name="Bank Equity",
+        )
+        reserves_funding = await Account.objects.aget(
+            account_type=Account.AccountType.EQUITY,
+            book=Account.Book.GOVERNMENT,
+            name="Sovereign Reserves Funding",
+        )
+        await bank_equity.arefresh_from_db()
+        await reserves_funding.arefresh_from_db()
+        self.assertEqual(bank_equity.balance, total_credit / 2)
+        self.assertEqual(reserves_funding.balance, total_credit / 2)
+
     async def test_apply_wealth_tax_exempt_not_taxed(self):
         """Characters with balance at or below exempt threshold are not taxed."""
         character = await sync_to_async(CharacterFactory)()
@@ -934,6 +957,82 @@ class TreasurySummaryTestCase(TestCase):
         result = get_treasury_summary(target_date=timezone.now().date())
         self.assertEqual(result["wealth_tax_collected"], Decimal(10_000))
         self.assertEqual(result["income"]["total"], 0)
+
+    def test_migration_backfills_wealth_tax_credit_leg(self):
+        """The 0008 backfill balances every existing Wealth Tax journal."""
+        import importlib
+
+        from django.apps import apps as real_apps
+
+        module = importlib.import_module(
+            "amc_finance.migrations.0008_backfill_wealth_tax_credit_leg"
+        )
+
+        _, _, _, reserves = self._create_gov_accounts()
+
+        character = CharacterFactory()
+        bank_account = Account.objects.create(
+            account_type=Account.AccountType.LIABILITY,
+            book=Account.Book.BANK,
+            character=character,
+            balance=5_000_000,
+        )
+        je = JournalEntry.objects.create(
+            date=timezone.now(),
+            description="Wealth Tax",
+            creator=character,
+        )
+        LedgerEntry.objects.create(
+            journal_entry=je,
+            account=bank_account,
+            debit=Decimal(10_000),
+            credit=0,
+        )
+        LedgerEntry.objects.create(
+            journal_entry=je,
+            account=reserves,
+            debit=Decimal(10_000),
+            credit=0,
+        )
+
+        module.backfill(real_apps, None)
+
+        bank_equity = Account.objects.get(
+            account_type=Account.AccountType.EQUITY,
+            book=Account.Book.BANK,
+            name="Bank Equity",
+        )
+        funding = Account.objects.get(
+            account_type=Account.AccountType.EQUITY,
+            book=Account.Book.GOVERNMENT,
+            name="Sovereign Reserves Funding",
+        )
+        self.assertEqual(bank_equity.balance, Decimal(10_000))
+        self.assertEqual(funding.balance, Decimal(10_000))
+        legs = LedgerEntry.objects.filter(journal_entry=je)
+        total_debit = sum(leg.debit for leg in legs)
+        total_credit = sum(leg.credit for leg in legs)
+        self.assertEqual(total_debit, total_credit)
+        self.assertEqual(legs.count(), 4)
+
+        # Idempotent: a second run must not insert anything more.
+        module.backfill(real_apps, None)
+        self.assertEqual(LedgerEntry.objects.filter(journal_entry=je).count(), 4)
+        bank_equity.refresh_from_db()
+        funding.refresh_from_db()
+        self.assertEqual(bank_equity.balance, Decimal(10_000))
+        self.assertEqual(funding.balance, Decimal(10_000))
+
+        module.reverse_backfill(real_apps, None)
+        bank_equity.refresh_from_db()
+        funding.refresh_from_db()
+        self.assertEqual(bank_equity.balance, 0)
+        self.assertEqual(funding.balance, 0)
+        self.assertFalse(
+            LedgerEntry.objects.filter(
+                journal_entry=je, credit__gt=0, debit=0
+            ).exists()
+        )
 
     def test_get_treasury_trend_7_days(self):
         """Trend should return 7 days of data arrays."""
