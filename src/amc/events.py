@@ -69,7 +69,7 @@ async def setup_event(timestamp, player_id, scheduled_event, http_client_mod):
     # native template (whose popup would override ours), and no setup
     # restrictions — the popup shows none and DQ/enforcement stays ours.
     instance = await _next_tt_instance_number()
-    event_name = f"{scheduled_event.name} ({instance:03d})"
+    event_name = f"{scheduled_event.name} ({instance:03d})"  # classless fallback
     # TT class: the [TT-xxx] name tag is what the SSE hook parses into
     # GameEvent.tt_class, which arms the start-line DQ / wanted / police
     # flow (and the mod-side HP cap + vanilla-tire rule). Sources:
@@ -89,7 +89,10 @@ async def setup_event(timestamp, player_id, scheduled_event, http_client_mod):
     ):
         tt_class = await TTClass.objects.order_by("?").afirst()
     if tt_class:
-        event_name = f"{event_name} [{tt_class.name}]"
+        # IR format (Yuuka 2026-10-01): "<SE name> - IR - <HP class>".
+        # Still never matches the native template name (popup-defeat holds),
+        # and the SSE hook parses "IR - N" back into tt_class.
+        event_name = f"{scheduled_event.name} - IR - {tt_class.max_hp}"
 
     data = {
         "EventGuid": generate_guid(),
@@ -1329,7 +1332,8 @@ async def post_random_events(ctx):
         instance = await _next_tt_instance_number()
         event_name = f"{scheduled_event.name} ({instance:03d})"
         if tt_class:
-            event_name = f"{event_name} [{tt_class.name}]"
+            # IR format (Yuuka 2026-10-01): "<SE name> - IR - <HP class>".
+            event_name = f"{scheduled_event.name} - IR - {tt_class.max_hp}"
             # Clear the setup's stale, class-conflicting restrictions
             # (Yuuka 2026-09-26: "the override should be to NONE, we rely
             # on our DQ checks (total hp)") — the game popup then shows no

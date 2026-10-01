@@ -146,9 +146,7 @@ async def _upsert_game_event(event_data: dict):
     # classes survive the SSE hop; manual events fall back to the
     # ScheduledEvent's pinned class at enforcement time.
     tt_class = None
-    name_match = re.search(r"\[(TT-\d+)\]\s*$", event_name)
-    if name_match:
-        tt_class = await TTClass.objects.filter(name=name_match.group(1)).afirst()
+    tt_class = await _parse_tt_class_tag(event_name)
     try:
         game_event = await (
             GameEvent.objects.filter(
@@ -498,6 +496,18 @@ _CROSSCHECK_FAILURE_LOG_EVERY = 12
 # /events payload stops listing its guid (5 s crosscheck cadence, so a
 # transient gap is far below this; the 2026-09-30 orphan sat for a day).
 _VANISH_REAP_GRACE_SECONDS = 10 * 60
+
+
+async def _parse_tt_class_tag(event_name: str):
+    """Parse the per-instance class tag off an event name. Two tags exist
+    in the wild: legacy "[TT-480]" and the IR format "… - IR - 480"
+    (Yuuka 2026-10-01). Returns the TTClass or None."""
+    name_match = re.search(r"(?:\[(TT-\d+)\]|-\s*IR\s*-\s*(\d+))\s*$", event_name or "")
+    if not name_match:
+        return None
+    if name_match.group(1):
+        return await TTClass.objects.filter(name=name_match.group(1)).afirst()
+    return await TTClass.objects.filter(max_hp=int(name_match.group(2))).afirst()
 
 
 async def crosscheck_live_events(http_client_mod, discord_client=None) -> list[str]:

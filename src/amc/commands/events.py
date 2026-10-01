@@ -185,9 +185,14 @@ async def cmd_events_list(ctx: CommandContext):
     # Only events whose window is live RIGHT NOW — the old version listed
     # everything with end_time in the future, a long stale list.
     events: list[str] = []
-    async for event in ScheduledEvent.objects.filter_active_at(ctx.timestamp).order_by(
-        "start_time"
-    ):
+    # Underground templates are /setup_event targets, not listed events —
+    # the daily rotation post (is_rotation_instance=True) is what players
+    # see (Yuuka 2026-10-01: "all the events are active now instead of one").
+    qs = ScheduledEvent.objects.filter_active_at(ctx.timestamp).exclude(
+        championship__name=UNDERGROUND_CHAMPIONSHIP_NAME,
+        is_rotation_instance=False,
+    )
+    async for event in qs.order_by("start_time"):
         start_txt = format_in_local_tz(event.start_time)
         end_txt = format_in_local_tz(event.end_time)
         events.append(f"""<Title>{event.name}</>

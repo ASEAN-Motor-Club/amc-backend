@@ -293,5 +293,5 @@ async def test_rotation_posts_zero_lap_events_only(announce_mock, db):
 
     posted = [p["EventName"] for p in mod.posts]
     assert [
-        re.sub(r"\s*\(\d{3}\)\s*\[TT-\d+\]$", "", n) for n in posted
+        re.sub(r"\s*(\(\d{3}\)\s*)?(\[TT-\d+\]|-\s*IR\s*-\s*\d+)$", "", n) for n in posted
     ] == ["Sprint SE"]
