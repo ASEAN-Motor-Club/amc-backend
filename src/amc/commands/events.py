@@ -127,8 +127,8 @@ async def cmd_setup_event(ctx: CommandContext, event_id: Optional[int] = None):
             # are never /setup_event targets — they are already live
             # in-game; re-setting them up would double-post the same setup.
             # Candidates are the underground TEMPLATES (classless, windowed
-            # now+14d to match the rotation instance convention) plus any
-            # other windowed race SEs.
+            # daily 08:30 (+07) → next 08:30 — the illegal-TT daily reset,
+            # Yuuka 2026-10-01) plus any other windowed race SEs.
             base = ScheduledEvent.objects.filter(
                 race_setup__isnull=False,
                 is_rotation_instance=False,

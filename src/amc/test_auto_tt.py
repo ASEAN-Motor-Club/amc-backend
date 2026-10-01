@@ -288,6 +288,27 @@ async def test_sprint_template_posted_and_mirrored(announce_mock, db):
 
 @pytest.mark.asyncio
 @patch("amc.events.announce", new_callable=AsyncMock)
+async def test_rotation_refreshes_template_windows_daily(announce_mock, db):
+    """Templates reset DAILY at 08:30 (+07) (Yuuka 2026-10-01): each tick
+    re-windows every underground template to today 08:30 → tomorrow 08:30,
+    so /setup_event targets always track the reset."""
+    from amc.events import _rotation_reset
+    now = timezone.now()
+    await _clean_slate()
+    race = await _make_race("Windowed TT route")
+    tmpl = await _ug_template("Stale TT", race, now - timedelta(days=20), now + timedelta(days=14))
+    mod = FakeModClient()
+    await post_random_events({"http_client_mod": mod, "http_client": AsyncMock()})
+
+    await tmpl.arefresh_from_db()
+    start = tmpl.start_time
+    assert start == _rotation_reset(now)
+    assert tmpl.end_time - start == timedelta(days=1)
+    assert start.hour == 1 and start.minute == 30  # 08:30 +07 in UTC
+
+
+@pytest.mark.asyncio
+@patch("amc.events.announce", new_callable=AsyncMock)
 async def test_vanished_event_row_closed(announce_mock, db):
     """The game silently deletes unclaimed owner-less events — a Ready auto
     row whose guid is absent from the live list must be closed so its slot
