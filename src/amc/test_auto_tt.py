@@ -124,7 +124,7 @@ async def _clean_slate():
     await sync_to_async(GameEvent.objects.all().delete)()
 
 
-async def _ug_template(name, race, start, end, time_trial=True):
+async def _ug_template(name, race, start, end, time_trial=True, is_rotation_instance=False):
     """Underground championship template (rotation pool, no pinned class)."""
     from amc.config import UNDERGROUND_CHAMPIONSHIP_NAME
     from amc.models import Championship
@@ -140,6 +140,7 @@ async def _ug_template(name, race, start, end, time_trial=True):
         championship=champ,
         start_time=start,
         end_time=end,
+        is_rotation_instance=is_rotation_instance,
     )
 
 
@@ -284,6 +285,27 @@ async def test_sprint_template_posted_and_mirrored(announce_mock, db):
     assert mirror.championship.name == UNDERGROUND_CHAMPIONSHIP_NAME
     announce_mock.assert_awaited_once()
     assert "underground racing events" in announce_mock.await_args.args[0]
+
+@pytest.mark.asyncio
+@patch("amc.events.announce", new_callable=AsyncMock)
+async def test_rotation_refreshes_template_windows_daily(announce_mock, db):
+    """Templates reset DAILY at 08:30 (+07) (Yuuka 2026-10-01): each tick
+    re-windows every underground template to today 08:30 → tomorrow 08:30,
+    so /setup_event targets always track the reset."""
+    from amc.events import _rotation_reset
+    now = timezone.now()
+    await _clean_slate()
+    race = await _make_race("Windowed TT route")
+    tmpl = await _ug_template("Stale TT", race, now - timedelta(days=20), now + timedelta(days=14))
+    mod = FakeModClient()
+    await post_random_events({"http_client_mod": mod, "http_client": AsyncMock()})
+
+    await tmpl.arefresh_from_db()
+    start = tmpl.start_time
+    assert start == _rotation_reset(now)
+    assert tmpl.end_time - start == timedelta(days=1)
+    assert start.hour == 1 and start.minute == 30  # 08:30 +07 in UTC
+
 
 @pytest.mark.asyncio
 @patch("amc.events.announce", new_callable=AsyncMock)
@@ -454,7 +476,7 @@ async def _tt_class(name="TT-480", max_hp=480):
     )
 
 
-def _se(name, race, start, end, tt_class=None):
+def _se(name, race, start, end, tt_class=None, is_rotation_instance=False):
     return sync_to_async(ScheduledEvent.objects.create)(
         name=name,
         race_setup=race,
@@ -462,6 +484,7 @@ def _se(name, race, start, end, tt_class=None):
         tt_class=tt_class,
         start_time=start,
         end_time=end,
+        is_rotation_instance=is_rotation_instance,
     )
 
 
@@ -494,6 +517,31 @@ async def test_setup_event_no_arg_starts_active_event(setup_mock, db):
     assert executed is True
     setup_mock.assert_awaited_once()
     assert setup_mock.await_args.args[2].pk == active.pk
+
+
+@pytest.mark.asyncio
+@sync_patch("amc.commands.events.setup_event", new_callable=AsyncMock)
+async def test_setup_event_skips_rotation_instance(setup_mock, db):
+    """The daily rotation post (is_rotation_instance=True) is never a
+    /setup_event target — only the windowed templates are (Yuuka
+    2026-09-30: template windows match the rotation's now+14d)."""
+    now = timezone.now()
+    await _clean_slate()
+    race = await _make_race("Instance TT route")
+    await _ug_template(
+        "Instance TT", race, now - timedelta(hours=1), now + timedelta(days=14),
+        is_rotation_instance=True,
+    )
+    template_race = await _make_race("Template TT route")
+    template = await _ug_template(
+        "Template TT", template_race, now - timedelta(hours=2), now + timedelta(days=14),
+    )
+    setup_mock.return_value = {"EventGuid": "G" * 32}
+
+    executed = await registry.execute("/setup_event", _make_ctx())
+    assert executed is True
+    setup_mock.assert_awaited_once()
+    assert setup_mock.await_args.args[2].pk == template.pk
 
 
 @pytest.mark.asyncio

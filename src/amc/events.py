@@ -3,6 +3,7 @@ import math
 import uuid
 from datetime import timedelta
 from urllib.parse import quote
+from zoneinfo import ZoneInfo
 
 import aiohttp
 import discord
@@ -1131,6 +1132,18 @@ async def _next_tt_instance_number() -> int:
     return _TT_INSTANCE
 
 
+def _rotation_reset(now):
+    """The 08:30 (+07) reset boundary covering `now`: the reset currently in
+    progress starts at 08:30 (+07); the next one is +24h. Cron fires at
+    08:30:15 server-local, so ticks land just after the boundary."""
+    tz = ZoneInfo("Asia/Bangkok")
+    local = now.astimezone(tz).replace(second=0, microsecond=0)
+    boundary = local.replace(hour=8, minute=30)
+    if local < boundary:
+        boundary -= timedelta(days=1)
+    return boundary
+
+
 @skip_if_running
 async def post_random_events(ctx):
     http_client_mod = ctx["http_client_mod"]
@@ -1223,6 +1236,22 @@ async def post_random_events(ctx):
         state__gte=0,
         state__lt=3,
     ).acount()
+
+    # Template window refresh (Yuuka 2026-10-01: illegal TT resets daily at
+    # 08:30 UTC+7): underground templates are /setup_event targets with a
+    # daily window aligned to the rotation reset — today 08:30 (+07) →
+    # tomorrow 08:30 (+07). Refreshed every tick so the windows track the
+    # reset even when a tick is skipped and retried later.
+    try:
+        await ScheduledEvent.objects.filter(
+            championship__name=UNDERGROUND_CHAMPIONSHIP_NAME,
+            is_rotation_instance=False,
+        ).aupdate(
+            start_time=_rotation_reset(timezone.now()),
+            end_time=_rotation_reset(timezone.now()) + timedelta(days=1),
+        )
+    except Exception as e:
+        print(f"Auto-TT: failed to refresh template windows: {e}")
 
     TARGET_EVENTS = 1  # one event per reset (Yuuka 2026-09-26: "only 1 every reset")
     slots_to_fill = TARGET_EVENTS - active_auto
