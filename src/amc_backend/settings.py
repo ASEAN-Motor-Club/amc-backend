@@ -412,9 +412,8 @@ DISCORD_CRIMINAL_ROLE_ID = int(
     os.environ.get("DISCORD_CRIMINAL_ROLE_ID", "1486645424910635029")
 )
 # Finance Minister role: allowed to change bank policy via Discord commands.
-# 0 = disabled (only the Admin role is honored until the role ID is configured).
 DISCORD_FINANCE_MINISTER_ROLE_ID = int(
-    os.environ.get("DISCORD_FINANCE_MINISTER_ROLE_ID", "0")
+    os.environ.get("DISCORD_FINANCE_MINISTER_ROLE_ID", "1453698145950109779")
 )
 # "Active" Discord role: synced daily by amc.active_role — linked players with a
 # game login in the last 30 days hold it, everyone else holding it loses it.
