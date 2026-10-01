@@ -247,12 +247,30 @@ async def announce_illegal_race(
                 break
             else:
                 return
-            await broadcast_server_message(
-                http_client_game, RACE_ALERT_MESSAGE
-            )
-            # Yuuka 2026-09-27 rework: the announcement IS the moment the
-            # star Wanted lands on everyone inside the event.
-            await grant_race_wanted(http_client_mod, game_event)
+            # Yuuka 2026-10-01 (prod: OjiNorthTT-V1 - IR - 480 announced
+            # nothing): grant BEFORE the broadcast and CONTAIN the broadcast.
+            # ensure_announced has already marked the guid exactly-once by
+            # the time we're here — a broadcast exception used to kill the
+            # task before grant_race_wanted ran, and the 30 s tick backstop
+            # then saw the guid as announced and skipped the grant too, so
+            # the whole race went star-less. The wanted grant is the action
+            # that must not be skipped; the announcement is cosmetic.
+            try:
+                await grant_race_wanted(http_client_mod, game_event)
+            except Exception:
+                logger.warning(
+                    "TT race wanted grant failed for %s",
+                    game_event.guid, exc_info=True,
+                )
+            try:
+                await broadcast_server_message(
+                    http_client_game, RACE_ALERT_MESSAGE
+                )
+            except Exception:
+                logger.warning(
+                    "TT race broadcast failed for %s (grant already done)",
+                    game_event.guid, exc_info=True,
+                )
             logger.info(
                 "TT race alert sent for %s (%s)",
                 game_event.guid, game_event.name,

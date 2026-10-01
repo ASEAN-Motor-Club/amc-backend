@@ -1857,12 +1857,23 @@ async def refresh_suspect_tags(http_client_mod, http_client_game=None) -> None:
             from amc.mod_server import broadcast_server_message
 
             if await ensure_announced(http_client_mod, race_event):
+                # Yuuka 2026-10-01 (prod: OjiNorthTT-V1 - IR - 480 went
+                # star-less): grant FIRST and contain the broadcast —
+                # ensure_announced has already marked the guid exactly-once,
+                # so a broadcast exception used to skip the grant and the
+                # tick backstop would never retry it.
+                await grant_race_wanted(http_client_mod, race_event)
                 # game-API client: the announcement goes through the native
                 # /chat path (game_server.announce), never a donor player.
-                await broadcast_server_message(
-                    http_client_game, RACE_ALERT_MESSAGE
-                )
-                await grant_race_wanted(http_client_mod, race_event)
+                try:
+                    await broadcast_server_message(
+                        http_client_game, RACE_ALERT_MESSAGE
+                    )
+                except Exception:
+                    logger.warning(
+                        "race broadcast failed for %s (grant already done)",
+                        race_event.guid, exc_info=True,
+                    )
         except Exception:
             logger.warning(
                 "race-pass announce failed for %s", race_event.guid, exc_info=True
