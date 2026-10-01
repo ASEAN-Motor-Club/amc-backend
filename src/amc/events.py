@@ -92,7 +92,47 @@ async def setup_event(timestamp, player_id, scheduled_event, http_client_mod):
             pk=scheduled_event.pk
         )
         if se.championship and se.championship.name == UNDERGROUND_CHAMPIONSHIP_NAME:
-            tt_class = await TTClass.objects.order_by("?").afirst()
+            # REUSE the live rotation instance's class when one is up
+            # (Yuuka 2026-10-01: "/setup_event rotates the HP class, it
+            # shouldn't"). The template itself carries no pin, so pick the
+            # class off its live instance mirror — deterministic, and the
+            # same event players saw announced. Roll random ONLY when no
+            # classed instance is live (server quiet / pre-first-rotation).
+            live_instance = (
+                await ScheduledEvent.objects.filter(
+                    race_setup=scheduled_event.race_setup,
+                    is_rotation_instance=True,
+                    tt_class__isnull=False,
+                )
+                .order_by("-start_time")
+                .select_related("tt_class")
+                .afirst()
+            )
+            if live_instance is not None:
+                tt_class = live_instance.tt_class
+            else:
+                # No instance of this setup up right now — roll, but STICKY
+                # within the daily window (Yuuka 2026-10-01): reuse the
+                # class the CURRENT window's last instance of this setup
+                # used (even if already closed), so repeated /setup_event
+                # inside one day doesn't shuffle HP classes. New day = new
+                # roll.
+                window_start = _rotation_reset(timezone.now())
+                last_window_instance = (
+                    await ScheduledEvent.objects.filter(
+                        race_setup=scheduled_event.race_setup,
+                        is_rotation_instance=True,
+                        tt_class__isnull=False,
+                        start_time__gte=window_start,
+                    )
+                    .order_by("-start_time")
+                    .select_related("tt_class")
+                    .afirst()
+                )
+                if last_window_instance is not None:
+                    tt_class = last_window_instance.tt_class
+                else:
+                    tt_class = await TTClass.objects.order_by("?").afirst()
     if tt_class:
         # IR format (Yuuka 2026-10-01): "<SE name> - IR - <HP class>".
         # Still never matches the native template name (popup-defeat holds),
