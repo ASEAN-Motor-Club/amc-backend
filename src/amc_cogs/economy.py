@@ -36,7 +36,7 @@ from amc.models import (
 from .utils import create_player_autocomplete, create_character_autocomplete
 from amc.utils import get_timespan
 from amc_finance.services import send_fund_to_player
-from amc_finance.models import Account, LedgerEntry
+from amc_finance.models import Account, BankPolicy, LedgerEntry
 from amc_finance.services import (
     make_treasury_bank_deposit,
     make_treasury_bank_withdrawal,
@@ -137,6 +137,14 @@ def _render_daily_gov_png(rows, date_label) -> BytesIO:
     fig.savefig(buf, format="png", facecolor=bg)
     buf.seek(0)
     return buf
+
+
+def _set_daily_interest_rate(rate):
+    """Persist the bank's daily interest rate on the BankPolicy singleton."""
+    policy = BankPolicy.load()
+    policy.daily_interest_rate = rate
+    policy.save(update_fields=["daily_interest_rate"])
+    return policy
 
 
 class EconomyCog(commands.Cog):
@@ -1348,6 +1356,48 @@ The purpose of this transfer is to return funds from the bank to the government 
         )
 
         await interaction.followup.send(embed=embed, ephemeral=True)
+
+    @app_commands.command(
+        name="set_interest_rate",
+        description="Set the bank's daily interest rate (Admin / Finance Minister)",
+    )
+    @app_commands.checks.has_any_role(
+        settings.DISCORD_ADMIN_ROLE_ID, settings.DISCORD_FINANCE_MINISTER_ROLE_ID
+    )
+    @app_commands.describe(
+        rate_percent="Nominal daily rate in percent (e.g. 2.2 = 2.2%/day, -5 to +5; 0 disables interest)"
+    )
+    async def set_interest_rate_command(self, interaction, rate_percent: float):
+        await interaction.response.defer(ephemeral=True)
+
+        if not (-Decimal(5) <= Decimal(str(rate_percent)) <= Decimal(5)):
+            await interaction.followup.send(
+                "Rate must be between -5 and +5 percent per day.", ephemeral=True
+            )
+            return
+
+        new_rate = Decimal(str(rate_percent)) / Decimal(100)
+        old_rate = await sync_to_async(BankPolicy.get_daily_interest_rate)()
+        await sync_to_async(_set_daily_interest_rate)(new_rate)
+
+        # Announce the change in the treasury channel
+        treasury_channel_id = getattr(
+            settings, "DISCORD_TREASURY_CHANNEL_ID", 1402660537619320872
+        )
+        treasury_channel = self.bot.get_channel(treasury_channel_id)
+        if treasury_channel:
+            embed = discord.Embed(
+                title="🏦 Bank Interest Rate Changed",
+                description=f"Daily interest rate set to **{new_rate:.2%}** "
+                f"by {interaction.user.mention}",
+                color=discord.Color.gold(),
+            )
+            await treasury_channel.send(embed=embed)
+
+        await interaction.followup.send(
+            f"Daily interest rate set to **{new_rate:.2%}** (was {old_rate:.2%}).", 
+            ephemeral=True,
+        )
 
     @commands.Cog.listener()
     async def on_message(self, message):

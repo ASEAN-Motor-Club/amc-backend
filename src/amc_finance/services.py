@@ -5,7 +5,7 @@ from django.utils import timezone
 from django.db import transaction
 from django.db.models import F, Sum
 from asgiref.sync import sync_to_async
-from amc_finance.models import Account, JournalEntry, LedgerEntry
+from amc_finance.models import Account, BankPolicy, JournalEntry, LedgerEntry
 
 
 from typing import Any, cast
@@ -590,16 +590,23 @@ def calculate_wealth_tax(balance: int, hours_offline: float) -> int:
     return max(int(tax), 0)
 
 
-def calculate_hourly_interest(balance: int, hours_offline: float) -> int:
+def calculate_hourly_interest(
+    balance: int, hours_offline: float, interest_rate: float | None = None
+) -> int:
     """Calculate one hourly tick of interest for an offline player.
 
     Mirrors calculate_wealth_tax — a pure function that returns the integer
-    interest amount for a given balance and offline duration.
+    interest amount for a given balance and offline duration. When no rate is
+    passed, reads the configured daily rate from the BankPolicy singleton.
     """
     if balance <= 0 or hours_offline <= 0:
         return 0
 
-    rate = INTEREST_RATE
+    rate: float
+    if interest_rate is None:
+        rate = float(BankPolicy.get_daily_interest_rate())
+    else:
+        rate = interest_rate
 
     if hours_offline <= 1:
         rate = ONLINE_INTEREST_MULTIPLIER * rate
@@ -665,22 +672,39 @@ def _bulk_create_interest_entries(entries_to_create, bank_expense_account, now):
         for account, amount in entries_to_create:
             je = JournalEntry.objects.create(
                 date=now,
-                description="Interest Payment",
+                description="Interest Payment" if amount >= 0 else "Interest Charge",
                 creator=None,
             )
-            LedgerEntry.objects.create(
-                journal_entry=je,
-                account=account,
-                debit=0,
-                credit=amount,
-            )
-            LedgerEntry.objects.create(
-                journal_entry=je,
-                account=bank_expense_account,
-                debit=amount,
-                credit=0,
-            )
-            # Update account balance (LIABILITY: credit increases balance)
+            if amount >= 0:
+                LedgerEntry.objects.create(
+                    journal_entry=je,
+                    account=account,
+                    debit=0,
+                    credit=amount,
+                )
+                LedgerEntry.objects.create(
+                    journal_entry=je,
+                    account=bank_expense_account,
+                    debit=amount,
+                    credit=0,
+                )
+            else:
+                # Negative interest: debit the player's checking account
+                # (balance down) and credit Bank Expense (offset).
+                LedgerEntry.objects.create(
+                    journal_entry=je,
+                    account=account,
+                    debit=-amount,
+                    credit=0,
+                )
+                LedgerEntry.objects.create(
+                    journal_entry=je,
+                    account=bank_expense_account,
+                    debit=0,
+                    credit=-amount,
+                )
+            # Update account balance (LIABILITY: credit increases, debit
+            # decreases — adding a signed amount covers both directions)
             account.balance = cast(Any, F("balance") + amount)
             account.save(update_fields=["balance"])
             total_expense += amount
@@ -692,10 +716,18 @@ def _bulk_create_interest_entries(entries_to_create, bank_expense_account, now):
 
 async def apply_interest_to_bank_accounts(
     ctx,
-    interest_rate=INTEREST_RATE,
+    interest_rate: float | None = None,
     online_interest_multiplier=ONLINE_INTEREST_MULTIPLIER,
     compounding_hours=1,
 ):
+    rate: float
+    if interest_rate is None:
+        rate = await sync_to_async(
+            lambda: float(BankPolicy.get_daily_interest_rate())
+        )()
+    else:
+        rate = float(interest_rate)
+
     bank_expense_account, _ = await Account.objects.aget_or_create(
         account_type=Account.AccountType.EXPENSE,
         book=Account.Book.BANK,
@@ -722,7 +754,7 @@ async def apply_interest_to_bank_accounts(
     now = timezone.now()
     entries_to_create = []
     for account in accounts:
-        character_interest_rate = interest_rate
+        character_interest_rate = rate
 
         last_online_ts = account.character.last_online  # pyrefly: ignore
         if last_online_ts is None:
@@ -751,7 +783,7 @@ async def apply_interest_to_bank_accounts(
             * balance_multiplier
             / Decimal(24 / compounding_hours)
         )
-        if amount >= Decimal(0.01):
+        if amount >= Decimal("0.01") or amount <= Decimal("-0.01"):
             entries_to_create.append((account, amount))
 
     # Bulk create in single transaction
