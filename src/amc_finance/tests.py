@@ -1015,6 +1015,14 @@ class TreasurySummaryTestCase(TestCase):
         self.assertEqual(total_debit, total_credit)
         self.assertEqual(legs.count(), 4)
 
+        # Idempotent: a second run must not insert anything more.
+        module.backfill(real_apps, None)
+        self.assertEqual(LedgerEntry.objects.filter(journal_entry=je).count(), 4)
+        bank_equity.refresh_from_db()
+        funding.refresh_from_db()
+        self.assertEqual(bank_equity.balance, Decimal(10_000))
+        self.assertEqual(funding.balance, Decimal(10_000))
+
         module.reverse_backfill(real_apps, None)
         bank_equity.refresh_from_db()
         funding.refresh_from_db()
