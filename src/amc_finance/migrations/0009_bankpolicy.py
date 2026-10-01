@@ -6,7 +6,7 @@ from django.db import migrations, models
 class Migration(migrations.Migration):
 
     dependencies = [
-        ("amc_finance", "0007_fix_reserves_wealth_tax_entries"),
+        ("amc_finance", "0008_backfill_wealth_tax_credit_leg"),
     ]
 
     operations = [
