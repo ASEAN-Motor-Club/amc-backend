@@ -1,3 +1,5 @@
+from decimal import Decimal
+
 from django.db import models
 from django.db.models import Sum
 from django.core.exceptions import ValidationError
@@ -191,3 +193,30 @@ class DailyTreasurySnapshot(models.Model):
 
     def __str__(self):
         return f"Treasury Snapshot {self.date} (surplus: {self.surplus:+,.0f})"
+
+
+class BankPolicy(models.Model):
+    """Server-wide bank policy configuration. Singleton (pk=1 always)."""
+
+    daily_interest_rate = models.DecimalField(
+        max_digits=8,
+        decimal_places=6,
+        default=Decimal("0.022"),
+        help_text="Nominal daily interest rate applied to bank balances "
+        "(e.g. 0.022 = 2.2%/day). Fraction, not percent.",
+    )
+
+    class Meta:
+        verbose_name_plural = "Bank policy"
+
+    def __str__(self):
+        return f"Bank policy (daily interest {self.daily_interest_rate:.2%})"
+
+    @classmethod
+    def load(cls) -> "BankPolicy":
+        policy, _ = cls.objects.get_or_create(pk=1)
+        return policy
+
+    @classmethod
+    def get_daily_interest_rate(cls) -> Decimal:
+        return cls.load().daily_interest_rate
