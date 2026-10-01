@@ -1,17 +1,19 @@
 import asyncio
 from typing import Optional
-from amc.command_framework import registry, CommandContext
-from amc.models import GameEvent, GameEventCharacter, ScheduledEvent, BotInvocationLog
-from amc.events import (
-    staggered_start,
-    auto_starting_grid,
-    show_scheduled_event_results_popup,
-    setup_event,
-)
-from amc.utils import format_in_local_tz, countdown
+
 from django.db.models import Exists, OuterRef
 from django.utils.translation import gettext_lazy
 
+from amc.command_framework import CommandContext, registry
+from amc.events import (
+    UNDERGROUND_CHAMPIONSHIP_NAME,
+    auto_starting_grid,
+    setup_event,
+    show_scheduled_event_results_popup,
+    staggered_start,
+)
+from amc.models import BotInvocationLog, GameEvent, GameEventCharacter, ScheduledEvent
+from amc.utils import countdown, format_in_local_tz
 
 STAGGERED_START_DEFAULT_DELAY = 20.0  # matches amc.events.staggered_start's own default
 
@@ -121,15 +123,34 @@ async def cmd_setup_event(ctx: CommandContext, event_id: Optional[int] = None):
             # 2026-09-27: "accurately separate them") — prefer the classed
             # twin outright; only fall back to a classless SE when no twin
             # window is live.
+            # Rotation instances (the daily post, is_rotation_instance=True)
+            # are never /setup_event targets — they are already live
+            # in-game; re-setting them up would double-post the same setup.
+            # Candidates are the underground TEMPLATES (classless, windowed
+            # now+14d to match the rotation instance convention) plus any
+            # other windowed race SEs.
             base = ScheduledEvent.objects.filter(
-                race_setup__isnull=False
+                race_setup__isnull=False,
+                is_rotation_instance=False,
             ).filter_active_at(ctx.timestamp)
+            # Prefer an underground template (rolls a class in setup_event);
+            # else the newest classed twin; else any windowed race SE.
+            underground = base.filter(
+                championship__name=UNDERGROUND_CHAMPIONSHIP_NAME,
+                tt_class__isnull=True,
+            )
             scheduled_event = (
-                await base.filter(tt_class__isnull=False)
-                .select_related("race_setup", "tt_class")
+                await underground.select_related("race_setup")
                 .order_by("-start_time")
                 .afirst()
             )
+            if scheduled_event is None:
+                scheduled_event = (
+                    await base.filter(tt_class__isnull=False)
+                    .select_related("race_setup", "tt_class")
+                    .order_by("-start_time")
+                    .afirst()
+                )
             if scheduled_event is None:
                 scheduled_event = (
                     await base.select_related("race_setup")
