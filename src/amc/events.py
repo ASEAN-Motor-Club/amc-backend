@@ -84,10 +84,15 @@ async def setup_event(timestamp, player_id, scheduled_event, http_client_mod):
     tt_class = None
     if getattr(scheduled_event, "tt_class_id", None):
         tt_class = scheduled_event.tt_class
-    elif scheduled_event.championship_id and (
-        scheduled_event.championship.name == UNDERGROUND_CHAMPIONSHIP_NAME
-    ):
-        tt_class = await TTClass.objects.order_by("?").afirst()
+    elif scheduled_event.championship_id:
+        # Re-fetch with the FK loaded — a lazy championship.name access
+        # inside the async command context raises SynchronousOnlyOperation
+        # (prod 2026-10-01: /setup_event died before the class roll).
+        se = await ScheduledEvent.objects.select_related("championship").aget(
+            pk=scheduled_event.pk
+        )
+        if se.championship and se.championship.name == UNDERGROUND_CHAMPIONSHIP_NAME:
+            tt_class = await TTClass.objects.order_by("?").afirst()
     if tt_class:
         # IR format (Yuuka 2026-10-01): "<SE name> - IR - <HP class>".
         # Still never matches the native template name (popup-defeat holds),

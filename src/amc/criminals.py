@@ -834,15 +834,16 @@ async def create_or_refresh_wanted(
         )
 
     # Set the player as a suspect in-game so police can chase them.
-    # event_race wanteds NEVER get the suspect GE (freeman 2026-09-30:
-    # "don't use make_suspect for event wanted") — the badge/overlay/marker
-    # is our separate GE injection into the native suspect flow, and the
-    # Wanted row alone owns the race flag lifecycle. Racers stay visible
-    # on the map; hiding = costume (costume pass still flags).
+    # Yuuka 2026-10-01: the earlier "don't use make_suspect for event
+    # wanted" ruling was a misunderstanding of her direction — the intent
+    # was to delete OUR separate race-owned GE injection (the bare
+    # make_suspect race-pass loop) and route event wanteds through THE
+    # STANDARD wanted system, which already applies the badge here. The
+    # origin exclusion removed the badge from racers entirely. All
+    # wanteds — event_race included — get the badge through this call.
     if (
         http_client_mod
         and character.guid
-        and origin != WANTED_ORIGIN_EVENT_RACE
     ):
         try:
             await make_suspect(http_client_mod, character.guid)
@@ -1774,14 +1775,12 @@ async def refresh_suspect_tags(http_client_mod, http_client_game=None) -> None:
         sus_guid = wanted.character.guid
         if not sus_guid:
             continue
-        # event_race wanteds are excluded from the suspect GE entirely
-        # (freeman 2026-09-30: "don't use make_suspect for event wanted") —
-        # no badge, no marker, no Net_Suspects entry; the wanted pass keeps
-        # them out of the tracked set so the transition-out pass has
-        # nothing to clear either. Costume still flags them via the
-        # costume pass below (the approved hiding opt-out).
-        if wanted.origin == WANTED_ORIGIN_EVENT_RACE:
-            continue
+        # Yuuka 2026-10-01: event wanteds ride the STANDARD system like
+        # every other wanted — badged here (the GE re-applied each tick),
+        # tracked in the set, and transitioned out on expiry (the GE
+        # expires with the Wanted even while the race is live).
+        # Costume still flags a costume-wearing racer via the costume pass
+        # below (the approved hiding opt-out).
         # Pass at least CRIMINAL_SUSPECT_DURATION so the duration never
         # collapses to 1 s for a nearly-cleared suspect.  The
         # mod currently clamps to 60 s anyway, but this future-proofs the
@@ -1838,7 +1837,8 @@ async def refresh_suspect_tags(http_client_mod, http_client_game=None) -> None:
     # finishes (state 3) / the player leaves (participant row pruned) / the
     # event ends — then the normal speed-law decay runs and the star decays
     # naturally (never force-cleared here). The suspect GE is never applied
-    # in this pass — the Wanted row owns it end to end (freeman 2026-09-30).
+    # in this pass — the badge comes from the standard wanted pass
+    # (Schedule 1's system; Yuuka 2026-10-01).
     live_race_events = GameEvent.objects.filter(
         race_legality="illegal",
         state=2,
@@ -1873,9 +1873,9 @@ async def refresh_suspect_tags(http_client_mod, http_client_game=None) -> None:
         # countdown from that moment (criminals.py decay branch, Yuuka
         # 2026-09-27 "stars didn't seem to decrease"). A long race can
         # expire its own wanted mid-run — intended semantics.)
-        # (No bare race-pass GE either: event wanteds get NO suspect GE —
-        # the make_suspect exclusion in the wanted pass + the
-        # create_or_refresh_wanted skip own that contract.)
+        # (No bare race-pass GE — STANDING RULING: our separate race-owned
+        # GE injection stays deleted; the badge is Schedule 1's wanted
+        # system's own make_suspect, applied by the wanted pass.)
 
     # --- Reconciliation: one-shot costume hydration for online characters ---
     unreconciled_criminals = Character.objects.filter(
@@ -1920,10 +1920,11 @@ async def refresh_suspect_tags(http_client_mod, http_client_game=None) -> None:
     # module-level comment.  This keeps costume criminals immune to the
     # last_online-lag flicker bug while still preventing false clears on
     # wanted-to-costume transitions via the combined diff here.
-    # race_guids deliberately NOT included (freeman 2026-09-30): the GE
-    # belongs to the Wanted row — when the race-origin Wanted expires the
-    # GE must expire with it, so a racer whose wanted cleared IS
-    # transitioned out even while the race is still live.
+    # race_guids deliberately NOT included — race wanteds are now tracked
+    # via the wanted pass itself (Schedule 1's system, Yuuka 2026-10-01):
+    # when the race-origin Wanted expires the GE must expire with it, so a
+    # racer whose wanted cleared IS transitioned out even while the race
+    # is still live.
     currently_suspect = wanted_guids | costume_guids
     transitioned_out = _last_suspect_guids - currently_suspect
     for guid in transitioned_out:

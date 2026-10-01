@@ -3761,12 +3761,12 @@ class CompassTickTests(TestCase):
 @patch("amc.criminals.clear_suspect", new_callable=AsyncMock)
 @patch("amc.criminals.make_suspect", new_callable=AsyncMock)
 async def test_race_participant_ge_owned_by_wanted_row(make_suspect_mock, clear_mock):
-    """freeman 2026-09-30: event wanteds NEVER get the suspect GE ("don't
-    use make_suspect for event wanted"). A bare online participant gets
-    no badge; an active event_race Wanted still gets NO badge (the Wanted
-    row alone owns the flag, stars are the [W] name tag); only an ORGANIC
-    wanted on the same character is badged by the wanted pass, and its
-    expiry is transitioned out even while the race is live (state 2)."""
+    """Yuuka 2026-10-01: the badge is Schedule 1's wanted system's own
+    make_suspect — event wanteds ride the standard wanted pass like every
+    other wanted. A bare online participant still gets no badge (no
+    Wanted row = nothing to badge); an active event_race Wanted IS
+    badged by the wanted pass; expiry is transitioned out even while the
+    race is live (state 2)."""
     now = timezone.now()
     from amc.models import (
         Character,
@@ -3804,21 +3804,18 @@ async def test_race_participant_ge_owned_by_wanted_row(make_suspect_mock, clear_
     make_suspect_mock.assert_not_awaited()
     clear_mock.assert_not_awaited()
 
-    # Active event_race Wanted -> STILL no suspect GE (freeman 2026-09-30:
-    # "don't use make_suspect for event wanted" — the Wanted row alone owns
-    # the flag; racers stay visible on the map). The wanted pass keeps
-    # event_race rows out of the tracked set, so nothing is transitioned
-    # out either.
+    # Active event_race Wanted -> BADGED by the standard wanted pass
+    # (Yuuka 2026-10-01: Schedule 1's system owns the badge for ALL
+    # wanteds — the event origin no longer excludes it).
     wanted = await Wanted.objects.acreate(
         character=char, amount=0, wanted_remaining=600, initial_heat=600,
         origin="event_race",
     )
     await refresh_suspect_tags(AsyncMock())
-    make_suspect_mock.assert_not_awaited()
+    assert make_suspect_mock.await_count >= 1
     clear_mock.assert_not_awaited()
 
-    # An ORGANIC wanted on the same character -> the wanted pass DOES
-    # apply the GE (a real suspect stays badged even while racing).
+    # An ORGANIC wanted on the same character -> also badged (same path).
     await Wanted.objects.filter(pk=wanted.pk).aupdate(origin="")
     make_suspect_mock.reset_mock()
     await refresh_suspect_tags(AsyncMock())
