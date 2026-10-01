@@ -93,3 +93,26 @@ class InterestRateSourceTestCase(TestCase):
         flat = 1_000_000 * Decimal("0.048") / Decimal(24)
         self.assertGreater(account.balance, 1_000_000)
         self.assertLess(account.balance, 1_000_000 + flat)
+
+    async def test_apply_negative_interest_charges_account(self):
+        account = await self._make_account(1_000_000)
+        await apply_interest_to_bank_accounts({}, interest_rate=-0.024)
+        await account.arefresh_from_db()
+        # No last_online → 365d log decay shrinks the magnitude below flat
+        flat_charge = 1_000_000 * Decimal("0.024") / Decimal(24)
+        self.assertLess(account.balance, 1_000_000)
+        self.assertGreater(account.balance, 1_000_000 - flat_charge)
+        journals = JournalEntry.objects.filter(
+            description="Interest Charge", entries__account=account
+        ).distinct()
+        self.assertEqual(await journals.acount(), 1)
+        # Journal balanced: debit == credit
+        je = await journals.afirst()
+        legs = [le async for le in je.entries.all()]
+        self.assertEqual(
+            sum(le.debit for le in legs), sum(le.credit for le in legs)
+        )
+        # Player's checking leg is the debit
+        player_leg = next(le for le in legs if le.account_id == account.id)
+        self.assertEqual(player_leg.debit, sum(le.debit for le in legs))
+        self.assertEqual(player_leg.credit, 0)

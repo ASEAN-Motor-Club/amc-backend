@@ -672,22 +672,39 @@ def _bulk_create_interest_entries(entries_to_create, bank_expense_account, now):
         for account, amount in entries_to_create:
             je = JournalEntry.objects.create(
                 date=now,
-                description="Interest Payment",
+                description="Interest Payment" if amount >= 0 else "Interest Charge",
                 creator=None,
             )
-            LedgerEntry.objects.create(
-                journal_entry=je,
-                account=account,
-                debit=0,
-                credit=amount,
-            )
-            LedgerEntry.objects.create(
-                journal_entry=je,
-                account=bank_expense_account,
-                debit=amount,
-                credit=0,
-            )
-            # Update account balance (LIABILITY: credit increases balance)
+            if amount >= 0:
+                LedgerEntry.objects.create(
+                    journal_entry=je,
+                    account=account,
+                    debit=0,
+                    credit=amount,
+                )
+                LedgerEntry.objects.create(
+                    journal_entry=je,
+                    account=bank_expense_account,
+                    debit=amount,
+                    credit=0,
+                )
+            else:
+                # Negative interest: debit the player's checking account
+                # (balance down) and credit Bank Expense (offset).
+                LedgerEntry.objects.create(
+                    journal_entry=je,
+                    account=account,
+                    debit=-amount,
+                    credit=0,
+                )
+                LedgerEntry.objects.create(
+                    journal_entry=je,
+                    account=bank_expense_account,
+                    debit=0,
+                    credit=-amount,
+                )
+            # Update account balance (LIABILITY: credit increases, debit
+            # decreases — adding a signed amount covers both directions)
             account.balance = cast(Any, F("balance") + amount)
             account.save(update_fields=["balance"])
             total_expense += amount
@@ -766,7 +783,7 @@ async def apply_interest_to_bank_accounts(
             * balance_multiplier
             / Decimal(24 / compounding_hours)
         )
-        if amount >= Decimal(0.01):
+        if amount >= Decimal("0.01") or amount <= Decimal("-0.01"):
             entries_to_create.append((account, amount))
 
     # Bulk create in single transaction

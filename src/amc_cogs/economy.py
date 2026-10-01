@@ -1365,14 +1365,14 @@ The purpose of this transfer is to return funds from the bank to the government 
         settings.DISCORD_ADMIN_ROLE_ID, settings.DISCORD_FINANCE_MINISTER_ROLE_ID
     )
     @app_commands.describe(
-        rate_percent="Nominal daily rate in percent (e.g. 2.2 = 2.2%/day; 0 disables interest)"
+        rate_percent="Nominal daily rate in percent (e.g. 2.2 = 2.2%/day, -5 to +5; 0 disables interest)"
     )
     async def set_interest_rate_command(self, interaction, rate_percent: float):
         await interaction.response.defer(ephemeral=True)
 
-        if not (Decimal(0) <= Decimal(str(rate_percent)) <= Decimal(10)):
+        if not (-Decimal(5) <= Decimal(str(rate_percent)) <= Decimal(5)):
             await interaction.followup.send(
-                "Rate must be between 0 and 10 percent per day.", ephemeral=True
+                "Rate must be between -5 and +5 percent per day.", ephemeral=True
             )
             return
 
