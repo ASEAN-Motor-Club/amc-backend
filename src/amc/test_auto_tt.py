@@ -550,30 +550,6 @@ async def test_setup_event_skips_rotation_instance(setup_mock, db):
     assert setup_mock.await_args.args[2].pk == template.pk
 
 
-@pytest.mark.asyncio
-@sync_patch("amc.commands.events.setup_event", new_callable=AsyncMock)
-async def test_setup_event_skips_rotation_instance(setup_mock, db):
-    """The daily rotation post (is_rotation_instance=True) is never a
-    /setup_event target — only the windowed templates are (Yuuka
-    2026-09-30: template windows match the rotation's now+14d)."""
-    now = timezone.now()
-    await _clean_slate()
-    race = await _make_race("Instance TT route")
-    await _ug_template(
-        "Instance TT", race, now - timedelta(hours=1), now + timedelta(days=14),
-        is_rotation_instance=True,
-    )
-    template_race = await _make_race("Template TT route")
-    template = await _ug_template(
-        "Template TT", template_race, now - timedelta(hours=2), now + timedelta(days=14),
-    )
-    setup_mock.return_value = {"EventGuid": "G" * 32}
-
-    executed = await registry.execute("/setup_event", _make_ctx())
-    assert executed is True
-    setup_mock.assert_awaited_once()
-    assert setup_mock.await_args.args[2].pk == template.pk
-
 
 @pytest.mark.asyncio
 @sync_patch("amc.commands.events.setup_event", new_callable=AsyncMock)
