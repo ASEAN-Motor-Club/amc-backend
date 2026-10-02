@@ -409,6 +409,30 @@ class ProcessLogEventTestCase(TestCase):
             await CharacterVehicle.objects.filter(vehicle_game_id=955575).aexists()
         )
 
+    async def test_stamp_hits_only_most_recent_same_name_row(self):
+        older = await CharacterVehicle.objects.acreate(
+            character=self.character,
+            vehicle_id=302,
+            config={"VehicleName": "Micky"},
+        )
+        newer = await CharacterVehicle.objects.acreate(
+            character=self.character,
+            vehicle_id=310,
+            config={"VehicleName": "Micky"},
+        )
+        event = PlayerBoughtVehicleLogEvent(
+            timestamp=self.server_log.timestamp,
+            player_id=1234,
+            player_name="test",
+            vehicle_id=955575,
+            vehicle_name="Micky",
+        )
+        await process_log_event(event)
+        await newer.arefresh_from_db(fields=["vehicle_game_id"])
+        await older.arefresh_from_db(fields=["vehicle_game_id"])
+        self.assertEqual(newer.vehicle_game_id, 955575)
+        self.assertIsNone(older.vehicle_game_id)
+
     async def test_player_exited_vehicle(self):
         event = PlayerExitedVehicleLogEvent(
             timestamp=self.server_log.timestamp,
