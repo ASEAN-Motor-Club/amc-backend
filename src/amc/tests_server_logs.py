@@ -11,6 +11,7 @@ from amc.server_logs import (
     PlayerLogoutLogEvent,
     PlayerEnteredVehicleLogEvent,
     PlayerExitedVehicleLogEvent,
+    PlayerBoughtVehicleLogEvent,
     PlayerRestockedDepotLogEvent,
     PlayerLevelChangedLogEvent,
     CompanyAddedLogEvent,
@@ -31,6 +32,7 @@ from amc.models import (
     PlayerChatLog,
     PlayerVehicleLog,
     PlayerRestockDepotLog,
+    CharacterVehicle,
 )
 from zoneinfo import ZoneInfo
 
@@ -353,6 +355,58 @@ class ProcessLogEventTestCase(TestCase):
                 vehicle_game_id=event.vehicle_id,
                 action=PlayerVehicleLog.Action.ENTERED,
             ).aexists()
+        )
+
+    async def test_player_bought_vehicle_stamps_game_id(self):
+        cv = await CharacterVehicle.objects.acreate(
+            character=self.character,
+            vehicle_id=302,
+            config={"VehicleName": "Micky"},
+        )
+        event = PlayerBoughtVehicleLogEvent(
+            timestamp=self.server_log.timestamp,
+            player_id=1234,
+            player_name="test",
+            vehicle_id=913024,
+            vehicle_name="Micky",
+        )
+        await process_log_event(event)
+        await cv.arefresh_from_db(fields=["vehicle_game_id"])
+        self.assertEqual(cv.vehicle_game_id, 913024)
+
+    async def test_player_entered_vehicle_stamps_game_id(self):
+        cv = await CharacterVehicle.objects.acreate(
+            character=self.character,
+            vehicle_id=302,
+            config={"VehicleName": "Micky"},
+        )
+        event = PlayerEnteredVehicleLogEvent(
+            timestamp=self.server_log.timestamp,
+            player_id=1234,
+            player_name="test",
+            vehicle_id=977048,
+            vehicle_name="Micky",
+        )
+        await process_log_event(event)
+        await cv.arefresh_from_db(fields=["vehicle_game_id"])
+        self.assertEqual(cv.vehicle_game_id, 977048)
+
+    async def test_stamp_does_not_touch_other_names(self):
+        await CharacterVehicle.objects.acreate(
+            character=self.character,
+            vehicle_id=303,
+            config={"VehicleName": "Raven"},
+        )
+        event = PlayerBoughtVehicleLogEvent(
+            timestamp=self.server_log.timestamp,
+            player_id=1234,
+            player_name="test",
+            vehicle_id=955575,
+            vehicle_name="Micky",
+        )
+        await process_log_event(event)
+        self.assertFalse(
+            await CharacterVehicle.objects.filter(vehicle_game_id=955575).aexists()
         )
 
     async def test_player_exited_vehicle(self):
