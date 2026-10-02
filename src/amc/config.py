@@ -35,8 +35,10 @@ UNDERGROUND_CHAMPIONSHIP_NAME = "Jeju Underground Street Racing"
 BLOOD_MONEY_PER_CHECKPOINT = 0
 RESPECT_PER_CHECKPOINT = 0  # rate undecided — structure only for now
 
-# Vehicle types allowed in underground races (start-line DQ, fail-closed).
-UNDERGROUND_VEHICLE_TYPES = ["Small", "Pickup"]
+# Vehicle types allowed in underground races: now per-class DATA
+# (TTClass.allowed_vehicle_types, Yuuka 2026-10-02) — no constant here.
+# The old UNDERGROUND_VEHICLE_TYPES constant was the seed default; the
+# TTClass field default preserves it for existing/new classes.
 
 
 def underground_blood_money(checkpoints: int, position: int, rate: int | None = None) -> int:

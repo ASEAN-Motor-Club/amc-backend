@@ -36,7 +36,6 @@ import logging
 import discord
 from django.conf import settings
 
-from amc.config import UNDERGROUND_VEHICLE_TYPES
 from amc.mod_detection import vehicle_type_for
 from amc.mod_server import (
     get_player_last_vehicle,
@@ -52,11 +51,12 @@ from amc.vehicles import format_vehicle_name
 logger = logging.getLogger(__name__)
 
 
-def vehicle_type_violation(vehicle_type: str | None) -> str:
+def vehicle_type_violation(vehicle_type: str | None, allowed_types: list[str]) -> str:
     """Human-readable violation line for the vehicle-type DQ rule."""
+    allowed = " & ".join(allowed_types) if allowed_types else "none"
     if vehicle_type:
-        return f"Vehicle type {vehicle_type} is not allowed (Small/Pickup only)"
-    return "Vehicle type could not be verified (allowed: Small/Pickup)"
+        return f"Vehicle type {vehicle_type} is not allowed ({allowed} only)"
+    return f"Vehicle type could not be verified (allowed: {allowed})"
 
 
 async def _disqualify_illegal_starters(
@@ -74,7 +74,7 @@ async def _disqualify_illegal_starters(
     if not game_event.tt_class_id:
         return []
     tt_class = await TTClass.objects.aget(pk=game_event.tt_class_id)
-    max_hp = tt_class.max_hp
+    allowed_types = tt_class.allowed_vehicle_types
     event_guid = game_event.guid
     disqualified: list[str] = []
 
@@ -105,13 +105,14 @@ async def _disqualify_illegal_starters(
                 )
                 continue
 
-            violations = evaluate_tt_parts(parts, max_hp)
+            violations = evaluate_tt_parts(parts, tt_class)
             vehicle_type = vehicle_type_for((vehicle or {}).get("fullName"))
-            if vehicle_type not in UNDERGROUND_VEHICLE_TYPES:
+            if vehicle_type not in allowed_types:
                 # Fail-closed: an unknown blueprint can't be verified, so it
                 # is a violation like the unknown-parts rule (Yuuka
-                # 2026-09-29: Small and Pickup only in underground races).
-                violations = violations + [vehicle_type_violation(vehicle_type)]
+                # 2026-09-29: Small and Pickup only in underground races;
+                # 2026-10-02: allowed types are per-class data).
+                violations = violations + [vehicle_type_violation(vehicle_type, allowed_types)]
             if not violations:
                 continue
             candidates.append((guid, player_name, unique_net_id, violations, vehicle))
@@ -158,7 +159,7 @@ async def _disqualify_illegal_starters(
             embed = discord.Embed(
                 title=f"DISQUALIFIED — {player_name}",
                 description=(
-                    f"Removed from **{game_event.name} [TT-{max_hp}]** at start"
+                    f"Removed from **{game_event.name} [TT-{tt_class.max_hp}]** at start"
                 ),
                 color=discord.Color.red(),
             )

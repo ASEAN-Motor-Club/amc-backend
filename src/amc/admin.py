@@ -24,6 +24,7 @@ from .models import (
     Company,
     CompassTuningConfig,
     WantedSystemConfig,
+    TTClass,
     PlayerChatLog,
     PlayerRestockDepotLog,
     PlayerVehicleLog,
@@ -331,8 +332,56 @@ class LapSectionTimeInlineAdmin(admin.TabularInline):
 
 @admin.register(GameEvent)
 class GameEventAdmin(admin.ModelAdmin):
-    list_display = ["guid", "name", "start_time", "scheduled_event", "owner", "rewards_paid"]
+    list_display = [
+        "guid",
+        "name",
+        "start_time",
+        "scheduled_event",
+        "owner",
+        "tt_class",
+        "race_legality",
+        "rewards_paid",
+    ]
+    list_select_related = ["tt_class"]
     inlines = [GameEventCharacterInlineAdmin]
+
+
+# Gamedata vehicle_type values (vehicles table snapshot 2026-10-02); a new
+# game version can add more — extend this list after a gamedata regen.
+TT_VEHICLE_TYPE_CHOICES = (
+    ("Small", "Small"),
+    ("Pickup", "Pickup"),
+    ("Truck", "Truck"),
+    ("SemiTractor", "SemiTractor"),
+    ("SemiTrailer", "SemiTrailer"),
+    ("Bus", "Bus"),
+    ("SmallTrailer", "SmallTrailer"),
+    ("Bike", "Bike"),
+    ("Kart", "Kart"),
+    ("HeavyMachinery", "HeavyMachinery"),
+    ("Racecar", "Racecar"),
+    ("Motorhome", "Motorhome"),
+)
+
+
+@admin.register(TTClass)
+class TTClassAdmin(admin.ModelAdmin):
+    list_display = ["name", "max_hp", "allowed_vehicle_types"]
+    fields = ["name", "max_hp", "allowed_vehicle_types"]
+
+    @admin.display(description="Allowed vehicle types")
+    def allowed_vehicle_types(self, obj):
+        return ", ".join(obj.allowed_vehicle_types) or "—"
+
+    def formfield_for_dbfield(self, db_field, request, **kwargs):
+        from django import forms
+
+        if db_field.name == "allowed_vehicle_types":
+            kwargs["required"] = False
+            kwargs["form_class"] = forms.MultipleChoiceField
+            kwargs["choices"] = TT_VEHICLE_TYPE_CHOICES
+            kwargs["widget"] = forms.CheckboxSelectMultiple
+        return super().formfield_for_dbfield(db_field, request, **kwargs)
 
 
 @admin.register(GameEventCharacter)
@@ -440,8 +489,9 @@ class ScheduledEventAdmin(admin.ModelAdmin):
         "championship",
         "time_trial",
         "is_rotation_instance",
+        "tt_class",
     ]
-    list_select_related = ["race_setup"]
+    list_select_related = ["race_setup", "tt_class"]
     inlines = [GameEventInlineAdmin]
     search_fields = ["name", "race_setup__hash", "race_setup__name"]
     autocomplete_fields = ["race_setup"]

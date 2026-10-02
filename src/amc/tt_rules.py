@@ -33,15 +33,18 @@ TT_TIRE_SLOT_MIN = 19
 TT_TIRE_SLOT_MAX = 38
 
 
-def evaluate_tt_parts(parts: list[dict], max_hp: int) -> list[str]:
+def evaluate_tt_parts(parts: list[dict], tt_class) -> list[str]:
     """Return the list of rule violations for one vehicle's parts payload.
 
-    Empty list == compliant. Never raises; every degradation path is an
-    explicit violation string so enforcement (event-start kick, step 3)
-    can decide policy per violation kind.
+    *tt_class* is a :class:`~amc.models.TTClass` instance (the power cap
+    and vehicle-type restrictions live on it). Empty list == compliant.
+    Never raises; every degradation path is an explicit violation string
+    so enforcement (event-start kick, step 3) can decide policy per
+    violation kind.
     """
     violations: list[str] = []
 
+    max_hp = tt_class.max_hp
     peak_hp = compute_peak_hp(parts)
     if peak_hp is None:
         violations.append("Engine power could not be verified (unknown parts)")
