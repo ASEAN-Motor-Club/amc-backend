@@ -283,9 +283,10 @@ async def test_sprint_template_posted_and_mirrored(announce_mock, db):
 @pytest.mark.asyncio
 @patch("amc.events.announce", new_callable=AsyncMock)
 async def test_rotation_refreshes_template_windows_daily(announce_mock, db):
-    """Templates reset DAILY at 08:30 (+07) (Yuuka 2026-10-01): each tick
-    re-windows every underground template to today 08:30 → tomorrow 08:30,
-    so /setup_event targets always track the reset."""
+    """Templates reset DAILY at 08:00 (+07) (Yuuka 2026-10-02): each tick
+    re-windows every underground template to today 08:00 → tomorrow 08:00,
+    so /setup_event targets always track the reset. 08:00 sits before the
+    08:30 server restart so the post is not eaten by it."""
     from amc.events import _rotation_reset
     now = timezone.now()
     await _clean_slate()
@@ -298,7 +299,7 @@ async def test_rotation_refreshes_template_windows_daily(announce_mock, db):
     start = tmpl.start_time
     assert start == _rotation_reset(now)
     assert tmpl.end_time - start == timedelta(days=1)
-    assert start.hour == 1 and start.minute == 30  # 08:30 +07 in UTC
+    assert start.hour == 1 and start.minute == 0  # 08:00 +07 in UTC
 
 
 @pytest.mark.asyncio
