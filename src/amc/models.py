@@ -3058,6 +3058,17 @@ class CharacterVehicle(models.Model):
         related_name="owned_vehicles",
     )
     vehicle_id = models.PositiveIntegerField(db_index=True)
+    vehicle_game_id = models.PositiveBigIntegerField(
+        null=True,
+        blank=True,
+        db_index=True,
+        help_text=(
+            "7-digit game-assigned vehicle id from the bought/entered vehicle "
+            "log lines. Unlike vehicle_id (a recycled runtime counter) this is "
+            "the closest thing to a durable per-vehicle identity; still stamped "
+            "by name, so it follows the most recent bought/entered match."
+        ),
+    )
     alias = models.CharField(max_length=32, null=True, blank=True)
     company_guid = models.CharField(max_length=32, null=True, blank=True)
     spawn_on_restart = models.BooleanField(default=False)
