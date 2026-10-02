@@ -2405,14 +2405,16 @@ class CommandsTestCase(TestCase):
         covering its FULL inventory: 10 part keys (VehicleParts0 rows) + 25
         tire physics assets + the 49 unsuffixed tuning keys from the
         2026-09-21 superset pak (FD0-FD40, Dampers; Spring900 stays in the
-        More Tuning entry where it was live-observed first), so
+        More Tuning entry where it was live-observed first) + the 36 tire
+        keys from the 2026-10-02 re-scan (KM0-KM4 car tires, KMH*/DRW truck
+        tires, BT1, BB2/BB3, BT2-X), so
         /check_parts labels them [GATE's AMC Parts] purely from the registry
         (design: not gated on the pak being an installed server mod)."""
         registry = load_known_mod_parts()
         self.assertIn("amc-tires", registry)
         amc = registry["amc-tires"]
         self.assertEqual(amc["label"], "GATE's AMC Parts")
-        self.assertEqual(len(amc["keys"]), 84)
+        self.assertEqual(len(amc["keys"]), 120)
         for key in (
             "amc_bike",
             "amc_sport",
@@ -2427,6 +2429,16 @@ class CommandsTestCase(TestCase):
             "amc_bike19rear",
             "amc_truck88drw",
             "amc_sport66",
+            # 2026-10-02 re-scan: KM tire family + hyphen variants
+            "km2-10",
+            "km2-01",
+            "km2-15",
+            "km2-45",
+            "kmhqb1-drw",
+            "bt1",
+            "bb2",
+            "bb3",
+            "bt2-x",
         ):
             self.assertIn(key, amc["keys"])
         self.assertEqual(amc["prefixes"], ("amc_",))
