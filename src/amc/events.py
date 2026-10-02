@@ -131,8 +131,14 @@ async def setup_event(timestamp, player_id, scheduled_event, http_client_mod):
         },
     }
 
+    race_setup = None
     if event_type == 1:
-        race_setup = scheduled_event.race_setup.config
+        # Copy before mutating — race_setup.config is the template's stored
+        # dict (JSONField); rewriting waypoints in place would poison every
+        # later reader of this instance (Location→Translation rename makes
+        # the next Location lookup KeyError) and re-hash the stored setup.
+        race_setup = dict(scheduled_event.race_setup.config)
+        race_setup["Route"] = dict(race_setup["Route"])
         race_setup["Route"]["Waypoints"] = [
             {
                 "Translation": waypoint["Location"],
@@ -152,6 +158,17 @@ async def setup_event(timestamp, player_id, scheduled_event, http_client_mod):
             error_body = await response.json()
             raise Exception(
                 f"API Error: Received status {response.status} instead of 201. Body: {error_body}"
+            )
+        # /events lists only mirrored rotation-instance SE rows — the daily
+        # auto-post mirrors its instance (post_random_events), but before
+        # this fix a /setup_event post never did, so the popup sat empty
+        # (prod 2026-10-02: live event 7387 resolved to the classless
+        # template SE 58 and /events showed nothing). Mirror manual posts
+        # exactly like the auto-poster — one mirror per posted instance,
+        # so every live event the /events popup should show has a row.
+        if tt_class and race_setup:
+            await _mirror_posted_event(
+                scheduled_event, tt_class, event_name, race_setup
             )
         return True
 

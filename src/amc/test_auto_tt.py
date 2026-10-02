@@ -414,6 +414,83 @@ async def test_setup_event_underground_template_rolls_class(db):
 
 
 @pytest.mark.asyncio
+async def test_setup_event_mirrors_rotation_instance(db):
+    """/setup_event posts mirror like the auto-poster (prod 2026-10-02:
+    /events sat empty because manual posts never created the
+    is_rotation_instance row the listing reads)."""
+    from amc.events import setup_event
+    from amc.models import ScheduledEvent as SE
+
+    now = timezone.now()
+    await _clean_slate()
+    await _tt_class()
+    race = await _make_race("Mirrored TT route")
+    template = await _ug_template("MirrorMe", race, now - timedelta(hours=1), now + timedelta(hours=1))
+    client = _SetupClient({"CharacterGuid": "C" * 32})
+    ok = await setup_event(now, 42, template, client)
+    assert ok is True
+    mirrors = SE.objects.filter(is_rotation_instance=True).exclude(pk=template.pk)
+    assert await sync_to_async(mirrors.exists)()
+    mirror = await sync_to_async(mirrors.get)()
+    assert mirror.tt_class_id is not None
+    assert mirror.description_in_game  # requirements text present
+    assert mirror.name == client.posts[0]["EventName"]
+
+
+@pytest.mark.asyncio
+async def test_setup_event_mirrors_each_instance(db):
+    """Mirrors are per posted instance: two /setup_event posts -> two
+    mirror rows, each named after its own posted event."""
+    from amc.events import setup_event
+    from amc.models import ScheduledEvent as SE
+
+    now = timezone.now()
+    await _clean_slate()
+    await _tt_class()
+    race = await _make_race("Per-instance TT route")
+    template = await _ug_template("PerInstance", race, now - timedelta(hours=1), now + timedelta(hours=1))
+    client = _SetupClient({"CharacterGuid": "C" * 32})
+    await setup_event(now, 42, template, client)
+    await setup_event(now, 42, template, client)
+    names = [p["EventName"] for p in client.posts]
+    mirror_names = [
+        r.name
+        async for r in SE.objects.filter(is_rotation_instance=True).exclude(
+            pk=template.pk
+        )
+    ]
+    assert sorted(mirror_names) == sorted(names)
+
+
+@pytest.mark.asyncio
+async def test_setup_event_classless_championship_never_mirrors(db):
+    """Non-underground posts stay classless and don't mirror."""
+    from amc.events import setup_event
+    from amc.models import Championship
+    from amc.models import ScheduledEvent as SE
+
+    now = timezone.now()
+    await _clean_slate()
+    champ, _ = await sync_to_async(Championship.objects.get_or_create)(
+        name="AMC Cup Season 3", defaults={"description": ""}
+    )
+    race = await _make_race("Legal route")
+    template = await sync_to_async(SE.objects.create)(
+        name="Ara Grand Prix",
+        race_setup=race,
+        time_trial=False,
+        tt_class=None,
+        championship=champ,
+        start_time=now - timedelta(hours=1),
+        end_time=now + timedelta(hours=1),
+    )
+    client = _SetupClient({"CharacterGuid": "C" * 32})
+    await setup_event(now, 42, template, client)
+    rows = [(r.pk, r.name, r.championship_id, r.tt_class_id) async for r in SE.objects.filter(is_rotation_instance=True)]
+    assert not rows, f"unexpected rotation rows: {rows}"
+
+
+@pytest.mark.asyncio
 async def test_setup_event_classless_championship_stays_legal(db):
     """Non-underground classless SEs are never criminalized by
     /setup_event (Yuuka: SEs are reusable templates)."""
