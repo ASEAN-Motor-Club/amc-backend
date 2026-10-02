@@ -302,7 +302,7 @@ class WorkerSettings:
         # in-game announce fires only when at least one POST /events
         # actually reached the game server (the old version announced
         # unconditionally, producing "TT is up!" with no events).
-        # Interval: DAILY at 08:30:15 server-local (+07) (Yuuka 2026-09-28:
+        # Interval: DAILY at 08:00:15 server-local (+07) (Yuuka 2026-09-28:
         # align the event rotation with the server restart hour so
         # restart-days roll over cleanly). NOTE: arq cron evaluates in the
         # worker's LOCAL timezone, not UTC — the first attempt (hour=1,
@@ -315,7 +315,7 @@ class WorkerSettings:
         cron(
             post_random_events,
             hour=8,
-            minute=30,
+            minute=0,
             second=15,
         ),
         # cron(monitor_server_condition, minute=set(range(3, 60, 5))),

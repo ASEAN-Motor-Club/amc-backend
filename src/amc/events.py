@@ -100,7 +100,7 @@ async def setup_event(timestamp, player_id, scheduled_event, http_client_mod):
             # so key off the POSTED EVENT history instead: the newest
             # classed underground GameEvent this window. /setup_event then
             # produces the same class players already raced today; only a
-            # fresh window (daily 08:30 +07) rolls a new random class.
+            # fresh window (daily 08:00 +07) rolls a new random class.
             window_start = _rotation_reset(timezone.now())
             last_window_event = (
                 await GameEvent.objects.filter(
@@ -1163,12 +1163,14 @@ async def _next_tt_instance_number() -> int:
 
 
 def _rotation_reset(now):
-    """The 08:30 (+07) reset boundary covering `now`: the reset currently in
-    progress starts at 08:30 (+07); the next one is +24h. Cron fires at
-    08:30:15 server-local, so ticks land just after the boundary."""
+    """The 08:00 (+07) reset boundary covering `now`: the reset currently in
+    progress starts at 08:00 (+07); the next one is +24h. Cron fires at
+    08:00:15 server-local, so ticks land just after the boundary. 08:00
+    (Yuuka 2026-10-02: "make it 30 minutes less") sits BEFORE the daily
+    08:30 server restart, so the restart no longer eats the post."""
     tz = ZoneInfo("Asia/Bangkok")
     local = now.astimezone(tz).replace(second=0, microsecond=0)
-    boundary = local.replace(hour=8, minute=30)
+    boundary = local.replace(hour=8, minute=0)
     if local < boundary:
         boundary -= timedelta(days=1)
     return boundary
@@ -1268,9 +1270,9 @@ async def post_random_events(ctx):
     ).acount()
 
     # Template window refresh (Yuuka 2026-10-01: illegal TT resets daily at
-    # 08:30 UTC+7): underground templates are /setup_event targets with a
-    # daily window aligned to the rotation reset — today 08:30 (+07) →
-    # tomorrow 08:30 (+07). Refreshed every tick so the windows track the
+    # 08:00 UTC+7): underground templates are /setup_event targets with a
+    # daily window aligned to the rotation reset — today 08:00 (+07) →
+    # tomorrow 08:00 (+07). Refreshed every tick so the windows track the
     # reset even when a tick is skipped and retried later.
     try:
         await ScheduledEvent.objects.filter(
