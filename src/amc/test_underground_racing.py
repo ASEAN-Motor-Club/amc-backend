@@ -340,7 +340,11 @@ def _player(guid, unique_id, name):
 
 async def _classed_event(vehicle_types=None):
     tt, _ = await sync_to_async(TTClass.objects.get_or_create)(
-        name="TT-270", defaults={"max_hp": 270}
+        name="TT-270",
+        defaults={
+            "max_hp": 270,
+            "allowed_vehicle_types": vehicle_types or ["Small", "Pickup"],
+        },
     )
     if vehicle_types is not None:
         # get_or_create ignores defaults on an existing row (earlier tests
