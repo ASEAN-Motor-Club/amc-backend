@@ -147,6 +147,14 @@ def _set_daily_interest_rate(rate):
     return policy
 
 
+def _set_gov_salary_multiplier(multiplier):
+    """Persist the gov/police salary UBI multiplier on the BankPolicy singleton."""
+    policy = BankPolicy.load()
+    policy.gov_salary_multiplier = multiplier
+    policy.save(update_fields=["gov_salary_multiplier"])
+    return policy
+
+
 class EconomyCog(commands.Cog):
     def __init__(self, bot, general_channel_id=settings.DISCORD_GENERAL_CHANNEL_ID):
         self.bot = bot
@@ -1395,7 +1403,49 @@ The purpose of this transfer is to return funds from the bank to the government 
             await treasury_channel.send(embed=embed)
 
         await interaction.followup.send(
-            f"Daily interest rate set to **{new_rate:.2%}** (was {old_rate:.2%}).", 
+            f"Daily interest rate set to **{new_rate:.2%}** (was {old_rate:.2%}).",
+            ephemeral=True,
+        )
+
+    @app_commands.command(
+        name="set_gov_salary",
+        description="Set the Government/Police salary UBI multiplier (Admin / Finance Minister)",
+    )
+    @app_commands.checks.has_any_role(
+        settings.DISCORD_ADMIN_ROLE_ID, settings.DISCORD_FINANCE_MINISTER_ROLE_ID
+    )
+    @app_commands.describe(
+        multiplier="Salary = UBI x multiplier (e.g. 2 = gov employees and on-duty police earn 2x UBI; 0-10)"
+    )
+    async def set_gov_salary_command(self, interaction, multiplier: float):
+        await interaction.response.defer(ephemeral=True)
+
+        if not (Decimal(0) <= Decimal(str(multiplier)) <= Decimal(10)):
+            await interaction.followup.send(
+                "Multiplier must be between 0 and 10.", ephemeral=True
+            )
+            return
+
+        new_mult = Decimal(str(multiplier)).quantize(Decimal("0.001"))
+        old_mult = await sync_to_async(BankPolicy.get_gov_salary_multiplier)()
+        await sync_to_async(_set_gov_salary_multiplier)(new_mult)
+
+        treasury_channel_id = getattr(
+            settings, "DISCORD_TREASURY_CHANNEL_ID", 1402660537619320872
+        )
+        treasury_channel = self.bot.get_channel(treasury_channel_id)
+        if treasury_channel:
+            embed = discord.Embed(
+                title="🏛️ Government Salary Rate Changed",
+                description=f"Gov/Police salary multiplier set to **{new_mult}x UBI** "
+                f"by {interaction.user.mention}",
+                color=discord.Color.gold(),
+            )
+            await treasury_channel.send(embed=embed)
+
+        await interaction.followup.send(
+            f"Government/Police salary multiplier set to **{new_mult}x UBI** "
+            f"(was {old_mult}x).",
             ephemeral=True,
         )
 

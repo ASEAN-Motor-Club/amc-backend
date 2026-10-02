@@ -217,6 +217,18 @@ class BankPolicy(models.Model):
         policy, _ = cls.objects.get_or_create(pk=1)
         return policy
 
+    gov_salary_multiplier = models.DecimalField(
+        max_digits=6,
+        decimal_places=3,
+        default=Decimal("2.000"),
+        help_text="UBI multiplier applied to Government Salary / Police Salary "
+        "(default 2 = gov employees and on-duty police earn 2x UBI).",
+    )
+
     @classmethod
     def get_daily_interest_rate(cls) -> Decimal:
         return cls.load().daily_interest_rate
+
+    @classmethod
+    def get_gov_salary_multiplier(cls) -> Decimal:
+        return cls.load().gov_salary_multiplier
