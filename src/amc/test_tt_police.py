@@ -7,7 +7,7 @@ Covers the contract agreed for the Yuuka 2026-09-26 request:
   star (Yuuka 2026-09-27: "badge should still exist, but no star" — the
   Wanted row is what despawns modded cars); a missing Character row
   skips that player and no Wanted row is ever created
-* the 60s announcement fires only while the event is still live AND
+* the checkpoint-gated announcement fires only while the event is still live AND
   racing (state 2); vanished / between-run-reset events stay silent
 * rotation candidates are restricted to race setups with NumLaps == 0
 """
@@ -23,7 +23,6 @@ from django.utils import timezone
 import amc.handlers.tt_police as tt_police  # noqa: F401  (referenced in patches)
 from amc.events import post_random_events
 from amc.handlers.tt_police import (
-    RACE_ALERT_DELAY_SECONDS,
     RACE_ALERT_MESSAGE,
     announce_illegal_race,
     grant_race_wanted,
@@ -43,13 +42,11 @@ def _clean_alert_state():
     """Isolate the module-level alert registries between tests."""
     tt_police._alert_tasks.clear()
     tt_police._announced_race_guids.clear()
-    tt_police._race_first_seen.clear()
     tt_police._alert_targets.clear()
     tt_police._announce_locks.clear()
     yield
     tt_police._alert_tasks.clear()
     tt_police._announced_race_guids.clear()
-    tt_police._race_first_seen.clear()
     tt_police._alert_targets.clear()
     tt_police._announce_locks.clear()
 
@@ -132,7 +129,6 @@ async def test_alert_fires_when_still_racing(get_events_mock, send_mock, db):
         await announce_illegal_race(object(), event)
         await _flush_tasks()
     send_mock.assert_awaited_once()
-    assert RACE_ALERT_DELAY_SECONDS == 60  # production value untouched
     assert RACE_ALERT_MESSAGE == "An Illegal race is happening! Check Events!"
 
 
