@@ -91,6 +91,9 @@ async def test_snapshot_storages_and_leaderboard():
 
     n = await snapshot_storages()
     assert n == 2
+    # arq cron calls it with the worker ctx dict as a positional arg
+    n_cron = await snapshot_storages({})
+    assert n_cron == 2
     now = timezone.now()
 
     # delivery INTO the starved coal bay (deficit_before = 180)
