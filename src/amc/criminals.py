@@ -1846,8 +1846,10 @@ async def refresh_suspect_tags(http_client_mod, http_client_game=None) -> None:
     ).prefetch_related("participants__character")
 
     async for race_event in live_race_events:
-        # Announcement + first wanted grant (once per event guid, whichever
-        # path — this tick or the SSE alert task — sees the race first).
+        # Announcement + first wanted grant (once per RUN — the marker
+        # re-arms on every non-racing transition, Yuuka 2026-10-02 rerun
+        # report; whichever path — this tick or the SSE alert task —
+        # sees the race first wins).
         try:
             from amc.handlers.tt_police import (
                 RACE_ALERT_MESSAGE,
