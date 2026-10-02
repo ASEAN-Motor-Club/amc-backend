@@ -1,5 +1,6 @@
 from decimal import Decimal
 from datetime import timedelta
+from asgiref.sync import sync_to_async
 from django.utils import timezone
 from amc.models import (
     Character,
@@ -11,6 +12,7 @@ from amc.jobs import calculate_treasury_multiplier
 from amc.mod_server import transfer_money
 from amc.pipeline.profit import on_player_profit
 from amc.police import is_police
+from amc_finance.models import BankPolicy
 from amc_finance.services import (
     send_fund_to_player_wallet,
     get_treasury_fund_balance,
@@ -32,6 +34,10 @@ async def handout_ubi(ctx):
     treasury_balance = await get_treasury_fund_balance()
     if treasury_balance <= TREASURY_UBI_FLOOR:
         return
+
+    gov_salary_multiplier = await sync_to_async(
+        BankPolicy.get_gov_salary_multiplier
+    )()
 
     config = await JobPostingConfig.aget_config()
     ubi_scale = calculate_treasury_multiplier(
@@ -94,10 +100,10 @@ async def handout_ubi(ctx):
 
             on_duty = await is_police(character)
             if on_duty:
-                amount *= 2
+                amount *= gov_salary_multiplier
                 label = "Police Salary"
             elif character.is_gov_employee:
-                amount *= 2
+                amount *= gov_salary_multiplier
                 label = "Government Salary"
             else:
                 label = "Universal Basic Income"

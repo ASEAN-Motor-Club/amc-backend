@@ -116,3 +116,16 @@ class InterestRateSourceTestCase(TestCase):
         player_leg = next(le for le in legs if le.account_id == account.id)
         self.assertEqual(player_leg.debit, sum(le.debit for le in legs))
         self.assertEqual(player_leg.credit, 0)
+
+
+class GovSalaryMultiplierTestCase(TestCase):
+    async def test_default_multiplier_is_2(self):
+        policy = await sync_to_async(BankPolicy.load)()
+        self.assertEqual(policy.gov_salary_multiplier, Decimal("2.000"))
+
+    async def test_set_and_read_back(self):
+        policy = await sync_to_async(BankPolicy.load)()
+        policy.gov_salary_multiplier = Decimal("3.5")
+        await policy.asave(update_fields=["gov_salary_multiplier"])
+        mult = await sync_to_async(BankPolicy.get_gov_salary_multiplier)()
+        self.assertEqual(mult, Decimal("3.5"))

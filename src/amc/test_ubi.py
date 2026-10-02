@@ -4,9 +4,11 @@ from unittest.mock import AsyncMock, patch
 
 from django.test import TestCase
 from django.utils import timezone
+from asgiref.sync import sync_to_async
 
 from amc.models import Character, Player
 from amc.ubi import handout_ubi, ACTIVE_GRANT_AMOUNT, MAX_LEVEL
+from amc_finance.models import BankPolicy
 
 
 def _make_ctx(http_client=None, http_client_mod=None):
@@ -179,6 +181,47 @@ class HandoutUbiLoanRepaymentTest(TestCase):
         call_args = mock_on_player_profit.call_args
         self.assertEqual(call_args[1]["base_payment"], expected_gov)
         self.assertTrue(call_args[1]["skip_gov_redirect"])
+
+    @patch("amc.ubi.calculate_treasury_multiplier", return_value=1.0)
+    @patch("amc.ubi.on_player_profit", new_callable=AsyncMock)
+    @patch("amc.ubi.transfer_money", new_callable=AsyncMock)
+    @patch("amc.ubi.send_fund_to_player_wallet", new_callable=AsyncMock)
+    @patch("amc.ubi.get_players", new_callable=AsyncMock)
+    @patch("amc.ubi.get_treasury_fund_balance", new_callable=AsyncMock)
+    async def test_gov_salary_multiplier_from_bank_policy(
+        self,
+        mock_treasury_balance,
+        mock_get_players,
+        mock_send,
+        mock_transfer,
+        mock_on_player_profit,
+        mock_treasury_mult,
+    ):
+        """Gov salary scales with BankPolicy.gov_salary_multiplier (not hardcoded 2x)."""
+        mock_treasury_balance.return_value = Decimal(50_000_000)
+        self.character.gov_employee_until = timezone.now() + timedelta(hours=12)
+        await self.character.asave()
+
+        policy = await sync_to_async(BankPolicy.load)()
+        policy.gov_salary_multiplier = Decimal("3.5")
+        await policy.asave(update_fields=["gov_salary_multiplier"])
+
+        mock_get_players.return_value = self._mock_players()
+
+        ctx = _make_ctx(http_client_mod=mock_transfer)
+        with patch(
+            "amc.ubi.CharacterLocation.batch_get_character_activity",
+            new_callable=AsyncMock,
+            return_value={self.character.id: (True, True)},
+        ):
+            await handout_ubi(ctx)
+
+        expected_base = int(self._expected_amount())
+        expected_gov = expected_base * Decimal("3.5")
+
+        mock_send.assert_called_once()
+        sent_amount = mock_send.call_args[0][0]
+        self.assertEqual(sent_amount, Decimal(str(expected_gov)))
 
     @patch("amc.ubi.on_player_profit", new_callable=AsyncMock)
     @patch("amc.ubi.transfer_money", new_callable=AsyncMock)
