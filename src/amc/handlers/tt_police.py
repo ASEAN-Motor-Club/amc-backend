@@ -58,17 +58,31 @@ _race_first_seen: dict[str, float] = {}
 _alert_targets: dict[str, int | None] = {}
 
 
-def _roll_target(live_event: dict) -> int | None:
-    """Roll this run's trigger index from the live payload, or None when
-    the route has no waypoint data (caller falls back to the 60 s gate)."""
+async def _roll_target(game_event, live_event: dict) -> int | None:
+    """Roll this run's trigger index from the run's waypoint count, or
+    None when no waypoint data exists (caller falls back to the 60 s
+    gate).
+
+    Waypoint count comes from the DB race setup when the row has one
+    (deterministic, survives payload quirks); the live payload is the
+    fallback for rows created before a setup link landed.
+    """
     import math
     import random
 
-    try:
-        waypoints = live_event["RaceSetup"]["Route"]["Waypoints"]
-        total = len(waypoints)
-    except (KeyError, TypeError):
-        return None
+    total = None
+    if game_event is not None and game_event.race_setup_id:
+        from amc.models import RaceSetup
+
+        setup = await RaceSetup.objects.aget(pk=game_event.race_setup_id)
+        config = setup.config or {}
+        total = len((config.get("Route", {}) or {}).get("Waypoints") or [])
+    if not total:
+        try:
+            waypoints = live_event["RaceSetup"]["Route"]["Waypoints"]
+            total = len(waypoints)
+        except (KeyError, TypeError):
+            return None
     if total <= 0:
         return None
     frac = random.uniform(RACE_ALERT_MIN_FRACTION, RACE_ALERT_MAX_FRACTION)
@@ -77,12 +91,24 @@ def _roll_target(live_event: dict) -> int | None:
     return min(total - 1, max(1, math.ceil(frac * total)))
 
 
-def _progress_gate(guid: str, live_event: dict) -> bool:
+async def _progress_gate(guid: str, live_event: dict, game_event=None) -> bool:
     """True when the run has reached its rolled trigger (or the 60 s
-    fallback when no waypoint data exists)."""
+    fallback when no waypoint data exists).
+
+    Progress source: the DB section stream (GameEventCharacter
+    .section_index, maintained by ServerPassedRaceSection) merged with
+    the live payload's Players[].SectionIndex — take whichever is
+    further. The DB is the reliable one: the live list payload's
+    SectionIndex has been observed not advancing for some events
+    (prod 2026-10-02: OjiNorthTT-V1 reruns raced to section 49/49 with
+    zero announcements — the live-payload gate never fired), while the
+    section stream provably tracks every crossing.
+    """
     target = _alert_targets.get(guid)
     if target is None:
-        target = _alert_targets.setdefault(guid, _roll_target(live_event))
+        target = _alert_targets.setdefault(
+            guid, await _roll_target(game_event, live_event)
+        )
     if target is None:
         return _arm_or_gate(guid)
     best = -1
@@ -90,6 +116,10 @@ def _progress_gate(guid: str, live_event: dict) -> bool:
         idx = player.get("SectionIndex", -1)
         if isinstance(idx, (int, float)) and idx > best:
             best = int(idx)
+    if game_event is not None and game_event.pk is not None:
+        async for participant in game_event.participants.all():
+            if participant.section_index > best:
+                best = participant.section_index
     return best >= target
 
 
@@ -107,13 +137,16 @@ def _arm_or_gate(guid: str) -> bool:
 
 
 async def ensure_announced(http_client_mod, game_event) -> bool:
-    """True exactly once per event guid — the caller sends the broadcast.
+    """True exactly once per RUN — the caller sends the broadcast.
 
     Shared de-dup between the SSE-hook alert task and the
     refresh_suspect_tags race pass (Yuuka 2026-09-27: the announcement
     must fire even when the hook path loses the race to a worker
-    restart). Race events loop back to state 1 between runs, so a guid
-    is re-armed whenever the event is seen non-racing.
+    restart). The marker is per-run: cancel_pending_race_alert clears
+    it on every non-racing transition (Yuuka 2026-10-02 — reruns of the
+    same guid re-announce and re-grant instead of staying silent until
+    a worker restart), so within one run the marker is what keeps the
+    task + tick paths from double-firing.
     """
     guid = game_event.guid
     lock = _announce_locks.setdefault(guid, asyncio.Lock())
@@ -136,8 +169,10 @@ async def ensure_announced(http_client_mod, game_event) -> bool:
         # Yuuka 2026-09-28: trigger between 50-100% of the route's
         # checkpoints passed (SectionIndex / waypoint count), rolled once
         # per run; falls back to the 60 s gate when the payload carries
-        # no waypoint data.
-        if not _progress_gate(guid, match):
+        # no waypoint data. Progress reads the DB section stream merged
+        # with the live payload (2026-10-02: live-payload SectionIndex
+        # can stall — the DB stream is the racing-truth source).
+        if not await _progress_gate(guid, match, game_event):
             return False
         _announced_race_guids.add(guid)
         return True
@@ -207,10 +242,19 @@ def cancel_pending_race_alert(event_guid: str) -> None:
     cannot fire into the next one, and on re-arm (one timer per guid —
     Yuuka 2026-09-28: stacked sleepers fired 3 announcements on a re-run
     setup, and a Start→Ready→Start toggle announced off the FIRST start).
+
+    Also clears the guid's announce marker: the announcement + star
+    Wanted are per-RUN (Yuuka 2026-10-02: "restarted events would
+    consistently give that wanted star, not just the first run" — the
+    first OjiNorthTT run got the star, every rerun of the same guid was
+    silent until the worker restarted). The old exactly-once-per-guid
+    marker had no other re-arm path: the 30s tick race pass only
+    iterates state-2 rows, so it can never observe a finished run.
     """
     task = _alert_tasks.pop(event_guid, None)
     if task is not None and not task.done():
         task.cancel()
+    _announced_race_guids.discard(event_guid)
     _race_first_seen.pop(event_guid, None)
     _alert_targets.pop(event_guid, None)
 
@@ -224,7 +268,8 @@ async def announce_illegal_race(
     sleeper (Yuuka 2026-09-28 — stacked sleepers from repeated starts
     each fired an announcement; Start→Ready→Start announced off the
     first start). At t+60s the task asks ensure_announced (exactly-once
-    per guid, shared with the 30s suspect-tick race pass) whether the
+    per RUN, shared with the 30s suspect-tick race pass — Yuuka
+    2026-10-02: reruns re-arm via cancel_pending_race_alert) whether the
     event has really raced ≥60s and still lives — a silent return there
     is fine, the tick pass is the restart/timing backstop. All failures
     contained; the task handle is held in a module-level registry so it

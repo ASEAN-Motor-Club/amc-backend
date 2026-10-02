@@ -238,17 +238,97 @@ async def test_alert_silent_below_rolled_fraction(
     assert event.guid in tt_police._alert_targets
 
 
-def test_roll_target_bounds():
+@pytest.mark.asyncio
+async def test_roll_target_bounds():
     for _ in range(200):
-        t = tt_police._roll_target(_racing_payload(45, section_index=0))
+        t = await tt_police._roll_target(None, _racing_payload(45, section_index=0))
         assert t is not None and 1 <= t <= 44
 
 
-def test_roll_target_no_waypoints():
-    assert tt_police._roll_target({"State": 2}) is None
-    assert tt_police._roll_target(
-        {"RaceSetup": {"Route": {"Waypoints": []}}}
+@pytest.mark.asyncio
+async def test_roll_target_no_waypoints():
+    assert await tt_police._roll_target(None, {"State": 2}) is None
+    assert await tt_police._roll_target(
+        None, {"RaceSetup": {"Route": {"Waypoints": []}}}
     ) is None
+
+
+@pytest.mark.asyncio
+@patch("amc.criminals.create_or_refresh_wanted", new_callable=AsyncMock)
+@patch("amc.handlers.tt_police.broadcast_server_message", new_callable=AsyncMock)
+@patch("amc.handlers.tt_police.get_events", new_callable=AsyncMock)
+async def test_rerun_reannounces_and_regrants(
+    get_events_mock, send_mock, grant_mock, db
+):
+    # Yuuka 2026-10-02: the FIRST run of an event guid announced + granted
+    # the star; every rerun of the same guid stayed silent until the worker
+    # restarted — the announce marker was never cleared on finish and the
+    # tick race pass only iterates state-2 rows, so nothing ever observed
+    # the non-racing re-arm. Finish must reset the marker so each run
+    # announces + grants fresh.
+    get_events_mock.return_value = [_racing_payload(5, section_index=4)]
+    event = await sync_to_async(GameEvent.objects.create)(
+        guid="GUIDPOL000000000000000000000E",
+        name="Alert Rerun [TT-350]",
+        state=2,
+    )
+    char, _, _, _ = await _make_character(
+        "RerunRacer", 7, "GUIDPOL0000000000000000000007"
+    )
+    char.last_online = timezone.now()
+    await char.asave()
+    await sync_to_async(event.participants.create)(character=char, rank=0)
+
+    with patch.object(tt_police, "RACE_ALERT_CHECK_INTERVAL", 0):
+        await announce_illegal_race(object(), event)
+        await _flush_tasks()
+    send_mock.assert_awaited_once()
+    grant_mock.assert_awaited_once()
+
+    # Run ends (the 2→1/3 transition hook calls this).
+    tt_police.cancel_pending_race_alert(event.guid)
+    assert event.guid not in tt_police._announced_race_guids
+
+    # Rerun: fresh run row, same guid, racing again.
+    rerun = await sync_to_async(GameEvent.objects.create)(
+        guid="GUIDPOL000000000000000000000E",
+        name="Alert Rerun [TT-350]",
+        state=2,
+    )
+    await sync_to_async(rerun.participants.create)(character=char, rank=0)
+    with patch.object(tt_police, "RACE_ALERT_CHECK_INTERVAL", 0):
+        await announce_illegal_race(object(), rerun)
+        await _flush_tasks()
+    assert send_mock.await_count == 2
+    assert grant_mock.await_count == 2
+
+
+@pytest.mark.asyncio
+@patch("amc.handlers.tt_police.broadcast_server_message", new_callable=AsyncMock)
+@patch("amc.handlers.tt_police.get_events", new_callable=AsyncMock)
+async def test_progress_gate_uses_db_section_stream(
+    get_events_mock, send_mock, db
+):
+    # The live payload's per-player SectionIndex can stall at 0 while the
+    # DB section stream keeps advancing (prod 2026-10-02: full 49/49 runs
+    # never announced). The gate must read the DB progress too.
+    get_events_mock.return_value = [_racing_payload(5, section_index=-1)]
+    event = await sync_to_async(GameEvent.objects.create)(
+        guid="GUIDPOL000000000000000000000E",
+        name="Alert DB Gate [TT-350]",
+        state=2,
+    )
+    char, _, _, _ = await _make_character(
+        "GateRacer", 8, "GUIDPOL0000000000000000000008"
+    )
+    await sync_to_async(event.participants.create)(
+        character=char, rank=0, section_index=4
+    )
+
+    with patch.object(tt_police, "RACE_ALERT_CHECK_INTERVAL", 0):
+        await announce_illegal_race(object(), event)
+        await _flush_tasks()
+    send_mock.assert_awaited_once()
 
 
 def _rot_config(route_name, laps):
