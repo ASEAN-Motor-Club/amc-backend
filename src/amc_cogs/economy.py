@@ -1667,9 +1667,11 @@ The purpose of this transfer is to return funds from the bank to the government 
             cog=self, user_id=interaction.user.id, multiplier=new_mult, old_multiplier=old_mult
         )
         await interaction.followup.send(
-            f"Review the simulation below, then confirm to set the wealth tax "
-            f"multiplier to **{new_mult}x** (currently {old_mult}x).",
-            content=pages[0],
+            content=(
+                f"Review the simulation below, then confirm to set the wealth tax "
+                f"multiplier to **{new_mult}x** (currently {old_mult}x).\n"
+                + pages[0]
+            ),
             ephemeral=True,
         )
         await interaction.followup.send(
