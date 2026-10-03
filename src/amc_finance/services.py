@@ -893,7 +893,7 @@ async def apply_wealth_tax(ctx):
     )
 
     now = timezone.now()
-    wt_mult = float(BankPolicy.get_wealth_tax_multiplier())
+    wt_mult = float(await sync_to_async(BankPolicy.get_wealth_tax_multiplier)())
     accounts = await sync_to_async(
         lambda: list(  # pyrefly: ignore
             Account.objects.filter(
