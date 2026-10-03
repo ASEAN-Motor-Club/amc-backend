@@ -511,11 +511,12 @@ class CriminalsLeaderboardTests(TestCase):
 
         output = ctx.reply.await_args[0][0]
         self.assertIn("Wanted Risk", output)
-        # Kingpin at 20M (test_illicit_cargo anchors): 100k ≈ 7.7%, 500k ≈ 45.1%
+        # Kingpin at 20M (test_illicit_cargo anchors), history mult 1.0:
+        # 10k ≈ 5.0%, 50k ≈ 5.6%, 100k ≈ 7.2%, 500k ≈ 40.8%
         self.assertIn("$10k — <Highlight>5%</>", output)
         self.assertIn("$50k — <Highlight>6%</>", output)
-        self.assertIn("$100k — <Highlight>8%</>", output)
-        self.assertIn("$500k — <Highlight>45%</>", output)
+        self.assertIn("$100k — <Highlight>7%</>", output)
+        self.assertIn("$500k — <Highlight>41%</>", output)
         # 1M is the guarantee cliff — plain Warning tag, no nesting
         self.assertIn("$1M — <Warning>guaranteed</>", output)
         self.assertNotIn("<Highlight><Warning>", output)

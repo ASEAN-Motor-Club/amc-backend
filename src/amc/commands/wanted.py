@@ -7,6 +7,7 @@ from amc.models import Character, PoliceSession, Wanted
 from amc.special_cargo import (
     calculate_boss_cut_ratio,
     calculate_criminal_level,
+    history_wanted_multiplier,
     wanted_trigger_chance,
 )
 
@@ -228,12 +229,14 @@ async def cmd_criminals(ctx: CommandContext):
 
         # Wanted-trigger risk table: the chance that ONE illicit delivery of
         # each size triggers a Wanted level, for the caller's current score
-        # (no cop nearby — attenuation is unknown at /criminals time).
+        # (no cop nearby — attenuation is unknown at /criminals time) and
+        # the caller's RECENT delivery history (spree/clean multiplier).
         msg += "\n<Title>Wanted Risk</>\n"
         msg += (
             "<Secondary>Chance per illicit delivery, no cop nearby"
-            " (within 1km):</>\n"
+            " (within 1km), recent history included:</>\n"
         )
+        history_mult = await history_wanted_multiplier(me)
         for pay, label in (
             (10_000, "$10k"),
             (50_000, "$50k"),
@@ -243,7 +246,9 @@ async def cmd_criminals(ctx: CommandContext):
             (750_000, "$750k"),
             (1_000_000, "$1M"),
         ):
-            chance = wanted_trigger_chance(pay, my_score, None)
+            chance = wanted_trigger_chance(
+                pay, my_score, None, history_multiplier=history_mult
+            )
             if chance >= 1.0:
                 risk = "<Warning>guaranteed</>"
             else:
