@@ -1014,15 +1014,20 @@ def _underground_description(tt_class, checkpoints: int) -> str:
 async def _mirror_posted_event(
     scheduled_event, tt_class, event_name: str, config: dict
 ) -> ScheduledEvent:
-    """Mirror a posted underground instance as its own ScheduledEvent row.
+    """Mirror the posted underground instance as THE window's one SE row.
 
-    The posted setup is the RE-SERIALIZED config (Location→Translation
-    waypoint rewrite), which hashes differently from the template's
-    original RaceSetup — mirror the setup row the hook will actually
-    resolve (same calculate_hash), then the SE link lands on this mirror
-    (newest start_time among SEs on that setup). Carries the rolled
-    class, the requirements text, and is_rotation_instance=True so it
-    can never become a rotation candidate itself.
+    Yuuka 2026-10-03: ONE mirror per daily reset window, window-bounded —
+    the old shape (a fresh row per post with a +14d window) left every
+    posted instance active for two weeks (prod SE 73/74) and made each
+    /setup_event pile a NEW active SE on top of the day's post (prod SE
+    75/76 duplicates). Reuse the current window's mirror when one exists
+    (update name/class/setup/description), else create it bounded to
+    [_rotation_reset(now), +1 day) — mirrors self-expire at the next
+    08:00 +07 reset, in step with the daily template re-window.
+
+    The mirror-setup-hash trap still applies — link the RaceSetup row the
+    hook will actually resolve (the POSTED, re-serialized config), not
+    the template's stored row.
     """
     from amc.models import RaceSetup
 
@@ -1035,18 +1040,52 @@ async def _mirror_posted_event(
     )
     checkpoints = len((config.get("Route", {}).get("Waypoints")) or [])
     description = _underground_description(tt_class, checkpoints)
-    return await ScheduledEvent.objects.acreate(
-        name=event_name,
-        start_time=timezone.now(),
-        end_time=timezone.now() + timedelta(days=14),
-        race_setup=race_setup,
-        championship=await _underground_championship(),
-        description=description,
-        description_in_game=description,
-        time_trial=scheduled_event.time_trial,
-        tt_class=tt_class,
-        is_rotation_instance=True,
+    championship = await _underground_championship()
+    window_start = _rotation_reset(timezone.now())
+    window_end = window_start + timedelta(days=1)
+    mirror = (
+        await ScheduledEvent.objects.filter(
+            championship=championship,
+            is_rotation_instance=True,
+            start_time__gte=window_start,
+            start_time__lt=window_end,
+        )
+        .afirst()
     )
+    if mirror is None:
+        return await ScheduledEvent.objects.acreate(
+            name=event_name,
+            start_time=window_start,
+            end_time=window_end,
+            race_setup=race_setup,
+            championship=championship,
+            description=description,
+            description_in_game=description,
+            time_trial=scheduled_event.time_trial,
+            tt_class=tt_class,
+            is_rotation_instance=True,
+        )
+    mirror.name = event_name
+    mirror.race_setup = race_setup
+    mirror.tt_class = tt_class
+    mirror.description = description
+    mirror.description_in_game = description
+    mirror.time_trial = scheduled_event.time_trial
+    mirror.start_time = window_start
+    mirror.end_time = window_end
+    await mirror.asave(
+        update_fields=[
+            "name",
+            "race_setup",
+            "tt_class",
+            "description",
+            "description_in_game",
+            "time_trial",
+            "start_time",
+            "end_time",
+        ]
+    )
+    return mirror
 
 
 @skip_if_running

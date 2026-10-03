@@ -418,7 +418,7 @@ async def test_setup_event_mirrors_rotation_instance(db):
     """/setup_event posts mirror like the auto-poster (prod 2026-10-02:
     /events sat empty because manual posts never created the
     is_rotation_instance row the listing reads)."""
-    from amc.events import setup_event
+    from amc.events import setup_event, _rotation_reset
     from amc.models import ScheduledEvent as SE
 
     now = timezone.now()
@@ -435,13 +435,20 @@ async def test_setup_event_mirrors_rotation_instance(db):
     assert mirror.tt_class_id is not None
     assert mirror.description_in_game  # requirements text present
     assert mirror.name == client.posts[0]["EventName"]
+    # Window-bounded to the daily reset (Yuuka 2026-10-03: mirrors must
+    # self-expire at the next 08:00 +07 reset, NOT +14 days).
+    expected_start = _rotation_reset(now)
+    assert mirror.start_time == expected_start
+    assert mirror.end_time == expected_start + timedelta(days=1)
 
 
 @pytest.mark.asyncio
-async def test_setup_event_mirrors_each_instance(db):
-    """Mirrors are per posted instance: two /setup_event posts -> two
-    mirror rows, each named after its own posted event."""
-    from amc.events import setup_event
+async def test_setup_event_reuses_one_window_mirror(db):
+    """ONE mirror per daily window (Yuuka 2026-10-03): two /setup_event
+    posts in the same window REUSE the mirror — the row updates to the
+    latest posted event instead of piling a new active SE on top (prod
+    SE 75/76 duplicates)."""
+    from amc.events import setup_event, _rotation_reset
     from amc.models import ScheduledEvent as SE
 
     now = timezone.now()
@@ -452,14 +459,14 @@ async def test_setup_event_mirrors_each_instance(db):
     client = _SetupClient({"CharacterGuid": "C" * 32})
     await setup_event(now, 42, template, client)
     await setup_event(now, 42, template, client)
-    names = [p["EventName"] for p in client.posts]
-    mirror_names = [
-        r.name
-        async for r in SE.objects.filter(is_rotation_instance=True).exclude(
-            pk=template.pk
-        )
-    ]
-    assert sorted(mirror_names) == sorted(names)
+    mirrors = SE.objects.filter(is_rotation_instance=True).exclude(pk=template.pk)
+    rows = [r async for r in mirrors]
+    assert len(rows) == 1, f"expected ONE window mirror, got {[r.name for r in rows]}"
+    # The reused mirror carries the LATEST posted event.
+    assert rows[0].name == client.posts[-1]["EventName"]
+    expected_start = _rotation_reset(now)
+    assert rows[0].start_time == expected_start
+    assert rows[0].end_time == expected_start + timedelta(days=1)
 
 
 @pytest.mark.asyncio
