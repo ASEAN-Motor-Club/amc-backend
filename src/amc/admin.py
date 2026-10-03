@@ -377,10 +377,15 @@ class TTClassAdmin(admin.ModelAdmin):
         from django import forms
 
         if db_field.name == "allowed_vehicle_types":
-            kwargs["required"] = False
-            kwargs["form_class"] = forms.MultipleChoiceField
-            kwargs["choices"] = TT_VEHICLE_TYPE_CHOICES
-            kwargs["widget"] = forms.CheckboxSelectMultiple
+            # ArrayField.formfield() injects base_field/size kwargs its
+            # super().formfield() chain rejects for MultipleChoiceField
+            # (TypeError: unexpected keyword 'base_field') — build the
+            # field directly instead of passing a form_class through.
+            return forms.MultipleChoiceField(
+                required=False,
+                choices=TT_VEHICLE_TYPE_CHOICES,
+                widget=forms.CheckboxSelectMultiple,
+            )
         return super().formfield_for_dbfield(db_field, request, **kwargs)
 
 
