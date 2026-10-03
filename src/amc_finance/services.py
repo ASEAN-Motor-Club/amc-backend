@@ -631,6 +631,7 @@ def get_crossover_accounts():
     - net_hourly_loss  (tax - interest)
     """
     now = timezone.now()
+    wt_mult = float(BankPolicy.get_wealth_tax_multiplier())
     accounts = list(
         Account.objects.filter(
             account_type=Account.AccountType.LIABILITY,
@@ -649,7 +650,9 @@ def get_crossover_accounts():
         else:
             hours_offline = (now - last_online_ts).total_seconds() / 3600
 
-        tax = calculate_wealth_tax(int(account.balance), hours_offline)
+        tax = int(
+            calculate_wealth_tax(int(account.balance), hours_offline) * wt_mult
+        )
         interest = calculate_hourly_interest(int(account.balance), hours_offline)
 
         if tax > interest:
@@ -890,6 +893,7 @@ async def apply_wealth_tax(ctx):
     )
 
     now = timezone.now()
+    wt_mult = float(await sync_to_async(BankPolicy.get_wealth_tax_multiplier)())
     accounts = await sync_to_async(
         lambda: list(  # pyrefly: ignore
             Account.objects.filter(
@@ -910,7 +914,9 @@ async def apply_wealth_tax(ctx):
         else:
             hours_offline = (now - last_online_ts).total_seconds() / 3600
 
-        tax = calculate_wealth_tax(int(account.balance), hours_offline)
+        tax = int(
+            calculate_wealth_tax(int(account.balance), hours_offline) * wt_mult
+        )
         if tax > 0 and tax <= account.balance - WEALTH_TAX_EXEMPT:
             entries_to_create.append((account, Decimal(tax)))
 

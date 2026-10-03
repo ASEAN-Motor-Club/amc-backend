@@ -1,4 +1,5 @@
 import asyncio
+import math
 import re
 import logging
 from io import BytesIO
@@ -41,6 +42,13 @@ from amc_finance.services import (
     make_treasury_bank_deposit,
     make_treasury_bank_withdrawal,
     get_crossover_accounts,
+    WEALTH_TAX_EXEMPT,
+    WEALTH_TAX_BRACKETS,
+    wealth_tax_hourly_rate,
+    ONLINE_INTEREST_MULTIPLIER,
+    INTEREST_DECAY_K,
+    INTEREST_THRESHOLD,
+    INTEREST_SCALE,
 )
 from amc_finance.loans import (
     get_player_bank_balance,
@@ -153,6 +161,183 @@ def _set_gov_salary_multiplier(multiplier):
     policy.gov_salary_multiplier = multiplier
     policy.save(update_fields=["gov_salary_multiplier"])
     return policy
+
+
+def _set_wealth_tax_multiplier(multiplier):
+    """Persist the wealth tax multiplier on the BankPolicy singleton."""
+    policy = BankPolicy.load()
+    policy.wealth_tax_multiplier = multiplier
+    policy.save(update_fields=["wealth_tax_multiplier"])
+    return policy
+
+
+# Balances and offline durations used by the /set_wealth_tax preview tables.
+WEALTH_TAX_PREVIEW_BALANCES = [5_000_000, 20_000_000, 50_000_000, 100_000_000, 250_000_000, 500_000_000]
+WEALTH_TAX_PREVIEW_DAYS = [1, 7, 30, 90]
+
+
+def _fmt_money(v: float) -> str:
+    if abs(v) >= 100_000:
+        return f"{v / 1_000_000:.2f}M"
+    if abs(v) >= 10_000:
+        return f"{v / 1_000:.1f}k"
+    return f"{v:,.0f}"
+
+
+def _wt_hourly_total(balance: int, hours_offline: float) -> float:
+    """Marginal-bracket hourly wealth tax for a balance (pre-multiplier)."""
+    if balance <= WEALTH_TAX_EXEMPT or hours_offline < 1:
+        return 0.0
+    tax = 0.0
+    prev = WEALTH_TAX_EXEMPT
+    for _floor, ceiling, k in WEALTH_TAX_BRACKETS:
+        if balance <= prev:
+            break
+        taxable = min(balance, ceiling) - prev
+        if taxable > 0:
+            tax += taxable * wealth_tax_hourly_rate(k, hours_offline)
+        prev = ceiling
+    return tax
+
+
+def _int_hourly(balance: int, hours_offline: float, daily_rate: float) -> float:
+    """Hourly interest for a balance at a given offline duration."""
+    if balance <= 0 or hours_offline <= 0:
+        return 0.0
+    rate = daily_rate
+    if hours_offline <= 1:
+        rate *= ONLINE_INTEREST_MULTIPLIER
+    else:
+        rate *= 1.0 / (1.0 + INTEREST_DECAY_K * math.log10(hours_offline))
+    excess = max(0, balance - INTEREST_THRESHOLD)
+    return balance * rate * math.exp(-excess / INTEREST_SCALE) / 24
+
+
+def _wt_interest_crossover_hours(balance: int, daily_rate: float) -> float | None:
+    """Smallest hours-offline where hourly wealth tax exceeds hourly interest.
+
+    None = interest wins at every simulated horizon (1h-1yr).
+    """
+    horizon = 365 * 24.0
+    if _wt_hourly_total(balance, horizon) <= _int_hourly(balance, horizon, daily_rate):
+        return None
+    lo, hi = 1.0, horizon
+    if _wt_hourly_total(balance, lo) > _int_hourly(balance, lo, daily_rate):
+        return lo
+    for _ in range(60):
+        mid = (lo + hi) / 2
+        if _wt_hourly_total(balance, mid) > _int_hourly(balance, mid, daily_rate):
+            hi = mid
+        else:
+            lo = mid
+    return hi
+
+
+def _wealth_tax_preview_pages(
+    multiplier: Decimal, interest_rate: Decimal, current_multiplier: Decimal
+) -> list[str]:
+    """Build the simulated-outcome tables shown/confirmed by /set_wealth_tax.
+
+    Returns 1-2 monospace code-block pages sized for Discord messages.
+    `current_multiplier` is passed in by the caller (DB read stays outside).
+    """
+    mult = float(multiplier)
+    daily_rate = float(interest_rate)
+
+    lines = [
+        (
+            "**Simulated daily outcomes** (wealth tax at "
+            f"{multiplier}x, interest at {interest_rate:.2%}/day)"
+        ),
+        "Cell = `wealth tax | interest` per day at that offline age:",
+        "```",
+        f"{'Balance':>10} | " + " | ".join(f"{d:>3}d" for d in WEALTH_TAX_PREVIEW_DAYS),
+        "-|-".join(["-" * 10] + ["-" * 11] * len(WEALTH_TAX_PREVIEW_DAYS)),
+    ]
+    for balance in WEALTH_TAX_PREVIEW_BALANCES:
+        cells = []
+        for days in WEALTH_TAX_PREVIEW_DAYS:
+            t = days * 24.0
+            wt = _wt_hourly_total(balance, t) * mult * 24
+            it = _int_hourly(balance, t, daily_rate) * 24
+            cells.append(f"{_fmt_money(wt):>5}|{_fmt_money(it):>5}")
+        lines.append(f"{balance / 1_000_000:>7.0f}M | " + " | ".join(cells))
+    lines.append("```")
+    page1 = "\n".join(lines)
+
+    crossover_lines = [
+        "**Offline time until wealth tax > interest** (at the new multiplier):",
+        "```",
+        f"{'Balance':>10} | crossover",
+        "-".join(["-" * 10, "-" * 22]),
+    ]
+    for balance in WEALTH_TAX_PREVIEW_BALANCES:
+        xh = _wt_interest_crossover_hours(balance, daily_rate)
+        if xh is None:
+            label = "never (interest always wins)"
+        else:
+            label = f"{xh / 24:,.1f} days" if xh >= 24 else f"{xh:,.1f} hours"
+        crossover_lines.append(f"{balance / 1_000_000:>7.0f}M | {label}")
+    crossover_lines.append("```")
+    crossover_lines.append(
+        f"Current multiplier: **{current_multiplier}x** — "
+        "confirm below to apply the new one."
+    )
+    page2 = "\n".join(crossover_lines)
+
+    return [page1, page2]
+
+
+class WealthTaxConfirmView(discord.ui.View):
+    """Confirmation button for /set_wealth_tax. Only the invoker can confirm."""
+
+    def __init__(self, cog, user_id: int, multiplier: Decimal, old_multiplier: Decimal):
+        super().__init__(timeout=120)
+        self.cog = cog
+        self.user_id = user_id
+        self.multiplier = multiplier
+        self.old_multiplier = old_multiplier
+        self.confirmed = False
+
+    async def interaction_check(self, interaction) -> bool:
+        if interaction.user.id != self.user_id:
+            await interaction.response.send_message(
+                "Only the command invoker can confirm.", ephemeral=True
+            )
+            return False
+        return True
+
+    @discord.ui.button(label="Confirm", style=discord.ButtonStyle.success)
+    async def confirm(self, interaction, button: discord.ui.Button):
+        button.disabled = True
+        await interaction.response.edit_message(view=self)
+        if self.confirmed:
+            return
+        self.confirmed = True
+        self.stop()
+
+        await sync_to_async(_set_wealth_tax_multiplier)(self.multiplier)
+
+        # Public (non-ephemeral) message with the same tables
+        pages = await sync_to_async(_wealth_tax_preview_pages)(
+            self.multiplier,
+            BankPolicy.get_daily_interest_rate(),
+            self.old_multiplier,
+        )
+        treasury_channel_id = getattr(
+            settings, "DISCORD_TREASURY_CHANNEL_ID", 1402660537619320872
+        )
+        treasury_channel = self.cog.bot.get_channel(treasury_channel_id)
+        if treasury_channel:
+            await treasury_channel.send(
+                f"⚖️ Wealth tax multiplier set to **{self.multiplier}x** "
+                f"(was {self.old_multiplier}x) by {interaction.user.mention}"
+            )
+            for page in pages:
+                await treasury_channel.send(page)
+
+    async def on_timeout(self):
+        self.confirmed = True
 
 
 class EconomyCog(commands.Cog):
@@ -1447,6 +1632,46 @@ The purpose of this transfer is to return funds from the bank to the government 
             f"Government/Police salary multiplier set to **{new_mult}x UBI** "
             f"(was {old_mult}x).",
             ephemeral=True,
+        )
+
+    @app_commands.command(
+        name="set_wealth_tax",
+        description="Set the wealth tax multiplier, with simulation preview (Admin / Finance Minister)",
+    )
+    @app_commands.checks.has_any_role(
+        settings.DISCORD_ADMIN_ROLE_ID, settings.DISCORD_FINANCE_MINISTER_ROLE_ID
+    )
+    @app_commands.describe(
+        multiplier="Wealth tax multiplier (e.g. 1 = normal brackets, 0 disables, 2 doubles; 0-10)"
+    )
+    async def set_wealth_tax_command(self, interaction, multiplier: float):
+        await interaction.response.defer(ephemeral=True)
+
+        if not (Decimal(0) <= Decimal(str(multiplier)) <= Decimal(10)):
+            await interaction.followup.send(
+                "Multiplier must be between 0 and 10.", ephemeral=True
+            )
+            return
+
+        new_mult = Decimal(str(multiplier)).quantize(Decimal("0.001"))
+        old_mult = await sync_to_async(BankPolicy.get_wealth_tax_multiplier)()
+
+        pages = await sync_to_async(_wealth_tax_preview_pages)(
+            new_mult,
+            BankPolicy.get_daily_interest_rate(),
+            old_mult,
+        )
+        view = WealthTaxConfirmView(
+            cog=self, user_id=interaction.user.id, multiplier=new_mult, old_multiplier=old_mult
+        )
+        await interaction.followup.send(
+            f"Review the simulation below, then confirm to set the wealth tax "
+            f"multiplier to **{new_mult}x** (currently {old_mult}x).",
+            content=pages[0],
+            ephemeral=True,
+        )
+        await interaction.followup.send(
+            content=pages[1], view=view, ephemeral=True
         )
 
     @commands.Cog.listener()

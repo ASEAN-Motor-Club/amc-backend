@@ -129,3 +129,93 @@ class GovSalaryMultiplierTestCase(TestCase):
         await policy.asave(update_fields=["gov_salary_multiplier"])
         mult = await sync_to_async(BankPolicy.get_gov_salary_multiplier)()
         self.assertEqual(mult, Decimal("3.5"))
+
+
+class WealthTaxMultiplierTestCase(TestCase):
+    async def test_default_multiplier_is_1(self):
+        policy = await sync_to_async(BankPolicy.load)()
+        self.assertEqual(policy.wealth_tax_multiplier, Decimal("1.000"))
+
+    async def test_set_and_read_back(self):
+        policy = await sync_to_async(BankPolicy.load)()
+        policy.wealth_tax_multiplier = Decimal("0.5")
+        await policy.asave(update_fields=["wealth_tax_multiplier"])
+        mult = await sync_to_async(BankPolicy.get_wealth_tax_multiplier)()
+        self.assertEqual(mult, Decimal("0.5"))
+
+    async def test_apply_wealth_tax_multiplier_scales_tax(self):
+        """Cron tax = bracket tax x BankPolicy.wealth_tax_multiplier."""
+        from amc.factories import CharacterFactory
+        from amc_finance.models import Account, JournalEntry
+        from amc_finance.services import apply_wealth_tax, calculate_wealth_tax
+
+        character = await sync_to_async(CharacterFactory)()
+        character.last_online = timezone.now() - timedelta(days=60)  # pyrefly: ignore
+        await character.asave(update_fields=["last_online"])
+
+        balance = 5_000_000
+        account = await Account.objects.acreate(
+            account_type=Account.AccountType.LIABILITY,
+            book=Account.Book.BANK,
+            character=character,
+            balance=balance,
+        )
+
+        policy = await sync_to_async(BankPolicy.load)()
+        policy.wealth_tax_multiplier = Decimal("0.5")
+        await policy.asave(update_fields=["wealth_tax_multiplier"])
+
+        await apply_wealth_tax({})
+        await account.arefresh_from_db()
+
+        hours_offline = 60 * 24.0
+        expected = int(calculate_wealth_tax(balance, hours_offline) * 0.5)
+        self.assertEqual(account.balance, balance - expected)
+
+        self.assertEqual(
+            await JournalEntry.objects.filter(description="Wealth Tax").acount(), 1
+        )
+
+    async def test_apply_wealth_tax_zero_multiplier_disables(self):
+        from amc.factories import CharacterFactory
+        from amc_finance.models import Account, JournalEntry
+        from amc_finance.services import apply_wealth_tax
+
+        character = await sync_to_async(CharacterFactory)()
+        character.last_online = timezone.now() - timedelta(days=60)  # pyrefly: ignore
+        await character.asave(update_fields=["last_online"])
+
+        await Account.objects.acreate(
+            account_type=Account.AccountType.LIABILITY,
+            book=Account.Book.BANK,
+            character=character,
+            balance=5_000_000,
+        )
+
+        policy = await sync_to_async(BankPolicy.load)()
+        policy.wealth_tax_multiplier = Decimal("0.000")
+        await policy.asave(update_fields=["wealth_tax_multiplier"])
+
+        await apply_wealth_tax({})
+        self.assertEqual(
+            await JournalEntry.objects.filter(description="Wealth Tax").acount(), 0
+        )
+
+    async def test_preview_pages_shape(self):
+        from amc_cogs.economy import (
+            WEALTH_TAX_PREVIEW_BALANCES,
+            _wt_interest_crossover_hours,
+            _wealth_tax_preview_pages,
+        )
+
+        pages = _wealth_tax_preview_pages(
+            Decimal("1.000"), Decimal("0.022"), Decimal("1.000")
+        )
+        self.assertEqual(len(pages), 2)
+        self.assertIn("20M", pages[0])
+        self.assertIn("crossover", pages[1])
+        self.assertLessEqual(max(len(p) for p in pages), 1900)
+        self.assertEqual(len(WEALTH_TAX_PREVIEW_BALANCES), 6)
+
+        # Below the low bracket, interest never loses to wealth tax
+        self.assertIsNone(_wt_interest_crossover_hours(5_000_000, 0.022))
