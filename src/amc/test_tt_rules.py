@@ -2,6 +2,8 @@
 
 from unittest.mock import patch
 
+from django import forms
+
 from amc.models import TTClass
 from amc.tt_rules import HP_BUFFER, evaluate_tt_parts
 
@@ -65,3 +67,20 @@ def test_default_vehicle_types_are_small_pickup():
 
 def test_buffer_constant_is_five():
     assert HP_BUFFER == 5
+
+
+def test_ttclass_admin_formfield_is_multiplechoice():
+    """Regression: ArrayField.formfield() injects base_field/size kwargs that
+    MultipleChoiceField rejects — the TTClass change page must render."""
+    import django
+    from django.contrib import admin as dj_admin
+    from amc.admin import TTClassAdmin
+
+    django.setup()
+    site = dj_admin.site
+    a = TTClassAdmin(TTClass, site)
+    f = TTClass._meta.get_field("allowed_vehicle_types")
+    ff = a.formfield_for_dbfield(f, None)
+    assert isinstance(ff, forms.MultipleChoiceField)
+    assert not ff.required
+    assert len(ff.choices) == 12
