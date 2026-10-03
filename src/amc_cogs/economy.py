@@ -1,5 +1,4 @@
 import asyncio
-import math
 import re
 import logging
 from io import BytesIO
@@ -42,13 +41,8 @@ from amc_finance.services import (
     make_treasury_bank_deposit,
     make_treasury_bank_withdrawal,
     get_crossover_accounts,
-    WEALTH_TAX_EXEMPT,
-    WEALTH_TAX_BRACKETS,
-    wealth_tax_hourly_rate,
-    ONLINE_INTEREST_MULTIPLIER,
-    INTEREST_DECAY_K,
-    INTEREST_THRESHOLD,
-    INTEREST_SCALE,
+    calculate_wealth_tax,
+    calculate_hourly_interest,
 )
 from amc_finance.loans import (
     get_player_bank_balance,
@@ -186,47 +180,38 @@ def _fmt_money(v: float) -> str:
 
 def _wt_hourly_total(balance: int, hours_offline: float) -> float:
     """Marginal-bracket hourly wealth tax for a balance (pre-multiplier)."""
-    if balance <= WEALTH_TAX_EXEMPT or hours_offline < 1:
-        return 0.0
-    tax = 0.0
-    prev = WEALTH_TAX_EXEMPT
-    for _floor, ceiling, k in WEALTH_TAX_BRACKETS:
-        if balance <= prev:
-            break
-        taxable = min(balance, ceiling) - prev
-        if taxable > 0:
-            tax += taxable * wealth_tax_hourly_rate(k, hours_offline)
-        prev = ceiling
-    return tax
+    return calculate_wealth_tax(balance, hours_offline)
 
 
 def _int_hourly(balance: int, hours_offline: float, daily_rate: float) -> float:
     """Hourly interest for a balance at a given offline duration."""
-    if balance <= 0 or hours_offline <= 0:
-        return 0.0
-    rate = daily_rate
-    if hours_offline <= 1:
-        rate *= ONLINE_INTEREST_MULTIPLIER
-    else:
-        rate *= 1.0 / (1.0 + INTEREST_DECAY_K * math.log10(hours_offline))
-    excess = max(0, balance - INTEREST_THRESHOLD)
-    return balance * rate * math.exp(-excess / INTEREST_SCALE) / 24
+    return calculate_hourly_interest(balance, hours_offline, daily_rate)
 
 
-def _wt_interest_crossover_hours(balance: int, daily_rate: float) -> float | None:
+def _wt_interest_crossover_hours(
+    balance: int, daily_rate: float, multiplier: float = 1.0
+) -> float | None:
     """Smallest hours-offline where hourly wealth tax exceeds hourly interest.
 
+    `multiplier` scales the tax side (the value being proposed). Multiplier 0
+    short-circuits: tax never exceeds interest.
     None = interest wins at every simulated horizon (1h-1yr).
     """
+    if multiplier <= 0:
+        return None
     horizon = 365 * 24.0
-    if _wt_hourly_total(balance, horizon) <= _int_hourly(balance, horizon, daily_rate):
+    if _wt_hourly_total(balance, horizon) * multiplier <= _int_hourly(
+        balance, horizon, daily_rate
+    ):
         return None
     lo, hi = 1.0, horizon
-    if _wt_hourly_total(balance, lo) > _int_hourly(balance, lo, daily_rate):
+    if _wt_hourly_total(balance, lo) * multiplier > _int_hourly(balance, lo, daily_rate):
         return lo
     for _ in range(60):
         mid = (lo + hi) / 2
-        if _wt_hourly_total(balance, mid) > _int_hourly(balance, mid, daily_rate):
+        if _wt_hourly_total(balance, mid) * multiplier > _int_hourly(
+            balance, mid, daily_rate
+        ):
             hi = mid
         else:
             lo = mid
@@ -272,7 +257,7 @@ def _wealth_tax_preview_pages(
         "-".join(["-" * 10, "-" * 22]),
     ]
     for balance in WEALTH_TAX_PREVIEW_BALANCES:
-        xh = _wt_interest_crossover_hours(balance, daily_rate)
+        xh = _wt_interest_crossover_hours(balance, daily_rate, mult)
         if xh is None:
             label = "never (interest always wins)"
         else:
@@ -325,6 +310,15 @@ class WealthTaxConfirmView(discord.ui.View):
             interest_rate,
             self.old_multiplier,
         )
+        # Non-ephemeral reply in the command channel with the same tables
+        await interaction.followup.send(
+            content=f"⚖️ Wealth tax multiplier set to **{self.multiplier}x** "
+            f"(was {self.old_multiplier}x).",
+        )
+        for page in pages:
+            await interaction.followup.send(content=page)
+
+        # Announcement + tables in the treasury channel
         treasury_channel_id = getattr(
             settings, "DISCORD_TREASURY_CHANNEL_ID", 1402660537619320872
         )
@@ -336,9 +330,14 @@ class WealthTaxConfirmView(discord.ui.View):
             )
             for page in pages:
                 await treasury_channel.send(page)
+        else:
+            logging.getLogger(__name__).warning(
+                "Treasury channel %s not found; wealth tax tables not posted",
+                treasury_channel_id,
+            )
 
     async def on_timeout(self):
-        self.confirmed = True
+        self.stop()
 
 
 class EconomyCog(commands.Cog):

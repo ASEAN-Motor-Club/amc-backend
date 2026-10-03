@@ -219,3 +219,11 @@ class WealthTaxMultiplierTestCase(TestCase):
 
         # Below the low bracket, interest never loses to wealth tax
         self.assertIsNone(_wt_interest_crossover_hours(5_000_000, 0.022))
+
+        # Higher multiplier => earlier crossover; 0 => never
+        self.assertIsNone(_wt_interest_crossover_hours(50_000_000, 0.022, 0.0))
+        c1 = _wt_interest_crossover_hours(50_000_000, 0.022, 1.0)
+        c5 = _wt_interest_crossover_hours(50_000_000, 0.022, 5.0)
+        self.assertIsNotNone(c1)
+        self.assertIsNotNone(c5)
+        self.assertLess(c5, c1)
