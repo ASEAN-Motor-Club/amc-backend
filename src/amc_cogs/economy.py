@@ -319,9 +319,10 @@ class WealthTaxConfirmView(discord.ui.View):
         await sync_to_async(_set_wealth_tax_multiplier)(self.multiplier)
 
         # Public (non-ephemeral) message with the same tables
+        interest_rate = await sync_to_async(BankPolicy.get_daily_interest_rate)()
         pages = await sync_to_async(_wealth_tax_preview_pages)(
             self.multiplier,
-            BankPolicy.get_daily_interest_rate(),
+            interest_rate,
             self.old_multiplier,
         )
         treasury_channel_id = getattr(
@@ -1656,9 +1657,10 @@ The purpose of this transfer is to return funds from the bank to the government 
         new_mult = Decimal(str(multiplier)).quantize(Decimal("0.001"))
         old_mult = await sync_to_async(BankPolicy.get_wealth_tax_multiplier)()
 
+        interest_rate = await sync_to_async(BankPolicy.get_daily_interest_rate)()
         pages = await sync_to_async(_wealth_tax_preview_pages)(
             new_mult,
-            BankPolicy.get_daily_interest_rate(),
+            interest_rate,
             old_mult,
         )
         view = WealthTaxConfirmView(
