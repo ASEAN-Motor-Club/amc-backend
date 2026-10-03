@@ -343,7 +343,10 @@ async def _make_setup(route_name, laps):
 
 @pytest.mark.asyncio
 @patch("amc.events.announce", new_callable=AsyncMock)
-async def test_rotation_posts_zero_lap_events_only(announce_mock, db):
+async def test_rotation_windows_zero_lap_events_only(announce_mock, db):
+    """B2 rotation (Yuuka 2026-10-03): the tick cycles SE WINDOWS, never
+    posts. Sprint (0-lap) templates are pool members; multi-lap setups
+    are excluded."""
     now = timezone.now()
     await sync_to_async(ScheduledEvent.objects.all().delete)()
     await sync_to_async(RaceSetup.objects.all().delete)()
@@ -359,7 +362,7 @@ async def test_rotation_posts_zero_lap_events_only(announce_mock, db):
             name=name,
             race_setup=setup,
             time_trial=True,
-            tt_class=None,  # class rolls per post now (Yuuka 2026-09-29)
+            tt_class=None,  # class is per-window state (pinned by the tick)
             championship=champ,
             start_time=now - timedelta(hours=1),
             end_time=now + timedelta(hours=1),
@@ -367,7 +370,13 @@ async def test_rotation_posts_zero_lap_events_only(announce_mock, db):
     mod = FakeModClient()
     await post_random_events({"http_client_mod": mod, "http_client": AsyncMock()})
 
-    posted = [p["EventName"] for p in mod.posts]
-    assert [
-        re.sub(r"\s*(\(\d{3}\)\s*)?(\[TT-\d+\]|-\s*IR\s*-\s*\d+)$", "", n) for n in posted
-    ] == ["Sprint SE"]
+    # NO event was POSTed to the game — the rotation only re-windows SEs.
+    assert mod.posts == []
+    # The 0-lap SE is the one that got windowed (class pinned, description
+    # written); the multi-lap SE was closed.
+    sprint_se = await ScheduledEvent.objects.aget(name="Sprint SE")
+    circuit_se = await ScheduledEvent.objects.aget(name="Circuit SE")
+    assert sprint_se.tt_class_id is not None
+    assert sprint_se.description_in_game
+    assert sprint_se.end_time > now
+    assert circuit_se.end_time is not None and circuit_se.end_time <= now

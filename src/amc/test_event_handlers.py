@@ -136,8 +136,9 @@ class UpsertGameEventTests(TestCase):
         event_data = _make_event_data()
         await _upsert_game_event(event_data)
 
-        race_setup = await RaceSetup.objects.afirst()
-        self.assertIsNotNone(race_setup)
+        race_setup = await RaceSetup.objects.aget(
+            config__Route__RouteName="Test Route"
+        )
         self.assertEqual(race_setup.config["Route"]["RouteName"], "Test Route")
         self.assertEqual(race_setup.config["NumLaps"], 0)
 
@@ -1525,10 +1526,10 @@ class ScheduledEventAssociationTests(TestCase):
 
         self.assertIsNone(game_event.scheduled_event_id)
 
-    async def test_auto_event_links_latest_se_after_window(self):
-        # Auto-posted event (no owner) outside any window: the daily 08:30
-        # rotation picks from the whole SE pool, so link the setup's most
-        # recent SE (Yuuka 2026-09-30) instead of orphaning it.
+    async def test_event_outside_window_stays_unlinked(self):
+        # B2 (Yuuka 2026-10-03): SE association is WINDOW MATCH ONLY — the
+        # owner-less out-of-window fallback is removed (no auto-poster
+        # exists anymore). A posted event outside every window gets no SE.
         scheduled_event = await self._make_scheduled_event(
             time_trial=False, started_minutes_ago=120, ends_in_minutes=-60
         )
@@ -1536,7 +1537,8 @@ class ScheduledEventAssociationTests(TestCase):
         game_event, _ = await _upsert_game_event(event_data)
         await game_event.arefresh_from_db()
 
-        self.assertEqual(game_event.scheduled_event_id, scheduled_event.id)
+        self.assertIsNone(game_event.scheduled_event_id)
+        self.assertIsNotNone(scheduled_event.id)  # sanity: the SE exists
 
 
 # ---------------------------------------------------------------------------

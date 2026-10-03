@@ -294,23 +294,17 @@ class WorkerSettings:
         cron(snapshot_storages, hour=None, minute=7, second=0),  # hourly storage snapshot
         # pyrefly: ignore [bad-argument-type]
         cron(send_rescue_reminders, second=set(range(0, 60, 15))),
-        # post_random_events (auto-TT posting) removed 2026-09-05 (freeman):
-        # pivoting to user-driven event setup via commands.
-        # Revived 2026-09-22: pool now filters ScheduledEvents to their live
-        # [start_time, end_time] window (expired-window events would land
-        # with scheduled_event=None and never show in /events), and the
-        # in-game announce fires only when at least one POST /events
-        # actually reached the game server (the old version announced
-        # unconditionally, producing "TT is up!" with no events).
-        # Interval: DAILY at 08:00:15 server-local (+07) (Yuuka 2026-09-28:
-        # align the event rotation with the server restart hour so
-        # restart-days roll over cleanly). NOTE: arq cron evaluates in the
-        # worker's LOCAL timezone, not UTC — the first attempt (hour=1,
-        # 2026-09-28 #293) fired at 01:30 +07, proven by the Discord post
-        # timestamp of event 7245 (01:30:20 +07). Was hourly at :00:15
-        # (3h pre-2026-09-22, 10-min during staging testing); silent
-        # no-op when the slot target is already filled or no
-        # window-active TT ScheduledEvent exists.
+        # post_random_events = the DAILY UNDERGROUND ROTATION (B2 rework,
+        # Yuuka 2026-10-03): NOT an auto-poster. The backend never POSTs
+        # events to the game — the tick cycles SE windows round-robin over
+        # the underground pool, rolls the HP class ONCE and pins it onto
+        # the active SE, writes its requirements description, and closes
+        # every other underground window. Players launch via /setup_event
+        # (original AMC Cup system: window-gated SEs are the only
+        # activeness mechanism). Interval: DAILY at 08:00:15 server-local
+        # (+07). NOTE: arq cron evaluates in the worker's LOCAL timezone,
+        # not UTC. 08:00 sits before the 08:30 restart so the restart
+        # never eats the tick.
         # pyrefly: ignore [bad-argument-type]
         cron(
             post_random_events,

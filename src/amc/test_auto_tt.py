@@ -1,26 +1,24 @@
-"""Tests for the revived auto-TT posting cron (post_random_events).
+"""Tests for the B2 underground rotation (post_random_events).
 
-Key behaviors under test (2026-09-22 revival):
-- the candidate pool only picks ScheduledEvents whose [start_time,
-  end_time] window is live (expired windows must not be resurrected —
-  _upsert_game_event links scheduled_event only inside the window);
-- the in-game announce fires ONLY when at least one POST /events
-  succeeded (the old version announced unconditionally — players saw
-  "TT is up!" with no events actually created).
+B2 (Yuuka 2026-10-03): the tick is NOT an auto-poster. It cycles SE
+windows round-robin over the underground pool, pins the rolled HP class
+onto the active SE, writes its requirements description, closes every
+other underground window, and announces. /setup_event posts the decided
+event; the original AMC Cup window system is the activeness mechanism.
 """
 
 import re
 
-# Auto-posted TT names carry the class tag: "Live TT [TT-480]".
+# Classed event names carry the class tag: "Live TT - IR - 480".
 import re as _re
 from datetime import timedelta
-from unittest.mock import AsyncMock, patch
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 from asgiref.sync import sync_to_async
 from django.utils import timezone
 
-from amc.events import post_random_events
+from amc.events import _rotation_reset, post_random_events
 from amc.models import (
     Character,
     GameEvent,
@@ -29,17 +27,6 @@ from amc.models import (
     RaceSetup,
     ScheduledEvent,
 )
-
-
-def base_event_name(name):
-    name = _re.sub(r"\s*\[TT-\d+\]$", "", name or "")
-    return _re.sub(r"\s*-\s*IR\s*-\s*\d+$", "", name)
-
-
-def strip_instance_suffix(name):
-    """Drop the per-instance "(NNN)" suffix (see amc.events)."""
-    name = _re.sub(r"\s*\(\d{3}\)\s*(\[TT-\d+\])?$", "", name or "")
-    return _re.sub(r"\s*-\s*IR\s*-\s*\d+$", "", name)
 
 
 def _race_config(route_name):
@@ -54,7 +41,7 @@ def _race_config(route_name):
                 },
             ],
         },
-        "NumLaps": 0,  # 0-lap only lineup (Yuuka 2026-09-26 rotation rule)
+        "NumLaps": 0,  # 0-lap only pool (Yuuka 2026-09-26 rotation rule)
         "VehicleKeys": [],
         "EngineKeys": [],
     }
@@ -79,19 +66,16 @@ class FakeResponse:
 
 
 class FakeModClient:
-    """aiohttp client stand-in: POST status per EventName (fail_statuses),
-    else 201; GET /events returns the queued live list."""
+    """aiohttp client stand-in: GET /events returns the queued live list;
+    POST is recorded (the rotation must never POST)."""
 
-    def __init__(self, fail_statuses=None, live_events=None):
-        self.fail_statuses = dict(fail_statuses or {})
+    def __init__(self, live_events=None):
         self.live_events = list(live_events or [])
         self.posts = []
 
     def post(self, path, json=None):
         self.posts.append(json)
-        name = (json or {}).get("EventName")
-        status = self.fail_statuses.get(strip_instance_suffix(name), 201)
-        return FakeResponse(status)
+        return FakeResponse(201)
 
     def get(self, path):
         if path == "/events":
@@ -109,13 +93,21 @@ async def _make_race(route_name, num_laps=0):
 
 
 async def _get_class():
-    """Pinned TT class for rotation-candidate SEs (illegal-TT twins)."""
+    """Pinned TT class for manual SEs."""
     from amc.models import TTClass
 
     cls, _ = await sync_to_async(TTClass.objects.get_or_create)(
         name="TT-480", defaults={"max_hp": 480}
     )
     return cls
+
+
+async def _tt_class(name="TT-480", max_hp=480):
+    from amc.models import TTClass
+
+    return await sync_to_async(TTClass.objects.get_or_create)(
+        name=name, defaults={"max_hp": max_hp}
+    )
 
 
 async def _clean_slate():
@@ -148,228 +140,144 @@ async def _ug_template(name, race, start, end, time_trial=True, is_rotation_inst
 
 @pytest.mark.asyncio
 @patch("amc.events.announce", new_callable=AsyncMock)
-async def test_expired_window_events_still_posted(announce_mock, db):
-    # Yuuka 2026-09-30: the pool is the whole pinned-class SE table, NOT
-    # window-active rows — the daily rotation owns the event's lifetime,
-    # so an expired window no longer blocks posting.
+async def test_rotation_never_posts_windows_one_se(announce_mock, db):
+    """B2 core: the tick POSTs NOTHING; exactly one underground SE ends up
+    windowed (class pinned + description written); the others are closed."""
     now = timezone.now()
     await _clean_slate()
-    race = await _make_race("Expired TT route")
-    await _ug_template("Expired TT", race, now - timedelta(days=30), now - timedelta(days=1))
-    mod = FakeModClient()
-    await post_random_events({"http_client_mod": mod, "http_client": AsyncMock()})
-    assert len(mod.posts) == 1
-    assert mod.posts[0]["EventName"].startswith("Expired TT")
-    announce_mock.assert_awaited_once()
-
-
-@pytest.mark.asyncio
-@patch("amc.events.announce", new_callable=AsyncMock)
-async def test_ir_names_carry_class_not_counter(announce_mock, db):
-    """Classed posts use the IR format "<SE name> - IR - <HP>"
-    (Yuuka 2026-10-01); no per-instance counter in that name."""
-    now = timezone.now()
-    await _clean_slate()
-    race = await _make_race("Instance TT route")
-    await _ug_template("Instance TT", race, now - timedelta(hours=1), now + timedelta(hours=1))
-    mod = FakeModClient()
-    await post_random_events({"http_client_mod": mod, "http_client": AsyncMock()})
-    assert re.fullmatch(r"Instance TT - IR - \d+", mod.posts[0]["EventName"])
-
-
-@pytest.mark.asyncio
-@patch("amc.events.announce", new_callable=AsyncMock)
-async def test_active_window_event_posted_and_announced(announce_mock, db):
-    now = timezone.now()
-    await _clean_slate()
-    race = await _make_race("Live TT route")
-    await _ug_template("Live TT", race, now - timedelta(hours=1), now + timedelta(hours=1))
+    race_a = await _make_race("Route A")
+    race_b = await _make_race("Route B")
+    await _ug_template("Track A", race_a, now - timedelta(hours=1), now + timedelta(hours=1))
+    await _ug_template("Track B", race_b, now - timedelta(hours=1), now + timedelta(hours=1))
     mod = FakeModClient()
     await post_random_events({"http_client_mod": mod, "http_client": AsyncMock()})
 
-    posted = [p["EventName"] for p in mod.posts]
-    assert [strip_instance_suffix(n) for n in posted] == ["Live TT"]
-    # The random class tag rides in the posted event name.
-    assert _re.search(r"- IR - \d+$", posted[0])
-    payload = mod.posts[0]
-    assert payload["EventType"] == 1
-    # Location → Translation rename on waypoints
-    assert payload["RaceSetup"]["Route"]["Waypoints"][0] == {
-        "Translation": {"X": 1.0, "Y": 2.0, "Z": 3.0},
-        "Scale3D": {"X": 1.0, "Y": 12.0, "Z": 10.0},
-        "Rotation": {"X": 0.0, "Y": 0.0, "Z": 0.0, "W": 1.0},
-    }
+    assert mod.posts == []  # never auto-posts
     announce_mock.assert_awaited_once()
-    assert "Live TT" in announce_mock.await_args.args[0]
+    rows = [r async for r in ScheduledEvent.objects.filter(end_time__gte=now, start_time__lte=now)]
+    assert len(rows) == 1
+    active = rows[0]
+    assert active.tt_class_id is not None  # class pinned at rotation time
+    assert active.description_in_game  # requirements text written
+    expected = _rotation_reset(now)
+    assert active.start_time == expected
+    assert active.end_time == expected + timedelta(days=1)
 
 
 @pytest.mark.asyncio
 @patch("amc.events.announce", new_callable=AsyncMock)
-async def test_all_posts_fail_no_announce(announce_mock, db):
+async def test_rotation_round_robin_advances(announce_mock, db):
+    """Two consecutive ticks -> the NEXT pool id holds the window (wrap at
+    the end back to pool[0])."""
     now = timezone.now()
     await _clean_slate()
-    race = await _make_race("Doomed TT route")
-    await _ug_template("Doomed TT", race, now - timedelta(hours=1), now + timedelta(hours=1))
-    mod = FakeModClient(fail_statuses={"Doomed TT": 400})
+    names = ["Alpha", "Bravo", "Charlie"]
+    for n in names:
+        race = await _make_race(f"{n} route")
+        await _ug_template(n, race, now - timedelta(hours=1), now + timedelta(hours=1))
+
+    mod = FakeModClient()
     await post_random_events({"http_client_mod": mod, "http_client": AsyncMock()})
-
-    assert [
-        strip_instance_suffix(p["EventName"]) for p in mod.posts if p["EventName"]
-    ] == ["Doomed TT"]
-    announce_mock.assert_not_awaited()
-
-
-@pytest.mark.asyncio
-@patch("amc.events.announce", new_callable=AsyncMock)
-async def test_announce_lists_only_posted_events(announce_mock, db):
-    """2 candidates, second POST fails → announce names only the first."""
-    now = timezone.now()
-    await _clean_slate()
-    # One slot per rotation (TARGET_EVENTS = 1), so "Bad TT" is kept out of
-    # the candidate pool entirely via the 0-lap filter; "Good TT" posts.
-    for name, laps in (("Good TT", 0), ("Bad TT", 3)):
-        race = await _make_race(f"{name} route", num_laps=laps)
-        await _ug_template(name, race, now - timedelta(hours=1), now + timedelta(hours=1))
-    mod = FakeModClient(fail_statuses={"Bad TT": 500})
-    await post_random_events({"http_client_mod": mod, "http_client": AsyncMock()})
-
-    announce_mock.assert_awaited_once()
-    message = announce_mock.await_args.args[0]
-    posted = [p["EventName"] for p in mod.posts if strip_instance_suffix(p["EventName"]) == "Good TT"]
-    assert len(posted) == 1
-    assert "Good TT" in message
-    assert "Bad TT" not in message
-
-
-async def _make_auto_event(guid, name="Auto TT", state=1):
-    return await sync_to_async(GameEvent.objects.create)(
-        guid=guid,
-        name=name,
-        state=state,
-        auto_created=True,
+    first = await (
+        ScheduledEvent.objects.filter(tt_class__isnull=False).afirst()
     )
 
+    # Simulate the next window: the previous active SE is expired-windowed
+    # by the tick itself (closed to window_start), so run the tick again
+    # with time advanced past the current window start.
+    await first.arefresh_from_db()
+    # The tick closed every OTHER underground SE; the active one holds
+    # [reset, reset+1d). Run a second tick "tomorrow": push the active SE's
+    # window into the previous window by rewinding its start_time.
+    await ScheduledEvent.objects.filter(pk=first.pk).aupdate(
+        start_time=_rotation_reset(now) - timedelta(days=1),
+        end_time=_rotation_reset(now) - timedelta(days=1) + timedelta(hours=1),
+    )
+    later = now + timedelta(days=2)
+    with patch("amc.events.timezone") as tz_mock:
+        tz_mock.now.return_value = later
+        tz_mock.timedelta = None  # unused by the rotation directly
+        await post_random_events({"http_client_mod": mod, "http_client": AsyncMock()})
+
+    active = await (
+        ScheduledEvent.objects.filter(
+            start_time__gte=_rotation_reset(later),
+            start_time__lt=_rotation_reset(later) + timedelta(days=1),
+        ).afirst()
+    )
+    assert active is not None
+    # pool order by id: Alpha < Bravo < Charlie; first tick picked Alpha,
+    # second must pick Bravo.
+    pool = [r async for r in ScheduledEvent.objects.filter(is_rotation_instance=False).order_by("id")]
+    pnames = [r.name for r in pool]
+    assert pnames[0] == "Alpha"  # sanity: pool order
+    assert active.name == "Bravo"
+
 
 @pytest.mark.asyncio
 @patch("amc.events.announce", new_callable=AsyncMock)
-async def test_sprint_template_posted_and_mirrored(announce_mock, db):
-    """Yuuka 2026-09-30: the pool is TTs AND sprints — an underground
-    sprint template (time_trial=False) posts the same way: rolled class
-    tag, EventType 1 race, and the mirror carries time_trial=False."""
+async def test_rotation_closes_other_underground_windows_only(announce_mock, db):
+    """Cup-era originals / non-underground SEs are NEVER touched by the
+    rotation; only underground windows are closed."""
+    now = timezone.now()
+    await _clean_slate()
+    from amc.models import Championship
+
+    cup_champ, _ = await sync_to_async(Championship.objects.get_or_create)(
+        name="AMC Cup Season 3", defaults={"description": ""}
+    )
+    race = await _make_race("Cup route")
+    cup_se = await sync_to_async(ScheduledEvent.objects.create)(
+        name="Cup Original",
+        race_setup=race,
+        time_trial=True,
+        tt_class=await _get_class(),
+        championship=cup_champ,
+        start_time=now - timedelta(days=3),
+        end_time=now + timedelta(days=4),
+        description="Original cup description",
+    )
+    ug_race = await _make_race("UG route")
+    await _ug_template("UG A", ug_race, now - timedelta(hours=1), now + timedelta(hours=1))
+    await _ug_template("UG B", ug_race, now - timedelta(hours=1), now + timedelta(hours=1))
+
+    mod = FakeModClient()
+    await post_random_events({"http_client_mod": mod, "http_client": AsyncMock()})
+
+    await cup_se.arefresh_from_db()
+    assert cup_se.end_time == now + timedelta(days=4)  # untouched
+    assert cup_se.tt_class_id is not None  # original class kept
+    assert cup_se.description == "Original cup description"
+    # Only ONE underground window open.
     from amc.config import UNDERGROUND_CHAMPIONSHIP_NAME
+
+    open_ug = [
+        r
+        async for r in ScheduledEvent.objects.filter(
+            championship__name=UNDERGROUND_CHAMPIONSHIP_NAME,
+            end_time__gte=now,
+            start_time__lte=now,
+        )
+    ]
+    assert len(open_ug) == 1
+
+
+@pytest.mark.asyncio
+@patch("amc.events.announce", new_callable=AsyncMock)
+async def test_rotation_announce_names_today_event(announce_mock, db):
     now = timezone.now()
     await _clean_slate()
-    race = await _make_race("Shitbox Sprint route")
-    await _ug_template(
-        "Shitbox Sprint", race, now - timedelta(hours=1), now + timedelta(hours=1),
-        time_trial=False,
-    )
+    race = await _make_race("Announce route")
+    await _ug_template("Announce TT", race, now - timedelta(hours=1), now + timedelta(hours=1))
     mod = FakeModClient()
     await post_random_events({"http_client_mod": mod, "http_client": AsyncMock()})
-    assert mod.posts and mod.posts[0]["EventName"].startswith("Shitbox Sprint - IR - ")
-    assert _re.search(r"- IR - \d+$", mod.posts[0]["EventName"])
-    assert mod.posts[0]["EventType"] == 1
-    # Mirror: same shape as TT mirrors but time_trial=False.
-    mirror = await ScheduledEvent.objects.filter(
-        is_rotation_instance=True
-    ).select_related("championship").afirst()
-    assert mirror is not None
-    assert mirror.time_trial is False
-    assert mirror.tt_class_id is not None
-    assert mirror.championship.name == UNDERGROUND_CHAMPIONSHIP_NAME
-    announce_mock.assert_awaited_once()
-    assert "underground racing events" in announce_mock.await_args.args[0]
-
-@pytest.mark.asyncio
-@patch("amc.events.announce", new_callable=AsyncMock)
-async def test_rotation_refreshes_template_windows_daily(announce_mock, db):
-    """Templates reset DAILY at 08:00 (+07) (Yuuka 2026-10-02): each tick
-    re-windows every underground template to today 08:00 → tomorrow 08:00,
-    so /setup_event targets always track the reset. 08:00 sits before the
-    08:30 server restart so the post is not eaten by it."""
-    from amc.events import _rotation_reset
-    now = timezone.now()
-    await _clean_slate()
-    race = await _make_race("Windowed TT route")
-    tmpl = await _ug_template("Stale TT", race, now - timedelta(days=20), now + timedelta(days=14))
-    mod = FakeModClient()
-    await post_random_events({"http_client_mod": mod, "http_client": AsyncMock()})
-
-    await tmpl.arefresh_from_db()
-    start = tmpl.start_time
-    assert start == _rotation_reset(now)
-    assert tmpl.end_time - start == timedelta(days=1)
-    assert start.hour == 1 and start.minute == 0  # 08:00 +07 in UTC
+    message = announce_mock.await_args.args[0]
+    assert "Announce TT - IR - " in message
 
 
-@pytest.mark.asyncio
-@patch("amc.events.announce", new_callable=AsyncMock)
-async def test_vanished_event_row_closed(announce_mock, db):
-    """The game silently deletes unclaimed owner-less events — a Ready auto
-    row whose guid is absent from the live list must be closed so its slot
-    and setup free up again."""
-    now = timezone.now()
-    await _clean_slate()
-    gone = await _make_auto_event("GUIDGONE00000000000000000000000")
-    race = await _make_race("Live TT route")
-    await _ug_template("Live TT", race, now - timedelta(hours=1), now + timedelta(hours=1))
-    mod = FakeModClient()  # live list empty → the event has vanished
-    await post_random_events({"http_client_mod": mod, "http_client": AsyncMock()})
-
-    await gone.arefresh_from_db()
-    assert gone.state == 3
-    # freed slot/setup → a replacement gets posted
-    assert len(mod.posts) == 1
-
-
-@pytest.mark.asyncio
-@patch("amc.events.remove_event", new_callable=AsyncMock)
-@patch("amc.events.announce", new_callable=AsyncMock)
-async def test_unclaimed_live_event_rotated_out(announce_mock, remove_mock, db):
-    """Each tick replaces owner-less Ready events nobody joined."""
-    now = timezone.now()
-    await _clean_slate()
-    await _make_auto_event("GUIDLIVE000000000000000000000000")
-    race = await _make_race("Live TT route")
-    await _ug_template("Live TT", race, now - timedelta(hours=1), now + timedelta(hours=1))
-    mod = FakeModClient(live_events=[{"EventGuid": "GUIDLIVE000000000000000000000000"}])
-    await post_random_events({"http_client_mod": mod, "http_client": AsyncMock()})
-
-    remove_mock.assert_awaited_once()
-    assert remove_mock.await_args.args[1] == "GUIDLIVE000000000000000000000000"
-    row = await sync_to_async(GameEvent.objects.get)(
-        guid="GUIDLIVE000000000000000000000000"
-    )
-    assert row.state == 3
-    # freed slot → replacement posted + announced
-    assert len(mod.posts) == 1
-    announce_mock.assert_awaited_once()
-
-
-@pytest.mark.asyncio
-@patch("amc.events.remove_event", new_callable=AsyncMock)
-@patch("amc.events.announce", new_callable=AsyncMock)
-async def test_joined_event_not_rotated(announce_mock, remove_mock, db):
-    """A player joined → the event is theirs; the cron must not touch it."""
-    now = timezone.now()
-    await _clean_slate()
-    ge = await _make_auto_event("GUIDJOIN000000000000000000000000")
-    race = await _make_race("Live TT route")
-    await _ug_template("Live TT", race, now - timedelta(hours=1), now + timedelta(hours=1))
-    player = await sync_to_async(Player.objects.create)(unique_id=12345)
-    character = await sync_to_async(Character.objects.create)(
-        player=player, guid="AAAA0000", name="yuuka"
-    )
-    await sync_to_async(GameEventCharacter.objects.create)(
-        game_event=ge, character=character, rank=0
-    )
-    mod = FakeModClient(live_events=[{"EventGuid": "GUIDJOIN000000000000000000000000"}])
-    await post_random_events({"http_client_mod": mod, "http_client": AsyncMock()})
-
-    remove_mock.assert_not_awaited()
-    await ge.arefresh_from_db()
-    assert ge.state == 1
-
+# ---------------------------------------------------------------------------
+# /setup_event on the decided SE
+# ---------------------------------------------------------------------------
 
 class _SetupClient:
     """Fake mod client for amc.events.setup_event: /events + /players GETs
@@ -392,109 +300,33 @@ class _SetupClient:
 
 
 @pytest.mark.asyncio
-async def test_setup_event_underground_template_rolls_class(db):
-    """Yuuka 2026-09-30: /setup_event on an underground template ROLLS a
-    class (the player-driven illegal-TT path the pinned-class twins used
-    to provide). The [TT-x] tag is what arms HP cap / tire kick / DQ /
-    wanted."""
+async def test_setup_event_pinned_class_ir_name_no_roll(db):
+    """B2: /setup_event reads the SE's pinned class (decided at rotation
+    time) and posts with the IR name tag. It NEVER rolls a class: a
+    classless SE posts classless (no IR tag)."""
     from amc.events import setup_event
 
     now = timezone.now()
     await _clean_slate()
-    await _tt_class()
-    race = await _make_race("Underground template route")
-    template = await _ug_template(
-        "Quarry Chaos -TT", race, now - timedelta(hours=1), now + timedelta(hours=1)
-    )
+    cls, _ = await _tt_class("TT-350", max_hp=350)
+    race = await _make_race("Pinned route")
+    await _ug_template("Pinned TT", race, now - timedelta(hours=1), now + timedelta(hours=1))
+    await ScheduledEvent.objects.filter(name="Pinned TT").aupdate(tt_class=cls)
+    # Re-fetch with the FK loaded (async-context lazy FK access raises).
+    se = await ScheduledEvent.objects.select_related("tt_class", "race_setup").aget(name="Pinned TT")
     client = _SetupClient({"CharacterGuid": "C" * 32})
-    ok = await setup_event(now, 42, template, client)
+    ok = await setup_event(now, 42, se, client)
     assert ok is True
-    assert _re.search(r"- IR - \d+$", client.posts[0]["EventName"])
-    assert client.posts[0]["EventName"].startswith("Quarry Chaos -TT - IR - ")
+    assert client.posts[0]["EventName"] == "Pinned TT - IR - 350"
+    # No mirrors exist — there is no such thing as mirroring.
+    assert not [r async for r in ScheduledEvent.objects.filter(is_rotation_instance=True)]
 
-
-@pytest.mark.asyncio
-async def test_setup_event_mirrors_rotation_instance(db):
-    """/setup_event posts mirror like the auto-poster (prod 2026-10-02:
-    /events sat empty because manual posts never created the
-    is_rotation_instance row the listing reads)."""
-    from amc.events import setup_event, _rotation_reset
-    from amc.models import ScheduledEvent as SE
-
-    now = timezone.now()
-    await _clean_slate()
-    await _tt_class()
-    race = await _make_race("Mirrored TT route")
-    template = await _ug_template("MirrorMe", race, now - timedelta(hours=1), now + timedelta(hours=1))
-    client = _SetupClient({"CharacterGuid": "C" * 32})
-    ok = await setup_event(now, 42, template, client)
-    assert ok is True
-    mirrors = SE.objects.filter(is_rotation_instance=True).exclude(pk=template.pk)
-    assert await sync_to_async(mirrors.exists)()
-    mirror = await sync_to_async(mirrors.get)()
-    assert mirror.tt_class_id is not None
-    assert mirror.description_in_game  # requirements text present
-    assert mirror.name == client.posts[0]["EventName"]
-    # Window-bounded to the daily reset (Yuuka 2026-10-03: mirrors must
-    # self-expire at the next 08:00 +07 reset, NOT +14 days).
-    expected_start = _rotation_reset(now)
-    assert mirror.start_time == expected_start
-    assert mirror.end_time == expected_start + timedelta(days=1)
-
-
-@pytest.mark.asyncio
-async def test_setup_event_reuses_one_window_mirror(db):
-    """ONE mirror per daily window (Yuuka 2026-10-03): two /setup_event
-    posts in the same window REUSE the mirror — the row updates to the
-    latest posted event instead of piling a new active SE on top (prod
-    SE 75/76 duplicates)."""
-    from amc.events import setup_event, _rotation_reset
-    from amc.models import ScheduledEvent as SE
-
-    now = timezone.now()
-    await _clean_slate()
-    await _tt_class()
-    race = await _make_race("Per-instance TT route")
-    template = await _ug_template("PerInstance", race, now - timedelta(hours=1), now + timedelta(hours=1))
-    client = _SetupClient({"CharacterGuid": "C" * 32})
-    await setup_event(now, 42, template, client)
-    await setup_event(now, 42, template, client)
-    mirrors = SE.objects.filter(is_rotation_instance=True).exclude(pk=template.pk)
-    rows = [r async for r in mirrors]
-    assert len(rows) == 1, f"expected ONE window mirror, got {[r.name for r in rows]}"
-    # The reused mirror carries the LATEST posted event.
-    assert rows[0].name == client.posts[-1]["EventName"]
-    expected_start = _rotation_reset(now)
-    assert rows[0].start_time == expected_start
-    assert rows[0].end_time == expected_start + timedelta(days=1)
-
-
-@pytest.mark.asyncio
-async def test_setup_event_classless_championship_never_mirrors(db):
-    """Non-underground posts stay classless and don't mirror."""
-    from amc.events import setup_event
-    from amc.models import Championship
-    from amc.models import ScheduledEvent as SE
-
-    now = timezone.now()
-    await _clean_slate()
-    champ, _ = await sync_to_async(Championship.objects.get_or_create)(
-        name="AMC Cup Season 3", defaults={"description": ""}
-    )
-    race = await _make_race("Legal route")
-    template = await sync_to_async(SE.objects.create)(
-        name="Ara Grand Prix",
-        race_setup=race,
-        time_trial=False,
-        tt_class=None,
-        championship=champ,
-        start_time=now - timedelta(hours=1),
-        end_time=now + timedelta(hours=1),
-    )
-    client = _SetupClient({"CharacterGuid": "C" * 32})
-    await setup_event(now, 42, template, client)
-    rows = [(r.pk, r.name, r.championship_id, r.tt_class_id) async for r in SE.objects.filter(is_rotation_instance=True)]
-    assert not rows, f"unexpected rotation rows: {rows}"
+    # Classless SE -> classless post (exact SE name, no tag, no counter).
+    race2 = await _make_race("Classless route")
+    se2 = await _ug_template("Classless TT", race2, now - timedelta(hours=1), now + timedelta(hours=1))
+    client2 = _SetupClient({"CharacterGuid": "C" * 32})
+    await setup_event(now, 42, se2, client2)
+    assert client2.posts[0]["EventName"] == "Classless TT"
 
 
 @pytest.mark.asyncio
@@ -524,14 +356,24 @@ async def test_setup_event_classless_championship_stays_legal(db):
     assert "- IR -" not in client.posts[0]["EventName"]
 
 
+@pytest.mark.asyncio
+@patch("amc.events.announce", new_callable=AsyncMock)
+async def test_ir_name_tag_parses_back_to_tt_class(announce_mock, db):
+    """The IR name format ("… - IR - 140") is the class channel: the SSE
+    upsert must parse it back into GameEvent.tt_class."""
+    from amc.handlers.events import _parse_tt_class_tag
+    cls, _ = await _tt_class("TT-140", max_hp=140)
+    assert (await _parse_tt_class_tag("Unbeatable Record - Time Trial - IR - 140")) == cls
+    assert (await _parse_tt_class_tag("Unbeatable Record - Time Trial - IR - 999")) is None
+    assert (await _parse_tt_class_tag("Unbeatable Record - Time Trial")) is None
+
+
 # ---------------------------------------------------------------------------
 # /events and /setup_event command behavior
 # ---------------------------------------------------------------------------
 
-from unittest.mock import MagicMock  # noqa: E402
-from unittest.mock import patch as sync_patch  # noqa: E402
-
 from amc.command_framework import CommandContext, registry  # noqa: E402
+from unittest.mock import patch as sync_patch  # noqa: E402
 
 
 def _make_ctx():
@@ -545,14 +387,6 @@ def _make_ctx():
     ctx.timestamp = timezone.now()
     ctx.player_info = {"is_admin": True}
     return ctx
-
-
-async def _tt_class(name="TT-480", max_hp=480):
-    from amc.models import TTClass
-
-    return await sync_to_async(TTClass.objects.get_or_create)(
-        name=name, defaults={"max_hp": int(name.split("-")[1])}
-    )
 
 
 def _se(name, race, start, end, tt_class=None, is_rotation_instance=False):
@@ -599,44 +433,6 @@ async def test_setup_event_no_arg_starts_active_event(setup_mock, db):
 
 
 @pytest.mark.asyncio
-@patch("amc.events.announce", new_callable=AsyncMock)
-async def test_ir_name_tag_parses_back_to_tt_class(announce_mock, db):
-    """The IR name format ("… - IR - 140") is the per-instance class
-    channel: the SSE upsert must parse it back into GameEvent.tt_class."""
-    from amc.handlers.events import _parse_tt_class_tag
-    cls, _ = await _tt_class("TT-140", max_hp=140)
-    assert (await _parse_tt_class_tag("Unbeatable Record - Time Trial - IR - 140")) == cls
-    assert (await _parse_tt_class_tag("Unbeatable Record - Time Trial - IR - 999")) is None
-    assert (await _parse_tt_class_tag("Unbeatable Record - Time Trial")) is None
-
-
-@pytest.mark.asyncio
-@sync_patch("amc.commands.events.setup_event", new_callable=AsyncMock)
-async def test_setup_event_skips_rotation_instance(setup_mock, db):
-    """The daily rotation post (is_rotation_instance=True) is never a
-    /setup_event target — only the windowed templates are (Yuuka
-    2026-09-30: template windows match the rotation's now+14d)."""
-    now = timezone.now()
-    await _clean_slate()
-    race = await _make_race("Instance TT route")
-    await _ug_template(
-        "Instance TT", race, now - timedelta(hours=1), now + timedelta(days=14),
-        is_rotation_instance=True,
-    )
-    template_race = await _make_race("Template TT route")
-    template = await _ug_template(
-        "Template TT", template_race, now - timedelta(hours=2), now + timedelta(days=14),
-    )
-    setup_mock.return_value = {"EventGuid": "G" * 32}
-
-    executed = await registry.execute("/setup_event", _make_ctx())
-    assert executed is True
-    setup_mock.assert_awaited_once()
-    assert setup_mock.await_args.args[2].pk == template.pk
-
-
-
-@pytest.mark.asyncio
 @sync_patch("amc.commands.events.setup_event", new_callable=AsyncMock)
 async def test_setup_event_no_arg_no_active_replies_no_events(setup_mock, db):
     now = timezone.now()
@@ -652,19 +448,25 @@ async def test_setup_event_no_arg_no_active_replies_no_events(setup_mock, db):
 
 @pytest.mark.asyncio
 @sync_patch("amc.commands.events.setup_event", new_callable=AsyncMock)
-async def test_events_lists_only_active(setup_mock, db):
+async def test_events_lists_every_windowed_se(setup_mock, db):
+    """Original system behavior: /events lists EVERY windowed SE with its
+    own description — no underground exclusion (the #311 exclusion is
+    removed; the rotation's one-window rule keeps the list clean)."""
     now = timezone.now()
     await _clean_slate()
     race = await _make_race("Active TT route")
     await _se("Active TT", race, now - timedelta(hours=1), now + timedelta(hours=1))
-    # Underground templates are /setup_event targets, never listed:
-    await _ug_template("Hidden Template", race, now - timedelta(hours=1), now + timedelta(hours=1))
+    ug = await _ug_template(
+        "Underground TT", race, now - timedelta(hours=1), now + timedelta(hours=1)
+    )
+    await ScheduledEvent.objects.filter(pk=ug.pk).aupdate(description_in_game="Underground street race — TT-350 requirements text.")
     await _se("Future TT", race, now + timedelta(days=3), now + timedelta(days=4))
     ctx = _make_ctx()
     await registry.execute("/events", ctx)
     message = ctx.reply.await_args.args[0]
     assert "Active TT" in message
-    assert "Hidden Template" not in message
+    assert "Underground TT" in message  # listed — no more exclusion
+    assert "Underground street race" in message  # its description shows
     assert "Future TT" not in message
 
 
