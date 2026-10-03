@@ -50,11 +50,14 @@ FULL_BLOCKS: dict[str, bool] = {
     BLOCK_RESPAWN_CHARACTER: True,
     BLOCK_RESET_VEHICLE_KEEP_CARGO: True,
     BLOCK_RESET_VEHICLE_STRIP_CARGO: True,
+    BLOCK_ROADSIDE_SERVICE: True,
 }
 
 # Wanted suspect while every on-duty cop is beyond the 500 m gate (freeman
 # 2026-09-28: "cops > 500m = roadside reset teleport allowed"): full lock
-# except the cargo-kept roadside reset.
+# except the cargo-kept roadside reset. ServerVehicleExControl (roadside
+# service) is NOT name-gated here — it doesn't work per freeman 2026-10-03;
+# roadside enforcement is entirely the ServerResetVehicleAt block keys.
 WANTED_ROADSIDE_BLOCKS: dict[str, bool] = {
     BLOCK_TELEPORT_CHARACTER: True,
     BLOCK_TELEPORT_VEHICLE: True,
