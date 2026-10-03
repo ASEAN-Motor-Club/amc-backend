@@ -410,6 +410,14 @@ _last_modded_vehicle_guids: set[str] = set()
 # keyed on their own distance to the suspect.
 _last_compass_sent: dict[tuple[str, str], float] = {}
 
+# Tracks when each suspect guid last received the wanted flash (monotonic).
+# The display name is BLANKED while wanted (freeman 2026-09-20), so the
+# stars are no longer visible in the name tag — the criminal gets a
+# flashing system-message reminder instead, and officers get the stars in
+# their compass entries (both freeman 2026-10-03).
+_last_wanted_flash: dict[str, float] = {}
+WANTED_FLASH_INTERVAL_SECONDS = 5.0
+
 
 def _calculate_logout_heat(min_police_distance: float) -> float:
     """Heat added when logging out near police (1/r² law, same as teleport).
@@ -1112,6 +1120,9 @@ async def tick_wanted_countdown(http_client, http_client_mod, http_client_mgmt=N
             await _finalize_expired_wanted(
                 online_chars, http_client, http_client_mod
             )
+            # Their flash timers die with the wanted status
+            for char in online_chars:
+                _last_wanted_flash.pop(char.guid, None)
         elif fugitive_flags or admin_flags:
             logger.info(
                 "wanted tick: dormant — %d fugitive-passenger wanted(s) and "
@@ -1192,6 +1203,7 @@ async def tick_wanted_countdown(http_client, http_client_mod, http_client_mgmt=N
     evaded_characters = []
     evaded_qualities: dict[str, float] = {}  # guid → meter at expiry
     star_change_notifications = []  # (wanted, message) for deferred processing
+    wanted_flash_messages = []  # (guid, stars, remaining) flashing reminders
     _current_modded_guids: set[str] = set()  # modded vehicle state this tick
     race_caps = await _race_restriction_caps(wanted_list)
 
@@ -1440,6 +1452,21 @@ async def tick_wanted_countdown(http_client, http_client_mod, http_client_mgmt=N
                 )
                 star_change_notifications.append((wanted, msg))
 
+        # Wanted flash (freeman 2026-10-03): the display name is blanked
+        # while wanted, so the criminal no longer sees their own stars —
+        # flash a system-message reminder every few seconds instead.
+        now_flash = _now()
+        if (
+            wanted.wanted_remaining > 0
+            and http_client_mod
+            and now_flash - _last_wanted_flash.get(sus_guid, 0.0)
+            >= WANTED_FLASH_INTERVAL_SECONDS
+        ):
+            _last_wanted_flash[sus_guid] = now_flash
+            wanted_flash_messages.append(
+                (sus_guid, new_stars, int(wanted.wanted_remaining))
+            )
+
     # Update modded-vehicle tracking for next tick
     _last_modded_vehicle_guids.clear()
     _last_modded_vehicle_guids.update(_current_modded_guids)
@@ -1449,6 +1476,11 @@ async def tick_wanted_countdown(http_client, http_client_mod, http_client_mgmt=N
     live_guids = {w.character.guid for w in wanted_list}
     for gone in [g for g in _underwater_since if g not in live_guids]:
         _underwater_since.pop(gone, None)
+    active_flash_guids = {
+        w.character.guid for w in wanted_list if w.wanted_remaining > 0
+    } | {c.guid for c in expired_characters}
+    for gone in [g for g in _last_wanted_flash if g not in active_flash_guids]:
+        _last_wanted_flash.pop(gone, None)
 
     # ------------------------------------------------------------------
     # Roadside-reset distance gate (freeman 2026-09-28 PR2): refine the
@@ -1578,6 +1610,21 @@ async def tick_wanted_countdown(http_client, http_client_mod, http_client_mgmt=N
             len(evaded_characters),
             bonus_lines,
         )
+
+    # Flash reminders for wanted criminals (freeman 2026-10-03): the display
+    # name is blanked, so the stars ride a flashing system message instead.
+    for flash_guid, flash_stars, flash_remaining in wanted_flash_messages:
+        try:
+            await send_system_message(
+                http_client_mod,
+                f"[{'*' * max(flash_stars, 1)}] WANTED - "
+                f"{flash_remaining}s remaining",
+                character_guid=flash_guid,
+            )
+        except Exception:  # noqa: BLE001 — the flash must never break the tick
+            logger.warning(
+                "Failed to send wanted flash to guid %s", flash_guid
+            )
 
     # Send star-change messages and refresh names (DB is now up-to-date)
     refreshed_guids = set()
@@ -2006,11 +2053,16 @@ async def tick_police_suspect_locations(http_client, http_client_mod, http_clien
     # Pre-compute online suspect (character, location) pairs
     wanted_guids: set[str] = set()
     online_suspects = []
+    # Stars per suspect guid for the compass entries — the display name is
+    # blanked while wanted, so the star tag replaces the name (freeman
+    # 2026-10-03). Clamped to >=1: a live wanted row never renders as [].
+    stars_by_guid: dict[str, int] = {}
     for wanted in wanted_list:
         guid = wanted.character.guid
         if not guid:
             continue
         wanted_guids.add(guid)
+        stars_by_guid[guid] = max(compute_stars(wanted.wanted_remaining), 1)
         if guid not in locations:
             continue
         online_suspects.append((wanted.character, locations[guid][1]))
@@ -2093,12 +2145,14 @@ async def tick_police_suspect_locations(http_client, http_client_mod, http_clien
             _last_compass_sent[key] = now
 
             metres = game_units_to_metres(dist)
+            stars_tag = "*" * stars_by_guid.get(character.guid, 1)
 
             if in_ring:
                 # Close ring: no bearing, just the proximity callout
-                # (label follows the tunable ring distance)
+                # (label follows the tunable ring distance). Stars replace
+                # the (blanked) suspect name.
                 ring_m = tuning.ring_distance // 100
-                entries.append((dist, f"[{character.name}] <{ring_m}m"))
+                entries.append((dist, f"[{stars_tag}] <{ring_m}m"))
                 continue
 
             dx = suspect_loc[0] - officer_x
@@ -2108,7 +2162,7 @@ async def tick_police_suspect_locations(http_client, http_client_mod, http_clien
             if metres < 500:
                 # 200–500 m band (freeman): direction only — the distance
                 # figure would make close searches trivial.
-                entries.append((dist, f"[{character.name}] {direction}"))
+                entries.append((dist, f"[{stars_tag}] {direction}"))
                 continue
 
             if metres < 1000:
@@ -2116,7 +2170,7 @@ async def tick_police_suspect_locations(http_client, http_client_mod, http_clien
             else:
                 dist_str = f"{metres / 1000:.1f}km"
 
-            entries.append((dist, f"[{character.name}] {dist_str} {direction}"))
+            entries.append((dist, f"[{stars_tag}] {dist_str} {direction}"))
 
         if not entries:
             continue
