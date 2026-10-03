@@ -38,12 +38,8 @@ MAX_HAUL_DEGREE = 1.0  # starvation weight when no snapshot/capacity data exists
 LEGAL_CARGO_FILTER = ~models.Q(cargo_key__in=ILLICIT_CARGO_KEYS)
 
 
-async def snapshot_storages(ctx: dict | None = None) -> int:
-    """Copy the current storage table into StorageSnapshot. Returns row count.
-
-    Accepts (and ignores) the arq worker ``ctx`` dict so the function can be
-    registered directly as an arq cron job.
-    """
+async def snapshot_storages() -> int:
+    """Copy the current storage table into StorageSnapshot. Returns row count."""
     now = timezone.now()
     current = [
         StorageSnapshot(

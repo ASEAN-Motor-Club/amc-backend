@@ -225,6 +225,14 @@ class BankPolicy(models.Model):
         "(default 2 = gov employees and on-duty police earn 2x UBI).",
     )
 
+    wealth_tax_multiplier = models.DecimalField(
+        max_digits=6,
+        decimal_places=3,
+        default=Decimal("1.000"),
+        help_text="Global multiplier applied to the computed wealth tax "
+        "(default 1 = brackets unchanged; 0 disables the wealth tax).",
+    )
+
     @classmethod
     def get_daily_interest_rate(cls) -> Decimal:
         return cls.load().daily_interest_rate
@@ -232,3 +240,7 @@ class BankPolicy(models.Model):
     @classmethod
     def get_gov_salary_multiplier(cls) -> Decimal:
         return cls.load().gov_salary_multiplier
+
+    @classmethod
+    def get_wealth_tax_multiplier(cls) -> Decimal:
+        return cls.load().wealth_tax_multiplier
