@@ -50,7 +50,6 @@ FULL_BLOCKS: dict[str, bool] = {
     BLOCK_RESPAWN_CHARACTER: True,
     BLOCK_RESET_VEHICLE_KEEP_CARGO: True,
     BLOCK_RESET_VEHICLE_STRIP_CARGO: True,
-    BLOCK_ROADSIDE_SERVICE: True,
 }
 
 # Wanted suspect while every on-duty cop is beyond the 500 m gate (freeman
