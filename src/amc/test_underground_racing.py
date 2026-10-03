@@ -82,8 +82,11 @@ async def test_blood_money_odd_checkpoints_floors():
 
 
 async def test_vehicle_type_violation_text():
-    assert "Sedan" in vehicle_type_violation("Sedan")
-    assert "verified" in vehicle_type_violation(None)
+    assert "Sedan" in vehicle_type_violation("Sedan", ["Small", "Pickup"])
+    assert "Small & Pickup" in vehicle_type_violation("Sedan", ["Small", "Pickup"])
+    assert "verified" in vehicle_type_violation(None, ["Small", "Pickup"])
+    # Custom class wording
+    assert "Truck & Bus" in vehicle_type_violation(None, ["Truck", "Bus"])
 
 
 # --------------------------------------------------------------------------
@@ -335,10 +338,15 @@ def _player(guid, unique_id, name):
     }
 
 
-async def _classed_event():
+async def _classed_event(vehicle_types=None):
     tt, _ = await sync_to_async(TTClass.objects.get_or_create)(
         name="TT-270", defaults={"max_hp": 270}
     )
+    if vehicle_types is not None:
+        # get_or_create ignores defaults on an existing row (earlier tests
+        # in this file create TT-270 with the field default) — set it.
+        tt.allowed_vehicle_types = vehicle_types
+        await tt.asave(update_fields=["allowed_vehicle_types"])
     return await sync_to_async(GameEvent.objects.create)(
         guid="GUIDVTYPE00000000000000000000001",
         name="VType Event [TT-270]",
@@ -410,6 +418,31 @@ async def test_pickup_type_not_kicked(kick, last_veh, last_parts, post, _vtype, 
         object(),
         event,
         {"Players": [_player("GUIDVT000000000000000000000003", "U7", "Hauler")]},
+        None,
+    )
+    assert out == []
+    kick.assert_not_awaited()
+    await sync_to_async(event.delete)()
+
+
+@pytest.mark.asyncio
+@patch("amc.handlers.tt_dq.vehicle_type_for", return_value="Truck")
+@patch("amc.handlers.tt_dq._post_audit_embed", new_callable=AsyncMock)
+@patch("amc.handlers.tt_dq.get_player_last_vehicle_parts", new_callable=AsyncMock)
+@patch("amc.handlers.tt_dq.get_player_last_vehicle", new_callable=AsyncMock)
+@patch("amc.handlers.tt_dq.kick_player_from_event", new_callable=AsyncMock)
+async def test_class_allowlisted_vehicle_type_not_kicked(
+    kick, last_veh, last_parts, post, _vtype, db
+):
+    """A class whose allowed_vehicle_types includes Truck admits Trucks
+    (Yuuka 2026-10-02: allowed types are per-class data)."""
+    event = await _classed_event(vehicle_types=["Small", "Truck"])
+    last_veh.return_value = {"vehicle": {"fullName": "Trucker_X_C"}}
+    last_parts.return_value = {"parts": _OK_PARTS}
+    out = await _disqualify_illegal_starters(
+        object(),
+        event,
+        {"Players": [_player("GUIDVT000000000000000000000004", "U6", "Trucker")]},
         None,
     )
     assert out == []

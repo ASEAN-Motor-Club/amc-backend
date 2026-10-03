@@ -32,6 +32,7 @@ from amc.models import (
     GameEventCharacter,
     PendingWanted,
     PoliceSession,
+    TTClass,
     Wanted,
     WantedSystemConfig,
 )
@@ -942,8 +943,8 @@ def compute_stars(wanted_remaining: float) -> int:
 _compute_stars = compute_stars
 
 
-async def _race_restriction_caps(wanted_list: list) -> dict[str, int]:
-    """Map suspect guid -> max_hp cap of the most recent classed illegal race
+async def _race_restriction_caps(wanted_list: list) -> dict[str, TTClass]:
+    """Map suspect guid -> TTClass of the most recent classed illegal race
     the character participated in (the CURRENT event while racing, the same
     event between runs, or the previous event after it ends — all resolved as
     "most recent by last_updated").
@@ -958,7 +959,7 @@ async def _race_restriction_caps(wanted_list: list) -> dict[str, int]:
     chars = [w.character_id for w in wanted_list if w.mod_vehicles_allowed]
     if not chars:
         return {}
-    caps_by_char: dict[int, int] = {}
+    caps_by_char: dict[int, TTClass] = {}
     rows = (
         GameEventCharacter.objects.filter(
             character_id__in=chars,
@@ -973,8 +974,8 @@ async def _race_restriction_caps(wanted_list: list) -> dict[str, int]:
             continue
         tt_class = row.game_event.tt_class
         if tt_class is not None:
-            caps_by_char[row.character_id] = tt_class.max_hp
-    out: dict[str, int] = {}
+            caps_by_char[row.character_id] = tt_class
+    out: dict[str, TTClass] = {}
     for w in wanted_list:
         if w.mod_vehicles_allowed and w.character.guid and w.character_id in caps_by_char:
             out[w.character.guid] = caps_by_char[w.character_id]

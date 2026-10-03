@@ -991,13 +991,14 @@ _TT_INSTANCE: int | None = None
 
 def _underground_description(tt_class, checkpoints: int) -> str:
     """Requirements text the auto-poster writes on the mirrored SE."""
-    from amc.config import BLOOD_MONEY_PER_CHECKPOINT, UNDERGROUND_VEHICLE_TYPES
+    from amc.config import BLOOD_MONEY_PER_CHECKPOINT
 
+    allowed = tt_class.allowed_vehicle_types or ["Small", "Pickup"]
     first = checkpoints * BLOOD_MONEY_PER_CHECKPOINT
     flat = underground_blood_money(checkpoints, 5)
     lines = [
         f"Underground street race — {tt_class.name}: max {tt_class.max_hp} HP, "
-        f"vanilla tires only, {' & '.join(UNDERGROUND_VEHICLE_TYPES)} vehicles only."
+        f"vanilla tires only, {' & '.join(allowed)} vehicles only."
     ]
     if BLOOD_MONEY_PER_CHECKPOINT > 0:
         lines.append(

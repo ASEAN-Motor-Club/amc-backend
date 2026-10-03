@@ -1156,6 +1156,10 @@ class ScheduledEventManager(models.Manager.from_queryset(ScheduledEventQuerySet)
     pass
 
 
+def _default_underground_vehicle_types() -> list[str]:
+    return ["Small", "Pickup"]
+
+
 @final
 class TTClass(models.Model):
     """A time-trial power tier (Yuuka 2026-09-24).
@@ -1168,6 +1172,18 @@ class TTClass(models.Model):
 
     name = models.CharField(max_length=60, unique=True)
     max_hp = models.PositiveIntegerField()
+    allowed_vehicle_types = ArrayField(
+        models.CharField(max_length=32),
+        default=_default_underground_vehicle_types,
+        blank=True,
+        help_text=(
+            "Vehicle types allowed in races of this class. Values are gamedata "
+            "vehicle_type strings (Small, Pickup, Truck, SemiTractor, "
+            "SemiTrailer, Bus, SmallTrailer, Bike, Kart, HeavyMachinery, "
+            "Racecar, Motorhome). Fail-closed: an unmapped vehicle type is "
+            "always a violation."
+        ),
+    )
 
     class Meta:
         ordering = ["max_hp"]
@@ -1215,6 +1231,7 @@ class ScheduledEvent(models.Model):
         null=True,
         blank=True,
         related_name="scheduled_events",
+        verbose_name="HP class",
         help_text="Optional pinned TT power class; auto-posted events override per instance",
     )
     is_rotation_instance = models.BooleanField(
@@ -1274,6 +1291,7 @@ class GameEvent(models.Model):
         null=True,
         blank=True,
         related_name="game_events",
+        verbose_name="HP class",
         help_text="TT power class for this event instance (parsed from the [TT-…] name tag)",
     )
     RACE_LEGALITY_CHOICES = (("legal", "Legal"), ("illegal", "Illegal"))
