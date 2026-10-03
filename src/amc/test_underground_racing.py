@@ -353,7 +353,7 @@ async def _classed_event(vehicle_types=None, se_vehicle_types=None):
             name="VType SE [TT-270]",
             race_setup=(await sync_to_async(RaceSetup.objects.create)(
                 name="VType Setup",
-                hash=RaceSetup.calculate_hash({}),
+                hash=RaceSetup.calculate_hash({}) + f"-{se_vehicle_types}",
                 config={},
             )),
             time_trial=True,
