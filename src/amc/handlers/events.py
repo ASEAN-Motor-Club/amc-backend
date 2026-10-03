@@ -114,6 +114,11 @@ async def _upsert_game_event(event_data: dict):
         ).afirst()
 
     # --- ScheduledEvent association ---
+    # Windowed match only (original SE system): a posted event links to an
+    # SE whose [start_time, end_time] window covers now. The owner-less
+    # out-of-window fallback (added for auto-posted events) is gone — the
+    # rotation no longer posts events, and a rogue setup copy must not
+    # inherit an SE's results.
     scheduled_event = None
     if race_setup:
         scheduled_event = await (
@@ -125,19 +130,6 @@ async def _upsert_game_event(event_data: dict):
             .order_by("start_time")  # deterministic pick if several match
             .afirst()
         )
-        if scheduled_event is None and owner is None:
-            # Out-of-window fallback for AUTO-posted events only (Yuuka
-            # 2026-09-30): the daily 08:30 rotation picks from the whole
-            # SE pool, so its event's SE window may not cover "now". Link
-            # the setup's most recent SE so results/penalties stay
-            # SE-linked instead of orphaning the event. Player-created
-            # events keep the windowed match — a rogue setup copy must
-            # not inherit an SE's results.
-            scheduled_event = await (
-                ScheduledEvent.objects.filter(race_setup=race_setup)
-                .order_by("-start_time")
-                .afirst()
-            )
 
     # --- GameEvent upsert ---
     transition = None

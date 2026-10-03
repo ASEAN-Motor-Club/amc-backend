@@ -6,7 +6,6 @@ from django.utils.translation import gettext_lazy
 
 from amc.command_framework import CommandContext, registry
 from amc.events import (
-    UNDERGROUND_CHAMPIONSHIP_NAME,
     auto_starting_grid,
     setup_event,
     show_scheduled_event_results_popup,
@@ -119,44 +118,17 @@ async def cmd_setup_event(ctx: CommandContext, event_id: Optional[int] = None):
             )
         else:
             # No id: start the CURRENT ACTIVE event (window live right now).
-            # Originals and illegal-TT twins are distinct SE rows (Yuuka
-            # 2026-09-27: "accurately separate them") — prefer the classed
-            # twin outright; only fall back to a classless SE when no twin
-            # window is live.
-            # Rotation instances (the daily post, is_rotation_instance=True)
-            # are never /setup_event targets — they are already live
-            # in-game; re-setting them up would double-post the same setup.
-            # Candidates are the underground TEMPLATES (classless, windowed
-            # daily 08:30 (+07) → next 08:30 — the illegal-TT daily reset,
-            # Yuuka 2026-10-01) plus any other windowed race SEs.
+            # Original SE system (Yuuka 2026-10-03): the rotation opens ONE
+            # underground window per day, so the active pick is just "the
+            # windowed race SE" — prefer the newest windowed race setup.
             base = ScheduledEvent.objects.filter(
                 race_setup__isnull=False,
-                is_rotation_instance=False,
             ).filter_active_at(ctx.timestamp)
-            # Prefer an underground template (rolls a class in setup_event);
-            # else the newest classed twin; else any windowed race SE.
-            underground = base.filter(
-                championship__name=UNDERGROUND_CHAMPIONSHIP_NAME,
-                tt_class__isnull=True,
-            )
             scheduled_event = (
-                await underground.select_related("race_setup")
+                await base.select_related("race_setup")
                 .order_by("-start_time")
                 .afirst()
             )
-            if scheduled_event is None:
-                scheduled_event = (
-                    await base.filter(tt_class__isnull=False)
-                    .select_related("race_setup", "tt_class")
-                    .order_by("-start_time")
-                    .afirst()
-                )
-            if scheduled_event is None:
-                scheduled_event = (
-                    await base.select_related("race_setup")
-                    .order_by("-start_time")
-                    .afirst()
-                )
             if scheduled_event is None:
                 await ctx.reply("No active events right now.")
                 return
@@ -185,13 +157,11 @@ async def cmd_events_list(ctx: CommandContext):
     # Only events whose window is live RIGHT NOW — the old version listed
     # everything with end_time in the future, a long stale list.
     events: list[str] = []
-    # Underground templates are /setup_event targets, not listed events —
-    # the daily rotation post (is_rotation_instance=True) is what players
-    # see (Yuuka 2026-10-01: "all the events are active now instead of one").
-    qs = ScheduledEvent.objects.filter_active_at(ctx.timestamp).exclude(
-        championship__name=UNDERGROUND_CHAMPIONSHIP_NAME,
-        is_rotation_instance=False,
-    )
+    # Original SE system behavior (Yuuka 2026-10-03): list EVERY windowed SE
+    # with its own description. The rotation opens one underground window
+    # per day, so the listing naturally shows today's event — no exclusion,
+    # no mirrors.
+    qs = ScheduledEvent.objects.filter_active_at(ctx.timestamp)
     async for event in qs.order_by("start_time"):
         start_txt = format_in_local_tz(event.start_time)
         end_txt = format_in_local_tz(event.end_time)
