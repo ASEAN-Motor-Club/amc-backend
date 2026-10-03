@@ -1234,6 +1234,15 @@ class ScheduledEvent(models.Model):
         verbose_name="HP class",
         help_text="Optional pinned TT power class; auto-posted events override per instance",
     )
+    allowed_vehicle_types = ArrayField(
+        models.CharField(max_length=32),
+        null=True,
+        blank=True,
+        help_text=(
+            "Per-event override of allowed vehicle types; empty = inherit "
+            "the pinned HP class's list"
+        ),
+    )
     is_rotation_instance = models.BooleanField(
         default=False,
         db_index=True,

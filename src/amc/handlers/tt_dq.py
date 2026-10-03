@@ -74,7 +74,12 @@ async def _disqualify_illegal_starters(
     if not game_event.tt_class_id:
         return []
     tt_class = await TTClass.objects.aget(pk=game_event.tt_class_id)
-    allowed_types = tt_class.allowed_vehicle_types
+    scheduled_event = game_event.scheduled_event
+    if scheduled_event is not None and scheduled_event.allowed_vehicle_types:
+        # Per-event override wins over the class default.
+        allowed_types = scheduled_event.allowed_vehicle_types
+    else:
+        allowed_types = tt_class.allowed_vehicle_types
     event_guid = game_event.guid
     disqualified: list[str] = []
 

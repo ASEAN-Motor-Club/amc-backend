@@ -338,7 +338,7 @@ def _player(guid, unique_id, name):
     }
 
 
-async def _classed_event(vehicle_types=None):
+async def _classed_event(vehicle_types=None, se_vehicle_types=None):
     tt, _ = await sync_to_async(TTClass.objects.get_or_create)(
         name="TT-270", defaults={"max_hp": 270}
     )
@@ -347,12 +347,32 @@ async def _classed_event(vehicle_types=None):
         # in this file create TT-270 with the field default) — set it.
         tt.allowed_vehicle_types = vehicle_types
         await tt.asave(update_fields=["allowed_vehicle_types"])
-    return await sync_to_async(GameEvent.objects.create)(
+    mirror = None
+    if se_vehicle_types is not None:
+        mirror = await sync_to_async(ScheduledEvent.objects.create)(
+            name="VType SE [TT-270]",
+            race_setup=(await sync_to_async(RaceSetup.objects.create)(
+                name="VType Setup",
+                hash=RaceSetup.calculate_hash({}) + f"-{se_vehicle_types}",
+                config={},
+            )),
+            time_trial=True,
+            start_time=timezone.now(),
+            end_time=timezone.now() + timezone.timedelta(days=1),
+            tt_class=tt,
+            allowed_vehicle_types=se_vehicle_types,
+        )
+    event = await sync_to_async(GameEvent.objects.create)(
         guid="GUIDVTYPE00000000000000000000001",
         name="VType Event [TT-270]",
         state=2,
         tt_class=tt,
+        scheduled_event=mirror,
     )
+    if mirror is not None:
+        event.scheduled_event = mirror
+        await sync_to_async(event.save)(update_fields=["scheduled_event"])
+    return event
 
 
 _OK_PARTS = [{"Slot": 2, "Key": "SmallBlock_240HP"}, {"Slot": 19, "Key": "201"}]
@@ -448,3 +468,54 @@ async def test_class_allowlisted_vehicle_type_not_kicked(
     assert out == []
     kick.assert_not_awaited()
     await sync_to_async(event.delete)()
+
+
+@pytest.mark.asyncio
+@patch("amc.handlers.tt_dq.vehicle_type_for", return_value="Truck")
+@patch("amc.handlers.tt_dq._post_audit_embed", new_callable=AsyncMock)
+@patch("amc.handlers.tt_dq.get_player_last_vehicle_parts", new_callable=AsyncMock)
+@patch("amc.handlers.tt_dq.get_player_last_vehicle", new_callable=AsyncMock)
+@patch("amc.handlers.tt_dq.kick_player_from_event", new_callable=AsyncMock)
+async def test_se_override_admits_vehicle_class_excludes(
+    kick, last_veh, last_parts, post, _vtype, db
+):
+    """Per-event override on the ScheduledEvent wins over the class list
+    (Yuuka 2026-10-03): class = Small only, SE override adds Truck."""
+    event = await _classed_event(vehicle_types=["Small"], se_vehicle_types=["Truck"])
+    last_veh.return_value = {"vehicle": {"fullName": "Trucker_X_C"}}
+    last_parts.return_value = {"parts": _OK_PARTS}
+    out = await _disqualify_illegal_starters(
+        object(),
+        event,
+        {"Players": [_player("GUIDVT000000000000000000000005", "U7", "Trucker2")]},
+        None,
+    )
+    assert out == []
+    kick.assert_not_awaited()
+    await sync_to_async(event.delete)()
+    await sync_to_async(event.scheduled_event.delete)()
+
+
+@pytest.mark.asyncio
+@patch("amc.handlers.tt_dq.vehicle_type_for", return_value="Truck")
+@patch("amc.handlers.tt_dq._post_audit_embed", new_callable=AsyncMock)
+@patch("amc.handlers.tt_dq.get_player_last_vehicle_parts", new_callable=AsyncMock)
+@patch("amc.handlers.tt_dq.get_player_last_vehicle", new_callable=AsyncMock)
+@patch("amc.handlers.tt_dq.kick_player_from_event", new_callable=AsyncMock)
+async def test_empty_se_override_falls_back_to_class(
+    kick, last_veh, last_parts, post, _vtype, db
+):
+    """Empty/null SE override = inherit the class list."""
+    event = await _classed_event(vehicle_types=["Small"], se_vehicle_types=[])
+    last_veh.return_value = {"vehicle": {"fullName": "Trucker_X_C"}}
+    last_parts.return_value = {"parts": _OK_PARTS}
+    out = await _disqualify_illegal_starters(
+        object(),
+        event,
+        {"Players": [_player("GUIDVT000000000000000000000006", "U8", "Trucker3")]},
+        None,
+    )
+    assert out and "Truck" in out[0]
+    kick.assert_awaited_once()
+    await sync_to_async(event.delete)()
+    await sync_to_async(event.scheduled_event.delete)()

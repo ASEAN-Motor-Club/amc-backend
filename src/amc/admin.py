@@ -502,6 +502,22 @@ class ScheduledEventAdmin(admin.ModelAdmin):
     autocomplete_fields = ["race_setup"]
     actions = ["award_points", "assign_to_game_events"]
 
+    def formfield_for_dbfield(self, db_field, request, **kwargs):
+        from django import forms
+
+        if db_field.name == "allowed_vehicle_types":
+            # Same ArrayField/MultipleChoiceField kwarg conflict as TTClassAdmin.
+            return forms.MultipleChoiceField(
+                required=False,
+                choices=TT_VEHICLE_TYPE_CHOICES,
+                widget=forms.CheckboxSelectMultiple,
+                help_text=(
+                    "Per-event override — empty = inherit the pinned HP "
+                    "class's allowed types"
+                ),
+            )
+        return super().formfield_for_dbfield(db_field, request, **kwargs)
+
     @admin.action(description="Assign to game events")
     def assign_to_game_events(self, request, queryset):
         for scheduled_event in queryset:

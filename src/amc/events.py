@@ -989,11 +989,11 @@ async def auto_starting_grid(http_client_mod, game_event):
 _TT_INSTANCE: int | None = None
 
 
-def _underground_description(tt_class, checkpoints: int) -> str:
+def _underground_description(tt_class, checkpoints: int, allowed: list[str]) -> str:
     """Requirements text the auto-poster writes on the mirrored SE."""
     from amc.config import BLOOD_MONEY_PER_CHECKPOINT
 
-    allowed = tt_class.allowed_vehicle_types or ["Small", "Pickup"]
+    allowed = allowed or ["Small", "Pickup"]
     first = checkpoints * BLOOD_MONEY_PER_CHECKPOINT
     flat = underground_blood_money(checkpoints, 5)
     lines = [
@@ -1040,7 +1040,10 @@ async def _mirror_posted_event(
         },
     )
     checkpoints = len((config.get("Route", {}).get("Waypoints")) or [])
-    description = _underground_description(tt_class, checkpoints)
+    # Per-event override lives on the TEMPLATE SE; the mirror inherits it.
+    override = list(scheduled_event.allowed_vehicle_types or [])
+    allowed = override or tt_class.allowed_vehicle_types or ["Small", "Pickup"]
+    description = _underground_description(tt_class, checkpoints, allowed)
     championship = await _underground_championship()
     window_start = _rotation_reset(timezone.now())
     window_end = window_start + timedelta(days=1)
@@ -1064,11 +1067,13 @@ async def _mirror_posted_event(
             description_in_game=description,
             time_trial=scheduled_event.time_trial,
             tt_class=tt_class,
+            allowed_vehicle_types=override or None,
             is_rotation_instance=True,
         )
     mirror.name = event_name
     mirror.race_setup = race_setup
     mirror.tt_class = tt_class
+    mirror.allowed_vehicle_types = override or None
     mirror.description = description
     mirror.description_in_game = description
     mirror.time_trial = scheduled_event.time_trial
@@ -1079,6 +1084,7 @@ async def _mirror_posted_event(
             "name",
             "race_setup",
             "tt_class",
+            "allowed_vehicle_types",
             "description",
             "description_in_game",
             "time_trial",
