@@ -89,6 +89,15 @@ def build_display_name(
     clean_name = strip_all_tags(base_name)
     tag = ""
 
+    # Wanted players' display name is BLANKED for the whole chase (freeman
+    # 2026-09-20): no plate text, no tag, no stars. The DB name, logs and
+    # Discord keep the real name — only the pushed game name is empty.
+    # Enforcement does not ride the name (the no-teleport block set is
+    # GUID-keyed), and the revert needs no extra machinery: every wanted-clear
+    # path already calls refresh_player_name, which recomputes the real name.
+    if wanted_stars > 0:
+        return ""
+
     if muted:
         tag += "X"
 
