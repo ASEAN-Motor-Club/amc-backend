@@ -1463,9 +1463,7 @@ async def tick_wanted_countdown(http_client, http_client_mod, http_client_mgmt=N
             >= WANTED_FLASH_INTERVAL_SECONDS
         ):
             _last_wanted_flash[sus_guid] = now_flash
-            wanted_flash_messages.append(
-                (sus_guid, new_stars, int(wanted.wanted_remaining))
-            )
+            wanted_flash_messages.append((sus_guid, new_stars))
 
     # Update modded-vehicle tracking for next tick
     _last_modded_vehicle_guids.clear()
@@ -1613,12 +1611,11 @@ async def tick_wanted_countdown(http_client, http_client_mod, http_client_mgmt=N
 
     # Flash reminders for wanted criminals (freeman 2026-10-03): the display
     # name is blanked, so the stars ride a flashing system message instead.
-    for flash_guid, flash_stars, flash_remaining in wanted_flash_messages:
+    for flash_guid, flash_stars in wanted_flash_messages:
         try:
             await send_system_message(
                 http_client_mod,
-                f"[{'*' * max(flash_stars, 1)}] WANTED - "
-                f"{flash_remaining}s remaining",
+                f"[{'*' * max(flash_stars, 1)}] WANTED",
                 character_guid=flash_guid,
             )
         except Exception:  # noqa: BLE001 — the flash must never break the tick

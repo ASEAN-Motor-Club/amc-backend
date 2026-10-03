@@ -84,7 +84,7 @@ def _non_flash_calls(mock_sys_msg):
     and must not count against tests that pin other system messages."""
     return [
         c for c in mock_sys_msg.call_args_list
-        if "WANTED -" not in str(c.args[1] if c.args else "")
+        if "WANTED" not in str(c.args[1] if c.args else "")
     ]
 
 
@@ -334,7 +334,6 @@ class WantedCountdownTickTests(TestCase):
         self.assertTrue(flash_calls, "no flash sent")
         message = flash_calls[0].args[1]
         self.assertIn("[***] WANTED", message)  # 300 remaining = 3 stars
-        self.assertIn("remaining", message)
 
     async def test_flash_throttled_to_interval(
         self, mock_sys_msg, mock_refresh,
