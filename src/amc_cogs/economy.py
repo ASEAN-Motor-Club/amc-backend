@@ -310,26 +310,35 @@ class WealthTaxConfirmView(discord.ui.View):
             interest_rate,
             self.old_multiplier,
         )
-        # Non-ephemeral reply in the command channel with the same tables
-        await interaction.followup.send(
-            content=f"⚖️ Wealth tax multiplier set to **{self.multiplier}x** "
-            f"(was {self.old_multiplier}x).",
+        # One consolidated non-ephemeral reply in the command channel
+        channel_text = "\n".join(
+            [
+                f"⚖️ Wealth tax multiplier set to **{self.multiplier}x** "
+                f"(was {self.old_multiplier}x).",
+                *pages,
+            ]
         )
-        for page in pages:
-            await interaction.followup.send(content=page)
+        await interaction.followup.send(content=channel_text)
 
-        # Announcement + tables in the treasury channel
+        # One consolidated announcement in the treasury channel
         treasury_channel_id = getattr(
             settings, "DISCORD_TREASURY_CHANNEL_ID", 1402660537619320872
         )
         treasury_channel = self.cog.bot.get_channel(treasury_channel_id)
-        if treasury_channel:
-            await treasury_channel.send(
-                f"⚖️ Wealth tax multiplier set to **{self.multiplier}x** "
-                f"(was {self.old_multiplier}x) by {interaction.user.mention}"
+        if treasury_channel and treasury_channel.id != interaction.channel_id:
+            treasury_text = "\n".join(
+                [
+                    f"⚖️ Wealth tax multiplier set to **{self.multiplier}x** "
+                    f"(was {self.old_multiplier}x) by {interaction.user.mention}",
+                    *pages,
+                ]
             )
-            for page in pages:
-                await treasury_channel.send(page)
+            await treasury_channel.send(treasury_text)
+        elif not treasury_channel:
+            logging.getLogger(__name__).warning(
+                "Treasury channel %s not found; wealth tax tables not posted",
+                treasury_channel_id,
+            )
         else:
             logging.getLogger(__name__).warning(
                 "Treasury channel %s not found; wealth tax tables not posted",
