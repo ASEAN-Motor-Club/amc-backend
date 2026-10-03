@@ -40,6 +40,7 @@ from amc.no_teleport import FULL_BLOCKS, push_no_teleport_later
 from amc.special_cargo import (
     ILLICIT_CARGO_KEYS,
     accumulate_illicit_delivery,
+    history_wanted_multiplier,
     should_trigger_wanted,
 )
 from amc.mod_detection import detect_custom_parts, POLICE_DUTY_WHITELIST
@@ -410,11 +411,15 @@ async def handle_cargo_arrived(event, player, character, ctx):
                     ctx.http_client, ctx.http_client_mod, character
                 )
                 if cops_present:
+                    history_mult = await history_wanted_multiplier(
+                        character, before_ts=timestamp
+                    )
                     trigger = should_trigger_wanted(
                         accumulated_amount,
                         pre_delivery_score,
                         cop_distance_m,
                         marked=marked,
+                        history_multiplier=history_mult,
                     )
                     if trigger and marked:
                         # The mark is spent on the delivery that triggers:
