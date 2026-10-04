@@ -507,13 +507,16 @@ class ScheduledEventAdmin(admin.ModelAdmin):
 
         if db_field.name == "allowed_vehicle_types":
             # Same ArrayField/MultipleChoiceField kwarg conflict as TTClassAdmin.
+            # Default tick Small + Pickup (Yuuka 2026-10-04): matches the model
+            # default, so a freshly created SE is legal out of the box.
             return forms.MultipleChoiceField(
                 required=False,
                 choices=TT_VEHICLE_TYPE_CHOICES,
                 widget=forms.CheckboxSelectMultiple,
+                initial=["Small", "Pickup"],
                 help_text=(
                     "Per-event override — empty = inherit the pinned HP "
-                    "class's allowed types"
+                    "class's allowed types (default: Small + Pickup)"
                 ),
             )
         return super().formfield_for_dbfield(db_field, request, **kwargs)
