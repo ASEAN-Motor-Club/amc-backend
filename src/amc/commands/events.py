@@ -112,7 +112,7 @@ async def cmd_setup_event(ctx: CommandContext, event_id: Optional[int] = None):
     try:
         if event_id:
             scheduled_event = (
-                await ScheduledEvent.objects.select_related("race_setup")
+                await ScheduledEvent.objects.select_related("race_setup", "tt_class")
                 .filter(race_setup__isnull=False)
                 .aget(pk=event_id)
             )
@@ -125,7 +125,7 @@ async def cmd_setup_event(ctx: CommandContext, event_id: Optional[int] = None):
                 race_setup__isnull=False,
             ).filter_active_at(ctx.timestamp)
             scheduled_event = (
-                await base.select_related("race_setup")
+                await base.select_related("race_setup", "tt_class")
                 .order_by("-start_time")
                 .afirst()
             )

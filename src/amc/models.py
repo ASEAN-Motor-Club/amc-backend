@@ -1238,9 +1238,11 @@ class ScheduledEvent(models.Model):
         models.CharField(max_length=32),
         null=True,
         blank=True,
+        default=_default_underground_vehicle_types,
         help_text=(
-            "Per-event override of allowed vehicle types; empty = inherit "
-            "the pinned HP class's list"
+            "Allowed vehicle types (Yuuka 2026-10-04: default Small + "
+            "Pickup for ALL new SEs); empty = inherit the pinned HP "
+            "class's list"
         ),
     )
     is_rotation_instance = models.BooleanField(
