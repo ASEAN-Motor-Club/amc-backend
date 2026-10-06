@@ -8,7 +8,7 @@ from amc.factories import (
     ChampionshipFactory,
     ChampionshipPointFactory,
 )
-from amc.models import CharacterLocation, Character
+from amc.models import CharacterLocation, Character, Player
 
 
 class CharacterLocationTestCase(TestCase):
@@ -131,6 +131,36 @@ class CharacterMangerTestCase(TestCase):
             "test2", 123, character_guid=234
         )
         self.assertEqual(character1.id, character2.id)
+
+    async def test_blank_guid_line_does_not_rewrite_name(self):
+        """A blank display name (wanted player mid-chase) resolves by GUID but
+        must NOT rewrite Character.name to ''."""
+        character, *_ = await Character.objects.aget_or_create_character_player(
+            "TestPlayer", 321, character_guid="guid-blank-1"
+        )
+        resolved, _, _, _ = await Character.objects.aget_or_create_character_player(
+            "", 321, character_guid="guid-blank-1"
+        )
+        self.assertEqual(resolved.id, character.id)
+        await resolved.arefresh_from_db()
+        self.assertEqual(resolved.name, "TestPlayer")
+
+    async def test_blank_name_without_guid_is_unresolvable(self):
+        """Blank name + no GUID: unresolvable — no rename, no orphan create."""
+        from amc.factories import CharacterFactory, PlayerFactory
+
+        player = await sync_to_async(PlayerFactory)(unique_id="76561199000000999")
+        await sync_to_async(CharacterFactory)(
+            player=player, name="RealName", guid="guid-blank-2"
+        )
+        character, _, created, _ = await (
+            Character.objects.aget_or_create_character_player("", "76561199000000999")
+        )
+        self.assertIsNone(character)
+        self.assertFalse(created)
+        row = await Character.objects.aget(guid="guid-blank-2")
+        self.assertEqual(row.name, "RealName")
+        await Player.objects.filter(unique_id="76561199000000999").adelete()
 
     async def test_add_guid(self):
         # Create a legacy GUID-less character directly (bypassing the manager)
