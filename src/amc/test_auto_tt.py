@@ -7,10 +7,6 @@ other underground window, and announces. /setup_event posts the decided
 event; the original AMC Cup window system is the activeness mechanism.
 """
 
-import re
-
-# Classed event names carry the class tag: "Live TT - IR - 480".
-import re as _re
 from datetime import timedelta
 from unittest.mock import AsyncMock, MagicMock, patch
 
@@ -20,10 +16,7 @@ from django.utils import timezone
 
 from amc.events import _rotation_reset, post_random_events
 from amc.models import (
-    Character,
     GameEvent,
-    GameEventCharacter,
-    Player,
     RaceSetup,
     ScheduledEvent,
 )

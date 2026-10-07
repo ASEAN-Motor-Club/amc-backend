@@ -12,7 +12,6 @@ Covers the contract agreed for the Yuuka 2026-09-26 request:
 * rotation candidates are restricted to race setups with NumLaps == 0
 """
 
-import re
 from datetime import timedelta
 from unittest.mock import AsyncMock, patch
 
