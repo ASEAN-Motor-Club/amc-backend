@@ -1830,7 +1830,16 @@ async def refresh_suspect_tags(http_client_mod, http_client_game=None) -> None:
             logger.warning("costume make_suspect failed for %s", rec.name)
 
     # --- Illegal-race pass (Yuuka 2026-09-27 full rework) ---
-    # Scope: events RACING (state 2). At ~60 s after start the announcement
+    # Scope: events RACING (state 2) — plus state 1 rows as a lost-start-
+    # hook recovery (prod 2026-10-07: the game enqueued NO 1→2
+    # ServerChangeEventState for player-hosted races — 3 AddEvents / 1
+    # ChangeEventState in the whole UE4SS session — so the row stayed
+    # state 1 its entire life and neither the SSE alert task nor this
+    # tick ever saw it racing; the race finished star-less). The live
+    # state inside ensure_announced is the real gate: a Ready lobby
+    # (DB 1 + live 1) re-arms silently, a lost-hook race (DB 1 + live 2)
+    # proceeds to the progress gate and fires like any other run.
+    # At ~60 s after start the announcement
     # fires (first tick or the SSE alert task that sees it racing) and every
     # online participant gets a REAL Wanted row (stars; origin 'event_race',
     # mod_vehicles_allowed=True, bounty 0). Every later tick REFRESHES the
@@ -1842,7 +1851,7 @@ async def refresh_suspect_tags(http_client_mod, http_client_game=None) -> None:
     # (Schedule 1's system; Yuuka 2026-10-01).
     live_race_events = GameEvent.objects.filter(
         race_legality="illegal",
-        state=2,
+        state__in=(1, 2),  # 1 = lost-start-hook recovery (live state gates)
         guid__isnull=False,
     ).prefetch_related("participants__character")
 

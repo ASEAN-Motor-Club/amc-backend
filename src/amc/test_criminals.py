@@ -3902,6 +3902,87 @@ async def test_race_wanted_countdown_not_topped_up_while_racing(
     await Character.objects.filter(guid="GEVENTNOP2").adelete()
 
 
+@pytest.mark.asyncio
+@pytest.mark.django_db
+async def test_race_pass_catches_lost_start_hook_state1_event():
+    """Lost-start-hook recovery (prod 2026-10-07): the game enqueued NO
+    1→2 ServerChangeEventState, so the illegal race's DB row stayed
+    state 1 its entire life and finished star-less. The race pass now
+    picks up state 1 rows too — ensure_announced's LIVE state check is
+    the real gate (a Ready lobby, DB 1 + live 1, must NOT fire)."""
+    import amc.handlers.tt_police as tt_police_mod
+    from amc.factories import CharacterFactory
+    from amc.models import Character, GameEvent, GameEventCharacter, Wanted
+
+    now = timezone.now()
+    char = await sync_to_async(CharacterFactory)(
+        guid="GEVENTHOOK1", name="hookloss"
+    )
+    await Character.objects.filter(pk=char.pk).aupdate(last_online=now)
+    event = await GameEvent.objects.acreate(
+        guid="GUIDHOOK00000000000000000000001",
+        name="Lost-start-hook race",
+        race_legality="illegal",
+        state=1,  # DB never learned the race started (hook lost)
+        start_time=now,
+    )
+    await GameEventCharacter.objects.acreate(
+        game_event=event, character=char, rank=0
+    )
+
+    live = [{
+        "EventGuid": "GUIDHOOK00000000000000000000001",
+        "State": 2,
+        "RaceSetup": {"Route": {"Waypoints": []}},  # no waypoints -> gate True
+        "Players": [{
+            "CharacterId": {"CharacterGuid": "GEVENTHOOK1"},
+            "SectionIndex": 3,
+        }],
+    }]
+
+    tt_police_mod._announced_race_guids.clear()
+    tt_police_mod._alert_targets.clear()
+    try:
+        with (
+            patch("amc.handlers.tt_police.get_events", new_callable=AsyncMock,
+                  return_value=live),
+            patch("amc.handlers.tt_police.grant_race_wanted",
+                  new_callable=AsyncMock) as grant,
+            patch("amc.mod_server.broadcast_server_message",
+                  new_callable=AsyncMock) as broadcast,
+        ):
+            await refresh_suspect_tags(AsyncMock())
+        grant.assert_awaited_once()
+        broadcast.assert_awaited_once()
+    finally:
+        tt_police_mod._announced_race_guids.clear()
+        tt_police_mod._alert_targets.clear()
+    row = await Wanted.objects.filter(
+        character__guid="GEVENTHOOK1"
+    ).afirst()
+    # grant_race_wanted was mocked — no real Wanted row; the pin is the
+    # announce+grant CALL happening for a state-1 DB row.
+    assert row is None
+
+    # And the negative: a Ready LOBBY (DB 1 + live 1) must stay silent.
+    tt_police_mod._announced_race_guids.clear()
+    tt_police_mod._alert_targets.clear()
+    lobby = [dict(live[0], State=1)]
+    with (
+        patch("amc.mod_server.get_events", new_callable=AsyncMock,
+              return_value=lobby),
+        patch("amc.handlers.tt_police.grant_race_wanted",
+              new_callable=AsyncMock) as grant2,
+    ):
+        await refresh_suspect_tags(AsyncMock())
+    grant2.assert_not_awaited()
+
+    await GameEvent.objects.filter(
+        guid="GUIDHOOK00000000000000000000001"
+    ).adelete()
+    await Character.objects.filter(guid="GEVENTHOOK1").adelete()
+
+
 # ---------------------------------------------------------------------------
 # Roadside-reset distance gate (freeman 2026-09-28 PR2)
 # ---------------------------------------------------------------------------
