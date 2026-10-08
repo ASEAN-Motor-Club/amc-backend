@@ -24,6 +24,7 @@ from amc.factories import (
     PlayerFactory,
     CharacterFactory,
     TeamFactory,
+    ScheduledEventFactory,
     GameEventFactory,
     GameEventCharacterFactory,
     ChampionshipFactory,
@@ -298,6 +299,29 @@ class ScheduledEventAPITest(TestCase):
         )
         data = response.json()
         self.assertEqual(len(data), 2)
+
+    async def test_detail_includes_championship(self):
+        champ = await sync_to_async(ChampionshipFactory)(
+            name="Jeju Underground Street Racing"
+        )
+        se = await sync_to_async(ScheduledEventFactory)(championship=champ)
+        response = await cast(Any, self.api_client.get(f"/{se.id}/"))
+        data = response.json()
+        self.assertEqual(data["championship"]["name"], "Jeju Underground Street Racing")
+
+    async def test_detail_championship_nullable(self):
+        se = await sync_to_async(ScheduledEventFactory)()
+        response = await cast(Any, self.api_client.get(f"/{se.id}/"))
+        self.assertEqual(response.status_code, 200)
+        self.assertIsNone(response.json()["championship"])
+
+    async def test_list_includes_championship(self):
+        champ = await sync_to_async(ChampionshipFactory)(name="AMC Cup Season 3")
+        await sync_to_async(ScheduledEventFactory)(championship=champ)
+        response = await cast(Any, self.api_client.get("/"))
+        data = response.json()
+        self.assertEqual(len(data), 1)
+        self.assertEqual(data[0]["championship"]["name"], "AMC Cup Season 3")
 
     async def test_results_time_trial(self):
         game_event = await sync_to_async(GameEventFactory)(

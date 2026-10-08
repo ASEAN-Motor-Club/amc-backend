@@ -126,7 +126,18 @@ class PatchTeamSchema(ModelSchema):
         fields_optional = "__all__"
 
 
+class SimpleChampionshipSchema(ModelSchema):
+    class Meta:
+        model = Championship
+        fields = [
+            "id",
+            "name",
+        ]
+
+
 class ScheduledEventSchema(ModelSchema):
+    championship: Optional[SimpleChampionshipSchema] = None
+
     class Meta:
         model = ScheduledEvent
         fields = [

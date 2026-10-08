@@ -515,12 +515,19 @@ scheduled_events_router = Router()
 
 @scheduled_events_router.get("/", response=list[ScheduledEventSchema])
 async def list_scheduled_events(request):
-    return [scheduled_event async for scheduled_event in ScheduledEvent.objects.all()]
+    return [
+        scheduled_event
+        async for scheduled_event in ScheduledEvent.objects.select_related(
+            "championship"
+        )
+    ]
 
 
 @scheduled_events_router.get("/{id}/", response=ScheduledEventSchema)
 async def get_scheduled_event(request, id):
-    return await ScheduledEvent.objects.select_related("race_setup").aget(id=id)
+    return await ScheduledEvent.objects.select_related(
+        "race_setup", "championship"
+    ).aget(id=id)
 
 
 @scheduled_events_router.get("/{id}/results/", response=list[ParticipantSchema])
