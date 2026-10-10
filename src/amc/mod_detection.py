@@ -381,10 +381,27 @@ def _load_compatibility_data():
         # vehicle blueprint name -> vehicle_type
         vtype_map: dict[str, str] = {}
         try:
-            for row in cursor.execute("SELECT id, vehicle_type FROM vehicles"):
-                vtype_map[row[0]] = row[1]
+            rows = list(
+                cursor.execute("SELECT id, vehicle_type, blueprint_path FROM vehicles")
+            )
         except sqlite3.OperationalError:
-            pass
+            # Older gamedata DBs without the blueprint_path column.
+            rows = list(cursor.execute("SELECT id, vehicle_type FROM vehicles"))
+        for row in rows:
+            vtype_map[row[0]] = row[1]
+            # Vehicles with numeric DataTable RowNames ('1' = Hana, '2' =
+            # Stinger, '3' = Maity, '4' = Spider) are keyed by RowName, but
+            # the runtime vehicle fullName carries the blueprint asset name
+            # (e.g. "Hana_C Default__Hana" -> "Hana"). Index the blueprint
+            # asset as an alias so vehicle_type_for() can resolve them;
+            # without it those vehicles fail the TT vehicle-type check with
+            # "Vehicle type could not be verified" (FreyFrey's Hana,
+            # 2026-10-10).
+            asset = ""
+            if len(row) > 2 and row[2]:
+                asset = row[2].rsplit("/", 1)[-1].removesuffix("_C")
+            if asset:
+                vtype_map.setdefault(asset, row[1])
 
         conn.close()
 
