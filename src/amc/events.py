@@ -1,5 +1,6 @@
 import asyncio
 import math
+import re
 import uuid
 from datetime import timedelta
 from urllib.parse import quote
@@ -118,6 +119,45 @@ async def setup_event(timestamp, player_id, scheduled_event, http_client_mod):
         return True
 
 
+async def match_scheduled_event(name, race_setup):
+    """Match a live game event to a ScheduledEvent.
+
+    Primary: an open-window SE whose race_setup hash equals the event's —
+    exact config match. Fallback: the IR-suffix name match. /setup_event
+    posts "<SE name> - IR - <hp>", but key-shape drift between the stored
+    template config (Location form) and the game's re-emission (Translation
+    form, populated VehicleKeys) can defeat the hash even when the route is
+    identical — observed live 2026-10 (Get the Priest SE 61, Swapped Cargo
+    SE 65) which dropped the leaderboard link from the results embed.
+    Player ad-hoc events never match: their names don't carry the IR
+    suffix and no SE name is a full prefix of them.
+    """
+    if race_setup is not None:
+        scheduled_event = await (
+            ScheduledEvent.objects.filter(
+                race_setup=race_setup,
+                start_time__lte=timezone.now(),
+                end_time__gte=timezone.now(),
+            )
+            .order_by("start_time")  # deterministic pick if several match
+            .afirst()
+        )
+        if scheduled_event is not None:
+            return scheduled_event
+
+    ir_suffix = re.compile(r"^( - IR - \d+)?$")
+    async for se in ScheduledEvent.objects.filter(
+        start_time__lte=timezone.now(),
+        end_time__gte=timezone.now(),
+    ).order_by("start_time"):
+        if not se.name:
+            continue
+        remainder = name[len(se.name) :]
+        if name.startswith(se.name) and ir_suffix.match(remainder):
+            return se
+    return None
+
+
 async def process_event(event):
     transition = None
     race_setup = None
@@ -135,15 +175,7 @@ async def process_event(event):
         guid=event["OwnerCharacterId"]["CharacterGuid"],
     ).afirst()
 
-    scheduled_event = await (
-        ScheduledEvent.objects.filter(
-            race_setup=race_setup,
-            start_time__lte=timezone.now(),
-            end_time__gte=timezone.now(),
-        )
-        .order_by("start_time")  # deterministic pick if several match
-        .afirst()
-    )
+    scheduled_event = await match_scheduled_event(event["EventName"], race_setup)
 
     try:
         game_event = await (
