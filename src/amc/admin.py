@@ -1,7 +1,9 @@
 import aiohttp
 import json
+import re
 from datetime import datetime, timedelta
 from asgiref.sync import async_to_sync
+from django import forms
 from django.contrib import admin
 from django.http import JsonResponse
 from django.urls import path
@@ -484,6 +486,47 @@ class ChampionshipPointAdmin(admin.ModelAdmin):
     search_fields = ["championship__name", "participant__character__name", "team__name"]
 
 
+class HPClassFormField(forms.CharField):
+    """Type-able HP class for ScheduledEvent.tt_class (Yuuka 2026-10-12).
+
+    Accepts an existing class NAME (or the widget's own round-trip rendering
+    ``"<name> (<hp>hp)"``) or a bare HP VALUE, which get-or-creates the class
+    carrying that exact max_hp (reusing any row that already has it — one
+    value = one rule set). Empty clears the pin. The rotation grid rule is
+    multiples of 10, so typed values are validated to the same grid.
+    """
+
+    widget = forms.TextInput
+
+    def prepare_value(self, value):
+        if isinstance(value, TTClass):
+            return value.name
+        return super().prepare_value(value)
+
+    def clean(self, value):
+        text = (super().clean(value) or "").strip()
+        if not text:
+            return None
+        # str(TTClass) renders "name (NNNhp)" — strip the rendering suffix
+        # so re-saving an untouched form round-trips.
+        match = re.fullmatch(r"(.+?)\s*\((\d+)hp\)", text)
+        if match:
+            text = match.group(1)
+        row = TTClass.objects.filter(name__iexact=text).first()
+        if row is not None:
+            return row
+        if text.isdigit():
+            hp = int(text)
+            if hp % 10:
+                raise forms.ValidationError(
+                    "HP value must be a multiple of 10 (e.g. 240)."
+                )
+            return TTClass.get_or_create_for_hp(hp)
+        raise forms.ValidationError(
+            "Unknown HP class — enter an existing class name or a multiple-of-10 HP value."
+        )
+
+
 @admin.register(ScheduledEvent)
 class ScheduledEventAdmin(admin.ModelAdmin):
     list_display = [
@@ -505,6 +548,19 @@ class ScheduledEventAdmin(admin.ModelAdmin):
     def formfield_for_dbfield(self, db_field, request, **kwargs):
         from django import forms
 
+        if db_field.name == "tt_class":
+            # Type-able HP class (Yuuka 2026-10-12): type an existing class
+            # name or a bare HP value instead of picking from the fixed
+            # ladder dropdown. Empty clears the pin.
+            return HPClassFormField(
+                required=False,
+                label=db_field.verbose_name,
+                help_text=(
+                    "Type an HP value (multiples of 10, e.g. 240) or an "
+                    "existing class name; the class is reused or created. "
+                    "Empty = no pinned HP class."
+                ),
+            )
         if db_field.name == "allowed_vehicle_types":
             # Same ArrayField/MultipleChoiceField kwarg conflict as TTClassAdmin.
             # Default tick Small + Pickup (Yuuka 2026-10-04): matches the model

@@ -179,14 +179,16 @@ async def test_rotation_round_robin_advances(announce_mock, db):
     # by the tick itself (closed to window_start), so run the tick again
     # with time advanced past the current window start.
     await first.arefresh_from_db()
-    # The tick closed every OTHER underground SE; the active one holds
-    # [reset, reset+1d). Run a second tick "tomorrow": push the active SE's
-    # window into the previous window by rewinding its start_time.
-    await ScheduledEvent.objects.filter(pk=first.pk).aupdate(
-        start_time=_rotation_reset(now) - timedelta(days=1),
-        end_time=_rotation_reset(now) - timedelta(days=1) + timedelta(hours=1),
-    )
     later = now + timedelta(days=2)
+    # The tick closed every OTHER underground SE; the active one holds
+    # [reset, reset+1d). Run a second tick "tomorrow": rewind the active SE
+    # into the PREVIOUS window (start at its boundary) so the round-robin
+    # resumes after it — class pinning is per-window state now, so the
+    # cleared slot is back in the pool and round-robin must skip past it.
+    await ScheduledEvent.objects.filter(pk=first.pk).aupdate(
+        start_time=_rotation_reset(later) - timedelta(days=1),
+        end_time=_rotation_reset(later) - timedelta(days=1) + timedelta(hours=1),
+    )
     with patch("amc.events.timezone") as tz_mock:
         tz_mock.now.return_value = later
         tz_mock.timedelta = None  # unused by the rotation directly
@@ -469,3 +471,128 @@ async def test_events_empty_replies_no_events(db):
     ctx = _make_ctx()
     await registry.execute("/events", ctx)
     ctx.reply.assert_awaited_once_with("No active events right now.")
+
+
+# ---------------------------------------------------------------------------
+# Grid-walk rework (Yuuka 2026-10-12): multiples of 10 in [110, 620],
+# |next - prev| >= 30, get-or-created rows, no pool drain.
+# ---------------------------------------------------------------------------
+
+
+async def _seed_prev_classed_event(name: str, hp: int):
+    """A finished classed underground GameEvent — the rotation's sticky
+    'previous value' state."""
+    cls, _ = await _tt_class(f"prev-{hp}", max_hp=hp)
+    race = await _make_race(f"{name} route")
+    se = await _ug_template(
+        name, race, timezone.now() - timedelta(days=2), timezone.now() - timedelta(days=1)
+    )
+    await ScheduledEvent.objects.filter(pk=se.pk).aupdate(tt_class=cls)
+    await sync_to_async(GameEvent.objects.create)(
+        name=f"{name} - IR - {hp}",
+        guid=("p" * 32)[:32],
+        state=3,
+        tt_class=cls,
+        scheduled_event=se,
+    )
+
+
+@pytest.mark.asyncio
+@patch("amc.events.announce", new_callable=AsyncMock)
+async def test_rotation_grid_walk_respects_prev_value(announce_mock, db):
+    """Pinned HP: multiple of 10, inside [110, 620], and >= 30 away from the
+    previous classed underground event's hp."""
+    from amc.models import TTClass
+
+    now = timezone.now()
+    await _clean_slate()
+    await _seed_prev_classed_event("Prev Grid Track", 480)
+    race = await _make_race("Grid route")
+    await _ug_template("Grid Track", race, now - timedelta(hours=1), now + timedelta(hours=1))
+
+    await post_random_events({"http_client_mod": FakeModClient(), "http_client": AsyncMock()})
+
+    active = await (
+        ScheduledEvent.objects.filter(tt_class__isnull=False)
+        .select_related("tt_class")
+        .afirst()
+    )
+    assert active is not None
+    hp = active.tt_class.max_hp
+    assert hp % 10 == 0
+    assert 110 <= hp <= 620
+    assert abs(hp - 480) >= 30
+
+
+@pytest.mark.asyncio
+@patch("amc.events.announce", new_callable=AsyncMock)
+async def test_rotation_grid_first_run_starts_at_floor(announce_mock, db):
+    """No prior classed underground event anywhere -> the floor (110)."""
+    from amc.models import TTClass
+
+    now = timezone.now()
+    await _clean_slate()
+    race = await _make_race("Fresh route")
+    await _ug_template("Fresh Track", race, now - timedelta(hours=1), now + timedelta(hours=1))
+
+    await post_random_events({"http_client_mod": FakeModClient(), "http_client": AsyncMock()})
+
+    active = await (
+        ScheduledEvent.objects.filter(tt_class__isnull=False)
+        .select_related("tt_class")
+        .afirst()
+    )
+    assert active is not None
+    assert active.tt_class.max_hp == 110
+    # The row exists as a real class -> the posted tag parses back.
+    from amc.handlers.events import _parse_tt_class_tag
+
+    parsed = await _parse_tt_class_tag("Fresh Track - IR - 110")
+    assert parsed is not None and parsed.max_hp == 110
+
+
+@pytest.mark.asyncio
+@patch("amc.events.announce", new_callable=AsyncMock)
+async def test_rotation_repins_used_slots_no_pool_drain(announce_mock, db):
+    """Pinning is per-window state: after a full round-robin cycle the tick
+    wraps back to the first slot instead of running the pool dry."""
+    now = timezone.now()
+    await _clean_slate()
+    names = ["Alpha", "Bravo", "Charlie"]
+    for n in names:
+        race = await _make_race(f"{n} route")
+        await _ug_template(n, race, now - timedelta(hours=1), now + timedelta(hours=1))
+
+    mod = FakeModClient()
+    picked = []
+    for day in range(5):
+        later = now + timedelta(days=day)
+        with patch("amc.events.timezone") as tz_mock:
+            tz_mock.now.return_value = later
+            await post_random_events({"http_client_mod": mod, "http_client": AsyncMock()})
+        active = await (
+            ScheduledEvent.objects.filter(
+                start_time__gte=_rotation_reset(later),
+                start_time__lt=_rotation_reset(later) + timedelta(days=1),
+            ).afirst()
+        )
+        assert active is not None, f"day {day}: pool drained — no windowed SE"
+        picked.append(active.name)
+
+    # Round-robin by id wraps: Alpha -> Bravo -> Charlie -> Alpha -> Bravo.
+    assert picked == ["Alpha", "Bravo", "Charlie", "Alpha", "Bravo"]
+
+
+@pytest.mark.asyncio
+async def test_get_or_create_for_hp_reuses_existing_row(db):
+    """One value = one rule set: an hp that any existing row carries is
+    REUSED (no duplicate-max_hp rows), only unseen values mint IR-<hp>."""
+    from amc.models import TTClass
+
+    seeded, _ = await _tt_class("TT-240", max_hp=240)
+    row = await sync_to_async(TTClass.get_or_create_for_hp)(240)
+    assert row.pk == seeded.pk
+    fresh = await sync_to_async(TTClass.get_or_create_for_hp)(260)
+    assert fresh.name == "IR-260" and fresh.max_hp == 260
+    again = await sync_to_async(TTClass.get_or_create_for_hp)(260)
+    assert again.pk == fresh.pk

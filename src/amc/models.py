@@ -1192,6 +1192,31 @@ class TTClass(models.Model):
     def __str__(self):
         return f"{self.name} ({self.max_hp}hp)"
 
+    @classmethod
+    def get_or_create_for_hp(cls, hp: int) -> "TTClass":
+        """The class carrying exactly *hp* — any name — else create ``IR-<hp>``.
+
+        Lookup keys on ``max_hp`` FIRST so one value always maps to one rule
+        set (rows are unique by ``name``, not ``max_hp``; two rows with the
+        same ``max_hp`` would make the ``_parse_tt_class_tag`` IR lookup
+        ambiguous about allowed vehicle types). Never deletes or renames the
+        seeded ladder rows — historical FKs reference them.
+        """
+        hp = int(hp)
+        existing = cls.objects.filter(max_hp=hp).first()
+        if existing is not None:
+            return existing
+        return cls.objects.get_or_create(name=f"IR-{hp}", defaults={"max_hp": hp})[0]
+
+    @classmethod
+    async def aget_or_create_for_hp(cls, hp: int) -> "TTClass":
+        """Async variant of :meth:`get_or_create_for_hp` (worker paths)."""
+        hp = int(hp)
+        existing = await cls.objects.filter(max_hp=hp).afirst()
+        if existing is not None:
+            return existing
+        return (await cls.objects.aget_or_create(name=f"IR-{hp}", defaults={"max_hp": hp}))[0]
+
 
 class ScheduledEvent(models.Model):
     name = models.CharField(max_length=200)

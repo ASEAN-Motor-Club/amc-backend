@@ -1,5 +1,6 @@
 import asyncio
 import math
+import random
 import re
 import uuid
 from datetime import timedelta
@@ -1095,6 +1096,52 @@ def _rotation_reset(now):
     return boundary
 
 
+# Underground HP grid (Yuuka 2026-10-12): the rotation walks multiples of
+# 10 inside the band; the next value must differ from the previous posted
+# one by at least _HP_GRID_MIN_DIFF (kills 110→120-style bland steps) but
+# is otherwise an UNBOUNDED jump — 110 → 420 can happen.
+HP_GRID_MIN = 110
+HP_GRID_MAX = 620
+HP_GRID_STEP = 10
+HP_GRID_MIN_DIFF = 30
+
+
+async def _roll_grid_tt_class() -> TTClass | None:
+    """Pick today's underground HP class by the grid-walk rule.
+
+    prev = the most recent classed underground-championship GameEvent
+    (sticky state from history, never from SE rows — the daily post uses
+    the template SE directly and mod-created events never mirror into
+    instance SEs). First-ever run starts at the grid floor. The drawn
+    value is get-or-created as a real TTClass row so the posted name tag
+    ("… - IR - <hp>") parses back and start-line DQ / wanted enforcement
+    arm; a value with no row would silently unclass the event.
+    """
+    prev = (
+        await GameEvent.objects.filter(
+            tt_class__isnull=False,
+            scheduled_event__championship__name=UNDERGROUND_CHAMPIONSHIP_NAME,
+        )
+        .select_related("tt_class")
+        .order_by("-last_updated")
+        .afirst()
+    )
+    prev_hp = prev.tt_class.max_hp if prev else None
+    if prev_hp is None:
+        hp = HP_GRID_MIN
+    else:
+        candidates = [
+            hp
+            for hp in range(HP_GRID_MIN, HP_GRID_MAX + 1, HP_GRID_STEP)
+            if abs(hp - prev_hp) >= HP_GRID_MIN_DIFF
+        ]
+        if not candidates:  # unreachable on this grid; keep the floor
+            hp = HP_GRID_MIN
+        else:
+            hp = random.choice(candidates)
+    return await TTClass.aget_or_create_for_hp(hp)
+
+
 @skip_if_running
 async def post_random_events(ctx):
     """Daily underground rotation (B2, Yuuka 2026-10-03): cycle SE WINDOWS.
@@ -1134,6 +1181,20 @@ async def post_random_events(ctx):
 
     window_start = _rotation_reset(timezone.now())
     window_end = window_start + timedelta(days=1)
+
+    # 2a) Per-window class state (Yuuka 2026-10-12): a slot pinned in a
+    #     PREVIOUS window is a template again until this tick re-pins it.
+    #     Without this the classless pool drains one slot per day until the
+    #     rotation goes dark (prod hit 9 of 14 pinned within 11 days of the
+    #     B2 launch). Underground slots only — cup-era originals live in
+    #     other championships and keep their authored classes. A manual
+    #     HP pin on an underground template is transient by design: the
+    #     next daily tick re-classes it anyway.
+    await ScheduledEvent.objects.filter(
+        championship__name=UNDERGROUND_CHAMPIONSHIP_NAME,
+        is_rotation_instance=False,
+        tt_class__isnull=False,
+    ).aupdate(tt_class=None)
 
     # 2) Pool: underground-championship SEs with a 0-lap setup, classless
     #    (class is per-window state), never a mirror row.
@@ -1175,10 +1236,11 @@ async def post_random_events(ctx):
         if idx is not None and idx + 1 < len(pool):
             picked = pool[idx + 1]
 
-    # 3) Roll the class ONCE at rotation time and pin it onto the SE.
-    tt_class = await TTClass.objects.order_by("?").afirst()
+    # 3) Roll the class ONCE at rotation time and pin it onto the SE
+    #    (grid-walk rule — see _roll_grid_tt_class).
+    tt_class = await _roll_grid_tt_class()
     if not tt_class:
-        print("Rotation: no TTClass rows exist — cannot pin a class")
+        print("Rotation: no TTClass row could be created — cannot pin a class")
         return
 
     # 4) Class-specific requirements text (Yuuka: description IS what
