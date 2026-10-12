@@ -502,8 +502,6 @@ async def _seed_prev_classed_event(name: str, hp: int):
 async def test_rotation_grid_walk_respects_prev_value(announce_mock, db):
     """Pinned HP: multiple of 10, inside [110, 620], and >= 30 away from the
     previous classed underground event's hp."""
-    from amc.models import TTClass
-
     now = timezone.now()
     await _clean_slate()
     await _seed_prev_classed_event("Prev Grid Track", 480)
@@ -528,8 +526,6 @@ async def test_rotation_grid_walk_respects_prev_value(announce_mock, db):
 @patch("amc.events.announce", new_callable=AsyncMock)
 async def test_rotation_grid_first_run_starts_at_floor(announce_mock, db):
     """No prior classed underground event anywhere -> the floor (110)."""
-    from amc.models import TTClass
-
     now = timezone.now()
     await _clean_slate()
     race = await _make_race("Fresh route")
