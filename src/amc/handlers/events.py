@@ -24,6 +24,7 @@ from django.conf import settings
 from django.db.models import Exists, OuterRef, Prefetch
 from django.utils import timezone
 
+from amc.config import UNDERGROUND_CHAMPIONSHIP_NAME
 from amc.events import create_event_embed, show_results_popup
 from amc.handlers import register
 from amc.mod_server import get_event_state, get_events, transfer_exp
@@ -72,6 +73,27 @@ def _normalize_race_setup(race_setup_raw: dict) -> dict:
     what the Lua hooks previously sent, so this is largely a passthrough.
     """
     return race_setup_raw
+
+
+def _race_legality_for(scheduled_event) -> str:
+    """Criminalization rule (Yuuka 2026-10-15): an event is ILLEGAL iff its
+    linked ScheduledEvent belongs to the Underground championship — NOT
+    because it carries an HP class.  Underground rotation events and manual
+    ``/setup_event`` launches of underground templates stay criminalized
+    automatically; manual admin-made SEs stay legal even when classed
+    (parts/type DQ is gated on illegality, so they run unchecked — DQ is
+    planned to extend to all events later).  ``/racelegality`` remains the
+    manual override and is set at CREATE time only, so a toggled event is
+    never re-stamped by later SSE upserts."""
+    if scheduled_event is None or scheduled_event.championship_id is None:
+        return "legal"
+    championship = scheduled_event.championship
+    if (
+        championship is not None
+        and championship.name == UNDERGROUND_CHAMPIONSHIP_NAME
+    ):
+        return "illegal"
+    return "legal"
 
 
 async def _upsert_game_event(event_data: dict):
@@ -128,6 +150,7 @@ async def _upsert_game_event(event_data: dict):
                 end_time__gte=timezone.now(),
             )
             .order_by("start_time")  # deterministic pick if several match
+            .select_related("championship")
             .afirst()
         )
 
@@ -155,11 +178,11 @@ async def _upsert_game_event(event_data: dict):
         if race_setup:
             game_event.race_setup = race_setup
         if tt_class:
+            # Class drives part/type enforcement data only — legality is
+            # decided by the SE's championship at CREATE time (Yuuka
+            # 2026-10-15); never re-stamped here so a /racelegality toggle
+            # survives subsequent SSE upserts.
             game_event.tt_class = tt_class
-            # A TT-classed event is an illegal race by default (Yuuka
-            # 2026-09-27); admins can flip it back with /racelegality.
-            if game_event.race_legality != "illegal":
-                game_event.race_legality = "illegal"
         if not game_event.scheduled_event and scheduled_event:
             game_event.scheduled_event = scheduled_event
         await game_event.asave()
@@ -200,7 +223,7 @@ async def _upsert_game_event(event_data: dict):
             scheduled_event=scheduled_event,
             auto_created=(owner is None),
             tt_class=tt_class,
-            race_legality="illegal" if tt_class else "legal",
+            race_legality=_race_legality_for(scheduled_event),
         )
 
     return game_event, transition

@@ -9,7 +9,9 @@ from asgiref.sync import sync_to_async
 from django.test import TestCase
 from django.utils import timezone
 
-from amc.factories import PlayerFactory, CharacterFactory
+from amc.config import UNDERGROUND_CHAMPIONSHIP_NAME
+from amc.events import print_results
+from amc.factories import ChampionshipFactory, CharacterFactory, PlayerFactory
 from amc.handlers import dispatch
 from amc.handlers.events import (
     _upsert_game_event,
@@ -27,8 +29,8 @@ from amc.models import (
     LapSectionTime,
     RaceSetup,
     ScheduledEvent,
+    TTClass,
 )
-from amc.events import print_results
 from amc.webhook_context import EventContext
 
 
@@ -1918,3 +1920,81 @@ class RunRowResolutionTests(TestCase):
         self.assertIsNone(game_event.owner_id)
         self.assertTrue(game_event.auto_created)
         self.assertIsNone(transition)
+
+
+# ---------------------------------------------------------------------------
+# Tests: race_legality derives from the SE's championship, not the HP class
+# (Yuuka 2026-10-15 — decoupling; /racelegality stays the manual override)
+# ---------------------------------------------------------------------------
+
+
+class RaceLegalityDerivationTests(TestCase):
+    async def _make_scheduled_event(self, championship=None) -> ScheduledEvent:
+        race_setup, _ = await RaceSetup.objects.aget_or_create(
+            hash=RaceSetup.calculate_hash(RACE_SETUP_RAW),
+            defaults={"config": RACE_SETUP_RAW, "name": "Test Route"},
+        )
+        now = timezone.now()
+        return await ScheduledEvent.objects.acreate(
+            name="Classed Sprint",
+            start_time=now - timedelta(minutes=30),
+            end_time=now + timedelta(minutes=30),
+            time_trial=True,
+            race_setup=race_setup,
+            championship=championship,
+        )
+
+    async def _make_classed_event(self):
+        """An event whose name carries the IR class tag (tt_class set)."""
+        await TTClass.objects.aget_or_create(
+            name="IR-670", defaults={"max_hp": 670}
+        )
+        event_data = _make_event_data(state=1)
+        event_data["EventName"] = "Test Event - IR - 670"
+        game_event, _ = await _upsert_game_event(event_data)
+        await game_event.arefresh_from_db()
+        return game_event
+
+    async def test_classed_event_without_championship_stays_legal(self):
+        await self._make_scheduled_event(championship=None)
+        game_event = await self._make_classed_event()
+        self.assertEqual(game_event.race_legality, "legal")
+        self.assertIsNotNone(game_event.tt_class_id)
+
+    async def test_classed_event_in_other_championship_stays_legal(self):
+        other = await sync_to_async(ChampionshipFactory)(name="Sunday Cup")
+        await self._make_scheduled_event(championship=other)
+        game_event = await self._make_classed_event()
+        self.assertEqual(game_event.race_legality, "legal")
+
+    async def test_underground_championship_event_is_illegal(self):
+        underground = await sync_to_async(ChampionshipFactory)(
+            name=UNDERGROUND_CHAMPIONSHIP_NAME
+        )
+        await self._make_scheduled_event(championship=underground)
+        game_event = await self._make_classed_event()
+        self.assertEqual(game_event.race_legality, "illegal")
+
+    async def test_unlinked_event_is_legal(self):
+        game_event = await self._make_classed_event()
+        self.assertEqual(game_event.race_legality, "legal")
+
+    async def test_racelegality_toggle_survives_reupsert(self):
+        """The legality stamp happens at CREATE time only — a later SSE
+        upsert (new run of the same guid) must not re-stamp legality."""
+        underground = await sync_to_async(ChampionshipFactory)(
+            name=UNDERGROUND_CHAMPIONSHIP_NAME
+        )
+        await self._make_scheduled_event(championship=underground)
+        game_event = await self._make_classed_event()
+        self.assertEqual(game_event.race_legality, "illegal")
+
+        game_event.race_legality = "legal"
+        await game_event.asave(update_fields=["race_legality"])
+
+        event_data = _make_event_data(state=1)
+        event_data["EventName"] = "Test Event - IR - 670"
+        await _upsert_game_event(event_data)
+        await game_event.arefresh_from_db()
+        self.assertEqual(game_event.race_legality, "legal")
+
