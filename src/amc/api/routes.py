@@ -9,7 +9,8 @@ from django.db.models import Count, Q, F, Window, Prefetch, Max
 from django.db.models.functions import Ntile
 from django.shortcuts import aget_object_or_404
 from django.utils import timezone
-from ninja import Router
+from ninja import Router, Schema
+from ninja.errors import HttpError
 from django.http import StreamingHttpResponse, HttpResponse
 from django.utils.http import http_date, parse_http_date
 from .schema import (
@@ -78,6 +79,7 @@ from amc.models import (
     ShortcutZone,
 )
 from amc.utils import lowercase_first_char_in_keys
+from amc.heightmap import terrain_z_cm
 from amc.save_file import (
     get_world,
     get_world_last_modified,
@@ -541,6 +543,23 @@ async def list_scheduled_event_results(request, id):
 
 
 tracks_router = Router()
+
+
+class TerrainHeightSchema(Schema):
+    z_cm: float
+
+
+@tracks_router.get("/terrain-height/", response=TerrainHeightSchema)
+def terrain_height(request, x: float, y: float):
+    """Terrain height (game Z, cm) at world X/Y from the full-resolution heightmap.
+
+    Used by the track editor's snap-to-ground button. Returns 404 when the location
+    is outside the mapped area or no heightmap is deployed.
+    """
+    z = terrain_z_cm(x, y)
+    if z is None:
+        raise HttpError(404, "terrain height unavailable at this location")
+    return TerrainHeightSchema(z_cm=z)
 
 
 @tracks_router.get("/{hash}/results/", response=list[ParticipantSchema])
