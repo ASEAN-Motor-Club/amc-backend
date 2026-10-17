@@ -34,6 +34,7 @@ import lzma
 import mmap
 import os
 import struct
+import zipfile
 from functools import lru_cache
 from itertools import accumulate
 from typing import Optional
@@ -177,25 +178,133 @@ def write_jhm(src_path: str, dst_path: str, width: int = WIDTH, height: int = HE
 
 
 _instance: Optional[Heightmap] = None
+_state: dict = {"key": None}
+
+
+def _latest_heightmap_file(directory: str) -> Optional[str]:
+    """Newest heightmap-looking file directly inside `directory` (drop-in updates)."""
+    best: Optional[tuple[float, str]] = None
+    for name in os.listdir(directory):
+        path = os.path.join(directory, name)
+        if not os.path.isfile(path):
+            continue
+        if not name.endswith((".jhm", ".bin", ".bin.gz", ".jhm.gz", ".zip")):
+            continue
+        mtime = os.path.getmtime(path)
+        if best is None or mtime > best[0]:
+            best = (mtime, path)
+    return best[1] if best else None
+
+
+def _extract_heightmap(source: str) -> str:
+    """Decompress a gzipped/zipped heightmap into a cache dir; return the openable file.
+
+    The extracted file is keyed by the source's mtime, so replacing the source (e.g.
+    dropping a new heightmap zip into the amc-web map_tiles directory) invalidates the
+    cache automatically.  A zip must contain exactly one non-directory member.
+    """
+    from django.conf import settings
+
+    cache_dir = getattr(settings, "HEIGHTMAP_CACHE_DIR", None)
+    if not cache_dir:
+        cache_dir = os.path.join(os.path.dirname(source), ".heightmap-cache")
+    os.makedirs(cache_dir, exist_ok=True)
+    stem = os.path.splitext(os.path.basename(source))[0]
+    key = f"{stem}-{int(os.path.getmtime(source))}"
+    if source.endswith(".gz"):
+        import gzip
+
+        inner = stem[: -len(".bin")] if stem.endswith(".bin") else stem
+        out = os.path.join(cache_dir, f"{key}-{inner}")
+        if not os.path.exists(out):
+            tmp = f"{out}.tmp"
+            with gzip.open(source, "rb") as src, open(tmp, "wb") as dst:
+                while chunk := src.read(1 << 20):
+                    dst.write(chunk)
+            os.replace(tmp, out)
+        return out
+    if source.endswith(".zip"):
+        with zipfile.ZipFile(source) as zf:
+            members = [m for m in zf.infolist() if not m.is_dir()]
+            if len(members) != 1:
+                raise ValueError(f"heightmap zip {source} must contain exactly one file")
+            member = members[0]
+            out = os.path.join(cache_dir, f"{key}-{os.path.basename(member.filename)}")
+            if not os.path.exists(out):
+                tmp = f"{out}.tmp"
+                with zf.open(member) as src, open(tmp, "wb") as dst:
+                    while chunk := src.read(1 << 20):
+                        dst.write(chunk)
+                os.replace(tmp, out)
+        return out
+    return source
+
+
+def _resolve_heightmap_path(path: str) -> Optional[str]:
+    """Resolve a configured heightmap location to an openable file, or None.
+
+    `path` may be a heightmap file (raw uint16, JHM1, or either one gzipped/zipped)
+    or a directory to scan for the newest one — dropping a new zip into the directory
+    (e.g. amc-web's static/map_tiles/<map>/) is enough to update the map data.
+    """
+    if os.path.isdir(path):
+        path = _latest_heightmap_file(path)
+        if path is None:
+            return None
+    try:
+        return _extract_heightmap(path)
+    except (OSError, ValueError, zipfile.BadZipFile):
+        logger.exception("heightmap source %s could not be used", path)
+        return None
+
+
+def _source_key(path: str) -> Optional[tuple]:
+    try:
+        st = os.stat(path)
+    except OSError:
+        return None
+    return (st.st_mtime_ns, st.st_size)
 
 
 def get_heightmap() -> Optional[Heightmap]:
-    """Return the process-wide heightmap, or None if unavailable."""
-    global _instance
-    if _instance is not None:
-        return _instance
+    """Return the process-wide heightmap, or None if unavailable.
 
+    The configured source is re-checked (cheap stat) on every call and the sampler is
+    rebuilt when the file changes, so heightmaps can be swapped without a restart.
+    """
+    global _instance
     from django.conf import settings
 
     path = getattr(settings, "HEIGHTMAP_PATH", DEFAULT_HEIGHTMAP_PATH)
+    resolved = _resolve_heightmap_path(path)
+    if resolved is None:
+        return None
+    key = (resolved, _source_key(resolved))
+    if _instance is not None and _state["key"] == key:
+        return _instance
+    if _instance is not None:
+        try:
+            _instance.close()
+        except OSError:
+            logger.exception("heightmap %s could not be closed", _instance.path)
+        _instance = None
+    # Tests plug in synthetic maps via HEIGHTMAP_WIDTH/HEIGHT settings; production
+    # leaves them unset and gets the real 11000x11000 layout.
+    width = getattr(settings, "HEIGHTMAP_WIDTH", None)
+    height = getattr(settings, "HEIGHTMAP_HEIGHT", None)
     try:
-        _instance = Heightmap(path)
+        _instance = (
+            Heightmap(resolved)
+            if width is None or height is None
+            else Heightmap(resolved, width=width, height=height)
+        )
+        _state["key"] = key
     except FileNotFoundError:
-        logger.warning("heightmap not found at %s — Z lookups disabled", path)
+        logger.warning("heightmap not found at %s — Z lookups disabled", resolved)
     except OSError:
-        logger.exception("heightmap %s could not be opened", path)
+        logger.exception("heightmap %s could not be opened", resolved)
     except ValueError:
-        logger.exception("heightmap %s has an unexpected size", path)
+        logger.exception("heightmap %s has an unexpected size", resolved)
     return _instance
 
 

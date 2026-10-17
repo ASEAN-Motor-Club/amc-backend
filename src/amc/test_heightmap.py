@@ -1,5 +1,6 @@
 """Unit tests for the heightmap sampler — pure stdlib, no DB required."""
 
+import os
 import struct
 
 import pytest
@@ -11,6 +12,7 @@ from amc.heightmap import (
     QUAD_CM,
     WIDTH,
     Heightmap,
+    terrain_z_cm,
     write_jhm,
 )
 
@@ -196,3 +198,158 @@ def test_jhm_delta_codec_roundtrip(tmp_path, raw_path):
             for c in range(bc * block, bc * block + block)
         ]
         assert got == expected
+
+
+# --- Drop-in updateability (zip / gz / directory scan / reload) ---------------
+
+
+@pytest.fixture(autouse=True)
+def isolate_heightmap_state(monkeypatch):
+    """Each test starts with a fresh process-wide heightmap cache."""
+    import amc.heightmap as hm_mod
+
+    monkeypatch.setattr(hm_mod, "_instance", None)
+    monkeypatch.setattr(hm_mod, "_state", {"key": None})
+    yield
+    if hm_mod._instance is not None:
+        hm_mod._instance.close()
+        hm_mod._instance = None
+        hm_mod._state = {"key": None}
+
+
+def _settings(monkeypatch, heightmap_width=3, heightmap_height=3, **kwargs):
+    """Override HEIGHTMAP_* settings; the synthetic maps are 3x3, not the full map."""
+    from django.test import override_settings
+
+    return override_settings(
+        HEIGHTMAP_WIDTH=heightmap_width,
+        HEIGHTMAP_HEIGHT=heightmap_height,
+        **kwargs,
+    )
+
+
+def test_zip_source(tmp_path, monkeypatch):
+    """A zipped raw heightmap is extracted to the cache and sampled correctly."""
+    import zipfile
+
+    raw = _write_raw(tmp_path, RAWS, name="heights_full.bin")
+    zip_path = tmp_path / "heights_full.zip"
+    with zipfile.ZipFile(zip_path, "w") as zf:
+        zf.write(raw, "heights_full.bin")
+
+    with _settings(monkeypatch, HEIGHTMAP_PATH=str(zip_path)):
+        x, y = world_xy(1, 1)
+        assert terrain_z_cm(x, y) == pytest.approx(Heightmap.raw_to_z_cm(RAWS[1][1]))
+        # The extracted file lives in the sibling cache dir, keyed by source mtime.
+        cache = tmp_path / ".heightmap-cache"
+        assert any(p.suffix == ".bin" for p in cache.iterdir())
+
+
+def test_gzip_source(tmp_path, monkeypatch):
+    import gzip
+
+    raw = _write_raw(tmp_path, RAWS, name="heights_full.bin")
+    gz_path = tmp_path / "heights_full.bin.gz"
+    with open(raw, "rb") as src, gzip.open(gz_path, "wb") as dst:
+        while chunk := src.read(1024):
+            dst.write(chunk)
+
+    with _settings(monkeypatch, HEIGHTMAP_PATH=str(gz_path)):
+        x, y = world_xy(2, 0)
+        assert terrain_z_cm(x, y) == pytest.approx(Heightmap.raw_to_z_cm(RAWS[2][0]))
+
+
+def test_directory_scan_picks_newest(tmp_path, monkeypatch):
+    """A directory source uses the newest heightmap file inside it."""
+    import time
+    import zipfile
+
+    old_raw = _write_raw(tmp_path, RAWS, name="heights_a.bin")
+    newer_raw = _write_raw(tmp_path, RAWS, name="heights_b.bin")
+    old_zip = tmp_path / "old.zip"
+    with zipfile.ZipFile(old_zip, "w") as zf:
+        zf.write(old_raw, "heights_a.bin")
+    # Backdate the zip and future-date the raw file so the newest file is
+    # unambiguous (utime epochs are unreliable across filesystems).
+    now = time.time()
+    os.utime(old_zip, (now - 60, now - 60))
+    os.utime(newer_raw, (now + 60, now + 60))
+
+    with _settings(monkeypatch, HEIGHTMAP_PATH=str(tmp_path)):
+        x, y = world_xy(0, 2)
+        assert terrain_z_cm(x, y) == pytest.approx(Heightmap.raw_to_z_cm(RAWS[0][2]))
+        # Only ONE Heightmap was built: the resolved file is the raw newer one.
+        import amc.heightmap as hm_mod
+
+        assert hm_mod._instance.path == str(newer_raw)
+
+
+def test_source_swap_triggers_reload(tmp_path, monkeypatch):
+    """Replacing the file (newer mtime) rebuilds the sampler without a restart."""
+    import amc.heightmap as hm_mod
+
+    path = _write_raw(tmp_path, RAWS, name="heights_full.bin")
+    with _settings(monkeypatch, HEIGHTMAP_PATH=str(path)):
+        x, y = world_xy(1, 1)
+        assert terrain_z_cm(x, y) == pytest.approx(Heightmap.raw_to_z_cm(RAWS[1][1]))
+        first = hm_mod._instance
+
+        # Same path, but the content changes under a newer mtime.
+        import os
+
+        new_grid = [[v + 128 for v in row] for row in RAWS]
+        new_path = _write_raw(tmp_path, new_grid, name="heights_full.bin")
+        os.utime(new_path, (os.path.getmtime(path) + 10,) * 2)
+        assert terrain_z_cm(x, y) == pytest.approx(Heightmap.raw_to_z_cm(new_grid[1][1]))
+        assert hm_mod._instance is not first
+
+
+def test_missing_source_is_none(tmp_path, monkeypatch):
+    with _settings(monkeypatch, HEIGHTMAP_PATH=str(tmp_path / "nope.bin")):
+        assert terrain_z_cm(0.0, 0.0) is None
+    with _settings(monkeypatch, HEIGHTMAP_PATH=str(tmp_path / "empty-dir")):
+        (tmp_path / "empty-dir").mkdir()
+        assert terrain_z_cm(0.0, 0.0) is None
+
+
+def test_multi_member_zip_rejected(tmp_path, monkeypatch):
+    import zipfile
+
+    raw = _write_raw(tmp_path, RAWS, name="heights_full.bin")
+    zip_path = tmp_path / "heights_full.zip"
+    with zipfile.ZipFile(zip_path, "w") as zf:
+        zf.write(raw, "one.bin")
+        zf.write(raw, "two.bin")
+
+    with _settings(monkeypatch, HEIGHTMAP_PATH=str(zip_path)):
+        assert terrain_z_cm(0.0, 0.0) is None
+
+
+# --- HTTP endpoint -----------------------------------------------------------
+
+
+def test_terrain_height_endpoint(tmp_path, monkeypatch):
+    """GET /tracks/terrain-height/ returns the sampled Z; out-of-bounds is a 404."""
+    import zipfile
+
+    from ninja.testing import TestClient
+
+    from amc.api.routes import tracks_router
+
+    raw = _write_raw(tmp_path, RAWS, name="heights_full.bin")
+    zip_path = tmp_path / "heights_full.zip"
+    with zipfile.ZipFile(zip_path, "w") as zf:
+        zf.write(raw, "heights_full.bin")
+
+    client = TestClient(tracks_router)
+    x, y = world_xy(1, 2)
+    with _settings(monkeypatch, HEIGHTMAP_PATH=str(zip_path)):
+        response = client.get(f"/terrain-height/?x={x}&y={y}")
+        assert response.status_code == 200
+        assert response.json()["z_cm"] == pytest.approx(
+            Heightmap.raw_to_z_cm(RAWS[1][2])
+        )
+        response = client.get(
+            f"/terrain-height/?x={ORIGIN_X_CM - 1}&y={ORIGIN_Y_CM}"
+        )
+        assert response.status_code == 404
