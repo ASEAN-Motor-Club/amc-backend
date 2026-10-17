@@ -102,6 +102,15 @@ LOGGING = {
             "level": "INFO",
             "propagate": False,
         },
+        # Game-API /chat announcements (illegal-race broadcast, police
+        # promotions, restart notices): the succeeded=false rejection
+        # WARNING must reach the journal — the parent "amc" logger runs at
+        # ERROR and a silently dead announcement channel looked healthy.
+        "amc.game_server": {
+            "handlers": ["console"],
+            "level": "INFO",
+            "propagate": False,
+        },
         # Questionnaire diagnostics: INFO breadcrumbs (open-form click, modal
         # accept, page submit, save outcome) plus WARNING/ERROR tracebacks
         # from view/modal on_error — the parent "amc" logger runs at ERROR
