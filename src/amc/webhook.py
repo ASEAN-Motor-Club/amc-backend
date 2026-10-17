@@ -34,6 +34,7 @@ import amc.handlers.smuggling  # noqa: F401
 import amc.handlers.events  # noqa: F401
 import amc.handlers.chat  # noqa: F401
 import amc.handlers.customization  # noqa: F401
+import amc.handlers.vehicle_despawn  # noqa: F401
 import amc.handlers.house  # noqa: F401
 
 # ---------------------------------------------------------------------------
