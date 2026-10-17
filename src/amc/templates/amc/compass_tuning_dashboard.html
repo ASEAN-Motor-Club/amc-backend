@@ -58,25 +58,26 @@
 {% block content %}
 <div class="compass-root">
 <h1>Compass Tuning Dashboard</h1>
-<div class="sub">Live law: <code>base = 1/(D·20·C) clamp [min, max]</code> ·
-<code>interval = base × 20/(S+20), floored at min</code> · per officer ×min(N, budget) ·
-inside the ring: fixed ring-proximity ping every <b>max</b> s</div>
+<div class="sub">Live law: <code>base = max × (1 − (1 − far_mult)·w)</code> ·
+<code>interval = base × 20/(S+20), floored at min</code> ·
+<code>w</code> saturates 0→1 with distance past the 500 m near cap · per officer ×min(N, budget) ·
+inside the ring: fixed ring-proximity ping every <b>max</b> s · parked-near = the slowest case</div>
 
 <div class="grid">
   <div class="panel">
     <h2>Parameters</h2>
 
-    <label class="row">C — frequency constant <span class="val" id="v_c"></span></label>
-    <input type="range" id="s_c" min="0.5e-6" max="8e-6" step="0.1e-6">
-    <div class="hint">higher = faster everywhere (also shrinks the parked-plateau)</div>
+    <label class="row">far_mult — parked-far fraction <span class="val" id="v_far"></span></label>
+    <input type="range" id="s_far" min="0.05" max="1" step="0.05">
+    <div class="hint">parked-far base = max × this (w saturates to 1 far away); 1 = distance-blind</div>
 
     <label class="row">min_interval — floor (s) <span class="val" id="v_min"></span></label>
     <input type="range" id="s_min" min="1" max="10" step="0.5">
     <div class="hint">fastest possible bearing per cop</div>
 
-    <label class="row">max_interval — ceiling (s) <span class="val" id="v_max"></span></label>
+    <label class="row">max_interval — parked-near ceiling (s) <span class="val" id="v_max"></span></label>
     <input type="range" id="s_max" min="5" max="60" step="1">
-    <div class="hint">parked suspect cadence; also the <ring ping interval</div>
+    <div class="hint">parked-near cadence; also the <ring ping interval</div>
 
     <label class="row">ring_distance (m) <span class="val" id="v_ring"></span></label>
     <input type="range" id="s_ring" min="50" max="2000" step="25">
@@ -135,10 +136,16 @@ const tableDists  = [100, 200, 300, 500, 1000, 2000, 5000, 10000];
 
 let sliders = {}, loaded = null, configs = [];
 
+// distance weight: 0 at the 500 m near cap, saturating to 1 far away,
+// half at +2 km past the cap — mirrors _distance_weight() in amc.criminals
+function distWeight(D_m) {
+  const x = Math.max(D_m - 500, 0) / 2000;
+  return x / (1 + x);
+}
+
 function law(D_m, S_kmh, p) {
   if (D_m <= p.ring) return { ring: true, t: p.max };
-  const raw = 1 / (D_m * 20 * p.c);
-  const base = Math.min(Math.max(raw, p.min), p.max);
+  const base = p.max * (1 - (1 - p.far) * distWeight(D_m));
   return { ring: false, t: Math.max(base * 20 / (S_kmh + 20), p.min) };
 }
 
@@ -161,13 +168,13 @@ function fmt(t) {
 
 function readSliders() {
   const p = {
-    c: parseFloat(sliders.c.value),
+    far: parseFloat(sliders.far.value),
     min: parseFloat(sliders.min.value),
     max: parseFloat(sliders.max.value),
     ring: parseInt(sliders.ring.value),
     budget: parseInt(sliders.budget.value),
   };
-  document.getElementById('v_c').textContent = (p.c * 1e6).toFixed(1) + 'e-6';
+  document.getElementById('v_far').textContent = p.far.toFixed(2) + '× max';
   document.getElementById('v_min').textContent = p.min + ' s';
   document.getElementById('v_max').textContent = p.max + ' s';
   document.getElementById('v_ring').textContent = p.ring + ' m';
@@ -176,7 +183,7 @@ function readSliders() {
 }
 
 function setSliders(p) {
-  sliders.c.value = p.c; sliders.min.value = p.min; sliders.max.value = p.max;
+  sliders.far.value = p.far; sliders.min.value = p.min; sliders.max.value = p.max;
   sliders.ring.value = p.ring; sliders.budget.value = p.budget;
 }
 
@@ -267,7 +274,7 @@ function renderConfigs() {
     const row = document.createElement('div');
     row.className = 'cfg' + (cfg.active ? ' active-row' : '');
     row.innerHTML = `<span class="name">${cfg.config_name}</span>
-      <span class="d">C ${(cfg.c * 1e6).toFixed(1)}e-6 · ${cfg.min_interval}s–${cfg.max_interval}s · ${cfg.ring_distance / 100}m · ×${cfg.budget_cap}</span>
+      <span class="d">far ×${(cfg.far_mult).toFixed(2)} · ${cfg.min_interval}s–${cfg.max_interval}s · ${cfg.ring_distance / 100}m · ×${cfg.budget_cap}</span>
       ${cfg.active ? '<span class="badge">ACTIVE</span>' : ''}`;
     row.onclick = () => { loaded = { ...cfg }; setSliders(cfgToParams(cfg)); refresh(); setStatus('Loaded ' + cfg.config_name, 'ok'); };
     box.appendChild(row);
@@ -275,7 +282,7 @@ function renderConfigs() {
 }
 
 function cfgToParams(cfg) {
-  return { c: cfg.c, min: cfg.min_interval, max: cfg.max_interval,
+  return { far: cfg.far_mult, min: cfg.min_interval, max: cfg.max_interval,
            ring: cfg.ring_distance / 100, budget: cfg.budget_cap };
 }
 
@@ -309,7 +316,7 @@ document.getElementById('btn_update').onclick = async () => {
   if (!loaded) return setStatus('Load a config first', 'err');
   try {
     await api('POST', { action: 'save', id: loaded.id, config_name: loaded.config_name,
-      c: p.c, min_interval: p.min, max_interval: p.max,
+      far_mult: p.far, min_interval: p.min, max_interval: p.max,
       ring_distance: p.ring * 100, budget_cap: p.budget });
     await reloadConfigs(true);
     setStatus('Saved ' + loaded.config_name + (loaded.active ? ' (active — applied next tick)' : ''), 'ok');
@@ -322,7 +329,7 @@ document.getElementById('btn_new').onclick = async () => {
   if (!name) return;
   try {
     await api('POST', { action: 'create', config_name: name,
-      c: p.c, min_interval: p.min, max_interval: p.max,
+      far_mult: p.far, min_interval: p.min, max_interval: p.max,
       ring_distance: p.ring * 100, budget_cap: p.budget });
     await reloadConfigs();
     setStatus('Created ' + name + ' — click it to load/activate', 'ok');
@@ -343,13 +350,13 @@ document.addEventListener('dblclick', async (ev) => {
   } catch (e) { setStatus('Activate failed: ' + e.message, 'err'); }
 });
 
-for (const id of ['s_c', 's_min', 's_max', 's_ring', 's_budget']) {
+for (const id of ['s_far', 's_min', 's_max', 's_ring', 's_budget']) {
   sliders[id.replace('s_', '')] = document.getElementById(id);
   document.getElementById(id).addEventListener('input', refresh);
 }
 
 // sensible initial values (config A) until configs load
-setSliders({ c: 3.0e-6, min: 3, max: 15, ring: 200, budget: 2 });
+setSliders({ far: 0.25, min: 3, max: 20, ring: 200, budget: 2 });
 
 // --- simulator: flash the compass text at the law's interval ---
 const sim = {

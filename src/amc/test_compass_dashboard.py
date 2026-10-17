@@ -55,7 +55,7 @@ def _reset_ninja_router_attachments():
 
 
 def _mk(name, **kw):
-    defaults = dict(c=3.0e-6, min_interval=3.0, max_interval=15.0,
+    defaults = dict(far_mult=0.25, min_interval=3.0, max_interval=20.0,
                     ring_distance=20_000, budget_cap=2)
     defaults.update(kw)
     return CompassTuningConfig.objects.create(config_name=name, **defaults)
@@ -82,13 +82,13 @@ class TestCompassTuningDashboard:
     async def test_aget_active_seeds_defaults(self):
         row = await CompassTuningConfig.aget_active()
         assert row.active
-        assert row.c == 3.0e-6 and row.max_interval == 15.0
+        assert row.far_mult == 0.25 and row.max_interval == 20.0
 
     @pytest.mark.asyncio
     async def test_tick_reads_active_row(self):
         from amc.models import CompassTuningConfig as C
-        await C.objects.acreate(config_name="A", c=3.0e-6, min_interval=3.0,
-                                max_interval=15.0, ring_distance=20_000,
+        await C.objects.acreate(config_name="A", far_mult=0.25, min_interval=3.0,
+                                max_interval=20.0, ring_distance=20_000,
                                 budget_cap=2, active=True)
         row = await C.aget_active()
         assert row.config_name == "A"
@@ -100,7 +100,7 @@ class TestCompassTuningDashboard:
 
     def test_configs_list_and_activate(self, admin_user):
         a = _mk("A", active=True)
-        b = _mk("B", c=2.0e-6, max_interval=10.0)
+        b = _mk("B", far_mult=0.5, max_interval=10.0)
         client = Client()
         client.force_login(admin_user)
 
@@ -123,7 +123,7 @@ class TestCompassTuningDashboard:
         client.force_login(admin_user)
         resp = client.post("/admin/amc/compasstuningconfig/dashboard/configs/",
                            data=json.dumps({"action": "save", "id": a.pk,
-                                            "config_name": "A", "c": 4.0e-6,
+                                            "config_name": "A", "far_mult": 0.4,
                                             "min_interval": 2.0,
                                             "max_interval": 12.0,
                                             "ring_distance": 25000,
@@ -131,7 +131,7 @@ class TestCompassTuningDashboard:
                            content_type="application/json")
         assert resp.status_code == 200
         a.refresh_from_db()
-        assert a.c == 4.0e-6 and a.min_interval == 2.0 and a.budget_cap == 3
+        assert a.far_mult == 0.4 and a.min_interval == 2.0 and a.budget_cap == 3
 
     def test_dashboard_page_renders_for_staff(self, admin_user):
         client = Client()
