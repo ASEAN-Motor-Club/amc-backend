@@ -195,3 +195,74 @@ class TeleportWaypointHeightmapTestCase(TestCase):
         }
         location = await self._run_tp(terrain_z=-20000)
         self.assertEqual(location["Z"], -20000 + 100)
+
+
+class SelfRescueVehicleTestCase(TestCase):
+    """Self-responder /tp is allowed but must NOT carry the caller's vehicle.
+
+    Responder == requester (self-respond) still grants the rescue-teleport,
+    but no_vehicles must be forced True — otherwise a player who rolled
+    over a loaded truck teleports the crashed truck away and back,
+    self-rescuing with the load intact.
+    """
+
+    def setUp(self):
+        self.ctx = MagicMock(spec=CommandContext)
+        self.ctx.reply = AsyncMock()
+        self.ctx.announce = AsyncMock()
+        self.ctx.discord_client = None
+        self.ctx.is_current_event = False
+        self.ctx.http_client_mod = MagicMock()
+        self.ctx.http_client_mod.post = AsyncMock()
+        self.ctx.http_client_mod.get = AsyncMock()
+
+        self.player = Player.objects.create(unique_id="76561198000000021")
+        self.character = Character.objects.create(
+            name="SelfTp", player=self.player, guid="guid-selftp"
+        )
+        self.other = Character.objects.create(
+            name="Helper",
+            player=Player.objects.create(unique_id="76561198000000022"),
+            guid="guid-helper",
+        )
+        self.ctx.character = self.character
+        self.ctx.player = self.player
+        self.ctx.player_info = {
+            "bIsAdmin": False,
+            "CustomDestinationAbsoluteLocation": {"X": 100, "Y": 200, "Z": 300},
+        }
+
+    async def _tp(self):
+        with (
+            patch(
+                "amc.commands.teleport.get_player_last_vehicle",
+                new=AsyncMock(return_value={"vehicle": None}),
+            ),
+            patch(
+                "amc.commands.teleport.teleport_player", new=AsyncMock()
+            ) as mock_tp,
+        ):
+            await cmd_tp_name(self.ctx, "")
+            return mock_tp
+
+    async def test_self_rescue_tp_blocks_vehicle(self):
+        rescue = await RescueRequest.objects.acreate(
+            character=self.character, message="help", location=Point(100, 200, 300)
+        )
+        await rescue.responders.aadd(self.player)
+
+        mock_tp = await self._tp()
+
+        mock_tp.assert_called_once()
+        self.assertTrue(mock_tp.call_args.kwargs["no_vehicles"])
+
+    async def test_other_rescue_tp_keeps_vehicle(self):
+        rescue = await RescueRequest.objects.acreate(
+            character=self.other, message="help", location=Point(100, 200, 300)
+        )
+        await rescue.responders.aadd(self.player)
+
+        mock_tp = await self._tp()
+
+        mock_tp.assert_called_once()
+        self.assertFalse(mock_tp.call_args.kwargs["no_vehicles"])
