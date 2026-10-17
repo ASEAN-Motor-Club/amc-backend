@@ -326,6 +326,36 @@ async def _despawn_police_vehicle_for_criminal(http_client_mod, character, playe
         )
 
 
+async def stamp_vehicle_game_id(character, vehicle_name, vehicle_game_id):
+    """Record the 7-digit game-assigned vehicle id on the character's
+    most-recently-registered CharacterVehicle row for that vehicle name.
+
+    The small Net_VehicleId counter is recycled across vehicles and sessions,
+    so (character, vehicle_id) alone can silently retarget to a different
+    physical vehicle (a player buying the same model again gets a fresh
+    Net_VehicleId that may collide with an older saved one). The 7-digit id
+    from the bought/entered log lines is the only durable per-vehicle handle
+    the game exposes — it reaches us only via log events, matched to the
+    CharacterVehicle row by vehicle name. When the player owns several
+    same-named vehicles we cannot tell them apart, so we stamp only the row
+    most recently registered instead of every name match.
+    """
+    if not vehicle_game_id:
+        return
+    row = (
+        await CharacterVehicle.objects.filter(
+            character=character,
+            config__VehicleName=vehicle_name,
+        )
+        .order_by("-id")
+        .afirst()
+    )
+    if row is None:
+        return
+    row.vehicle_game_id = vehicle_game_id
+    await row.asave(update_fields=["vehicle_game_id"])
+
+
 async def on_vehicle_sold(character, vehicle_name, http_client_mod):
     """Auto-repay loan from vehicle sale proceeds (50% of vehicle cost)."""
     try:
@@ -1200,6 +1230,11 @@ async def process_log_event(
                 vehicle_name=vehicle_name,
                 action=action,
             )
+            if action in [
+                PlayerVehicleLog.Action.BOUGHT,
+                PlayerVehicleLog.Action.ENTERED,
+            ]:
+                await stamp_vehicle_game_id(character, vehicle_name, vehicle_id)
             if action == PlayerVehicleLog.Action.ENTERED:
                 if is_police_vehicle(vehicle_name):
                     if character.criminal_score > 0:
