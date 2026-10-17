@@ -5,7 +5,7 @@ from django.utils import timezone
 
 from amc.command_framework import registry, CommandContext
 from amc.game_server import get_players
-from amc.models import Character, Wanted, WantedSystemConfig
+from amc.models import Character, PoliceSession, Wanted, WantedSystemConfig
 from amc.mod_server import (
     get_player,
     get_player_customization,
@@ -28,6 +28,10 @@ from django.utils.translation import gettext as _, gettext_lazy
 from amc.commands.faction import parse_location_string
 
 SETWANTED_MIN_DISTANCE = 100_000  # 1km = 100,000 units (1m = 100 units)
+
+# After going off duty, the player must wait this long before toggling
+# /police back on (anti-abuse: prevents duty flickering to dodge gates).
+POLICE_RETOGGLE_COOLDOWN_SECONDS = 60
 
 
 def _distance_3d(a, b):
@@ -56,6 +60,36 @@ async def cmd_police(ctx: CommandContext, verification_code: str = ""):
             character_guid=ctx.character.guid,
         )
     else:
+        # Cooldown: block re-activating duty shortly after going off duty.
+        last_session = (
+            await PoliceSession.objects.filter(
+                character=ctx.character, ended_at__isnull=False
+            )
+            .order_by("-ended_at")
+            .afirst()
+        )
+        if (
+            last_session is not None
+            and last_session.ended_at
+            >= timezone.now()
+            - timedelta(seconds=POLICE_RETOGGLE_COOLDOWN_SECONDS)
+        ):
+            remaining = max(
+                0,
+                POLICE_RETOGGLE_COOLDOWN_SECONDS
+                - int(
+                    (timezone.now() - last_session.ended_at).total_seconds()
+                ),
+            )
+            await send_system_message(
+                ctx.http_client_mod,
+                _(
+                    "You recently went off duty. Try again in {seconds}s."
+                ).format(seconds=remaining),
+                character_guid=ctx.character.guid,
+            )
+            return
+
         # Wanted criminals may not become police
         has_wanted = await Wanted.objects.filter(
             character=ctx.character, expired_at__isnull=True

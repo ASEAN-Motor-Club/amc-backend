@@ -3370,6 +3370,41 @@ class PoliceCommandTestCase(TestCase):
             mock_activate.assert_called_once()
 
 
+    async def test_cmd_police_retoggle_blocked_within_cooldown(self):
+        """Going on duty is blocked within 60s of a recent off-duty toggle."""
+        await PoliceSession.objects.acreate(
+            character=self.character, ended_at=timezone.now()
+        )
+        with (
+            patch("amc.commands.police.is_police", new=AsyncMock(return_value=False)),
+            patch("amc.commands.police.send_system_message", new=AsyncMock()) as mock_msg,
+            patch(
+                "amc.commands.police.activate_police", new=AsyncMock()
+            ) as mock_activate,
+        ):
+            await cmd_police(self.ctx)
+        self.assertFalse(mock_activate.called)
+        self.assertIn("Try again in", mock_msg.call_args.args[1])
+
+    async def test_cmd_police_retoggle_allowed_after_cooldown(self):
+        """Going on duty works once the off-duty cooldown has elapsed."""
+        await PoliceSession.objects.acreate(
+            character=self.character,
+            ended_at=timezone.now() - timedelta(seconds=61),
+        )
+        with (
+            patch("amc.commands.police.is_police", new=AsyncMock(return_value=False)),
+            patch("amc.commands.police.get_players", new=AsyncMock(return_value=[])),
+            patch(
+                "amc.commands.police.get_player_customization",
+                new=AsyncMock(return_value={"Costume": "Costume_Police_01"}),
+            ),
+            patch("amc.commands.police.activate_police", new=AsyncMock()) as mock_activate,
+        ):
+            await cmd_police(self.ctx)
+        self.assertTrue(mock_activate.called)
+
+
 class PoliceCostumeGateTestCase(TestCase):
     """Tests for /police command costume gate."""
 
