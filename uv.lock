@@ -131,7 +131,7 @@ requires-dist = [
     { name = "psutil", specifier = ">=6.1.1" },
     { name = "psycopg", extras = ["binary"], specifier = ">=3.2.9" },
     { name = "pycryptodome", specifier = ">=3.23.0" },
-    { name = "pyjwt", specifier = ">=2.9.0" },
+    { name = "pyjwt", specifier = ">=2.12.0" },
     { name = "uvicorn", extras = ["standard"], specifier = ">=0.34.3" },
     { name = "uvicorn-worker", specifier = ">=0.3.0" },
     { name = "yarl", specifier = ">=1.20.1" },
@@ -1115,11 +1115,11 @@ wheels = [
 
 [[package]]
 name = "pyjwt"
-version = "2.9.0"
+version = "2.12.0"
 source = { registry = "https://pypi.org/simple" }
-sdist = { url = "https://files.pythonhosted.org/packages/fb/68/ce067f09fca4abeca8771fe667d89cc347d1e99da3e093112ac329c6020e/pyjwt-2.9.0.tar.gz", hash = "sha256:7e1e5b56cc735432a7369cbfa0efe50fa113ebecdc04ae6922deba8b84582d0c", size = 78825, upload-time = "2024-08-01T15:01:08.445Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/a8/10/e8192be5f38f3e8e7e046716de4cae33d56fd5ae08927a823bb916be36c1/pyjwt-2.12.0.tar.gz", hash = "sha256:2f62390b667cd8257de560b850bb5a883102a388829274147f1d724453f8fb02", size = 102511, upload-time = "2026-03-12T17:15:30.831Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/79/84/0fdf9b18ba31d69877bd39c9cd6052b47f3761e9910c15de788e519f079f/PyJWT-2.9.0-py3-none-any.whl", hash = "sha256:3b02fb0f44517787776cf48f2ae25d8e14f300e6d7545a4315cee571a415e850", size = 22344, upload-time = "2024-08-01T15:01:06.481Z" },
+    { url = "https://files.pythonhosted.org/packages/15/70/70f895f404d363d291dcf62c12c85fdd47619ad9674ac0f53364d035925a/pyjwt-2.12.0-py3-none-any.whl", hash = "sha256:9bb459d1bdd0387967d287f5656bf7ec2b9a26645d1961628cda1764e087fd6e", size = 29700, upload-time = "2026-03-12T17:15:29.257Z" },
 ]
 
 [[package]]
@@ -1228,14 +1228,14 @@ wheels = [
 
 [[package]]
 name = "redis"
-version = "5.3.0"
+version = "5.3.1"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "pyjwt" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/71/dd/2b37032f4119dff2a2f9bbcaade03221b100ba26051bb96e275de3e5db7a/redis-5.3.0.tar.gz", hash = "sha256:8d69d2dde11a12dc85d0dbf5c45577a5af048e2456f7077d87ad35c1c81c310e", size = 4626288, upload-time = "2025-04-30T14:54:40.634Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/6a/cf/128b1b6d7086200c9f387bd4be9b2572a30b90745ef078bd8b235042dc9f/redis-5.3.1.tar.gz", hash = "sha256:ca49577a531ea64039b5a36db3d6cd1a0c7a60c34124d46924a45b956e8cf14c", size = 4626200, upload-time = "2025-07-25T08:06:27.778Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/45/b0/aa601efe12180ba492b02e270554877e68467e66bda5d73e51eaa8ecc78a/redis-5.3.0-py3-none-any.whl", hash = "sha256:f1deeca1ea2ef25c1e4e46b07f4ea1275140526b1feea4c6459c0ec27a10ef83", size = 272836, upload-time = "2025-04-30T14:54:30.744Z" },
+    { url = "https://files.pythonhosted.org/packages/7f/26/5c5fa0e83c3621db835cfc1f1d789b37e7fa99ed54423b5f519beb931aa7/redis-5.3.1-py3-none-any.whl", hash = "sha256:dc1909bd24669cc31b5f67a039700b16ec30571096c5f1f0d9d2324bff31af97", size = 272833, upload-time = "2025-07-25T08:06:26.317Z" },
 ]
 
 [package.optional-dependencies]

@@ -25,7 +25,7 @@ dependencies = [
     "matplotlib>=3.10.6",
     "pycryptodome>=3.23.0",
     "psutil>=6.1.1",
-    "pyjwt>=2.9.0",
+    "pyjwt>=2.12.0",
     "protobuf>=7.34.1",
     "openai==1.96.1",
     "emoji>=2.14.1",
