@@ -1,5 +1,6 @@
 import pytest
 from unittest.mock import patch, AsyncMock, MagicMock
+from amc.models import Player, Wanted
 from amc.player_tags import (
     strip_all_tags,
     build_display_name,
@@ -165,25 +166,22 @@ def test_build_display_name_police_level_10():
 
 
 def test_build_display_name_wanted_only():
-    # No R: the teleport lock rides the invisible no-teleport flag.
-    assert (
-        build_display_name("PlayerOne", wanted_stars=5)
-        == "[*****] PlayerOne"
-    )
+    """Wanted players' display name is BLANKED for the whole chase."""
+    assert build_display_name("PlayerOne", wanted_stars=5) == ""
 
 
-def test_build_display_name_wanted_w1():
+def test_build_display_name_wanted_blanks_all_other_tags():
+    """Wanted blanks the ENTIRE name — no mute/mod/gov tag survives."""
     assert (
-        build_display_name("PlayerOne", wanted_stars=1)
-        == "[*] PlayerOne"
+        build_display_name(
+            "PlayerOne", wanted_stars=1, muted=True, has_custom_parts=True, gov_level=3
+        )
+        == ""
     )
 
 
 def test_build_display_name_wanted_w3():
-    assert (
-        build_display_name("PlayerOne", wanted_stars=3)
-        == "[***] PlayerOne"
-    )
+    assert build_display_name("PlayerOne", wanted_stars=3) == ""
 
 
 @pytest.mark.skip(reason="player tags feature on hold")
@@ -197,7 +195,7 @@ def test_build_display_name_wanted_and_crim():
 def test_build_display_name_wanted_and_mods():
     assert (
         build_display_name("PlayerOne", has_custom_parts=True, wanted_stars=2)
-        == "[M**] PlayerOne"
+        == ""
     )
 
 
@@ -211,11 +209,8 @@ def test_build_display_name_wanted_with_police():
 
 
 def test_build_display_name_wanted_with_gov():
-    """Wanted tag shows even when gov is active."""
-    assert (
-        build_display_name("PlayerOne", gov_level=3, wanted_stars=5)
-        == "[*****G3] PlayerOne"
-    )
+    """Wanted blanks everything, gov included."""
+    assert build_display_name("PlayerOne", gov_level=3, wanted_stars=5) == ""
 
 
 @pytest.mark.skip(reason="player tags feature on hold")
@@ -300,10 +295,11 @@ def test_build_display_name_police_on_duty_with_gov():
 
 
 def test_build_display_name_police_on_duty_and_wanted_stars_only():
-    """No R — wanted stars render, the lock is the invisible flag."""
+    """Wanted blanks the name entirely — even when police_on_duty is set
+    (a wanted player cannot also be on duty, but the blank wins if both)."""
     assert (
         build_display_name("PlayerOne", police_on_duty=True, wanted_stars=2)
-        == "[**] PlayerOne"
+        == ""
     )
 
 
@@ -326,12 +322,13 @@ def test_build_display_name_muted_only():
 
 
 def test_build_display_name_mute_goes_first():
-    """X is the first letter in the compact tag."""
+    """X is the first letter in the compact tag (wanted would blank it all —
+    use rp_mode for the composite)."""
     assert (
         build_display_name(
-            "PlayerOne", muted=True, has_custom_parts=True, wanted_stars=2
+            "PlayerOne", muted=True, has_custom_parts=True, rp_mode=True
         )
-        == "[XM**] PlayerOne"
+        == "[XRM] PlayerOne"
     )
 
 
@@ -724,6 +721,85 @@ async def test_refresh_player_name_police_off_duty_strips_r_tag(mock_set_name):
 
     await character.arefresh_from_db()
     assert character.custom_name is None
+
+
+@pytest.mark.asyncio
+@pytest.mark.django_db
+@patch("amc.player_tags.set_character_name", new_callable=AsyncMock)
+async def test_refresh_player_name_wanted_blanks_name(mock_set_name):
+    """Active wanted → pushed display name is "" (DB name untouched)."""
+    from asgiref.sync import sync_to_async
+
+    from amc.factories import CharacterFactory, PlayerFactory
+    player = await sync_to_async(PlayerFactory)()
+    character = await sync_to_async(CharacterFactory)(
+        player=player,
+        name="TestPlayer",
+        guid="test-guid-wanted-blank",
+        custom_name="[M] TestPlayer",
+    )
+
+    await Wanted.objects.acreate(character=character, wanted_remaining=600)
+
+    try:
+        session = MagicMock()
+        await refresh_player_name(character, session)
+
+        await character.arefresh_from_db()
+        assert character.name == "TestPlayer"
+        assert character.custom_name == ""
+        from amc.player_tags import set_character_name
+
+        set_character_name.assert_awaited_once_with(
+            session, "test-guid-wanted-blank", ""
+        )
+    finally:
+        # Async tests can leak rows across the async loop (known pytest-django
+        # issue) — an active Wanted row leaking into the wanted-grace tests
+        # breaks their early-return assertions. Delete explicitly.
+        await Wanted.objects.all().adelete()
+        await Player.objects.filter(pk=player.pk).adelete()
+
+
+@pytest.mark.asyncio
+@pytest.mark.django_db
+@patch("amc.player_tags.set_character_name", new_callable=AsyncMock)
+async def test_refresh_player_name_wanted_expiry_restores_name(mock_set_name):
+    """Expired wanted → real name comes back (no residual blank)."""
+    from datetime import timedelta
+
+    from asgiref.sync import sync_to_async
+    from django.utils import timezone
+
+    from amc.factories import CharacterFactory, PlayerFactory
+    player = await sync_to_async(PlayerFactory)()
+    character = await sync_to_async(CharacterFactory)(
+        player=player,
+        name="TestPlayer",
+        guid="test-guid-wanted-restore",
+        custom_name="",
+    )
+
+    await Wanted.objects.acreate(
+        character=character,
+        wanted_remaining=0,
+        expired_at=timezone.now() - timedelta(minutes=1),
+    )
+
+    try:
+        session = MagicMock()
+        await refresh_player_name(character, session)
+
+        await character.arefresh_from_db()
+        assert character.custom_name is None
+        from amc.player_tags import set_character_name
+
+        set_character_name.assert_awaited_once_with(
+            session, "test-guid-wanted-restore", "TestPlayer"
+        )
+    finally:
+        await Wanted.objects.all().adelete()
+        await Player.objects.filter(pk=player.pk).adelete()
 
 
 @pytest.mark.asyncio

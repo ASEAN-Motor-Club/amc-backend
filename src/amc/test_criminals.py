@@ -33,6 +33,7 @@ from amc.criminals import (
     CRIMINAL_SUSPECT_DURATION,
     SCORE_DECAY_FACTOR_PER_TICK,
     TICK_INTERVAL,
+    WANTED_FLASH_INTERVAL_SECONDS,
     WANTED_NEAR_CAP_UNITS,
     WANTED_ORIGIN_FUGITIVE_PASSENGER,
     _compute_stars,
@@ -41,6 +42,8 @@ from amc.criminals import (
     _last_modded_vehicle_guids,
     _last_star_notified,
     _last_suspect_guids,
+    _last_wanted_flash,
+    _now,
     active_police_present,
     hide_decay_multiplier,
     initial_heat_for_stars,
@@ -73,6 +76,16 @@ def _make_player_data(unique_id, character_guid, x, y, z):
 def _make_players_list(player_datas):
     """Wrap player datas into the format returned by get_players()."""
     return [(d["unique_id"], d) for d in player_datas]
+
+
+def _non_flash_calls(mock_sys_msg):
+    """mock_sys_msg calls that are NOT wanted-flash reminders — the flash
+    fires every few seconds for online wanted players (freeman 2026-10-03)
+    and must not count against tests that pin other system messages."""
+    return [
+        c for c in mock_sys_msg.call_args_list
+        if "WANTED" not in str(c.args[1] if c.args else "")
+    ]
 
 
 # ---------------------------------------------------------------------------
@@ -189,6 +202,7 @@ class WantedCountdownTickTests(TestCase):
     def setUp(self):
         _last_star_notified.clear()
         _last_suspect_guids.clear()
+        _last_wanted_flash.clear()
         # Default to ARMED (cops present) so law tests don't trip the dormant
         # amnesty. Dormant tests set self.armed_mock.return_value = False.
         armed = patch(
@@ -293,6 +307,81 @@ class WantedCountdownTickTests(TestCase):
         mock_refresh.assert_called_once_with(criminal, mock_http_mod)
         mock_announce.assert_awaited_once()
         self.assertIn("no longer wanted", mock_announce.call_args.args[0])
+
+    # -----------------------------------------------------------------------
+    # Wanted flash — stars in a flashing system message (freeman 2026-10-03)
+    # -----------------------------------------------------------------------
+
+    async def test_online_wanted_gets_flash_message(
+        self, mock_sys_msg, mock_refresh,
+    ):
+        """Online wanted criminal receives a flashing system message with
+        their star count + remaining seconds (name is blanked)."""
+        criminal = await self._setup_criminal(wanted_remaining=300)
+        players = _make_players_list(
+            [_make_player_data(criminal.player.unique_id, criminal.guid, *_SUSPECT_LOC)]
+        )
+        mock_http = AsyncMock()
+        mock_http_mod = AsyncMock()
+
+        with patch("amc.criminals.get_players", new_callable=AsyncMock, return_value=players):
+            await tick_wanted_countdown(mock_http, mock_http_mod)
+
+        flash_calls = [
+            c for c in mock_sys_msg.call_args_list
+            if "WANTED" in str(c.args[1]) and c.kwargs.get("character_guid") == criminal.guid
+        ]
+        self.assertTrue(flash_calls, "no flash sent")
+        message = flash_calls[0].args[1]
+        self.assertIn("[***] WANTED", message)  # 300 remaining = 3 stars
+
+    async def test_flash_throttled_to_interval(
+        self, mock_sys_msg, mock_refresh,
+    ):
+        """A second tick inside the flash interval sends no new flash."""
+        criminal = await self._setup_criminal(wanted_remaining=300)
+        players = _make_players_list(
+            [_make_player_data(criminal.player.unique_id, criminal.guid, *_SUSPECT_LOC)]
+        )
+        mock_http = AsyncMock()
+        mock_http_mod = AsyncMock()
+
+        def _flash_count():
+            return len([
+                c for c in mock_sys_msg.call_args_list
+                if "WANTED" in str(c.args[1])
+                and c.kwargs.get("character_guid") == criminal.guid
+            ])
+
+        with patch("amc.criminals.get_players", new_callable=AsyncMock, return_value=players):
+            await tick_wanted_countdown(mock_http, mock_http_mod)
+            self.assertEqual(_flash_count(), 1)
+            # Second tick within the interval — no new flash
+            await tick_wanted_countdown(mock_http, mock_http_mod)
+            self.assertEqual(_flash_count(), 1)
+            # Interval elapsed — flashes again
+            _last_wanted_flash[criminal.guid] -= WANTED_FLASH_INTERVAL_SECONDS + 0.1
+            await tick_wanted_countdown(mock_http, mock_http_mod)
+            self.assertEqual(_flash_count(), 2)
+
+    async def test_flash_timer_purged_on_expiry(
+        self, mock_sys_msg, mock_refresh,
+    ):
+        """Expiry clears the flash timer so a re-wanted player flashes
+        immediately instead of inheriting the old cadence."""
+        criminal = await self._setup_criminal(wanted_remaining=300)
+        _last_wanted_flash[criminal.guid] = _now()
+        players = _make_players_list(
+            [_make_player_data(criminal.player.unique_id, criminal.guid, *_SUSPECT_LOC)]
+        )
+        mock_http = AsyncMock()
+        mock_http_mod = AsyncMock()
+        self.armed_mock.return_value = False  # dormant amnesty expires them
+
+        with patch("amc.criminals.get_players", new_callable=AsyncMock, return_value=players):
+            await tick_wanted_countdown(mock_http, mock_http_mod)
+
+        self.assertNotIn(criminal.guid, _last_wanted_flash)
 
     async def _setup_admin_flag(self, wanted_remaining=600):
         """Create a wanted record set by an admin character (set_by) — the
@@ -1093,8 +1182,8 @@ class WantedCountdownTickTests(TestCase):
 
         wanted = await Wanted.objects.aget(character=criminal)
         self.assertAlmostEqual(wanted.wanted_remaining, 295, delta=0.1)
-        # No system messages fired at all (no escape hints in the new law)
-        mock_sys_msg.assert_not_called()
+        # No non-flash system messages fired (no escape hints in the new law)
+        self.assertEqual(_non_flash_calls(mock_sys_msg), [])
 
     async def test_armed_copless_world_decays_at_base_rate(
         self,
@@ -1194,7 +1283,7 @@ class WantedCountdownTickTests(TestCase):
             await tick_wanted_countdown(mock_http, mock_http_mod)
 
         # Still W5 → no star-change message at all
-        mock_sys_msg.assert_not_called()
+        self.assertEqual(_non_flash_calls(mock_sys_msg), [])
 
     async def test_last_star_notified_cleaned_on_expiry(
         self,
@@ -1396,7 +1485,8 @@ class WantedCountdownTickTests(TestCase):
 
         mock_arrest.assert_not_called()
         # One warning per dive: dive #1 and dive #2 each warned once
-        self.assertEqual(mock_sys_msg.await_count, 2)
+        # (flash reminders excluded — they fire on their own cadence)
+        self.assertEqual(len(_non_flash_calls(mock_sys_msg)), 2)
 
     async def test_criminal_at_threshold_not_arrested(
         self,
@@ -1421,7 +1511,7 @@ class WantedCountdownTickTests(TestCase):
             await tick_wanted_countdown(mock_http, mock_http_mod)
 
         mock_arrest.assert_not_called()
-        mock_sys_msg.assert_not_called()
+        self.assertEqual(_non_flash_calls(mock_sys_msg), [])
         wanted = await Wanted.objects.aget(character=criminal)
         self.assertLess(wanted.wanted_remaining, 200)  # normal decay happened
 
@@ -1448,7 +1538,7 @@ class WantedCountdownTickTests(TestCase):
             await tick_wanted_countdown(mock_http, mock_http_mod)
 
         mock_arrest.assert_not_called()
-        mock_sys_msg.assert_not_called()
+        self.assertEqual(_non_flash_calls(mock_sys_msg), [])
         wanted = await Wanted.objects.aget(character=criminal)
         self.assertLess(wanted.wanted_remaining, 200)  # normal decay happened
 
@@ -2367,12 +2457,9 @@ class PoliceSuspectLocationsTests(TestCase):
 
         mock_sys_msg.assert_awaited_once()
         message = mock_sys_msg.call_args.args[1]
-        # Close suspect shown as the fixed '<200m' proximity ping
-        self.assertIn(criminal_close.name, message)
-        self.assertIn("<200m", message)
-        # Far suspect shown with bearing
-        self.assertIn(criminal_far.name, message)
-        self.assertIn("600m", message)
+        # Stars replace the (blanked) suspect name: 300 remaining = 3 stars
+        self.assertIn("[***] <200m", message)
+        self.assertIn("[***] 600m", message)
 
 
 @patch("amc.criminals.make_suspect", new_callable=AsyncMock)
@@ -3700,7 +3787,8 @@ class CompassTickTests(TestCase):
 
         mock_sys_msg.assert_awaited_once()
         message = mock_sys_msg.await_args.args[1]
-        self.assertIn(criminal.name, message)
+        # Stars replace the (blanked) suspect name: 300 remaining = 3 stars
+        self.assertIn("[***]", message)
         self.assertIn("1.0km", message)
         self.assertIn("270°W", message)  # suspect is due west of the officer
 
@@ -3708,9 +3796,11 @@ class CompassTickTests(TestCase):
         self, mock_get_players, mock_get_locations, mock_police, mock_sys_msg,
     ):
         """Two suspects: one within its interval, one past → only the stale
-        one appears in the officer's message."""
-        criminal_a = await self._setup_criminal()
-        criminal_b = await self._setup_criminal()
+        one appears in the officer's message. Distinguished by star count
+        (names are blanked while wanted): A=1 star (120 remaining),
+        B=2 stars (240 remaining)."""
+        criminal_a = await self._setup_criminal(wanted_remaining=120)
+        criminal_b = await self._setup_criminal(wanted_remaining=240)
         officer = await self._setup_police()
 
         mock_get_players.return_value = _make_players_list([
@@ -3731,8 +3821,9 @@ class CompassTickTests(TestCase):
 
         mock_sys_msg.assert_awaited_once()
         message = mock_sys_msg.await_args.args[1]
-        self.assertNotIn(criminal_a.name, message)
-        self.assertIn(criminal_b.name, message)
+        # Only B (2 stars) appears; A (1 star) is inside its interval
+        self.assertNotIn("[*] ", message)
+        self.assertIn("[**]", message)
 
     async def test_send_failure_does_not_crash(
         self, mock_get_players, mock_get_locations, mock_police, mock_sys_msg,

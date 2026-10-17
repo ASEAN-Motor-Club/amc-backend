@@ -203,6 +203,16 @@ class CharacterManager(models.Manager.from_queryset(CharacterQuerySet)):  # type
 
         player_name = strip_all_tags(player_name)
 
+        # A BLANK display name is a wanted player mid-chase (the game name is
+        # blanked while wanted). A blank name must never flow into identity:
+        # it would rewrite Character.name to "" on GUID-matched update/create
+        # and poison every name-keyed lookup. GUID identity still resolves;
+        # the name write is simply skipped.
+        blank_name = not player_name.strip()
+        if blank_name and not character_guid:
+            # No GUID + blank name = unresolvable (name lookup is meaningless).
+            return (None, None, False, False)
+
         player, player_created = await Player.objects.aget_or_create(
             unique_id=player_id
         )
@@ -230,7 +240,9 @@ class CharacterManager(models.Manager.from_queryset(CharacterQuerySet)):  # type
                     character,
                     character_created,
                 ) = await self.get_queryset().aupdate_or_create(
-                    guid=character_guid, player=player, defaults={"name": player_name}
+                    guid=character_guid,
+                    player=player,
+                    defaults={} if blank_name else {"name": player_name},
                 )
             except IntegrityError:
                 character = await self.get_queryset().aget(guid=character_guid)
