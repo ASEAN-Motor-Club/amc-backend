@@ -9,7 +9,7 @@ from django.contrib.gis.geos import Point
 from django.test import TestCase
 from django.utils import timezone
 
-from amc.factories import PlayerFactory, CharacterFactory
+from amc.factories import DeliveryFactory, PlayerFactory, CharacterFactory
 from amc.models import (
     CharacterLocation,
     DeliveryPoint,
@@ -596,8 +596,8 @@ class WantedTriggerChanceTests(TestCase):
     """wanted_trigger_chance: 1M guarantee + saturating yardstick (freeman 2026-09-23).
 
     A delivery >= WANTED_GUARANTEE_PAY is always wanted; below that, pay is
-    measured against a yardstick that saturates, so the 300k haul plateaus
-    ~25% at very high scores while large hauls stay dangerous.
+    measured against a yardstick that saturates, so the 300k haul rolls
+    ~22% at very high scores while large hauls stay dangerous.
     """
 
     def test_guarantee_at_one_million(self):
@@ -638,8 +638,8 @@ class WantedTriggerChanceTests(TestCase):
         from amc.special_cargo import wanted_trigger_chance
 
         for pay, expected in (
-            (100_000, 0.2007),
-            (500_000, 0.8337),
+            (100_000, 0.0845),
+            (500_000, 0.5109),
         ):
             self.assertAlmostEqual(
                 wanted_trigger_chance(pay, 1_000_000, None),
@@ -649,12 +649,12 @@ class WantedTriggerChanceTests(TestCase):
             )
 
     def test_kingpin_20m_anchors(self):
-        """300k haul plateaus ~25%; 1M+ is guaranteed regardless of score."""
+        """300k haul rolls ~22% even at 20M score; 1M+ is guaranteed."""
         from amc.special_cargo import wanted_trigger_chance
 
         for pay, expected in (
-            (300_000, 0.2475),
-            (500_000, 0.4506),
+            (300_000, 0.2201),
+            (500_000, 0.4085),
             (1_000_000, 1.0),
             (1_500_000, 1.0),
         ):
@@ -969,7 +969,9 @@ class WantedTriggerRestoreTests(TestCase):
             event = self._cargo_event(character, "Ganja", payment=5_000)
             await process_event(event, player, character)
 
-        mock_roll.assert_called_once_with(5_000, 1_000_000, 350.0, marked=False)
+        mock_roll.assert_called_once_with(
+            5_000, 1_000_000, 350.0, marked=False, history_multiplier=1.0
+        )
 
     async def test_marked_delivery_triggers_and_clears_flag(
         self, mock_accumulate, mock_cops, mock_get_treasury, mock_get_rp_mode,
@@ -1072,3 +1074,238 @@ class WantedTriggerRestoreTests(TestCase):
         await seeded.arefresh_from_db()
         # Refresh resets to full heat for the delivery size: $5k → 3★ → 360.
         self.assertEqual(seeded.wanted_remaining, 360)
+
+
+class HistoryWantedMultiplierTests(TestCase):
+    """history_wanted_multiplier: recent delivery pattern scales the sweep.
+
+    Spree: each illicit delivery in the last 24h adds +25%, capped at ×2.0.
+    Clean: each legal (non-precursor, ≥20k pay) delivery since the last
+    illicit one removes 10%, capped at ×0.5. Product clamped [0.5, 2.0].
+    """
+
+    async def _setup_character(self):
+        player = await sync_to_async(PlayerFactory)()
+        character = await sync_to_async(CharacterFactory)(player=player)
+        return character
+
+    async def test_no_history_is_neutral(self):
+        from amc.special_cargo import history_wanted_multiplier
+
+        character = await self._setup_character()
+        self.assertEqual(await history_wanted_multiplier(character), 1.0)
+
+    async def test_spree_ramps_and_caps(self):
+        from amc.special_cargo import history_wanted_multiplier
+
+        character = await self._setup_character()
+        now = timezone.now()
+        for hours_ago, payment in (
+            (1, 30_000),
+            (2, 30_000),
+            (3, 30_000),
+            (4, 30_000),
+        ):
+            await sync_to_async(DeliveryFactory)(
+                character=character,
+                cargo_key="Ganja",
+                payment=payment,
+                timestamp=now - timedelta(hours=hours_ago),
+            )
+        # 4 sprees → ×2.0; a 5th does NOT push beyond the cap.
+        self.assertEqual(await history_wanted_multiplier(character, now), 2.0)
+        await sync_to_async(DeliveryFactory)(
+            character=character,
+            cargo_key="Ganja",
+            payment=30_000,
+            timestamp=now - timedelta(hours=5),
+        )
+        self.assertEqual(await history_wanted_multiplier(character, now), 2.0)
+        # Older than the 24h window does not count as spree…
+        await sync_to_async(DeliveryFactory)(
+            character=character,
+            cargo_key="Ganja",
+            payment=30_000,
+            timestamp=now - timedelta(hours=25),
+        )
+        self.assertEqual(await history_wanted_multiplier(character, now), 2.0)
+
+    async def test_partial_spree(self):
+        from amc.special_cargo import history_wanted_multiplier
+
+        character = await self._setup_character()
+        now = timezone.now()
+        for hours_ago in (1, 2, 3):
+            await sync_to_async(DeliveryFactory)(
+                character=character,
+                cargo_key="Money",
+                payment=25_000,
+                timestamp=now - timedelta(hours=hours_ago),
+            )
+        # 3 sprees → 1 + 0.25 × 3 = 1.75
+        self.assertAlmostEqual(
+            await history_wanted_multiplier(character, now), 1.75
+        )
+
+    async def test_current_batch_excluded_from_spree(self):
+        """The delivery being rolled (same timestamp) must not count itself."""
+        from amc.special_cargo import history_wanted_multiplier
+
+        character = await self._setup_character()
+        now = timezone.now()
+        # Earlier group of the SAME arrival batch + the rolled group itself
+        for hours_ago in (0, 0):
+            await sync_to_async(DeliveryFactory)(
+                character=character,
+                cargo_key="CocaPaste",
+                payment=80_000,
+                timestamp=now,
+            )
+        self.assertEqual(await history_wanted_multiplier(character, now), 1.0)
+
+    async def test_clean_deliveries_discount_since_last_illicit(self):
+        from amc.special_cargo import history_wanted_multiplier
+
+        character = await self._setup_character()
+        now = timezone.now()
+        await sync_to_async(DeliveryFactory)(
+            character=character,
+            cargo_key="Ganja",
+            payment=30_000,
+            timestamp=now - timedelta(hours=10),
+        )
+        # Legal cover AFTER the illicit: 50k → 1.0 credit, 30k → 0.6 credit
+        for payment, hours_ago in ((50_000, 8), (30_000, 6), (15_000, 5)):
+            await sync_to_async(DeliveryFactory)(
+                character=character,
+                cargo_key="Stone",
+                payment=payment,
+                timestamp=now - timedelta(hours=hours_ago),
+            )
+        # The illicit run 10h ago is inside the 24h spree window (×1.25);
+        # 1.6 credits → clean ×0.84 → 1.25 × 0.84
+        self.assertAlmostEqual(
+            await history_wanted_multiplier(character, now), 1.05
+        )
+
+    async def test_clean_credits_cap_at_half(self):
+        from amc.special_cargo import history_wanted_multiplier
+
+        character = await self._setup_character()
+        now = timezone.now()
+        await sync_to_async(DeliveryFactory)(
+            character=character,
+            cargo_key="Ganja",
+            payment=30_000,
+            timestamp=now - timedelta(hours=10),
+        )
+        for hours_ago in (9, 8, 7, 6, 5, 4):
+            await sync_to_async(DeliveryFactory)(
+                character=character,
+                cargo_key="Stone",
+                payment=60_000,
+                timestamp=now - timedelta(hours=hours_ago),
+            )
+        # 6 credits → capped at 5 → ×0.5 clean; the illicit run gives ×1.25 spree
+        self.assertAlmostEqual(
+            await history_wanted_multiplier(character, now), 0.625
+        )
+
+    async def test_precursor_cargo_never_counts_as_clean(self):
+        from amc.special_cargo import history_wanted_multiplier
+
+        character = await self._setup_character()
+        now = timezone.now()
+        await sync_to_async(DeliveryFactory)(
+            character=character,
+            cargo_key="Ganja",
+            payment=30_000,
+            timestamp=now - timedelta(hours=10),
+        )
+        # Meth-chain inputs must not buy clean cover, whatever they pay —
+        # the lone illicit run's ×1.25 spree is untouched by them.
+        for cargo_key, payment in (
+            ("HydrochloricAcid", 380_810),
+            ("QuicklimePallet", 30_000),
+            ("Acetone", 30_000),
+            ("Fuel", 64_000),
+        ):
+            await sync_to_async(DeliveryFactory)(
+                character=character,
+                cargo_key=cargo_key,
+                payment=payment,
+                timestamp=now - timedelta(hours=9),
+            )
+        self.assertEqual(await history_wanted_multiplier(character, now), 1.25)
+
+    async def test_spree_and_clean_combine_with_clamp(self):
+        """A big spree + a clean stretch: product clamps, and a +spree with
+        −clean never nets above ×2.0 or below ×0.5."""
+        from amc.special_cargo import history_wanted_multiplier
+
+        character = await self._setup_character()
+        now = timezone.now()
+        # 4 sprees inside the window interleaved with clean deliveries…
+        await sync_to_async(DeliveryFactory)(
+            character=character,
+            cargo_key="Ganja",
+            payment=30_000,
+            timestamp=now - timedelta(hours=10),
+        )
+        for hours_ago in (9, 8):
+            await sync_to_async(DeliveryFactory)(
+                character=character,
+                cargo_key="Stone",
+                payment=50_000,
+                timestamp=now - timedelta(hours=hours_ago),
+            )
+        for hours_ago in (4, 3, 2, 1):
+            await sync_to_async(DeliveryFactory)(
+                character=character,
+                cargo_key="Money",
+                payment=40_000,
+                timestamp=now - timedelta(hours=hours_ago),
+            )
+        # spree: Ganja + 4 Money = 5 in the window → capped ×2.0;
+        # clean: the two 50k legal runs → 2 credits → ×0.8 → product 1.6
+        self.assertAlmostEqual(
+            await history_wanted_multiplier(character, now), 1.6
+        )
+
+    async def test_chance_respects_history_multiplier_and_ceiling(self):
+        from amc.special_cargo import (
+            WANTED_TRIGGER_FLOOR_CHANCE,
+            wanted_trigger_chance,
+        )
+
+        # Fresh 100k base 73.6%; ×2.0 doubles the sweep ABOVE the floor and
+        # clamps the result at the ceiling.
+        self.assertEqual(
+            wanted_trigger_chance(100_000, 0, None, history_multiplier=2.0),
+            1.0,
+        )
+        # ×0.5 halves the sweep above the floor.
+        self.assertAlmostEqual(
+            wanted_trigger_chance(100_000, 0, None, history_multiplier=0.5),
+            WANTED_TRIGGER_FLOOR_CHANCE + 0.5 * (0.7362 - WANTED_TRIGGER_FLOOR_CHANCE),
+            places=3,
+        )
+        # Guarantee path is history-exempt: ×0.5 stays certain.
+        self.assertEqual(
+            wanted_trigger_chance(1_000_000, 0, None, history_multiplier=0.5),
+            1.0,
+        )
+
+    async def test_should_trigger_wanted_applies_history_multiplier(self):
+        from amc.special_cargo import should_trigger_wanted
+
+        with patch("amc.special_cargo.random") as mock_rng:
+            # Base fresh-100k chance 0.7362; ×0.5 → 0.3931. RNG 0.4 = miss.
+            mock_rng.random.return_value = 0.40
+            self.assertFalse(
+                should_trigger_wanted(100_000, 0, None, history_multiplier=0.5)
+            )
+            mock_rng.random.return_value = 0.39
+            self.assertTrue(
+                should_trigger_wanted(100_000, 0, None, history_multiplier=0.5)
+            )

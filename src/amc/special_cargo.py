@@ -11,6 +11,7 @@ import logging
 import random
 
 from django.db.models import F
+from datetime import timedelta
 from collections import defaultdict
 from collections.abc import Callable, Coroutine
 from typing import Any
@@ -20,7 +21,7 @@ from django.utils import timezone
 
 from amc.game_server import announce
 from amc.mod_server import show_popup, transfer_money
-from amc.models import Character, ServerCargoArrivedLog
+from amc.models import Character, Delivery, ServerCargoArrivedLog
 from amc_finance.services import record_treasury_expense, register_player_deposit
 
 logger = logging.getLogger("amc.special_cargo")
@@ -63,9 +64,40 @@ WANTED_TRIGGER_CEILING_CHANCE = 1.0  # asymptotic ceiling of the ratio sweep
 WANTED_TRIGGER_KNEE_RATIO = 0.62  # ratio at the sweep midpoint (P = 52.5%)
 WANTED_YARDSTICK_FLOOR = 100_000  # lifetime-total reference for fresh records
 WANTED_YARDSTICK_ASYMPTOTE = 1_050_000  # yardstick saturation (300k plateau ~25%)
-WANTED_YARDSTICK_HALF_SCORE = 2_500_000  # score at which the yardstick is halfway saturated
+# Half-score 300k (freeman 2026-10-03 "let's go"): calibrated against the
+# observed criminal-score population on prod — months of play top out at
+# ~56k, so the old 2.5M half-score left EVERY real criminal at the 100k
+# floor and the score term was effectively dead. At 300k, a 56k kingpin's
+# yardstick is ~249k: an 88k haul rolls ~28% for them vs ~68% fresh.
+WANTED_YARDSTICK_HALF_SCORE = 300_000
 WANTED_COP_ATTENUATION_METRES = 1000.0  # ramp length to the nearest effective cop
 WANTED_COP_ATTENUATION_EXPONENT = 2.0  # ramp shape: sweep scales with (d/range)^γ
+
+# Recency-history multiplier (freeman 2026-10-03): the trigger chance also
+# depends on the player's RECENT delivery pattern, not just pay-vs-score.
+# Multiple large illegal deliveries in a short window make the roll MORE
+# likely; interleaved legal deliveries make it LESS likely. Computed from
+# the Delivery history at roll time (no new schema).
+WANTED_SPREE_WINDOW = timedelta(hours=24)  # spree lookback window
+WANTED_SPREE_STEP = 0.25  # chance multiplier added per spree-counting delivery
+WANTED_SPREE_CAP = 4  # deliveries counted; cap ⇒ ×2.0 max spree factor
+WANTED_CLEAN_STEP = 0.10  # chance multiplier removed per clean credit
+WANTED_CLEAN_CREDIT_CAP = 5.0  # max credits ⇒ ×0.5 min clean factor
+WANTED_CLEAN_MIN_PAY = 20_000  # a legal delivery pays at least this to count
+WANTED_CLEAN_CREDIT_SCALE = 50_000  # credit = min(1, pay / scale)
+# Legal deliveries that are meth-chain precursors never count as "clean"
+# cover — washing heat by running the very inputs of the next cook defeats
+# the mechanic. Values observed paying >250k in real history.
+WANTED_CLEAN_EXCLUDED_KEYS = {
+    "Acetone",
+    "CausticSoda",
+    "Fuel",
+    "HydrochloricAcid",
+    "Quicklime",
+    "QuicklimePallet",
+    "SulfuricAcid",
+}
+WANTED_HISTORY_CLAMP = (0.5, 2.0)  # combined multiplier bounds
 # Minimum bounty placed on a Wanted record (creation or per-delivery increment).
 # Bounty starts at 0 and only grows from police proximity (chase) in tick_wanted_countdown.
 WANTED_MIN_BOUNTY = 0
@@ -94,7 +126,63 @@ def cop_attenuation_multiplier(cop_distance_m: float | None) -> float:
     return x**WANTED_COP_ATTENUATION_EXPONENT
 
 
-def wanted_trigger_chance(pay: int, score: int, cop_distance_m: float | None) -> float:
+def clamp_history_multiplier(mult: float) -> float:
+    lo, hi = WANTED_HISTORY_CLAMP
+    return max(lo, min(hi, mult))
+
+
+async def history_wanted_multiplier(character, before_ts=None) -> float:
+    """Recency-history chance multiplier from the player's Delivery history.
+
+    Spree factor: each illicit delivery inside the last
+    WANTED_SPREE_WINDOW (strictly before *before_ts*, so the delivery being
+    rolled never counts itself) adds WANTED_SPREE_STEP, capped at
+    WANTED_SPREE_CAP. Clean factor: legal deliveries (non-illicit, not a
+    meth-chain precursor, paying ≥ WANTED_CLEAN_MIN_PAY) inside the SAME
+    window add a credit of min(1, pay/WANTED_CLEAN_CREDIT_SCALE) each,
+    capped at WANTED_CLEAN_CREDIT_CAP credits; each credit removes
+    WANTED_CLEAN_STEP. Using one window for both is deliberate: legal
+    runs INTERLEAVED between illicit ones buy partial relief (they would
+    count for nothing under a "since the last illicit" rule). Product
+    clamped to WANTED_HISTORY_CLAMP so a clean stretch can never halve the
+    floor sweep below ×0.5 and a spree can never more than double it.
+
+    *before_ts* defaults to now; pass the delivery timestamp so the batch
+    being rolled (same-arrival rows) is excluded from its own history.
+    """
+    before = before_ts or timezone.now()
+    since = before - WANTED_SPREE_WINDOW
+    spree_count = await Delivery.objects.filter(
+        character=character,
+        cargo_key__in=ILLICIT_CARGO_KEYS,
+        timestamp__gte=since,
+        timestamp__lt=before,
+    ).acount()
+    spree_factor = 1.0 + WANTED_SPREE_STEP * min(WANTED_SPREE_CAP, spree_count)
+
+    credits = 0.0
+    clean_qs = (
+        Delivery.objects.filter(
+            character=character,
+            timestamp__lt=before,
+            timestamp__gte=since,
+            payment__gte=WANTED_CLEAN_MIN_PAY,
+        )
+        .exclude(cargo_key__in=ILLICIT_CARGO_KEYS)
+        .exclude(cargo_key__in=WANTED_CLEAN_EXCLUDED_KEYS)
+    )
+    async for row in clean_qs:
+        credits += min(1.0, row.payment / WANTED_CLEAN_CREDIT_SCALE)
+    clean_factor = 1.0 - WANTED_CLEAN_STEP * min(WANTED_CLEAN_CREDIT_CAP, credits)
+    return clamp_history_multiplier(spree_factor * clean_factor)
+
+
+def wanted_trigger_chance(
+    pay: int,
+    score: int,
+    cop_distance_m: float | None,
+    history_multiplier: float = 1.0,
+) -> float:
     """Chance (0..1) that one illicit delivery creates a Wanted record.
 
     Guarantee + ratio-driven (freeman 2026-09-23): a delivery of
@@ -109,6 +197,12 @@ def wanted_trigger_chance(pay: int, score: int, cop_distance_m: float | None) ->
     floor and ceiling chances through a quadratic knee; the cop-proximity
     attenuation then scales everything above the floor by distance to the
     nearest effective cop, so camping a delivery site farms nothing.
+    ``history_multiplier`` (freeman 2026-10-03) scales the sweep above the
+    floor by the player's recent delivery pattern — multiple large illegal
+    deliveries in 24h raise it, interleaved legal deliveries lower it
+    (see history_wanted_multiplier). The guarantee path and the marked
+    path are NOT history-scaled — the guarantee is a pay fact, not a
+    behavioral one, and the mark is a deliberate escalation.
     """
     if pay >= WANTED_GUARANTEE_PAY:
         return WANTED_TRIGGER_FLOOR_CHANCE + cop_attenuation_multiplier(
@@ -126,13 +220,21 @@ def wanted_trigger_chance(pay: int, score: int, cop_distance_m: float | None) ->
     base = WANTED_TRIGGER_FLOOR_CHANCE + (
         WANTED_TRIGGER_CEILING_CHANCE - WANTED_TRIGGER_FLOOR_CHANCE
     ) * sweep
-    return WANTED_TRIGGER_FLOOR_CHANCE + cop_attenuation_multiplier(cop_distance_m) * (
-        base - WANTED_TRIGGER_FLOOR_CHANCE
+    return min(
+        WANTED_TRIGGER_CEILING_CHANCE,
+        WANTED_TRIGGER_FLOOR_CHANCE
+        + cop_attenuation_multiplier(cop_distance_m)
+        * clamp_history_multiplier(history_multiplier)
+        * (base - WANTED_TRIGGER_FLOOR_CHANCE),
     )
 
 
 def should_trigger_wanted(
-    pay: int, score: int, cop_distance_m: float | None, marked: bool = False
+    pay: int,
+    score: int,
+    cop_distance_m: float | None,
+    marked: bool = False,
+    history_multiplier: float = 1.0,
 ) -> bool:
     """Roll whether this illicit delivery triggers a Wanted level.
 
@@ -161,7 +263,9 @@ def should_trigger_wanted(
             cop_distance_m
         ) * (1.0 - WANTED_TRIGGER_FLOOR_CHANCE)
         return random.random() < chance
-    return random.random() < wanted_trigger_chance(pay, score, cop_distance_m)
+    return random.random() < wanted_trigger_chance(
+        pay, score, cop_distance_m, history_multiplier
+    )
 
 
 async def accumulate_illicit_delivery(character_guid: str, amount: int) -> int:
