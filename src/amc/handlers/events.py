@@ -112,7 +112,16 @@ async def _upsert_game_event(event_data: dict):
 
     # --- RaceSetup ---
     race_setup = None
-    if race_setup_raw:
+    # Empty-setup guard (Yuuka 2026-10-18): the AddEvent hook echoes an
+    # empty RaceSetup (no waypoints — /setup_event launches and hand-built
+    # events both). Hashing that config get_or_creates a junk RaceSetup row
+    # that no real setup ever matches; leave race_setup None so the SE
+    # windowed match is skipped and no junk row is minted. The real setup
+    # arrives on later hooks (state-change) and links via the normal
+    # upsert; state-1 crosscheck reconcile is the backstop for hand-built
+    # events (its documented job).
+    has_waypoints = bool((race_setup_raw.get("Route") or {}).get("Waypoints"))
+    if race_setup_raw and has_waypoints:
         race_setup_hash = RaceSetup.calculate_hash(race_setup_raw)
         race_setup, _ = await RaceSetup.objects.aget_or_create(
             hash=race_setup_hash,

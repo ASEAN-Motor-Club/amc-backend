@@ -352,6 +352,101 @@ async def test_setup_event_classless_championship_stays_legal(db):
 
 
 @pytest.mark.asyncio
+async def test_setup_event_precreates_row_illegal(db):
+    """/setup_event PRE-CREATES the GameEvent row before the POST with the
+    SE + setup + legality already bound (Yuuka 2026-10-18): the add-hook's
+    empty-setup echo must never re-derive an Underground launch to legal
+    (prod: GE 7511 never got its wanted star)."""
+    from amc.events import setup_event
+
+    now = timezone.now()
+    await _clean_slate()
+    cls, _ = await _tt_class("TT-570", max_hp=570)
+    race = await _make_race("OjiNorth route")
+    se = await _ug_template("OjiNorthTT-V1", race, now - timedelta(hours=1), now + timedelta(hours=1))
+    await ScheduledEvent.objects.filter(name="OjiNorthTT-V1").aupdate(tt_class=cls)
+    se = await ScheduledEvent.objects.select_related("tt_class", "race_setup", "championship").aget(name="OjiNorthTT-V1")
+
+    client = _SetupClient({"CharacterGuid": "C" * 32})
+    ok = await setup_event(now, 42, se, client)
+    assert ok is True
+
+    row = await GameEvent.objects.aget(guid=client.posts[0]["EventGuid"])
+    assert row.scheduled_event_id == se.pk
+    assert row.race_setup_id == race.pk
+    assert row.tt_class_id == cls.pk
+    assert row.race_legality == "illegal"
+    assert row.state == 1
+    assert row.auto_created is False
+
+
+    # Async ORM bypasses pytest-django rollback; delete created rows so
+    # later files (test_events etc.) start clean.
+    await sync_to_async(GameEvent.objects.all().delete)()
+
+
+
+@pytest.mark.asyncio
+async def test_setup_event_precreates_row_legal_nonchamp(db):
+    """Non-championship classed SEs pre-create with legality='legal' — the
+    born-legal stamp is CORRECT for them, not a bug."""
+    from amc.events import setup_event
+
+    now = timezone.now()
+    await _clean_slate()
+    cls, _ = await _tt_class("TT-300", max_hp=300)
+    race = await _make_race("Bus Terminal route")
+    se = await sync_to_async(ScheduledEvent.objects.create)(
+        name="Bus Terminal Sprint Test",
+        race_setup=race,
+        time_trial=True,
+        tt_class=cls,
+        championship=None,
+        start_time=now - timedelta(hours=1),
+        end_time=now + timedelta(hours=1),
+    )
+    se = await ScheduledEvent.objects.select_related("tt_class", "race_setup").aget(pk=se.pk)
+
+    client = _SetupClient({"CharacterGuid": "C" * 32})
+    await setup_event(now, 42, se, client)
+
+    row = await GameEvent.objects.aget(guid=client.posts[0]["EventGuid"])
+    assert row.scheduled_event_id == se.pk
+    assert row.race_legality == "legal"
+
+
+    # Async ORM bypasses pytest-django rollback; delete created rows so
+    # later files (test_events etc.) start clean.
+    await sync_to_async(GameEvent.objects.all().delete)()
+
+
+
+@pytest.mark.asyncio
+async def test_setup_event_precreate_get_or_create_retry(db):
+    """A /setup_event retry (same player, same SE) must not collide on the
+    guid unique index — get_or_create keeps the existing row."""
+    from amc.events import setup_event
+
+    now = timezone.now()
+    await _clean_slate()
+    race = await _make_race("Retry route")
+    se = await _ug_template("Retry TT", race, now - timedelta(hours=1), now + timedelta(hours=1))
+    se = await ScheduledEvent.objects.select_related("race_setup", "championship").aget(pk=se.pk)
+
+    client = _SetupClient({"CharacterGuid": "C" * 32})
+    await setup_event(now, 42, se, client)
+    await setup_event(now, 42, se, client)  # retry: posts again with a NEW guid
+    # Two posts → two distinct guids → two rows; neither path raised.
+    assert await GameEvent.objects.acount() == 2
+
+
+    # Async ORM bypasses pytest-django rollback; delete created rows so
+    # later files (test_events etc.) start clean.
+    await sync_to_async(GameEvent.objects.all().delete)()
+
+
+
+@pytest.mark.asyncio
 @patch("amc.events.announce", new_callable=AsyncMock)
 async def test_ir_name_tag_parses_back_to_tt_class(announce_mock, db):
     """The IR name format ("… - IR - 140") is the class channel: the SSE
