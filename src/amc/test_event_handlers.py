@@ -1998,3 +1998,81 @@ class RaceLegalityDerivationTests(TestCase):
         await game_event.arefresh_from_db()
         self.assertEqual(game_event.race_legality, "legal")
 
+
+
+# ---------------------------------------------------------------------------
+# Tests: start-line DQ gate (Yuuka 2026-10-18 — legal classed events get DQ'd)
+# ---------------------------------------------------------------------------
+
+
+@patch("amc.handlers.events.get_event_state", new_callable=AsyncMock)
+@patch("amc.handlers.tt_dq.get_player_last_vehicle", new_callable=AsyncMock)
+@patch("amc.handlers.tt_dq.get_player_last_vehicle_parts", new_callable=AsyncMock)
+@patch("amc.handlers.tt_dq.kick_player_from_event", new_callable=AsyncMock)
+@patch("amc.handlers.tt_dq._post_audit_embed", new_callable=AsyncMock)
+@patch("amc.handlers.tt_dq.set_event_state", new_callable=AsyncMock)
+@patch("amc.handlers.tt_police.announce_illegal_race", new_callable=AsyncMock)
+class StartLineDqGateTests(TestCase):
+    """The state-2 gate: DQ keys on the tt_class FK (legal included), the
+    announce/wanted layer stays keyed on race_legality."""
+
+    async def _seed_add(self, event_name):
+        await TTClass.objects.aget_or_create(name="IR-670", defaults={"max_hp": 670})
+        event_data = _make_event_data(state=1, players=[])
+        event_data["EventName"] = event_name
+        await handle_add_event(
+            {"data": {"Event": event_data}}, None, None,
+            _make_ctx(http_client_mod=object()),
+        )
+
+    async def _start(self, mock_get_live, event_name):
+        start_payload = _make_event_data(state=2)
+        start_payload["EventName"] = event_name
+        mock_get_live.return_value = start_payload
+        await handle_change_event_state(
+            {"data": {"Event": start_payload}}, None, None,
+            _make_ctx(http_client_mod=object()),
+        )
+        return start_payload
+
+    async def test_legal_classed_event_kicks_violator(
+        self, mock_announce, mock_set_state, mock_post, mock_kick,
+        mock_parts, mock_veh, mock_get_live,
+    ):
+        await self._seed_add("Test Event - IR - 670")
+        mock_veh.return_value = {"vehicle": {"fullName": "Mystery_X_C"}}
+        mock_parts.return_value = {"parts": [{"Name": "Engine_X"}]}
+
+        await self._start(mock_get_live, "Test Event - IR - 670")
+
+        mock_kick.assert_awaited_once()
+        mock_announce.assert_not_awaited()
+
+    async def test_unclassed_legal_event_untouched(
+        self, mock_announce, mock_set_state, mock_post, mock_kick,
+        mock_parts, mock_veh, mock_get_live,
+    ):
+        await self._seed_add("Test Event")
+        mock_veh.return_value = {"vehicle": {"fullName": "Mystery_X_C"}}
+        mock_parts.return_value = {"parts": [{"Name": "Engine_X"}]}
+
+        await self._start(mock_get_live, "Test Event")
+
+        mock_kick.assert_not_awaited()
+        mock_announce.assert_not_awaited()
+
+    async def test_illegal_classed_event_kicks_and_announces(
+        self, mock_announce, mock_set_state, mock_post, mock_kick,
+        mock_parts, mock_veh, mock_get_live,
+    ):
+        await self._seed_add("Test Event - IR - 670")
+        game_event = await GameEvent.objects.filter(guid=EVENT_GUID).afirst()
+        game_event.race_legality = "illegal"
+        await game_event.asave(update_fields=["race_legality"])
+        mock_veh.return_value = {"vehicle": {"fullName": "Mystery_X_C"}}
+        mock_parts.return_value = {"parts": [{"Name": "Engine_X"}]}
+
+        await self._start(mock_get_live, "Test Event - IR - 670")
+
+        mock_kick.assert_awaited_once()
+        mock_announce.assert_awaited_once()
