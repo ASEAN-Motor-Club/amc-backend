@@ -13,6 +13,7 @@ from django.conf import settings
 from django.db.models import Exists, F, OuterRef, Prefetch, Window
 from django.db.models.functions import RowNumber
 from django.utils import timezone
+from asgiref.sync import sync_to_async
 
 from amc.config import (
     RESPECT_PER_CHECKPOINT,
@@ -110,6 +111,41 @@ async def setup_event(timestamp, player_id, scheduled_event, http_client_mod):
         data["RaceSetup"] = race_setup
     elif event_type == 2:
         data["CaptureTheFlagSetup"] = scheduled_event.capture_the_flag_setup.config
+
+    # PRE-CREATE the GameEvent row BEFORE the POST (Yuuka 2026-10-18):
+    # the game's ServerAddEvent hook echoes an EMPTY RaceSetup, and the SSE
+    # handler hashes that empty config — the windowed SE match then finds
+    # nothing and the row is born with scheduled_event=None and
+    # race_legality="legal" (prod: GE 7511, an Underground event that never
+    # got its wanted star; SE/legality are only attached on LATER upserts,
+    # never re-stamped). Everything the row needs is known HERE — guid,
+    # name, SE, setup, class pin, legality — so create it before the POST
+    # and the add-hook upsert becomes a pure update. get_or_create keeps a
+    # /setup_event retry from colliding on the guid unique index.
+    from amc.handlers.events import _race_legality_for
+
+    event_guid = data["EventGuid"]
+    # _race_legality_for lazy-loads scheduled_event.championship — a sync
+    # ORM query that raises SynchronousOnlyOperation when the SE arrives
+    # without the FK preloaded (async caller context). Run it in a thread.
+    race_legality = await sync_to_async(_race_legality_for)(scheduled_event)
+    owner = await Character.objects.filter(
+        player__unique_id=str(player_id),
+        guid=player["CharacterGuid"],
+    ).afirst()
+    await GameEvent.objects.aget_or_create(
+        guid=event_guid,
+        defaults={
+            "name": data["EventName"],
+            "state": 1,
+            "race_setup": scheduled_event.race_setup,
+            "owner": owner,
+            "scheduled_event": scheduled_event,
+            "auto_created": False,
+            "tt_class": tt_class,
+            "race_legality": race_legality,
+        },
+    )
 
     async with http_client_mod.post("/events", json=data) as response:
         if response.status >= 400:

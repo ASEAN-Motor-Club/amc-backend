@@ -2,6 +2,7 @@
 
 import asyncio
 import time
+import pytest
 from datetime import timedelta
 from unittest.mock import AsyncMock, patch
 
@@ -24,6 +25,8 @@ from amc.handlers.events import (
     handle_passed_race_section,
 )
 from amc.models import (
+    Championship,
+    Character,
     GameEvent,
     GameEventCharacter,
     LapSectionTime,
@@ -2003,76 +2006,211 @@ class RaceLegalityDerivationTests(TestCase):
 # ---------------------------------------------------------------------------
 # Tests: start-line DQ gate (Yuuka 2026-10-18 — legal classed events get DQ'd)
 # ---------------------------------------------------------------------------
+#
+# NOTE (2026-10-18): async test methods inside django TestCase DO NOT
+# EXECUTE under pytest (probe-verified: a guaranteed self.fail inside a
+# TestCase async method still let the suite pass). Plain module-level
+# functions with @pytest.mark.asyncio + @pytest.mark.django_db are the
+# only reliable shape (same as test_underground_racing.py). The async
+# TestCase classes elsewhere in this file are legacy-vacuous — see the
+# follow-up plan before trusting any "green" from them.
 
 
-@patch("amc.handlers.events.get_event_state", new_callable=AsyncMock)
-@patch("amc.handlers.tt_dq.get_player_last_vehicle", new_callable=AsyncMock)
-@patch("amc.handlers.tt_dq.get_player_last_vehicle_parts", new_callable=AsyncMock)
-@patch("amc.handlers.tt_dq.kick_player_from_event", new_callable=AsyncMock)
-@patch("amc.handlers.tt_dq._post_audit_embed", new_callable=AsyncMock)
-@patch("amc.handlers.tt_dq.set_event_state", new_callable=AsyncMock)
+@pytest.mark.asyncio
+@pytest.mark.django_db
 @patch("amc.handlers.tt_police.announce_illegal_race", new_callable=AsyncMock)
-class StartLineDqGateTests(TestCase):
-    """The state-2 gate: DQ keys on the tt_class FK (legal included), the
-    announce/wanted layer stays keyed on race_legality."""
+@patch("amc.handlers.tt_dq.get_player_last_vehicle_parts", new_callable=AsyncMock)
+@patch("amc.handlers.tt_dq.get_player_last_vehicle", new_callable=AsyncMock)
+@patch("amc.handlers.tt_dq.kick_player_from_event", new_callable=AsyncMock)
+@patch("amc.handlers.events.get_event_state", new_callable=AsyncMock)
+async def test_dq_legal_classed_event_kicks_violator(
+    mock_get_state, mock_kick, mock_veh, mock_parts, mock_announce,
+):
+    await _cleanup_probe_rows()
+    """The state-2 gate keys DQ on tt_class (legal included); announce +
+    wanted stay keyed on race_legality (PR #350)."""
+    await TTClass.objects.aget_or_create(name="IR-670", defaults={"max_hp": 670})
+    event_data = _make_event_data(state=1, players=[])
+    event_data["EventName"] = "Test Event - IR - 670"
+    await handle_add_event(
+        {"data": {"Event": event_data}}, None, None,
+        _make_ctx(http_client_mod=object()),
+    )
+    mock_veh.return_value = {"vehicle": {"fullName": "Mystery_X_C"}}
+    mock_parts.return_value = {"parts": [{"Name": "Engine_X"}]}
 
-    async def _seed_add(self, event_name):
-        await TTClass.objects.aget_or_create(name="IR-670", defaults={"max_hp": 670})
-        event_data = _make_event_data(state=1, players=[])
-        event_data["EventName"] = event_name
-        await handle_add_event(
-            {"data": {"Event": event_data}}, None, None,
-            _make_ctx(http_client_mod=object()),
-        )
+    start_payload = _make_event_data(state=2)
+    start_payload["EventName"] = "Test Event - IR - 670"
+    mock_get_state.return_value = start_payload
+    await handle_change_event_state(
+        {"data": {"Event": start_payload}}, None, None,
+        _make_ctx(http_client_mod=object()),
+    )
 
-    async def _start(self, mock_get_live, event_name):
-        start_payload = _make_event_data(state=2)
-        start_payload["EventName"] = event_name
-        mock_get_live.return_value = start_payload
-        await handle_change_event_state(
-            {"data": {"Event": start_payload}}, None, None,
-            _make_ctx(http_client_mod=object()),
-        )
-        return start_payload
+    mock_kick.assert_awaited_once()
+    mock_announce.assert_not_awaited()
+    await _cleanup_probe_rows()
 
-    async def test_legal_classed_event_kicks_violator(
-        self, mock_announce, mock_set_state, mock_post, mock_kick,
-        mock_parts, mock_veh, mock_get_live,
-    ):
-        await self._seed_add("Test Event - IR - 670")
-        mock_veh.return_value = {"vehicle": {"fullName": "Mystery_X_C"}}
-        mock_parts.return_value = {"parts": [{"Name": "Engine_X"}]}
 
-        await self._start(mock_get_live, "Test Event - IR - 670")
+@pytest.mark.asyncio
+@pytest.mark.django_db
+@patch("amc.handlers.tt_police.announce_illegal_race", new_callable=AsyncMock)
+@patch("amc.handlers.tt_dq.get_player_last_vehicle_parts", new_callable=AsyncMock)
+@patch("amc.handlers.tt_dq.get_player_last_vehicle", new_callable=AsyncMock)
+@patch("amc.handlers.tt_dq.kick_player_from_event", new_callable=AsyncMock)
+@patch("amc.handlers.events.get_event_state", new_callable=AsyncMock)
+async def test_dq_unclassed_legal_event_untouched(
+    mock_get_state, mock_kick, mock_veh, mock_parts, mock_announce,
+):
+    await _cleanup_probe_rows()
+    await TTClass.objects.aget_or_create(name="IR-670", defaults={"max_hp": 670})
+    event_data = _make_event_data(state=1, players=[])
+    event_data["EventName"] = "Test Event"
+    await handle_add_event(
+        {"data": {"Event": event_data}}, None, None,
+        _make_ctx(http_client_mod=object()),
+    )
+    mock_veh.return_value = {"vehicle": {"fullName": "Mystery_X_C"}}
+    mock_parts.return_value = {"parts": [{"Name": "Engine_X"}]}
 
-        mock_kick.assert_awaited_once()
-        mock_announce.assert_not_awaited()
+    start_payload = _make_event_data(state=2)
+    start_payload["EventName"] = "Test Event"
+    mock_get_state.return_value = start_payload
+    await handle_change_event_state(
+        {"data": {"Event": start_payload}}, None, None,
+        _make_ctx(http_client_mod=object()),
+    )
 
-    async def test_unclassed_legal_event_untouched(
-        self, mock_announce, mock_set_state, mock_post, mock_kick,
-        mock_parts, mock_veh, mock_get_live,
-    ):
-        await self._seed_add("Test Event")
-        mock_veh.return_value = {"vehicle": {"fullName": "Mystery_X_C"}}
-        mock_parts.return_value = {"parts": [{"Name": "Engine_X"}]}
+    mock_kick.assert_not_awaited()
+    mock_announce.assert_not_awaited()
+    await _cleanup_probe_rows()
 
-        await self._start(mock_get_live, "Test Event")
 
-        mock_kick.assert_not_awaited()
-        mock_announce.assert_not_awaited()
+@pytest.mark.asyncio
+@pytest.mark.django_db
+@patch("amc.handlers.tt_police.announce_illegal_race", new_callable=AsyncMock)
+@patch("amc.handlers.tt_dq.get_player_last_vehicle_parts", new_callable=AsyncMock)
+@patch("amc.handlers.tt_dq.get_player_last_vehicle", new_callable=AsyncMock)
+@patch("amc.handlers.tt_dq.kick_player_from_event", new_callable=AsyncMock)
+@patch("amc.handlers.events.get_event_state", new_callable=AsyncMock)
+async def test_dq_illegal_classed_event_kicks_and_announces(
+    mock_get_state, mock_kick, mock_veh, mock_parts, mock_announce,
+):
+    await _cleanup_probe_rows()
+    await TTClass.objects.aget_or_create(name="IR-670", defaults={"max_hp": 670})
+    event_data = _make_event_data(state=1, players=[])
+    event_data["EventName"] = "Test Event - IR - 670"
+    await handle_add_event(
+        {"data": {"Event": event_data}}, None, None,
+        _make_ctx(http_client_mod=object()),
+    )
+    game_event = await GameEvent.objects.filter(guid=EVENT_GUID).afirst()
+    game_event.race_legality = "illegal"
+    await game_event.asave(update_fields=["race_legality"])
+    mock_veh.return_value = {"vehicle": {"fullName": "Mystery_X_C"}}
+    mock_parts.return_value = {"parts": [{"Name": "Engine_X"}]}
 
-    async def test_illegal_classed_event_kicks_and_announces(
-        self, mock_announce, mock_set_state, mock_post, mock_kick,
-        mock_parts, mock_veh, mock_get_live,
-    ):
-        await self._seed_add("Test Event - IR - 670")
-        game_event = await GameEvent.objects.filter(guid=EVENT_GUID).afirst()
-        game_event.race_legality = "illegal"
-        await game_event.asave(update_fields=["race_legality"])
-        mock_veh.return_value = {"vehicle": {"fullName": "Mystery_X_C"}}
-        mock_parts.return_value = {"parts": [{"Name": "Engine_X"}]}
+    start_payload = _make_event_data(state=2)
+    start_payload["EventName"] = "Test Event - IR - 670"
+    mock_get_state.return_value = start_payload
+    await handle_change_event_state(
+        {"data": {"Event": start_payload}}, None, None,
+        _make_ctx(http_client_mod=object()),
+    )
 
-        await self._start(mock_get_live, "Test Event - IR - 670")
+    mock_kick.assert_awaited_once()
+    mock_announce.assert_awaited_once()
+    await _cleanup_probe_rows()
 
-        mock_kick.assert_awaited_once()
-        mock_announce.assert_awaited_once()
+
+async def _cleanup_probe_rows():
+    """My new plain-async tests leak rows across test boundaries (the async
+    ORM connection bypasses pytest-django's rollback — see
+    test_underground_racing's _underground_world docstring). Explicitly
+    delete everything these tests create, at start AND end."""
+    await GameEventCharacter.objects.filter(character__guid=CHAR_GUID).adelete()
+    await GameEvent.objects.filter(guid=EVENT_GUID).adelete()
+    await Character.objects.filter(guid=CHAR_GUID).adelete()
+    await ScheduledEvent.objects.filter(name="Test Event").adelete()
+    await RaceSetup.objects.filter(name="Test Route").adelete()
+
+
+# ---------------------------------------------------------------------------
+# Empty-setup guard + pre-create survival (2026-10-18)
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+@pytest.mark.django_db
+async def test_empty_setup_add_hook_creates_no_race_setup_row():
+    await _cleanup_probe_rows()
+    """The AddEvent hook echoes an empty RaceSetup (no waypoints); the
+    handler must not hash/get_or_create a junk RaceSetup row (36 such
+    junk rows accumulated in prod)."""
+    before = await RaceSetup.objects.acount()
+    payload = _make_event_data(state=1, race_setup_empty=True)
+    payload["EventName"] = "Test Event - IR - 670"
+    game_event, _ = await _upsert_game_event(payload)
+    assert game_event.race_setup_id is None
+    assert await RaceSetup.objects.acount() == before
+    await _cleanup_probe_rows()
+
+
+@pytest.mark.asyncio
+@pytest.mark.django_db
+async def test_precreated_row_keeps_legality_and_se_through_add_hook():
+    await _cleanup_probe_rows()
+    """setup_event pre-creates the row (SE + legality stamped); the
+    empty-setup add-hook upsert must UPDATE it without re-deriving
+    legality or dropping the SE link."""
+    underground, _ = await sync_to_async(Championship.objects.get_or_create)(
+        name=UNDERGROUND_CHAMPIONSHIP_NAME, defaults={"description": ""}
+    )
+    race_setup, _ = await RaceSetup.objects.aget_or_create(
+        hash=RaceSetup.calculate_hash(RACE_SETUP_RAW),
+        defaults={"config": RACE_SETUP_RAW, "name": "Test Route"},
+    )
+    now = timezone.now()
+    se = await ScheduledEvent.objects.acreate(
+        name="Test Event",
+        start_time=now - timedelta(minutes=30),
+        end_time=now + timedelta(minutes=30),
+        race_setup=race_setup,
+        championship=underground,
+    )
+    row = await GameEvent.objects.acreate(
+        guid=EVENT_GUID,
+        name="Test Event - IR - 670",
+        state=1,
+        race_setup=race_setup,
+        scheduled_event=se,
+        race_legality="illegal",
+    )
+
+    add_payload = _make_event_data(state=1, race_setup_empty=True)
+    add_payload["EventName"] = "Test Event - IR - 670"
+    game_event, _ = await _upsert_game_event(add_payload)
+
+    await row.arefresh_from_db()
+    assert game_event.pk == row.pk
+    assert game_event.scheduled_event_id == se.pk
+    assert game_event.race_legality == "illegal"
+    await _cleanup_probe_rows()
+
+
+@pytest.mark.asyncio
+@pytest.mark.django_db
+async def test_real_setup_on_later_hook_still_links():
+    await _cleanup_probe_rows()
+    """A later hook carrying the REAL setup links it normally — the
+    guard only swallows waypoint-less setups."""
+    race_setup, _ = await RaceSetup.objects.aget_or_create(
+        hash=RaceSetup.calculate_hash(RACE_SETUP_RAW),
+        defaults={"config": RACE_SETUP_RAW, "name": "Test Route"},
+    )
+    await _upsert_game_event(_make_event_data(state=1))
+    game_event, _ = await _upsert_game_event(_make_event_data(state=2))
+    game_event = await GameEvent.objects.aget(pk=game_event.pk)
+    assert game_event.race_setup_id == race_setup.pk
+    await _cleanup_probe_rows()
+
