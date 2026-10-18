@@ -462,6 +462,9 @@ async def _reconcile_event_players(
         # Start-line enforcement for TT-classed events (in order):
         #   1. DQ (force-leave) participants violating the class rules —
         #      deliberately after the prune so it sees the settled roster.
+        #      Runs for EVERY classed event, legal or illegal (Yuuka
+        #      2026-10-18: "legals should get restricted too") — the class
+        #      tag is the trigger, legality only decides the criminal layer.
         #   2. Mark the remaining racers wanted (illegal-race RP trigger,
         #      Yuuka 2026-09-26) — DQ'd players never entered the race.
         #   3. Schedule the 60s "An Illegal race is happening!" broadcast
@@ -474,16 +477,20 @@ async def _reconcile_event_players(
         # Start-line DQ remains the only start-time enforcement; ~60 s in,
         # the announcement fires and everyone inside the event gets the
         # star Wanted (grant_race_wanted inside announce_illegal_race).
-        # Gated on race_legality — only ILLEGAL races get any of this;
-        # ordinary events racing must stay clean (Yuuka 2026-09-27:
-        # "ALL events are getting this wanted thing applied"). Defaults
-        # to legal; TT-classed events are stamped illegal by the
-        # auto-poster and admins can flip it with /racelegality. The
-        # suspect-tick race pass filters race_legality the same way.
-        if game_event.race_legality == "illegal":
+        # DQ is keyed on the tt_class FK — every classed event gets it,
+        # legal ones included (Yuuka 2026-10-18). The announcement + wanted
+        # grant stay gated on race_legality — only ILLEGAL races are
+        # criminalized; ordinary events racing must stay clean (Yuuka
+        # 2026-09-27: "ALL events are getting this wanted thing applied").
+        # Defaults to legal; legality is decided by the SE's championship
+        # at create time (_race_legality_for) and admins can flip it with
+        # /racelegality. The suspect-tick race pass filters race_legality
+        # the same way.
+        if game_event.tt_class_id:
             await _disqualify_illegal_starters(
                 http_client_mod, game_event, live_event, discord_client,
             )
+        if game_event.race_legality == "illegal":
             await announce_illegal_race(
                 http_client_mod, game_event, http_client_game=http_client_game
             )
