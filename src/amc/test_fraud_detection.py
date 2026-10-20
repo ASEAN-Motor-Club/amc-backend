@@ -271,17 +271,29 @@ class ValidateCargoPaymentTests(TestCase):
         self.assertEqual(excess, payment - threshold)
 
     async def _seed_route_history(
-        self, sender, dest, payments, cargo="CabbagePallet", weight=0.0
+        self, sender, dest, payments, cargo="CabbagePallet", weight=0.0,
+        newest_days_ago=0.0,
     ):
-        """Create ServerCargoArrivedLog history rows for one route pair."""
-        from datetime import datetime, timezone as dt_tz
+        """Create ServerCargoArrivedLog history rows for one route pair.
+
+        Rows are timestamped relative to `now`: the newest sample is
+        `newest_days_ago` days old, older samples walk back ~2 days each so
+        by default the history is RECENT (passes the freshness gate) and
+        DIVERSE (each payment distinct unless the caller repeats values).
+        Set `newest_days_ago` high to build a stale history for the
+        recency-guard tests.
+        """
+        from datetime import timedelta
 
         await sender.asave()
         await dest.asave()
 
         for i, pay in enumerate(payments):
+            ts = timezone.now() - timedelta(
+                days=newest_days_ago + 2 * (len(payments) - 1 - i)
+            )
             await ServerCargoArrivedLog.objects.acreate(
-                timestamp=datetime(2026, 9, 1, 12, 0, i, tzinfo=dt_tz.utc),
+                timestamp=ts,
                 cargo_key=cargo,
                 payment=pay,
                 weight=weight,
@@ -405,6 +417,86 @@ class ValidateCargoPaymentTests(TestCase):
         # heavy p99 = 50_018, max = 50_019 -> ceiling = max(100_036, 60_022)
         self.assertEqual(excess, 200_000 - 100_036)
 
+    async def test_route_history_stale_disables_detection(self):
+        """2026-10-20 Moonshine Copper Mine -G -> Joil false positive: the
+        route history holds plenty of samples but ALL are months old, so
+        the 2xp99 ceiling frozen at $8,826 clawed two legitimate 5-unit
+        runs paying $12,720/$15,020 per unit (the live formula pays
+        ~$14,500).  History with no recent sample must DISABLE detection
+        (absolute ceiling only), not clip at a dead price level."""
+        sender = DeliveryPoint(
+            guid="sender-h8", name="Copper Mine -G", coord=Point(0, 0, 0, srid=3857)
+        )
+        dest = DeliveryPoint(
+            guid="dest-h8", name="Joil", coord=Point(900_000, 0, 0, srid=3857)
+        )
+        # 38 diverse samples, but the newest is 60 days old (> 45-day gate).
+        await self._seed_route_history(
+            sender,
+            dest,
+            [4_000 + i for i in range(38)],
+            cargo="Moonshine",
+            weight=94.0,
+            newest_days_ago=60.0,
+        )
+        excess = await validate_cargo_payment(
+            cargo_key="Moonshine",
+            payment=12_720,
+            quantity=1,
+            sender_point=sender,
+            destination_point=dest,
+            unit_weight=94.26,
+        )
+        self.assertEqual(excess, 0)
+
+    async def test_route_history_degenerate_values_disables_detection(self):
+        """History with enough samples but fewer than 3 DISTINCT payment
+        values cannot describe the current economy (two flat price levels
+        from a pre-rebalance era) -> detection disabled, no claw."""
+        sender = DeliveryPoint(
+            guid="sender-h9", name="Copper Mine -G", coord=Point(0, 0, 0, srid=3857)
+        )
+        dest = DeliveryPoint(
+            guid="dest-h9", name="Joil", coord=Point(900_000, 0, 0, srid=3857)
+        )
+        # Exactly the real Moonshine/Joil shape: two flat values, 20 + 18
+        # samples, all recent.
+        history = [3_548] * 20 + [4_413] * 18
+        await self._seed_route_history(
+            sender, dest, history, cargo="Moonshine", weight=94.0
+        )
+        excess = await validate_cargo_payment(
+            cargo_key="Moonshine",
+            payment=15_020,
+            quantity=1,
+            sender_point=sender,
+            destination_point=dest,
+            unit_weight=98.73,
+        )
+        self.assertEqual(excess, 0)
+
+    async def test_route_history_diverse_recent_still_claws(self):
+        """The guards must not blind detection: a fresh, diverse history
+        still builds a consensus and still claws genuine inflation."""
+        sender = DeliveryPoint(
+            guid="sender-h10", name="Mine", coord=Point(0, 0, 0, srid=3857)
+        )
+        dest = DeliveryPoint(
+            guid="dest-h10", name="Factory", coord=Point(50_000, 0, 0, srid=3857)
+        )
+        history = [3_000 + i for i in range(25)]  # fresh + 25 distinct values
+        await self._seed_route_history(sender, dest, history)
+        payment = 100_000
+        route_threshold = max(2 * (3_000 + 23), int(1.2 * (3_000 + 24)))
+        excess = await validate_cargo_payment(
+            cargo_key="CabbagePallet",
+            payment=payment,
+            quantity=1,
+            sender_point=sender,
+            destination_point=dest,
+        )
+        self.assertEqual(excess, payment - route_threshold)
+
     async def test_route_history_without_weight_keeps_legacy_behaviour(self):
         """No unit weight on the delivery -> weight-blind consensus, exactly
         the pre-weight-band behaviour."""
@@ -460,13 +552,12 @@ class ValidateCargoPaymentTests(TestCase):
         dest = DeliveryPoint(
             guid="dest-h4", name="Supermarket", coord=Point(926_000, 0, 0, srid=3857)
         )
-        from datetime import datetime, timezone as dt_tz
 
         await sender.asave()
         await dest.asave()
         for i in range(25):
             await ServerCargoArrivedLog.objects.acreate(
-                timestamp=datetime(2026, 9, 1, 12, 0, i, tzinfo=dt_tz.utc),
+                timestamp=timezone.now() - timedelta(days=50 - i),
                 cargo_key="CabbagePallet",
                 payment=5_000,  # post-clawback
                 data={
@@ -503,23 +594,25 @@ class ValidateCargoPaymentTests(TestCase):
         dest = DeliveryPoint(
             guid="dest-h5", name="Still", coord=Point(926_000, 0, 0, srid=3857)
         )
-        from datetime import datetime, timezone as dt_tz
+        from datetime import timedelta
 
         await sender.asave()
         await dest.asave()
         # 25 unmarked legacy rows: 24 light runs at ~$3,000 plus one legit
-        # full-load run at $70,401 — all stored clamped to 20,000
+        # full-load run at $70,401 — all stored clamped to 20,000.  Values
+        # are distinct and timestamps fresh so the recency/distinct-value
+        # guards pass and the legacy-consensus behaviour is exercised.
         for i in range(24):
             await ServerCargoArrivedLog.objects.acreate(
-                timestamp=datetime(2026, 9, 1, 12, 0, i, tzinfo=dt_tz.utc),
+                timestamp=timezone.now() - timedelta(days=1 + (23 - i) * 0.5),
                 cargo_key="Moonshine",
                 payment=20_000,
-                data={"Net_Payment": 3_000, "Net_CargoKey": "Moonshine"},
+                data={"Net_Payment": 3_000 + i, "Net_CargoKey": "Moonshine"},
                 sender_point=sender,
                 destination_point=dest,
             )
         await ServerCargoArrivedLog.objects.acreate(
-            timestamp=datetime(2026, 9, 1, 12, 0, 24, tzinfo=dt_tz.utc),
+            timestamp=timezone.now() - timedelta(hours=6),
             cargo_key="Moonshine",
             payment=20_000,
             data={"Net_Payment": 70_401, "Net_CargoKey": "Moonshine"},
@@ -635,15 +728,18 @@ class FraudCargoIntegrationTests(TestCase):
         # payments below would legitimately go unclawed.  20 samples of
         # 5,000 at weight 100 (matching the events' Net_Weight) put the
         # route consensus ceiling at max(2 x p99, 1.2 x max) = 10,000.
-        from datetime import datetime, timezone as dt_tz
+        from datetime import timedelta
 
         for i in range(ROUTE_HISTORY_MIN_SAMPLES):
             await ServerCargoArrivedLog.objects.acreate(
-                timestamp=datetime(2026, 9, 1, 12, 0, i, tzinfo=dt_tz.utc),
+                # Distinct values (5,000 + i) + fresh timestamps so the
+                # route-history consensus is USABLE under the recency and
+                # distinct-value guards.
+                timestamp=timezone.now() - timedelta(days=i),
                 cargo_key="BottlePallete",
-                payment=5_000,
+                payment=5_000 + i,
                 weight=100.0,
-                data={"Net_Payment": 5_000, "Net_CargoKey": "BottlePallete"},
+                data={"Net_Payment": 5_000 + i, "Net_CargoKey": "BottlePallete"},
                 sender_point_id="fs",
                 destination_point_id="fd",
             )
