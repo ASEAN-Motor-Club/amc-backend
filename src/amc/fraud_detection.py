@@ -195,6 +195,20 @@ MIN_DISTANCE_METRES = 500
 ROUTE_HISTORY_WINDOW_DAYS = 180
 ROUTE_HISTORY_MIN_SAMPLES = 20
 ROUTE_HISTORY_MAX_ROWS = 1000
+# Recency requirement (PR fix/fraud-history-recency-guard, 2026-10-20):
+# the NEWEST sample in the consensus must be at most this old, and the
+# consensus must hold at least ROUTE_HISTORY_MIN_DISTINCT_PAYMENTS distinct
+# payment values.  A consensus built from a handful of flat values months
+# old does not describe the CURRENT economy (game rebalances and mod
+# retunes shift whole price levels — the 2026-10-20 Moonshine Copper
+# Mine -G -> Joil case: 38 samples but only two distinct values from Apr
+# and Sep, ceiling $8,826 vs the live formula's ~$14,500, false-clawed
+# two legitimate 5-unit runs).  A history that fails either requirement
+# cannot support ANY payment check and is treated as sparse (detection
+# disabled; only the absolute ceiling applies) — fail-safe, never
+# assumes pay 0 or infinity.
+ROUTE_HISTORY_NEWEST_MAX_DAYS = 45
+ROUTE_HISTORY_MIN_DISTINCT_PAYMENTS = 3
 # Weight-band for the route consensus: a sample counts toward the consensus
 # of a delivery with unit weight W when the sample's unit weight is within
 # [0.6, 1.4] x W (roughly +/-40%).  Outside the band the sample describes a
@@ -460,6 +474,43 @@ async def validate_cargo_payment(
             sender_point,
             destination_point,
         )
+        # 2026-10-20 Moonshine Copper Mine -G -> Joil false positive: 38
+        # samples but only TWO distinct payment values, both months old
+        # (Apr $4,413 x18, Sep $3,548 x20).  The 2xp99 ceiling frozen at
+        # $8,826 clawed two legitimate 5-unit runs ($12,720/$15,020 per
+        # unit vs the live formula's ~$14,500).  History that is stale
+        # (no recent sample) or degenerate (too few distinct values)
+        # cannot describe the current economy -> treat as sparse and
+        # disable detection (fail-safe: only the absolute ceiling may
+        # apply; never assumes pay 0 or infinity).
+        now = timezone.now()
+        is_fresh = historical and (now - historical[0][2]).days <= (
+            ROUTE_HISTORY_NEWEST_MAX_DAYS
+        )
+        distinct_payments = {pay for pay, _, _ in historical}
+        is_diverse = len(distinct_payments) >= ROUTE_HISTORY_MIN_DISTINCT_PAYMENTS
+        # Empty history falls through to the legacy per-km/per-unit
+        # fallbacks below (nothing learned from this route); a NON-empty
+        # but stale or degenerate history is actively misleading, so
+        # detection is disabled outright.
+        if historical and not (is_fresh and is_diverse):
+            logger.warning(
+                "FRAUD-SKIP cargo=%s payment=%d: route history unusable "
+                "(%d samples, %d distinct values, newest %d days old; "
+                "need %d distinct within %d days) — detection disabled",
+                cargo_key,
+                payment,
+                len(historical),
+                len(distinct_payments),
+                (now - historical[0][2]).days if historical else -1,
+                ROUTE_HISTORY_MIN_DISTINCT_PAYMENTS,
+                ROUTE_HISTORY_NEWEST_MAX_DAYS,
+            )
+            # Only the absolute ceiling still applies.
+            absolute_excess = 0
+            if max_absolute is not None and payment > max_absolute:
+                absolute_excess = payment - int(max_absolute)
+            return absolute_excess
         # Payment scales with unit WEIGHT for bulk cargo: a route history
         # dominated by light jobs has a legitimate top far below a full
         # load's pay, so a weight-blind consensus censors heavy hauls.
@@ -477,7 +528,7 @@ async def validate_cargo_payment(
         if unit_weight:
             in_band = [
                 pay
-                for pay, weight in historical
+                for pay, weight, _ts in historical
                 if weight
                 and ROUTE_HISTORY_WEIGHT_BAND_LO
                 <= weight / unit_weight
@@ -501,7 +552,7 @@ async def validate_cargo_payment(
                 if max_absolute is not None and payment > max_absolute:
                     absolute_excess = payment - int(max_absolute)
                 return absolute_excess
-        historical_values = [pay for pay, _ in historical]
+        historical_values = [pay for pay, _w, _ts in historical]
         route_samples = len(historical_values)
         if route_samples >= ROUTE_HISTORY_MIN_SAMPLES:
             route_checked = True
@@ -590,7 +641,7 @@ async def _route_history_payments(
     cargo_key: str,
     sender_point: DeliveryPoint,
     destination_point: DeliveryPoint,
-) -> list[tuple[int, float]]:
+) -> list[tuple[int, float, datetime]]:
     """(raw pre-clawback Net_Payment, unit weight kg) for this cargo on this
     exact sender/destination pair, from the last ROUTE_HISTORY_WINDOW_DAYS.
 
@@ -616,10 +667,10 @@ async def _route_history_payments(
             timestamp__gte=cutoff,
         )
         .order_by("-timestamp")
-        .values_list("data", "weight")[:ROUTE_HISTORY_MAX_ROWS]
+        .values_list("data", "weight", "timestamp")[:ROUTE_HISTORY_MAX_ROWS]
     )
-    payments: list[tuple[int, float]] = []
-    async for data, weight in rows:
+    payments: list[tuple[int, float, datetime]] = []
+    async for data, weight, timestamp in rows:
         payload = data or {}
         if payload.get("amc_fraud_excess") is not None:
             continue  # clawed by this regime — cheat signal, never consensus
@@ -631,7 +682,7 @@ async def _route_history_payments(
         except (TypeError, ValueError):
             continue
         if value > 0:
-            payments.append((value, float(weight or 0)))
+            payments.append((value, float(weight or 0), timestamp))
     return payments
 
 
