@@ -135,6 +135,34 @@ async def handle_cargo_arrived(event, player, character, ctx):
         ]
     )
 
+    # --- 2b. Gamedata-gap alerts (unknown cargo keys) ----------------------
+    # One alert per distinct key per event; alerting must never raise.
+    if ctx.discord_client is not None:
+        from amc.pipeline.discord import post_discord_gamedata_alert
+
+        unknown_keys = sorted(
+            {
+                log.cargo_key
+                for log in logs
+                if log.data is not None and log.data.get("amc_unknown_cargo")
+            }
+        )
+        for cargo_key in unknown_keys:
+            logger.warning(
+                "Unknown cargo key (no definition row): cargo=%s", cargo_key
+            )
+            post_discord_gamedata_alert(
+                ctx.discord_client,
+                kind="unknown_cargo",
+                title="Unknown cargo delivered",
+                description=(
+                    "A cargo key with no row in `cargo_definitions.json` was "
+                    "delivered. It should be added to gamedata — the log rows "
+                    "are tagged `amc_unknown_cargo` for the audit query."
+                ),
+                fields={"Cargo key": cargo_key},
+            )
+
     # --- 3. Apply game-level bonuses (damage bonus etc.) ---
     for log in logs:
         log.payment += get_cargo_bonus(log.cargo_key, log.payment, log.damage or 0)
