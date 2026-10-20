@@ -652,7 +652,7 @@ async def process_cargo_log(cargo, player, character, timestamp):
     destination = await DeliveryPoint.objects.filter(
         coord__coveredby=destination_coord
     ).afirst()
-    return ServerCargoArrivedLog(
+    log = ServerCargoArrivedLog(
         timestamp=timestamp,
         player=player,
         character=character,
@@ -665,6 +665,29 @@ async def process_cargo_log(cargo, player, character, timestamp):
         destination_point=destination,
         data=cargo,
     )
+    # --- Delivery telemetry enrichment (behavior-neutral) -----------------
+    # Attach the registered delivery's pricing context (demand/supply/balance
+    # multipliers, path distance, unit count) from the telemetry snapshot
+    # when available.  A miss writes NOTHING — missing telemetry must never
+    # alter processing, only enrich the row for later analysis.
+    from amc import delivery_telemetry
+
+    telemetry = delivery_telemetry.telemetry_for_delivery(log.delivery_id)
+    if telemetry is not None and log.data is not None:
+        log.data["amc_delivery_telemetry"] = telemetry
+    # --- Unknown-cargo marker (gamedata gap funnel) ------------------------
+    # Tag rows whose cargo key has no definition row so new/renamed cargos
+    # surface in audits and get added to cargo_definitions.
+    if log.data is not None:
+        marker = delivery_telemetry.unknown_cargo_marker(log.cargo_key)
+        if marker:
+            log.data["amc_unknown_cargo"] = True
+            logger.warning(
+                "Unknown cargo key (no definition row): cargo=%s delivery_id=%s",
+                log.cargo_key,
+                log.delivery_id,
+            )
+    return log
 
 
 def _handle_teleport_burst(character, logs, ctx, timestamp) -> int:

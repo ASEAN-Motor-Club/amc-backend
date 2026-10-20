@@ -1,0 +1,198 @@
+"""Delivery telemetry: route/demand pricing context for cargo arrivals.
+
+The MTDediMod Lua webserver exposes `GET /delivery/points` where each point
+carries its pricing constants (`PaymentMultiplier`, `BasePayment`,
+`DemandConfigs[].PaymentMultiplier`) and its registered deliveries
+(`Net_Deliveries[]` with `PaymentMultiplierByDemand/BySupply/ByBalanceConfig`,
+`PathDistance`, `PathClimbHeight`, `PathSpeedKPH`, `NumCargos`, `Weight`).
+This is the data that decomposes a cargo payment into formula vs town bonus
+vs demand pricing — the terms the backend previously could not observe
+(2026-10-20 forensics: CocaPaste paying 7x more into one sink than another).
+
+Design (behavior-neutral, fail-safe):
+
+- A periodic worker job refreshes the snapshot into module memory.
+- At cargo arrival, `handlers.cargo.process_cargo_log` enriches the log
+  row's `data` JSON with `amc_delivery_telemetry` when the row's
+  `Net_DeliveryId` is in the (fresh) snapshot.  A miss writes NOTHING —
+  missing telemetry must never alter processing, only enrich logging.
+- A background refresh is scheduled (debounced) when a looked-up delivery
+  id is not in cache, so between polls new registrations get picked up.
+- The game API being down is a soft failure: logged, never raised.
+"""
+
+from __future__ import annotations
+
+import asyncio
+import logging
+import time
+from typing import Any, Optional
+
+logger = logging.getLogger("amc.delivery_telemetry")
+
+# Snapshot is usable for enrichment while younger than this.
+SNAPSHOT_MAX_AGE_SECONDS = 60 * 60  # 1 hour
+# Minimum gap between background refreshes triggered by cache misses.
+_BACKGROUND_REFRESH_DEBOUNCE_SECONDS = 60.0
+
+_snapshot_deliveries: dict[int, dict[str, Any]] = {}
+_snapshot_points: dict[str, dict[str, Any]] = {}
+_snapshot_fetched_at: Optional[float] = None
+_refresh_lock: Optional[asyncio.Lock] = None
+_last_background_refresh: float = 0.0
+
+
+def _get_refresh_lock() -> asyncio.Lock:
+    global _refresh_lock
+    if _refresh_lock is None:
+        _refresh_lock = asyncio.Lock()
+    return _refresh_lock
+
+
+def _delivery_entry(delivery: Any) -> Optional[dict[str, Any]]:
+    """Reduce a Net_Delivery to the telemetry fields we keep."""
+    try:
+        delivery_id = int(delivery.get("ID") or 0)
+    except (TypeError, ValueError):
+        return None
+    if delivery_id <= 0:
+        return None
+    return {
+        "delivery_id": delivery_id,
+        "cargo_key": delivery.get("CargoKey"),
+        "num_cargos": delivery.get("NumCargos"),
+        "weight": delivery.get("Weight"),
+        "payment_multiplier_by_demand": delivery.get("PaymentMultiplierByDemand"),
+        "payment_multiplier_by_supply": delivery.get("PaymentMultiplierBySupply"),
+        "payment_multiplier_by_balance_config": delivery.get(
+            "PaymentMultiplierByBalanceConfig"
+        ),
+        "path_distance": delivery.get("PathDistance"),
+        "path_climb_height": delivery.get("PathClimbHeight"),
+        "path_speed_kph": delivery.get("PathSpeedKPH"),
+        "timer_seconds": delivery.get("TimerSeconds"),
+        "delivery_flags": delivery.get("DeliveryFlags"),
+        "sender_point": delivery.get("SenderPoint"),
+        "receiver_point": delivery.get("ReceiverPoint"),
+        "registered_time_seconds": delivery.get("RegisteredTimeSeconds"),
+    }
+
+
+def apply_snapshot(payload: dict[str, Any]) -> tuple[int, int]:
+    """Ingest a `/delivery/points` response into the in-memory snapshot.
+
+    Returns (num_points, num_deliveries).  A malformed response raises —
+    callers decide whether that is fatal (tests) or soft (worker cron).
+    """
+    global _snapshot_deliveries, _snapshot_points, _snapshot_fetched_at
+
+    points = payload.get("data")
+    if not isinstance(points, list):
+        raise ValueError("delivery points response missing 'data' list")
+
+    deliveries: dict[int, dict[str, Any]] = {}
+    points_by_guid: dict[str, dict[str, Any]] = {}
+    for point in points:
+        if not isinstance(point, dict):
+            continue
+        guid = point.get("DeliveryPointGuid")
+        if guid:
+            points_by_guid[guid] = {
+                "payment_multiplier": point.get("PaymentMultiplier"),
+                "base_payment": point.get("BasePayment"),
+                "demand_configs": point.get("DemandConfigs") or [],
+            }
+        for delivery in point.get("Net_Deliveries") or []:
+            entry = _delivery_entry(delivery)
+            if entry is not None:
+                deliveries[entry["delivery_id"]] = entry
+
+    _snapshot_deliveries = deliveries
+    _snapshot_points = points_by_guid
+    _snapshot_fetched_at = time.monotonic()
+    return len(points_by_guid), len(deliveries)
+
+
+def snapshot_age_seconds() -> Optional[float]:
+    if _snapshot_fetched_at is None:
+        return None
+    return time.monotonic() - _snapshot_fetched_at
+
+
+def telemetry_for_delivery(delivery_id: Optional[int]) -> Optional[dict[str, Any]]:
+    """Telemetry dict for a delivery id, or None (unknown / stale / no id)."""
+    if not delivery_id or delivery_id <= 0:
+        return None
+    age = snapshot_age_seconds()
+    if age is None or age > SNAPSHOT_MAX_AGE_SECONDS:
+        return None
+    entry = _snapshot_deliveries.get(delivery_id)
+    if entry is None:
+        return None
+    result = dict(entry)
+    receiver = _snapshot_points.get(entry.get("receiver_point") or "")
+    if receiver:
+        result["receiver_payment_multiplier"] = receiver["payment_multiplier"]
+        result["receiver_base_payment"] = receiver["base_payment"]
+        result["receiver_demand_configs"] = receiver["demand_configs"]
+    result["snapshot_age_seconds"] = round(snapshot_age_seconds() or 0, 1)
+    return result
+
+
+async def refresh_snapshot(session) -> tuple[int, int]:
+    """Fetch `/delivery/points` (field-filtered) from the mod server."""
+    params = {"filters": "Net_Deliveries,PaymentMultiplier,BasePayment,DemandConfigs"}
+    async with session.get("/delivery/points", params=params) as resp:
+        if resp.status != 200:
+            body = await resp.text()
+            raise RuntimeError(
+                f"/delivery/points returned {resp.status}: {body[:200]}"
+            )
+        payload = await resp.json(content_type=None)
+    return apply_snapshot(payload)
+
+
+async def refresh_background(session) -> None:
+    """Debounced background refresh for cache misses (soft-fail)."""
+    global _last_background_refresh
+    now = time.monotonic()
+    if now - _last_background_refresh < _BACKGROUND_REFRESH_DEBOUNCE_SECONDS:
+        return
+    _last_background_refresh = now
+    lock = _get_refresh_lock()
+    if lock.locked():
+        return
+    async with lock:
+        try:
+            points, deliveries = await refresh_snapshot(session)
+            logger.info(
+                "Delivery telemetry snapshot refreshed: %d points, %d deliveries",
+                points,
+                deliveries,
+            )
+        except Exception as exc:  # noqa: BLE001 — soft failure by design
+            logger.warning("Delivery telemetry refresh failed: %s", exc)
+
+
+async def schedule_refresh_on_miss(session, delivery_id: Optional[int]) -> None:
+    """Fire-and-forget background refresh when a delivery id is unknown."""
+    if not delivery_id:
+        return
+    age = snapshot_age_seconds()
+    if age is not None and age < _BACKGROUND_REFRESH_DEBOUNCE_SECONDS:
+        return  # snapshot is fresh; the delivery simply is not on the board
+    asyncio.create_task(refresh_background(session))
+
+
+def unknown_cargo_marker(cargo_key: str) -> Optional[bool]:
+    """True when the cargo key has NO definition row (gamedata gap).
+
+    Used by the cargo handler to tag log rows with `amc_unknown_cargo` so
+    unknown cargos surface in audits and get added to cargo_definitions.
+    Imported lazily to avoid an import cycle at module load.
+    """
+    from amc.cargo_definitions import cargo_is_known
+
+    if cargo_is_known(cargo_key):
+        return None
+    return True

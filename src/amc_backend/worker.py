@@ -33,6 +33,7 @@ from amc.status import monitor_server_status  # noqa: E402
 from amc.gov_employee import expire_gov_employees  # noqa: E402
 from amc.supply_chain import monitor_supply_chain_events  # noqa: E402
 from amc.economy_dashboard import snapshot_storages  # noqa: E402
+from amc import delivery_telemetry  # noqa: E402
 from amc.rescue_reminder import send_rescue_reminders  # noqa: E402
 import discord  # noqa: E402
 from amc.discord_client import bot as discord_client  # noqa: E402
@@ -220,6 +221,11 @@ async def criminal_score_decay_tick(ctx):
     await tick_criminal_score_decay()
 
 
+async def delivery_telemetry_tick(ctx):
+    """Refresh the delivery telemetry snapshot (pricing context logging)."""
+    await delivery_telemetry.refresh_background(ctx["http_client_mod"])
+
+
 async def crosscheck_events_tick(ctx):
     """Drift report + Ready-state reconcile every 5s: live events vs DB."""
     for line in await crosscheck_live_events(
@@ -251,6 +257,10 @@ class WorkerSettings:
         cron(suspect_tag_refresh_tick, second=set(range(0, 60, 30))),
         # pyrefly: ignore [bad-argument-type]
         cron(police_suspect_locations_tick, second=set(range(5, 60, 5))),
+        # pyrefly: ignore [bad-argument-type]
+        # Delivery telemetry — pricing context snapshot for cargo rows
+        # pyrefly: ignore [bad-argument-type]
+        cron(delivery_telemetry_tick, minute=set(range(0, 60, 5))),
         # pyrefly: ignore [bad-argument-type]
         cron(criminal_score_decay_tick, minute=0, second=30),  # hourly at :30
         # Event crosscheck — read-only live-vs-DB drift report, only does
