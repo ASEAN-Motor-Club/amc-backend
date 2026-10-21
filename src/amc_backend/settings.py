@@ -365,6 +365,11 @@ DISCORD_VEHICLE_LOGS_CHANNEL_ID = int(
 DISCORD_FRAUD_ALERT_CHANNEL_ID = int(
     os.environ.get("DISCORD_FRAUD_ALERT_CHANNEL_ID", "0")
 )
+# Gamedata-gap alerts (unknown cargo etc). Temporary home: namer-review
+# channel (Yuuka, 2026-10-20) — re-point via env when it moves.
+DISCORD_GAMEDATA_ALERT_CHANNEL_ID = int(
+    os.environ.get("DISCORD_GAMEDATA_ALERT_CHANNEL_ID", "1366478091131551834")
+)
 DISCORD_EVENTS_CHANNEL_ID = int(os.environ.get("DISCORD_EVENTS_CHANNEL_ID", 0))
 DISCORD_PARTS_LOG_CHANNEL_ID = int(os.environ.get("DISCORD_PARTS_LOG_CHANNEL_ID", 0))
 DISCORD_TEAMS_CHANNEL_ID = int(os.environ.get("DISCORD_TEAMS_CHANNEL_ID", 0))

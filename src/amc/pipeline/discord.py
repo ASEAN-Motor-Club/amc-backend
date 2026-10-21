@@ -106,6 +106,44 @@ def post_discord_reset_flag_alert(
         )
 
 
+def post_discord_gamedata_alert(
+    discord_client,
+    *,
+    kind: str,
+    title: str,
+    description: str,
+    fields: dict[str, str] | None = None,
+) -> None:
+    """Fire-and-forget Discord alert for gamedata gaps.
+
+    Target channel: DISCORD_GAMEDATA_ALERT_CHANNEL_ID (temporary home is
+    the namer-review channel per Yuuka, 2026-10-20).  Silent no-op when
+    no channel/client is available, and never raises.
+    """
+    channel_id = settings.DISCORD_GAMEDATA_ALERT_CHANNEL_ID
+    if not channel_id or discord_client is None:
+        return
+    try:
+        channel = discord_client.get_channel(channel_id)
+        if channel is None:
+            logger.warning(
+                "Gamedata alert channel %s not found; dropping %s alert",
+                channel_id,
+                kind,
+            )
+            return
+
+        embed = Embed(title=title, color=0xF39C12, description=description)
+        for name, value in (fields or {}).items():
+            embed.add_field(name=name, value=value, inline=False)
+
+        asyncio.run_coroutine_threadsafe(
+            channel.send(embed=embed), discord_client.loop
+        )
+    except Exception:
+        logger.exception("Failed to post gamedata alert (%s)", kind)
+
+
 def post_discord_fraud_alert(
     discord_client,
     *,

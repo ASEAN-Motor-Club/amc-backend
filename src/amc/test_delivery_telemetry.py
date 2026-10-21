@@ -101,6 +101,43 @@ class SnapshotIngestTests(TestCase):
         asyncio.run(delivery_telemetry.refresh_background(session))
 
 
+class GamedataAlertTests(TestCase):
+    """Alert plumbing: temp channel default + silent no-op paths."""
+
+    def test_temp_channel_default(self):
+        # Yuuka, 2026-10-20: namer-review channel as temporary home.
+        from django.conf import settings
+
+        self.assertEqual(
+            settings.DISCORD_GAMEDATA_ALERT_CHANNEL_ID, 1366478091131551834
+        )
+
+    def test_no_client_is_noop(self):
+        from amc.pipeline.discord import post_discord_gamedata_alert
+
+        post_discord_gamedata_alert(
+            None,
+            kind="unknown_cargo",
+            title="t",
+            description="d",
+        )  # must not raise
+
+    def test_missing_channel_is_noop(self):
+        from unittest.mock import MagicMock
+
+        from amc.pipeline.discord import post_discord_gamedata_alert
+
+        client = MagicMock()
+        client.get_channel.return_value = None
+        post_discord_gamedata_alert(
+            client,
+            kind="unknown_cargo",
+            title="t",
+            description="d",
+        )
+        client.get_channel.assert_called_once()
+
+
 class CargoRowEnrichmentTests(TestCase):
     def setUp(self):
         delivery_telemetry.apply_snapshot(_snapshot_payload(delivery_id=77))
