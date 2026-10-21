@@ -87,6 +87,58 @@ class ValidateCargoPaymentTests(TestCase):
         )
         self.assertEqual(excess, 0)
 
+    def test_expected_payment_at_or_below_base_passes(self):
+        """2026-10-21 HiddenMethBed case: the game paid exactly its own
+        computed price ($42,863) while route history said $37,886 — the
+        game-computed price (telemetry BaseValue) must win."""
+        import asyncio
+
+        excess = asyncio.run(
+            validate_cargo_payment(
+                cargo_key="HiddenMethBed",
+                payment=42_863,
+                quantity=1,
+                sender_point=None,
+                destination_point=None,
+                expected_payment=42_863,
+            )
+        )
+        self.assertEqual(excess, 0)
+
+    def test_expected_payment_below_actual_claws_to_base(self):
+        """Payment above the game-computed price claws the full overpay —
+        this is the only anomaly the detector should react to when
+        telemetry knows the delivery's price."""
+        import asyncio
+
+        excess = asyncio.run(
+            validate_cargo_payment(
+                cargo_key="Moonshine",
+                payment=500_000,
+                quantity=1,
+                sender_point=None,
+                destination_point=None,
+                expected_payment=50_000,
+            )
+        )
+        self.assertEqual(excess, 450_000)
+
+    def test_expected_payment_zero_or_missing_uses_legacy_path(self):
+        import asyncio
+
+        payment = int(CARGO_PER_UNIT_DEFAULT) + 100_000
+        excess = asyncio.run(
+            validate_cargo_payment(
+                cargo_key="SomeNewCargo_99",
+                payment=payment,
+                quantity=1,
+                sender_point=None,
+                destination_point=None,
+                expected_payment=0,
+            )
+        )
+        self.assertEqual(excess, 100_000)
+
     async def test_unknown_cargo_uses_default_backstop(self):
         """Unlisted cargo keys fall back to CARGO_PER_UNIT_DEFAULT so a
         game-update cargo is never unprotected."""

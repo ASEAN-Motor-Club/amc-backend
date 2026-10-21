@@ -184,6 +184,11 @@ async def handle_cargo_arrived(event, player, character, ctx):
             log.destination_point_id,
         )
         if validation_key not in validated_excess:
+            telemetry_base = None
+            if log.data and isinstance(log.data.get("amc_delivery_telemetry"), dict):
+                telemetry_base = log.data["amc_delivery_telemetry"].get(
+                    "game_payment_base"
+                )
             validated_excess[validation_key] = await validate_cargo_payment(
                 cargo_key=log.cargo_key,
                 payment=log.payment,
@@ -191,6 +196,7 @@ async def handle_cargo_arrived(event, player, character, ctx):
                 sender_point=log.sender_point,
                 destination_point=log.destination_point,
                 unit_weight=log.weight,
+                expected_payment=telemetry_base,
             )
         excess = validated_excess[validation_key]
         if excess > 0:

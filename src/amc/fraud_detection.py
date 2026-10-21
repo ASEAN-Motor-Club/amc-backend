@@ -429,6 +429,7 @@ async def validate_cargo_payment(
     sender_point: DeliveryPoint | None,
     destination_point: DeliveryPoint | None,
     unit_weight: float | None = None,
+    expected_payment: int | None = None,
 ) -> int:
     """Validate a single cargo delivery payment against baselines.
 
@@ -436,10 +437,36 @@ async def validate_cargo_payment(
     weight-band filter on the route-history consensus; without it the
     consensus is weight-blind (legacy behaviour).
 
+    `expected_payment` (per unit, when known) is the game's own computed
+    price for this delivery — `Net_Payment.BaseValue` captured from the
+    in-flight cargo by delivery telemetry.  When present it is PRIMARY:
+    the game priced this exact delivery, so any payment above it is an
+    anomaly regardless of what history says, and any payment at or below
+    it is legitimate even if history disagrees (demand repricing moves
+    the game's price far beyond any historical window — 2026-10-21 cases:
+    Moonshine paid $51,857/unit vs a $40,104 history ceiling, and
+    HiddenMethBed $42,863 == BaseValue yet clawed $4,977).
+
     Returns the excess amount to claw back (0 if legitimate).
     """
     if payment <= 0 or quantity <= 0:
         return 0
+
+    # --- PRIMARY: the game's own computed price (telemetry BaseValue) ------
+    if expected_payment is not None and int(expected_payment) > 0:
+        expected = int(expected_payment)
+        if payment <= expected:
+            return 0
+        excess = payment - expected
+        logger.warning(
+            "FRAUD-EXCESS cargo=%s payment=%d exceeds game-computed "
+            "price %d (delivery telemetry) — clawing %d",
+            cargo_key,
+            payment,
+            expected,
+            excess,
+        )
+        return excess
 
     per_unit = payment / quantity
     per_unit_threshold = CARGO_PER_UNIT_THRESHOLDS.get(cargo_key, CARGO_PER_UNIT_DEFAULT)
