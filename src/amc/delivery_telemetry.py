@@ -78,11 +78,16 @@ def _delivery_entry(delivery: Any) -> Optional[dict[str, Any]]:
     }
 
 
-def apply_snapshot(payload: dict[str, Any]) -> tuple[int, int]:
+def apply_snapshot(
+    payload: dict[str, Any],
+    vehicle_deliveries: Optional[dict[int, dict[str, Any]]] = None,
+) -> tuple[int, int]:
     """Ingest a `/delivery/points` response into the in-memory snapshot.
 
-    Returns (num_points, num_deliveries).  A malformed response raises —
-    callers decide whether that is fatal (tests) or soft (worker cron).
+    `vehicle_deliveries` optionally carries in-flight cargo collected from
+    online players' vehicles (see fetch_vehicle_cargos).  Returns
+    (num_points, num_deliveries).  A malformed response raises — callers
+    decide whether that is fatal (tests) or soft (worker cron).
     """
     global _snapshot_deliveries, _snapshot_points, _snapshot_fetched_at
 
@@ -107,10 +112,77 @@ def apply_snapshot(payload: dict[str, Any]) -> tuple[int, int]:
             if entry is not None:
                 deliveries[entry["delivery_id"]] = entry
 
+    # In-flight deliveries do NOT appear in `point.Net_Deliveries` (verified
+    # empty on the dedicated server, 2026-10-21); accepted cargo lives on the
+    # player's vehicle.  The caller passes vehicle-cargo entries so arriving
+    # deliveries can be enriched — including the game's own computed payment
+    # (`Net_Payment.BaseValue`) as the ground-truth expected pay.
+    deliveries.update(vehicle_deliveries or {})
+
     _snapshot_deliveries = deliveries
     _snapshot_points = points_by_guid
     _snapshot_fetched_at = time.monotonic()
     return len(points_by_guid), len(deliveries)
+
+
+async def fetch_vehicle_cargos(session) -> dict[int, dict[str, Any]]:
+    """Collect accepted (in-flight) cargo from every online player's vehicle."""
+    async with session.get("/players") as resp:
+        if resp.status != 200:
+            return {}
+        players = (await resp.json(content_type=None)).get("data") or []
+    deliveries: dict[int, dict[str, Any]] = {}
+    for player in players:
+        if not isinstance(player, dict):
+            continue
+        character_guid = player.get("CharacterGuid")
+        if not character_guid:
+            continue
+        async with session.get(f"/players/{character_guid}/vehicle_cargos") as resp:
+            if resp.status != 200:
+                continue
+            payload = (await resp.json(content_type=None)).get("data") or []
+        for vehicle in payload:
+            if not isinstance(vehicle, dict):
+                continue
+            for space in vehicle.get("cargoSpaces") or []:
+                if not isinstance(space, dict):
+                    continue
+                for cargo in space.get("cargos") or []:
+                    entry = _vehicle_cargo_entry(cargo)
+                    if entry is not None:
+                        deliveries[entry["delivery_id"]] = entry
+    return deliveries
+
+
+def _vehicle_cargo_entry(cargo: Any) -> Optional[dict[str, Any]]:
+    """Reduce a vehicle-cargo actor to telemetry fields (per unit)."""
+    if not isinstance(cargo, dict):
+        return None
+    try:
+        delivery_id = int(cargo.get("Net_DeliveryId") or 0)
+    except (TypeError, ValueError):
+        return None
+    if delivery_id <= 0:
+        return None
+    payment = cargo.get("Net_Payment") or {}
+    sender = cargo.get("Net_SenderAbsoluteLocation") or {}
+    destination = cargo.get("Net_DestinationLocation") or {}
+    return {
+        "delivery_id": delivery_id,
+        "cargo_key": cargo.get("Net_CargoKey"),
+        "weight": cargo.get("Net_Weight"),
+        "game_payment_base": payment.get("BaseValue"),
+        "game_payment_shadowed": payment.get("ShadowedValue"),
+        "empty_container_mass": cargo.get("EmptyContainerMass"),
+        "sender_location": {
+            k: sender.get(k) for k in ("X", "Y", "Z")
+        },
+        "destination_location": {
+            k: destination.get(k) for k in ("X", "Y", "Z")
+        },
+        "source": "vehicle_cargos",
+    }
 
 
 def snapshot_age_seconds() -> Optional[float]:
@@ -149,7 +221,14 @@ async def refresh_snapshot(session) -> tuple[int, int]:
                 f"/delivery/points returned {resp.status}: {body[:200]}"
             )
         payload = await resp.json(content_type=None)
-    return apply_snapshot(payload)
+    # Vehicle-cargo polling is soft-fail: its own errors never block the
+    # board snapshot (the board source still enriches generated offers).
+    try:
+        vehicle_deliveries = await fetch_vehicle_cargos(session)
+    except Exception:  # noqa: BLE001 — soft failure by design
+        logger.warning("vehicle_cargos telemetry fetch failed", exc_info=True)
+        vehicle_deliveries = {}
+    return apply_snapshot(payload, vehicle_deliveries)
 
 
 async def refresh_background(session) -> None:
