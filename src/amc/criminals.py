@@ -775,11 +775,29 @@ async def create_or_refresh_wanted(
         expired_at__isnull=True,
     ).afirst()
     if active_wanted:
-        # Refresh (delivery while already wanted, or police re-flag): reset
-        # the countdown only. The bounty is FROZEN at its trigger-time value
-        # for the whole chase — score growth mid-chase never re-prices it.
-        active_wanted.wanted_remaining = initial_wanted
-        active_wanted.initial_heat = initial_wanted
+        # Refresh (delivery while already wanted, or police re-flag).
+        #
+        # Delivery path (wanted_stars given): MAX-MERGE, never lower —
+        # Ritz bug 2026-10-21 (Discord thread 1562488093687292055): each
+        # illicit delivery recomputed stars from that delivery's pay alone
+        # and OVERWROTE the live chase, visibly dropping stars mid-chase
+        # (and repeatedly, up AND down, across trunk deliveries). New heat
+        # can only floor-or-raise; a decayed chase keeps its progress, and
+        # initial_heat — the growth cap used by tick_wanted_countdown and
+        # logout escalation — is monotone too. A small delivery also no
+        # longer restarts the countdown of a nearly-escaped wanted.
+        # Police path (wanted_stars=None) keeps the explicit reset:
+        # /setwanted re-arms a full 5★ chase on purpose.
+        if wanted_stars is not None:
+            active_wanted.wanted_remaining = max(
+                float(active_wanted.wanted_remaining), initial_wanted
+            )
+            active_wanted.initial_heat = max(
+                int(active_wanted.initial_heat), initial_wanted
+            )
+        else:
+            active_wanted.wanted_remaining = initial_wanted
+            active_wanted.initial_heat = initial_wanted
         # mod_vehicles_allowed is only ever SET on create (acreate below).
         # A refresh must never arm it — a race grant landing on an already
         # wanted (organic) player would otherwise disable the modded-vehicle

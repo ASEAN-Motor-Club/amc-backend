@@ -20,6 +20,7 @@ Speed-based wanted law (2026-09 rework, corrected 2026-09-20):
 import asyncio
 import math
 import time
+from contextlib import ExitStack
 from datetime import timedelta
 from unittest.mock import AsyncMock, patch
 
@@ -54,7 +55,9 @@ from amc.criminals import (
 )
 from amc.factories import CharacterFactory, PlayerFactory
 from amc.models import (
+    Character,
     CompassTuningConfig,
+    Player,
     PoliceSession,
     Wanted,
     WantedSystemConfig,
@@ -4514,3 +4517,163 @@ class RaceWantedRestrictionTests(TestCase):
         ):
             await tick_wanted_countdown(AsyncMock(), mock_http_mod)
         mock_exit.assert_awaited_once()
+
+
+# --- Ritz bug 2026-10-21: delivery-refresh must never LOWER stars --------
+# Reported in Discord thread 1562488093687292055: a player already wanted
+# (big meth haul → high stars) kept delivering; every delivery recomputed
+# stars from that delivery's pay alone and OVERWROTE the chase — stars
+# flapped up AND down. The delivery-refresh path must be monotone.
+
+
+async def _starfix_cleanup(guid: str) -> None:
+    """Async ORM bypasses pytest-django rollback — delete created rows."""
+    await Wanted.objects.filter(character__guid=guid).adelete()
+    await Character.objects.filter(guid=guid).adelete()
+    await Player.objects.filter(characters__guid=guid).adelete()
+
+
+def _starfix_patch_ctx():
+    """Shared mock context for create_or_refresh_wanted side effects."""
+    return (
+        patch("amc.criminals.refresh_player_name", new_callable=AsyncMock),
+        patch("amc.criminals.send_system_message", new_callable=AsyncMock),
+        patch("amc.criminals.make_suspect", new_callable=AsyncMock),
+        patch(
+            "amc.criminals.get_player_last_vehicle",
+            new_callable=AsyncMock,
+            return_value={"vehicle": None},
+        ),
+        patch(
+            "amc.criminals.get_player_last_vehicle_parts",
+            new_callable=AsyncMock,
+            return_value={"parts": []},
+        ),
+    )
+
+
+@pytest.mark.asyncio
+@pytest.mark.django_db
+async def test_delivery_refresh_lower_stars_never_drops():
+    """The Ritz bug: a small illicit delivery while a big chase is live
+    must NOT lower the star count (heat is max-merged, never overwritten)."""
+    from amc.criminals import create_or_refresh_wanted
+
+    char, *_ = await Character.objects.aget_or_create_character_player(
+        "StarfixA", 7701, character_guid="GUIDSTARFIX00000000000000000001"
+    )
+    try:
+        wanted = await Wanted.objects.acreate(
+            character=char,
+            amount=0,
+            wanted_remaining=600,  # 5★ heat (big meth haul)
+            initial_heat=600,
+        )
+        ctx = _starfix_patch_ctx()
+        with ExitStack() as stack:
+            for cm in ctx:
+                stack.enter_context(cm)
+            active, created = await create_or_refresh_wanted(
+                char, AsyncMock(), amount=0, wanted_stars=3, notify=False
+            )
+        assert not created
+        refreshed = await Wanted.objects.aget(pk=wanted.pk)
+        assert refreshed.wanted_remaining == 600  # stays 5★ heat
+        assert refreshed.initial_heat == 600
+    finally:
+        await _starfix_cleanup("GUIDSTARFIX00000000000000000001")
+
+
+@pytest.mark.asyncio
+@pytest.mark.django_db
+async def test_delivery_refresh_higher_stars_raises():
+    """A bigger delivery raises heat immediately (Yuuka: 'higher expected')."""
+    from amc.criminals import create_or_refresh_wanted
+
+    char, *_ = await Character.objects.aget_or_create_character_player(
+        "StarfixB", 7702, character_guid="GUIDSTARFIX00000000000000000002"
+    )
+    try:
+        await Wanted.objects.acreate(
+            character=char,
+            amount=0,
+            wanted_remaining=360,  # 3★ floor
+            initial_heat=360,
+        )
+        ctx = _starfix_patch_ctx()
+        with ExitStack() as stack:
+            for cm in ctx:
+                stack.enter_context(cm)
+            active, created = await create_or_refresh_wanted(
+                char, AsyncMock(), amount=0, wanted_stars=6, notify=False
+            )
+        assert not created
+        assert active.wanted_remaining == 720  # 6★ heat
+        assert active.initial_heat == 720
+    finally:
+        await _starfix_cleanup("GUIDSTARFIX00000000000000000002")
+
+
+@pytest.mark.asyncio
+@pytest.mark.django_db
+async def test_delivery_refresh_small_delivery_does_not_revive_decayed_heat():
+    """A decayed chase stays decayed: a small delivery raises the heat
+    FLOOR (max(remaining, new)) but must not restart the countdown from
+    the new stars, and the growth cap keeps its historical maximum."""
+    from amc.criminals import create_or_refresh_wanted
+
+    char, *_ = await Character.objects.aget_or_create_character_player(
+        "StarfixC", 7703, character_guid="GUIDSTARFIX00000000000000000003"
+    )
+    try:
+        await Wanted.objects.acreate(
+            character=char,
+            amount=0,
+            wanted_remaining=200,  # decayed from 600 (5★)
+            initial_heat=600,
+        )
+        ctx = _starfix_patch_ctx()
+        with ExitStack() as stack:
+            for cm in ctx:
+                stack.enter_context(cm)
+            active, created = await create_or_refresh_wanted(
+                char, AsyncMock(), amount=0, wanted_stars=3, notify=False
+            )
+        assert not created
+        refreshed = await Wanted.objects.aget(pk=active.pk)
+        assert refreshed.wanted_remaining == 360  # floor raised to 3★ heat
+        assert refreshed.initial_heat == 600  # cap keeps historical max
+    finally:
+        await _starfix_cleanup("GUIDSTARFIX00000000000000000003")
+
+
+@pytest.mark.asyncio
+@pytest.mark.django_db
+async def test_police_setwanted_refresh_still_resets():
+    """Police /setwanted passes wanted_stars=None — it keeps the explicit
+    reset semantics (re-arms a full 5★ chase) and is NOT max-merged."""
+    from amc.criminals import create_or_refresh_wanted
+
+    char, *_ = await Character.objects.aget_or_create_character_player(
+        "StarfixD", 7704, character_guid="GUIDSTARFIX00000000000000000004"
+    )
+    try:
+        await Wanted.objects.acreate(
+            character=char,
+            amount=0,
+            wanted_remaining=720,  # 6★
+            initial_heat=720,
+        )
+        ctx = _starfix_patch_ctx()
+        with ExitStack() as stack:
+            for cm in ctx:
+                stack.enter_context(cm)
+            active, created = await create_or_refresh_wanted(
+                char, AsyncMock(), amount=0, set_by=char, notify=False
+            )
+        assert not created
+        refreshed = await Wanted.objects.aget(pk=active.pk)
+        assert refreshed.wanted_remaining == Wanted.INITIAL_WANTED_LEVEL  # 600
+        assert refreshed.initial_heat == Wanted.INITIAL_WANTED_LEVEL
+    finally:
+        await _starfix_cleanup("GUIDSTARFIX00000000000000000004")
