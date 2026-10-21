@@ -98,6 +98,51 @@ class SnapshotIngestTests(TestCase):
         self.assertEqual(entry["game_payment_shadowed"], 479007)
         self.assertEqual(entry["source"], "vehicle_cargos")
 
+    def test_vehicle_fetch_retries_after_failure(self):
+        import asyncio
+        from unittest.mock import MagicMock
+
+        calls = {"n": 0, "path": ""}
+
+        class Resp:
+            status = 200
+
+            async def json(self, content_type=None):
+                if calls["n"] == 0:
+                    calls["n"] += 1
+                    raise RuntimeError("transient")
+                calls["n"] += 1
+                if calls["path"] == "players":
+                    calls["path"] = "veh"
+                    return {"data": [{"CharacterGuid": "ABC"}]}
+                return {"data": [{"cargoSpaces": [{"cargos": [
+                    {
+                        "Net_CargoKey": "Milk",
+                        "Net_DeliveryId": 555,
+                        "Net_Weight": 1030.0,
+                        "Net_Payment": {"BaseValue": 662},
+                    }
+                ]}]}]}
+
+        def get(*args, **kwargs):
+            resp = Resp()
+            calls["path"] = "players" if str(args[0]).endswith("/players") else "veh"
+
+            class Ctx:
+                async def __aenter__(self):
+                    return resp
+
+                async def __aexit__(self, *exc):
+                    return False
+
+            return Ctx()
+
+        session = MagicMock()
+        session.get = get
+        got = asyncio.run(delivery_telemetry.fetch_vehicle_cargos(session))
+        self.assertIn(555, got)
+        self.assertEqual(got[555]["game_payment_base"], 662)
+
     def test_vehicle_cargo_entry_rejects_bad_ids(self):
         self.assertIsNone(delivery_telemetry._vehicle_cargo_entry({"Net_DeliveryId": 0}))
         self.assertIsNone(delivery_telemetry._vehicle_cargo_entry(None))

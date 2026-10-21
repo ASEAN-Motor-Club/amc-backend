@@ -34,6 +34,7 @@ logger = logging.getLogger("amc.delivery_telemetry")
 SNAPSHOT_MAX_AGE_SECONDS = 60 * 60  # 1 hour
 # Minimum gap between background refreshes triggered by cache misses.
 _BACKGROUND_REFRESH_DEBOUNCE_SECONDS = 60.0
+_VEHICLE_FETCH_ATTEMPTS = 3
 
 _snapshot_deliveries: dict[int, dict[str, Any]] = {}
 _snapshot_points: dict[str, dict[str, Any]] = {}
@@ -126,11 +127,26 @@ def apply_snapshot(
 
 
 async def fetch_vehicle_cargos(session) -> dict[int, dict[str, Any]]:
-    """Collect accepted (in-flight) cargo from every online player's vehicle."""
-    async with session.get("/players") as resp:
-        if resp.status != 200:
-            return {}
-        players = (await resp.json(content_type=None)).get("data") or []
+    """Collect accepted (in-flight) cargo from every online player's vehicle.
+
+    The mod's vehicle_cargos endpoint intermittently returns empty payloads
+    for a player (observed on prod 2026-10-21: the same in-flight delivery
+    appears in one snapshot and is missing from the next).  Because a miss
+    silently disables enrichment for that cycle, each player is retried and
+    failures are isolated per player so one bad response can't blank the
+    whole snapshot.
+    """
+    players = []
+    for attempt in range(_VEHICLE_FETCH_ATTEMPTS):
+        try:
+            async with session.get("/players") as resp:
+                if resp.status != 200:
+                    logger.warning("/players returned %s", resp.status)
+                    continue
+                players = (await resp.json(content_type=None)).get("data") or []
+                break
+        except Exception:  # noqa: BLE001 — soft failure by design
+            logger.warning("/players fetch failed attempt=%s", attempt, exc_info=True)
     deliveries: dict[int, dict[str, Any]] = {}
     for player in players:
         if not isinstance(player, dict):
@@ -138,11 +154,33 @@ async def fetch_vehicle_cargos(session) -> dict[int, dict[str, Any]]:
         character_guid = player.get("CharacterGuid")
         if not character_guid:
             continue
-        async with session.get(f"/players/{character_guid}/vehicle_cargos") as resp:
-            if resp.status != 200:
+        for attempt in range(_VEHICLE_FETCH_ATTEMPTS):
+            try:
+                found = await _vehicle_cargos_for_player(session, character_guid)
+            except Exception:  # noqa: BLE001 — soft failure by design
+                logger.warning(
+                    "vehicle_cargos fetch failed player=%s attempt=%s",
+                    character_guid,
+                    attempt,
+                    exc_info=True,
+                )
                 continue
-            payload = (await resp.json(content_type=None)).get("data") or []
-        for vehicle in payload:
+            if found:
+                deliveries.update(found)
+                break
+    logger.info("vehicle_cargos telemetry: %d entries", len(deliveries))
+    return deliveries
+
+
+async def _vehicle_cargos_for_player(
+    session, character_guid: str
+) -> dict[int, dict[str, Any]]:
+    deliveries: dict[int, dict[str, Any]] = {}
+    async with session.get(f"/players/{character_guid}/vehicle_cargos") as resp:
+        if resp.status != 200:
+            return {}
+        payload = (await resp.json(content_type=None)).get("data") or []
+    for vehicle in payload:
             if not isinstance(vehicle, dict):
                 continue
             for space in vehicle.get("cargoSpaces") or []:
