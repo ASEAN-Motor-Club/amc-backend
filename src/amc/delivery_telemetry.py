@@ -181,19 +181,23 @@ async def _vehicle_cargos_for_player(
             return {}
         payload = (await resp.json(content_type=None)).get("data") or []
     for vehicle in payload:
-            if not isinstance(vehicle, dict):
+        if not isinstance(vehicle, dict):
+            continue
+        # fullName looks like "Golima_Semi_C /Game/Maps/...:...Elisa2_C_21469..."
+        # — the class token (first space-separated chunk) identifies the
+        # vehicle (tractor) or trailer (Conter_Rear_40ft_C, Taber_Lead_C, ...).
+        vehicle_name = str(vehicle.get("fullName") or "").split(" ", 1)[0]
+        for space in vehicle.get("cargoSpaces") or []:
+            if not isinstance(space, dict):
                 continue
-            for space in vehicle.get("cargoSpaces") or []:
-                if not isinstance(space, dict):
-                    continue
-                for cargo in space.get("cargos") or []:
-                    entry = _vehicle_cargo_entry(cargo)
-                    if entry is not None:
-                        deliveries[entry["delivery_id"]] = entry
+            for cargo in space.get("cargos") or []:
+                entry = _vehicle_cargo_entry(cargo, vehicle_name)
+                if entry is not None:
+                    deliveries[entry["delivery_id"]] = entry
     return deliveries
 
 
-def _vehicle_cargo_entry(cargo: Any) -> Optional[dict[str, Any]]:
+def _vehicle_cargo_entry(cargo: Any, vehicle: str = "") -> Optional[dict[str, Any]]:
     """Reduce a vehicle-cargo actor to telemetry fields (per unit)."""
     if not isinstance(cargo, dict):
         return None
@@ -209,6 +213,7 @@ def _vehicle_cargo_entry(cargo: Any) -> Optional[dict[str, Any]]:
     return {
         "delivery_id": delivery_id,
         "cargo_key": cargo.get("Net_CargoKey"),
+        "vehicle": vehicle,
         "weight": cargo.get("Net_Weight"),
         "game_payment_base": payment.get("BaseValue"),
         "game_payment_shadowed": payment.get("ShadowedValue"),
