@@ -86,9 +86,11 @@ class IllicitCargoWantedTests(TestCase):
         )
         await process_event(event, player, character)
         await created.arefresh_from_db()
-        # Refresh resets to full heat for the delivery size: $5k → 3★ floor
-        # (tier table) → 3 × 120 = 360.
-        self.assertEqual(created.wanted_remaining, 360)
+        # Ritz bug 2026-10-21: a delivery made while already wanted must
+        # never LOWER the chase. The seeded 5★ heat (600) stands even though
+        # this $5k delivery alone would only rate the 3★ floor (3 × 120 =
+        # 360) — the refresh max-merges instead of overwriting.
+        self.assertEqual(created.wanted_remaining, 600)
 
     @patch("amc.special_cargo.record_treasury_expense", new_callable=AsyncMock)
     async def test_cocaine_does_not_auto_create_wanted(
