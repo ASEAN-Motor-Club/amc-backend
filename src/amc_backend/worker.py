@@ -260,7 +260,11 @@ class WorkerSettings:
         # pyrefly: ignore [bad-argument-type]
         # Delivery telemetry — pricing context snapshot for cargo rows
         # pyrefly: ignore [bad-argument-type]
-        cron(delivery_telemetry_tick, minute=set(range(0, 60, 5))),
+        # Every 2 minutes: covers in-flight jobs shorter than a 5-min window
+        # (e.g. Sunflower Farm→Nobong Quicklime shuttles delivered inside one
+        # tick gap never got enriched). Cost is ~1 request/player + board,
+        # single-digit-ms game-loop hitches — negligible.
+        cron(delivery_telemetry_tick, minute=set(range(0, 60, 2))),
         # pyrefly: ignore [bad-argument-type]
         cron(criminal_score_decay_tick, minute=0, second=30),  # hourly at :30
         # Event crosscheck — read-only live-vs-DB drift report, only does

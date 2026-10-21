@@ -115,7 +115,7 @@ class SnapshotIngestTests(TestCase):
                 if calls["path"] == "players":
                     calls["path"] = "veh"
                     return {"data": [{"CharacterGuid": "ABC"}]}
-                return {"data": [{"cargoSpaces": [{"cargos": [
+                return {"data": [{"fullName": "Golima_Semi_C /Game/Maps/Jeju/Jeju_World.Jeju_World:PersistentLevel.Golima_Semi_C_2146948537", "cargoSpaces": [{"cargos": [
                     {
                         "Net_CargoKey": "Milk",
                         "Net_DeliveryId": 555,
@@ -142,6 +142,7 @@ class SnapshotIngestTests(TestCase):
         got = asyncio.run(delivery_telemetry.fetch_vehicle_cargos(session))
         self.assertIn(555, got)
         self.assertEqual(got[555]["game_payment_base"], 662)
+        self.assertEqual(got[555]["vehicle"], "Golima_Semi_C")
 
     def test_vehicle_cargo_entry_rejects_bad_ids(self):
         self.assertIsNone(delivery_telemetry._vehicle_cargo_entry({"Net_DeliveryId": 0}))
