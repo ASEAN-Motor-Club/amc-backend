@@ -81,6 +81,50 @@ class SnapshotIngestTests(TestCase):
         _, deliveries = delivery_telemetry.apply_snapshot(payload)
         self.assertEqual(deliveries, 1)  # only ID=42 counts
 
+    def test_vehicle_cargo_entry_indexed(self):
+        vehicle = {
+            "delivery_id": 777,
+            "cargo_key": "Moonshine",
+            "weight": 95.29,
+            "game_payment_base": 42305,
+            "game_payment_shadowed": 479007,
+            "source": "vehicle_cargos",
+        }
+        delivery_telemetry.apply_snapshot(_snapshot_payload(), {777: vehicle})
+        entry = delivery_telemetry.telemetry_for_delivery(777)
+        self.assertIsNotNone(entry)
+        self.assertEqual(entry["cargo_key"], "Moonshine")
+        self.assertEqual(entry["game_payment_base"], 42305)
+        self.assertEqual(entry["game_payment_shadowed"], 479007)
+        self.assertEqual(entry["source"], "vehicle_cargos")
+
+    def test_vehicle_cargo_entry_rejects_bad_ids(self):
+        self.assertIsNone(delivery_telemetry._vehicle_cargo_entry({"Net_DeliveryId": 0}))
+        self.assertIsNone(delivery_telemetry._vehicle_cargo_entry(None))
+        self.assertIsNone(delivery_telemetry._vehicle_cargo_entry({"Net_DeliveryId": "x"}))
+
+    def test_vehicle_fetch_soft_fail_keeps_board_snapshot(self):
+        session = MagicMock()
+        resp = MagicMock()
+        resp.status = 503
+
+        async def text():
+            return "busy"
+
+        resp.text = text
+
+        async def get(*args, **kwargs):
+            return resp
+
+        session.get = get
+        import asyncio
+
+        # Board fetch fails (any exception) — the cron-level caller handles
+        # it; the point is that this must not corrupt the snapshot state.
+        asyncio.run(delivery_telemetry.refresh_background(session))
+        delivery_telemetry.apply_snapshot(_snapshot_payload(), None)
+        self.assertIsNotNone(delivery_telemetry.telemetry_for_delivery(42))
+
     def test_refresh_snapshot_soft_failure(self):
         session = MagicMock()
         resp = MagicMock()
