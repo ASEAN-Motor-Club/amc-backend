@@ -87,6 +87,24 @@ class ValidateCargoPaymentTests(TestCase):
         )
         self.assertEqual(excess, 0)
 
+    def test_expected_total_with_bonus_accounts_for_safety_bonus(self):
+        """2026-10-22 Test310: Log_Oak_12ft pays a 100%-of-base safety
+        bonus at 0 damage — the expected total must include it or the
+        bonus reads as a full overpay and gets clawed."""
+        from amc.handlers.cargo import _expected_total_with_bonus
+
+        self.assertEqual(
+            _expected_total_with_bonus("Log_Oak_12ft", 4546, 0.0), 9092
+        )
+        # Half damage -> half bonus.
+        self.assertEqual(
+            _expected_total_with_bonus("Log_Oak_12ft", 4546, 0.5), 6819
+        )
+        # No telemetry -> no expectation (legacy path).
+        self.assertIsNone(_expected_total_with_bonus("Log_Oak_12ft", None, 0.0))
+        # Cargo without a bonus expects exactly the base.
+        self.assertEqual(_expected_total_with_bonus("Milk", 662, 0.0), 662)
+
     def test_expected_payment_at_or_below_base_passes(self):
         """2026-10-21 HiddenMethBed case: the game paid exactly its own
         computed price ($42,863) while route history said $37,886 — the
