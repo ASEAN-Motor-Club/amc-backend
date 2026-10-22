@@ -12,6 +12,7 @@ import os
 import time
 from datetime import timedelta
 from operator import attrgetter
+from typing import Any, Optional
 
 from django.contrib.gis.geos import Point
 from django.db.models import F
@@ -103,6 +104,25 @@ async def handle_cargo_dumped(event, player, character, ctx):
 # ---------------------------------------------------------------------------
 
 
+def _expected_total_with_bonus(
+    cargo_key: str, telemetry_base: Any, damage: float
+) -> Optional[int]:
+    """Game-computed expected wallet deposit for one unit of a delivery.
+
+    `Net_Payment.BaseValue` (telemetry) is the PRE-bonus pay; the handler
+    adds the game-level bonus on top of it.  Fraud validation compares
+    against the post-bonus total, otherwise every bonus cargo looks like a
+    100% overpay (2026-10-22: Test310's eight Log_Oak_12ft safety bonuses
+    — 100% of base at 0 damage — were clawed in full).
+    """
+    from amc.cargo import get_cargo_bonus
+
+    if not telemetry_base:
+        return None
+    base = int(telemetry_base)
+    return base + get_cargo_bonus(cargo_key, base, damage or 0)
+
+
 @register("ServerCargoArrived")
 async def handle_cargo_arrived(event, player, character, ctx):
     from amc.cargo import get_cargo_bonus
@@ -189,6 +209,15 @@ async def handle_cargo_arrived(event, player, character, ctx):
                 telemetry_base = log.data["amc_delivery_telemetry"].get(
                     "game_payment_base"
                 )
+            # The game's BaseValue is the pre-bonus Net_Payment; the handler
+            # already added the game-level bonus (e.g. Log_Oak_12ft safety
+            # bonus = 100% of base at 0 damage) to log.payment above.  The
+            # comparison must therefore be against base + that same bonus,
+            # or every bonus cargo reads as a 100% overpay (2026-10-22
+            # Test310: 8 x Log_Oak_12ft safety bonuses clawed in full).
+            expected_total = _expected_total_with_bonus(
+                log.cargo_key, telemetry_base, log.damage or 0
+            )
             validated_excess[validation_key] = await validate_cargo_payment(
                 cargo_key=log.cargo_key,
                 payment=log.payment,
@@ -196,7 +225,7 @@ async def handle_cargo_arrived(event, player, character, ctx):
                 sender_point=log.sender_point,
                 destination_point=log.destination_point,
                 unit_weight=log.weight,
-                expected_payment=telemetry_base,
+                expected_payment=expected_total,
             )
         excess = validated_excess[validation_key]
         if excess > 0:
