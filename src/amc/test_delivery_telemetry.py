@@ -141,8 +141,8 @@ class SnapshotIngestTests(TestCase):
         session.get = get
         got = asyncio.run(delivery_telemetry.fetch_vehicle_cargos(session))
         self.assertIn(555, got)
-        self.assertEqual(got[555]["game_payment_base"], 662)
-        self.assertEqual(got[555]["vehicle"], "Golima_Semi_C")
+        self.assertEqual(got[555][0]["game_payment_base"], 662)
+        self.assertEqual(got[555][0]["vehicle"], "Golima_Semi_C")
 
     def test_vehicle_cargo_entry_rejects_bad_ids(self):
         self.assertIsNone(delivery_telemetry._vehicle_cargo_entry({"Net_DeliveryId": 0}))
@@ -282,4 +282,127 @@ class CargoRowEnrichmentTests(TestCase):
             self._cargo("CocaineBricks", 77), self.player, None, None
         )
         self.assertNotIn("amc_unknown_cargo", log.data)
-        self.assertIsNotNone(log.data.get("amc_delivery_telemetry"))
+        # The snapshot entry for id 77 belongs to Moonshine: a different cargo
+        # must never inherit another cargo's telemetry/quote.
+        self.assertIsNone(log.data.get("amc_delivery_telemetry"))
+
+class MultiStackQuoteTests(TestCase):
+    """A delivery id can cover several batches of one cargo.
+
+    Two batches sharing an id were registered at different pickup refreshes
+    and carry different prices; the snapshot must keep both and enforce only
+    above the highest (2026-10-22, Bitzer coal: 17 units paid 1,920 were
+    clawed against the other batch's 1,523 quote).
+    """
+
+    def setUp(self):
+        delivery_telemetry._snapshot_deliveries = {}
+        delivery_telemetry._snapshot_points = {}
+        delivery_telemetry._snapshot_fetched_at = None
+
+    def tearDown(self):
+        delivery_telemetry._snapshot_deliveries = {}
+        delivery_telemetry._snapshot_points = {}
+        delivery_telemetry._snapshot_fetched_at = None
+
+    @staticmethod
+    def _entry(delivery_id, cargo_key, weight, base, vehicle):
+        return {
+            "delivery_id": delivery_id,
+            "cargo_key": cargo_key,
+            "vehicle": vehicle,
+            "weight": weight,
+            "game_payment_base": base,
+            "game_payment_shadowed": base * 10,
+            "source": "vehicle_cargos",
+        }
+
+    def _ingest(self, entries):
+        grouped = {}
+        for entry in entries:
+            grouped.setdefault(entry["delivery_id"], []).append(entry)
+        delivery_telemetry.apply_snapshot({"data": []}, grouped)
+
+    def test_both_batches_are_kept(self):
+        self._ingest(
+            [
+                self._entry(168967, "Coal", 600.0, 1920, "Oldum_C"),
+                self._entry(168967, "Coal", 600.0, 1523, "Taber_Rear_C"),
+            ]
+        )
+        telemetry = delivery_telemetry.telemetry_for_delivery(
+            168967, cargo_key="Coal", weight=600.0
+        )
+        self.assertIsNotNone(telemetry)
+        self.assertEqual(telemetry["game_payment_bases"], [1523, 1920])
+        self.assertTrue(telemetry["multi_quote"])
+        # enforcement value is the HIGHEST registered quote
+        self.assertEqual(telemetry["game_payment_base"], 1920)
+
+    def test_single_quote_payload_unchanged(self):
+        self._ingest([self._entry(42, "Coal", 600.0, 1523, "Oldum_C")])
+        telemetry = delivery_telemetry.telemetry_for_delivery(
+            42, cargo_key="Coal", weight=600.0
+        )
+        self.assertEqual(telemetry["game_payment_base"], 1523)
+        self.assertNotIn("multi_quote", telemetry)
+        self.assertNotIn("game_payment_bases", telemetry)
+
+    def test_different_cargo_never_shares_a_quote(self):
+        """Corn paying 3x pumpkin must not excuse a pumpkin payout."""
+        self._ingest(
+            [
+                self._entry(77, "CornPallet", 174.0, 30000, "Oldum_C"),
+                self._entry(77, "PumpkinPallet", 174.0, 10000, "Oldum_C"),
+            ]
+        )
+        corn = delivery_telemetry.telemetry_for_delivery(
+            77, cargo_key="CornPallet", weight=174.0
+        )
+        pumpkin = delivery_telemetry.telemetry_for_delivery(
+            77, cargo_key="PumpkinPallet", weight=174.0
+        )
+        self.assertEqual(corn["game_payment_base"], 30000)
+        self.assertEqual(pumpkin["game_payment_base"], 10000)
+        self.assertNotIn("multi_quote", pumpkin)
+
+    def test_unknown_cargo_returns_none(self):
+        self._ingest([self._entry(77, "CornPallet", 174.0, 30000, "Oldum_C")])
+        self.assertIsNone(
+            delivery_telemetry.telemetry_for_delivery(
+                77, cargo_key="PumpkinPallet", weight=174.0
+            )
+        )
+
+    def test_weight_mismatch_falls_back_to_cargo_matches(self):
+        """Per-unit weight variance (containers) must not lose coverage."""
+        self._ingest([self._entry(9, "SteelCoil_10t", 14000.0, 5000, "Oldum_C")])
+        telemetry = delivery_telemetry.telemetry_for_delivery(
+            9, cargo_key="SteelCoil_10t", weight=13999.2
+        )
+        self.assertIsNotNone(telemetry)
+        self.assertEqual(telemetry["game_payment_base"], 5000)
+
+    def test_weight_separates_distinct_stacks_when_they_differ(self):
+        self._ingest(
+            [
+                self._entry(11, "IronOre", 2000.0, 4000, "Atlas_8x4_Dump_C"),
+                self._entry(11, "IronOre", 3000.0, 5500, "Oldum_C"),
+            ]
+        )
+        light = delivery_telemetry.telemetry_for_delivery(
+            11, cargo_key="IronOre", weight=2000.0
+        )
+        self.assertEqual(light["game_payment_base"], 4000)
+        self.assertNotIn("multi_quote", light)
+
+    def test_stale_snapshot_returns_none(self):
+        self._ingest([self._entry(42, "Coal", 600.0, 1523, "Oldum_C")])
+        delivery_telemetry._snapshot_fetched_at -= (
+            delivery_telemetry.SNAPSHOT_MAX_AGE_SECONDS + 1
+        )
+        self.assertIsNone(
+            delivery_telemetry.telemetry_for_delivery(
+                42, cargo_key="Coal", weight=600.0
+            )
+        )

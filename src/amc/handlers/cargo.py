@@ -735,7 +735,9 @@ async def process_cargo_log(cargo, player, character, timestamp):
     # alter processing, only enrich the row for later analysis.
     from amc import delivery_telemetry
 
-    telemetry = delivery_telemetry.telemetry_for_delivery(log.delivery_id)
+    telemetry = delivery_telemetry.telemetry_for_delivery(
+        log.delivery_id, cargo_key=log.cargo_key, weight=log.weight
+    )
     if telemetry is not None and log.data is not None:
         log.data["amc_delivery_telemetry"] = telemetry
     # --- Unknown-cargo marker (gamedata gap funnel) ------------------------
