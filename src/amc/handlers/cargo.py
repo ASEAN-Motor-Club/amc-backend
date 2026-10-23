@@ -738,6 +738,20 @@ async def process_cargo_log(cargo, player, character, timestamp):
     telemetry = delivery_telemetry.telemetry_for_delivery(
         log.delivery_id, cargo_key=log.cargo_key, weight=log.weight
     )
+    if telemetry is None:
+        # Reconnect recovery: the game resets Net_DeliveryId to 0 when a
+        # player disconnects mid-haul, so this arrival has no id to match
+        # the live snapshot with.  Fall back to the registration cached
+        # before the drop, matched by this same character's cargo, weight
+        # and route — single-player cargo has no cached registration and
+        # still falls through to route history.
+        telemetry = await sync_to_async(delivery_telemetry.lookup_quote_cache)(
+            getattr(character, "id", None),
+            log.cargo_key,
+            log.weight,
+            sender,
+            destination,
+        )
     if telemetry is not None and log.data is not None:
         log.data["amc_delivery_telemetry"] = telemetry
     # --- Unknown-cargo marker (gamedata gap funnel) ------------------------

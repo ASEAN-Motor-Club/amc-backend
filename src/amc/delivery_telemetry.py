@@ -26,7 +26,10 @@ from __future__ import annotations
 import asyncio
 import logging
 import time
+from datetime import timedelta
 from typing import Any, Optional
+
+from asgiref.sync import sync_to_async
 
 logger = logging.getLogger("amc.delivery_telemetry")
 
@@ -197,6 +200,10 @@ async def _vehicle_cargos_for_player(
             for cargo in space.get("cargos") or []:
                 entry = _vehicle_cargo_entry(cargo, vehicle_name)
                 if entry is not None:
+                    # Carried cargo is attributed to the character whose
+                    # vehicle it sits in, so the reconnect quote cache can
+                    # match an arrival that lost its Net_DeliveryId.
+                    entry["character_guid"] = character_guid
                     # A player can haul SEVERAL batches of the same cargo to
                     # the same sink in one vehicle/trailer chain.  Those
                     # batches share Net_DeliveryId but were registered at
@@ -366,6 +373,10 @@ async def refresh_snapshot(session) -> tuple[int, int]:
     except Exception:  # noqa: BLE001 — soft failure by design
         logger.warning("vehicle_cargos telemetry fetch failed", exc_info=True)
         vehicle_deliveries = {}
+    # Persist the registrations so an arrival that loses its delivery id
+    # (disconnect/reconnect mid-haul) can still be priced from the game's
+    # own BaseValue instead of stale route history.
+    await sync_to_async(record_quote_cache)(vehicle_deliveries)
     return apply_snapshot(payload, vehicle_deliveries)
 
 
@@ -413,3 +424,183 @@ def unknown_cargo_marker(cargo_key: str) -> Optional[bool]:
     if cargo_is_known(cargo_key):
         return None
     return True
+
+
+# --- Reconnect quote cache -------------------------------------------------
+# The game resets Net_DeliveryId to 0 when a player disconnects mid-haul, so
+# the arriving row has no id to match against the snapshot and falls back to
+# route history (which is stale and claws legitimate hauls).  Every tick we
+# persist the registrations seen on players' vehicles; an unregistered
+# arrival is then matched back to its own registration by character + cargo
+# + weight + pickup/destination.  Single-player cargo has no registration,
+# so it never matches and still falls through to history.
+QUOTE_CACHE_MAX_AGE = timedelta(hours=12)
+QUOTE_CACHE_RETENTION = timedelta(days=7)
+QUOTE_CACHE_MAX_CANDIDATES = 100
+# Same route means the same delivery-point coordinate (the arrival resolves
+# its point within a 1 m buffer), so this only absorbs float noise.
+QUOTE_CACHE_ROUTE_TOLERANCE_M = 50.0
+
+
+def record_quote_cache(deliveries: dict[int, list[dict[str, Any]]]) -> int:
+    """Persist in-flight registrations so a reconnect can still be priced.
+
+    Sync ORM by design: called from async code through
+    ``asgiref.sync.sync_to_async``.  Soft-fail — any database error is
+    logged and swallowed, because this cache only improves a fallback and
+    must never block the snapshot.
+    """
+    try:
+        from django.utils import timezone
+
+        from amc.models import Character, DeliveryQuoteCache
+
+        now = timezone.now()
+        guids = {
+            str(entry["character_guid"])
+            for entries in deliveries.values()
+            for entry in entries
+            if entry.get("character_guid")
+        }
+        if not guids:
+            return 0
+        character_ids: dict[str, int] = {}
+        lookup_guids = {g.upper() for g in guids} | {g.lower() for g in guids}
+        for row in Character.objects.filter(guid__in=lookup_guids).values(
+            "id", "guid"
+        ):
+            character_ids[(row["guid"] or "").upper()] = row["id"]
+
+        rows: list[DeliveryQuoteCache] = []
+        for entries in deliveries.values():
+            for entry in entries:
+                character_id = character_ids.get(
+                    (entry.get("character_guid") or "").upper()
+                )
+                base_value = entry.get("game_payment_base")
+                if character_id is None or not base_value:
+                    continue
+                sender = entry.get("sender_location") or {}
+                destination = entry.get("destination_location") or {}
+                rows.append(
+                    DeliveryQuoteCache(
+                        character_id=character_id,
+                        delivery_id=entry["delivery_id"],
+                        cargo_key=entry.get("cargo_key") or "",
+                        weight=entry.get("weight"),
+                        vehicle=entry.get("vehicle"),
+                        base_value=base_value,
+                        sender_x=sender.get("X"),
+                        sender_y=sender.get("Y"),
+                        sender_z=sender.get("Z"),
+                        dest_x=destination.get("X"),
+                        dest_y=destination.get("Y"),
+                        dest_z=destination.get("Z"),
+                        first_seen=now,
+                        last_seen=now,
+                    )
+                )
+        if not rows:
+            return 0
+        DeliveryQuoteCache.objects.bulk_create(
+            rows,
+            update_conflicts=True,
+            unique_fields=["character", "delivery_id", "cargo_key", "weight"],
+            update_fields=["base_value", "vehicle", "last_seen"],
+        )
+        DeliveryQuoteCache.objects.filter(
+            last_seen__lt=now - QUOTE_CACHE_RETENTION
+        ).delete()
+        return len(rows)
+    except Exception:  # noqa: BLE001 — cache is best-effort
+        logger.warning("quote cache write failed", exc_info=True)
+        return 0
+
+
+def _cache_location_matches(point, x: Any, y: Any, z: Any) -> Optional[bool]:
+    """True/False when both sides are known, None when the check is moot.
+
+    A delivery point's ``coord`` is the point itself (the arrival handler
+    resolves it by requiring the point within a 1 m buffer of the cargo's
+    sender/destination location), so the same route means the same
+    coordinates.  The tolerance only absorbs float noise.
+    """
+    if point is None or x is None or y is None:
+        return None
+    try:
+        from django.contrib.gis.geos import Point
+    except Exception:  # noqa: BLE001 — GIS unavailable
+        return None
+    try:
+        cached = Point(float(x), float(y), float(z or 0.0))
+        return point.coord.distance(cached) <= QUOTE_CACHE_ROUTE_TOLERANCE_M
+    except Exception:  # noqa: BLE001 — malformed geometry
+        return None
+
+
+def lookup_quote_cache(
+    character_id: Optional[int],
+    cargo_key: Optional[str],
+    weight: Any,
+    sender_point=None,
+    destination_point=None,
+) -> Optional[dict[str, Any]]:
+    """Recover the game's own price for an arrival that lost its id.
+
+    Sync ORM by design (called through ``sync_to_async``).  Returns a
+    telemetry-shaped dict (source ``quote_cache``) so downstream validation
+    consumes it exactly like a live snapshot quote, or None when nothing
+    matches — never a guess from another cargo or another route.
+    """
+    if not character_id or not cargo_key or weight is None:
+        return None
+    try:
+        from django.utils import timezone
+
+        from amc.models import DeliveryQuoteCache
+
+        now = timezone.now()
+        rows = list(
+            DeliveryQuoteCache.objects.filter(
+                character_id=character_id,
+                cargo_key=cargo_key,
+                base_value__gt=0,
+                last_seen__gte=now - QUOTE_CACHE_MAX_AGE,
+            ).order_by("-last_seen")[:QUOTE_CACHE_MAX_CANDIDATES]
+        )
+    except Exception:  # noqa: BLE001 — lookup is best-effort
+        logger.warning("quote cache lookup failed", exc_info=True)
+        return None
+
+    try:
+        wanted_weight = float(weight)
+    except (TypeError, ValueError):
+        return None
+
+    best = None
+    for row in rows:
+        if not _weights_match(row.weight, wanted_weight):
+            continue
+        sender_ok = _cache_location_matches(
+            sender_point, row.sender_x, row.sender_y, row.sender_z
+        )
+        dest_ok = _cache_location_matches(
+            destination_point, row.dest_x, row.dest_y, row.dest_z
+        )
+        if sender_ok is False or dest_ok is False:
+            continue
+        # Several batches can share one route; enforce only against the
+        # highest cached quote so a legitimate batch is never clawed.
+        if best is None or (row.base_value or 0) > (best.base_value or 0):
+            best = row
+    if best is None:
+        return None
+    return {
+        "source": "quote_cache",
+        "delivery_id": best.delivery_id,
+        "game_payment_base": best.base_value,
+        "weight": best.weight,
+        "vehicle": best.vehicle,
+        "cache_age_seconds": round((now - best.last_seen).total_seconds(), 1),
+        "quote_cache": True,
+    }
