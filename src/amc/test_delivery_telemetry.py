@@ -525,3 +525,16 @@ class QuoteCacheTests(TestCase):
         telemetry = self._lookup()
         self.assertEqual(telemetry["game_payment_base"], 180)
         self.assertEqual(telemetry["delivery_id"], 556)
+
+    def test_duplicate_units_collapse_to_one_row(self):
+        # A vehicle hauling N units of one cargo reports N entries with the
+        # same (character, delivery_id, cargo, weight) key.  Postgres rejects
+        # an ON CONFLICT DO UPDATE touching one row twice in one statement,
+        # so they must be collapsed before the insert (prod bug 2026-10-24:
+        # 100-unit Milk haul made every cache write fail silently).
+        entries = [self._entry(game_payment_base=300) for _ in range(100)]
+        entries.append(self._entry(game_payment_base=350))
+        written = delivery_telemetry.record_quote_cache({555: entries})
+        self.assertEqual(written, 1)
+        self.assertEqual(DeliveryQuoteCache.objects.count(), 1)
+        self.assertEqual(DeliveryQuoteCache.objects.get().base_value, 350)
