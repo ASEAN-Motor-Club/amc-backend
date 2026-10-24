@@ -3,11 +3,16 @@ unknown-cargo marker (behavior-neutral, fail-safe by design)."""
 
 from unittest.mock import MagicMock
 
+import asyncio
+from datetime import timedelta
+
+from django.contrib.gis.geos import Point
 from django.test import TestCase
+from django.utils import timezone
 
 from amc import delivery_telemetry
 from amc.handlers.cargo import process_cargo_log
-from amc.models import Player
+from amc.models import Character, DeliveryPoint, DeliveryQuoteCache, Player
 
 
 def _snapshot_payload(delivery_id=42, cargo_key="Moonshine", num_cargos=5):
@@ -99,8 +104,6 @@ class SnapshotIngestTests(TestCase):
         self.assertEqual(entry["source"], "vehicle_cargos")
 
     def test_vehicle_fetch_retries_after_failure(self):
-        import asyncio
-        from unittest.mock import MagicMock
 
         calls = {"n": 0, "path": ""}
 
@@ -163,8 +166,7 @@ class SnapshotIngestTests(TestCase):
             return resp
 
         session.get = get
-        import asyncio
-
+        
         # Board fetch fails (any exception) — the cron-level caller handles
         # it; the point is that this must not corrupt the snapshot state.
         asyncio.run(delivery_telemetry.refresh_background(session))
@@ -186,8 +188,7 @@ class SnapshotIngestTests(TestCase):
 
         session.get = get
 
-        import asyncio
-
+        
         asyncio.run(delivery_telemetry.refresh_background(session))
 
 
@@ -213,7 +214,6 @@ class GamedataAlertTests(TestCase):
         )  # must not raise
 
     def test_missing_channel_is_noop(self):
-        from unittest.mock import MagicMock
 
         from amc.pipeline.discord import post_discord_gamedata_alert
 
@@ -406,3 +406,122 @@ class MultiStackQuoteTests(TestCase):
                 42, cargo_key="Coal", weight=600.0
             )
         )
+
+
+class QuoteCacheTests(TestCase):
+    """Reconnect recovery: an arrival that lost its delivery id.
+
+    The game resets Net_DeliveryId to 0 when a player disconnects mid-haul.
+    Every tick we cache the registrations seen on players' vehicles; an
+    unregistered arrival must be matched back to its own registration by
+    character + cargo + weight + route, and must never borrow another
+    character's price (single-player cargo has no cached row at all).
+    """
+
+    SENDER = (0.0, 0.0, 0.0)
+    RECEIVER = (100_000.0, 0.0, 0.0)
+
+    def setUp(self):
+        self.player = Player.objects.create(unique_id=76561190000000002)
+        self.character = Character.objects.create(
+            player=self.player, guid="GUID0001", name="Hauler"
+        )
+        self.other = Character.objects.create(
+            player=self.player, guid="GUID0002", name="Stranger"
+        )
+        self.sender = DeliveryPoint.objects.create(
+            guid="sender-1", name="Pickup", coord=Point(*self.SENDER, srid=3857)
+        )
+        self.receiver = DeliveryPoint.objects.create(
+            guid="receiver-1", name="Drop", coord=Point(*self.RECEIVER, srid=3857)
+        )
+
+    def _entry(self, **overrides):
+        entry = {
+            "delivery_id": 555,
+            "cargo_key": "Fuel",
+            "vehicle": "Taber_Lead_C",
+            "weight": 800.0,
+            "game_payment_base": 152,
+            "sender_location": dict(zip(("X", "Y", "Z"), self.SENDER)),
+            "destination_location": dict(zip(("X", "Y", "Z"), self.RECEIVER)),
+            "character_guid": "GUID0001",
+            "source": "vehicle_cargos",
+        }
+        entry.update(overrides)
+        return entry
+
+    def _write(self, **entry_overrides):
+        return delivery_telemetry.record_quote_cache(
+            {555: [self._entry(**entry_overrides)]}
+        )
+
+    def _lookup(self, **overrides):
+        kwargs = {
+            "character_id": self.character.id,
+            "cargo_key": "Fuel",
+            "weight": 800.0,
+            "sender_point": self.sender,
+            "destination_point": self.receiver,
+        }
+        kwargs.update(overrides)
+        return delivery_telemetry.lookup_quote_cache(**kwargs)
+
+    def test_reconnect_arrival_matched_to_cached_quote(self):
+        self.assertEqual(self._write(), 1)
+        telemetry = self._lookup()
+        self.assertIsNotNone(telemetry)
+        self.assertEqual(telemetry["game_payment_base"], 152)
+        self.assertEqual(telemetry["source"], "quote_cache")
+        self.assertEqual(telemetry["delivery_id"], 555)
+
+    def test_unregistered_cargo_never_matches_another_character(self):
+        self._write()
+        # Single-player cargo: no cached registration for this character.
+        self.assertIsNone(self._lookup(character_id=self.other.id))
+
+    def test_weight_mismatch_rejected(self):
+        self._write()
+        self.assertIsNone(self._lookup(weight=400.0))
+
+    def test_cargo_mismatch_rejected(self):
+        self._write()
+        self.assertIsNone(self._lookup(cargo_key="Coal"))
+
+    def test_route_mismatch_rejected(self):
+        self._write()
+        elsewhere = DeliveryPoint.objects.create(
+            guid="sender-2", name="Other pickup", coord=Point(0, 900_000, 0, srid=3857)
+        )
+        self.assertIsNone(self._lookup(sender_point=elsewhere))
+
+    def test_stale_registration_ignored(self):
+        self._write()
+        DeliveryQuoteCache.objects.update(
+            last_seen=timezone.now() - timedelta(hours=13)
+        )
+        self.assertIsNone(self._lookup())
+
+    def test_upsert_refreshes_quote_and_last_seen(self):
+        self._write()
+        DeliveryQuoteCache.objects.update(
+            last_seen=timezone.now() - timedelta(hours=5)
+        )
+        self._write(game_payment_base=180)
+        self.assertEqual(DeliveryQuoteCache.objects.count(), 1)
+        row = DeliveryQuoteCache.objects.get()
+        self.assertEqual(row.base_value, 180)
+        self.assertLess(
+            (timezone.now() - row.last_seen).total_seconds(), 60
+        )
+
+    def test_highest_cached_quote_wins(self):
+        delivery_telemetry.record_quote_cache(
+            {
+                555: [self._entry(game_payment_base=152)],
+                556: [self._entry(delivery_id=556, game_payment_base=180)],
+            }
+        )
+        telemetry = self._lookup()
+        self.assertEqual(telemetry["game_payment_base"], 180)
+        self.assertEqual(telemetry["delivery_id"], 556)

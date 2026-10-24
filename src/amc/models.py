@@ -2179,6 +2179,45 @@ class ServerCargoArrivedLog(models.Model):
 
 
 @final
+class DeliveryQuoteCache(models.Model):
+    """Last-known registration for an in-flight delivery, per character.
+
+    Rewritten every telemetry tick from the online players' vehicle cargo
+    payload.  Exists for one case: the game resets ``Net_DeliveryId`` to 0
+    when a player disconnects and reconnects mid-haul, so the arriving row
+    can no longer be matched to its live snapshot and would be judged by
+    (stale) route history instead of the game's own computed payment.
+    Matching an unregistered arrival against this cache recovers the real
+    ``BaseValue``; cargo picked up in single-player never has a row here, so
+    it still falls through to history (2026-10-23).
+    """
+
+    character = models.ForeignKey(
+        Character, on_delete=models.CASCADE, related_name="delivery_quote_cache"
+    )
+    delivery_id = models.BigIntegerField()
+    cargo_key = models.CharField(max_length=200, db_index=True)
+    weight = models.FloatField(null=True, blank=True)
+    vehicle = models.CharField(max_length=200, null=True, blank=True)
+    base_value = models.FloatField(null=True, blank=True)
+    sender_x = models.FloatField(null=True, blank=True)
+    sender_y = models.FloatField(null=True, blank=True)
+    sender_z = models.FloatField(null=True, blank=True)
+    dest_x = models.FloatField(null=True, blank=True)
+    dest_y = models.FloatField(null=True, blank=True)
+    dest_z = models.FloatField(null=True, blank=True)
+    first_seen = models.DateTimeField()
+    last_seen = models.DateTimeField(db_index=True)
+
+    class Meta:
+        unique_together = [("character", "delivery_id", "cargo_key", "weight")]
+        indexes = [
+            models.Index(fields=["character", "last_seen"]),
+            models.Index(fields=["cargo_key", "last_seen"]),
+        ]
+
+
+@final
 class ServerSignContractLog(models.Model):
     timestamp = models.DateTimeField()
     guid = models.CharField(max_length=32, db_index=True, editable=False, null=True)
