@@ -77,7 +77,7 @@ class EventsTests(TestCase):
         await process_event(event)
         await GameEventCharacter.objects.afirst()
         self.assertEqual(
-            [game_event.state async for game_event in GameEvent.objects.all()], [2, 1]
+            [game_event.state async for game_event in GameEvent.objects.order_by("id")], [2, 1]
         )
 
         data = json.loads(
@@ -87,7 +87,7 @@ class EventsTests(TestCase):
         await process_event(event)
         await GameEventCharacter.objects.afirst()
         self.assertEqual(
-            [game_event.state async for game_event in GameEvent.objects.all()], [2, 2]
+            [game_event.state async for game_event in GameEvent.objects.order_by("id")], [2, 2]
         )
 
 
