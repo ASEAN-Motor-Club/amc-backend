@@ -471,7 +471,7 @@ def record_quote_cache(deliveries: dict[int, list[dict[str, Any]]]) -> int:
         ):
             character_ids[(row["guid"] or "").upper()] = row["id"]
 
-        rows: list[DeliveryQuoteCache] = []
+        rows: dict[tuple, DeliveryQuoteCache] = {}
         for entries in deliveries.values():
             for entry in entries:
                 character_id = character_ids.get(
@@ -482,28 +482,40 @@ def record_quote_cache(deliveries: dict[int, list[dict[str, Any]]]) -> int:
                     continue
                 sender = entry.get("sender_location") or {}
                 destination = entry.get("destination_location") or {}
-                rows.append(
-                    DeliveryQuoteCache(
-                        character_id=character_id,
-                        delivery_id=entry["delivery_id"],
-                        cargo_key=entry.get("cargo_key") or "",
-                        weight=entry.get("weight"),
-                        vehicle=entry.get("vehicle"),
-                        base_value=base_value,
-                        sender_x=sender.get("X"),
-                        sender_y=sender.get("Y"),
-                        sender_z=sender.get("Z"),
-                        dest_x=destination.get("X"),
-                        dest_y=destination.get("Y"),
-                        dest_z=destination.get("Z"),
-                        first_seen=now,
-                        last_seen=now,
-                    )
+                key = (
+                    character_id,
+                    entry["delivery_id"],
+                    entry.get("cargo_key") or "",
+                    entry.get("weight"),
+                )
+                # A vehicle hauling N units of one cargo reports N cargo
+                # entries with the SAME key.  Postgres rejects an
+                # ON CONFLICT DO UPDATE that touches one row twice in a
+                # single statement, so collapse them here and keep the
+                # highest quote (enforcement uses the highest anyway).
+                existing = rows.get(key)
+                if existing is not None and (existing.base_value or 0) >= base_value:
+                    continue
+                rows[key] = DeliveryQuoteCache(
+                    character_id=character_id,
+                    delivery_id=entry["delivery_id"],
+                    cargo_key=entry.get("cargo_key") or "",
+                    weight=entry.get("weight"),
+                    vehicle=entry.get("vehicle"),
+                    base_value=base_value,
+                    sender_x=sender.get("X"),
+                    sender_y=sender.get("Y"),
+                    sender_z=sender.get("Z"),
+                    dest_x=destination.get("X"),
+                    dest_y=destination.get("Y"),
+                    dest_z=destination.get("Z"),
+                    first_seen=now,
+                    last_seen=now,
                 )
         if not rows:
             return 0
         DeliveryQuoteCache.objects.bulk_create(
-            rows,
+            list(rows.values()),
             update_conflicts=True,
             unique_fields=["character", "delivery_id", "cargo_key", "weight"],
             update_fields=["base_value", "vehicle", "last_seen"],
@@ -513,7 +525,10 @@ def record_quote_cache(deliveries: dict[int, list[dict[str, Any]]]) -> int:
         ).delete()
         return len(rows)
     except Exception:  # noqa: BLE001 — cache is best-effort
-        logger.warning("quote cache write failed", exc_info=True)
+        # ERROR, not WARNING: the ``amc`` logger is configured at ERROR, so a
+        # warning here is invisible — a silently failing write is exactly how
+        # the 2026-10-24 duplicate-key bug went unnoticed for hours.
+        logger.error("quote cache write failed", exc_info=True)
         return 0
 
 
@@ -569,7 +584,7 @@ def lookup_quote_cache(
             ).order_by("-last_seen")[:QUOTE_CACHE_MAX_CANDIDATES]
         )
     except Exception:  # noqa: BLE001 — lookup is best-effort
-        logger.warning("quote cache lookup failed", exc_info=True)
+        logger.error("quote cache lookup failed", exc_info=True)
         return None
 
     try:
