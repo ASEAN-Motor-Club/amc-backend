@@ -21,17 +21,54 @@ logger = logging.getLogger("amc.webhook.handlers.house")
 
 DEFAULT_HOUSING_RATIO = 5.0
 
+RENT_BLOCKED_POPUP = (
+    "<Title>Rent This Plot in Discord</>\n"
+    "\n"
+    "Plot: <Highlight>{plot}</>\n"
+    "\n"
+    "Houses are rented through the AMC Discord, not in-game.\n"
+    "1. Open the AMC Discord\n"
+    "2. Run <Highlight>/house buy</> and pick this plot\n"
+    "3. Rent is paid from your bank balance\n"
+    "\n"
+    "Not linked yet? Run <Highlight>/verify</> in Discord first."
+)
 
-async def _compute_rent_cost(http_client_mod, house_guid):
+RENT_EXTEND_BLOCKED_POPUP = (
+    "<Title>Extend Rent in Discord</>\n"
+    "\n"
+    "Plot: <Highlight>{plot}</>\n"
+    "\n"
+    "Rent extensions are done through the AMC Discord, not in-game.\n"
+    "1. Open the AMC Discord\n"
+    "2. Run <Highlight>/house extend</> and pick this plot\n"
+    "3. Extensions are paid from your bank balance"
+)
+
+
+async def _fetch_rent_info(http_client_mod, house_guid):
+    """Fetch the mod's rent config for a plot; empty dict when unavailable."""
+    if not house_guid:
+        return {}
+    try:
+        return await get_rent_info(http_client_mod, house_guid)
+    except Exception:
+        logger.warning("Failed to get rent info for house %s", house_guid, exc_info=True)
+        return {}
+
+
+def _plot_label(rent_info, house_guid):
+    """The identifier the player pastes into /house buy or /house extend."""
+    return rent_info.get("HousegKey") or house_guid or "unknown"
+
+
+async def _compute_rent_cost(http_client_mod, house_guid, rent_info=None):
     """Compute the rent cost for a house from the mod's server config + House model."""
     if not house_guid:
         return 0
 
-    try:
-        rent_info = await get_rent_info(http_client_mod, house_guid)
-    except Exception:
-        logger.warning("Failed to get rent info for house %s", house_guid, exc_info=True)
-        return 0
+    if rent_info is None:
+        rent_info = await _fetch_rent_info(http_client_mod, house_guid)
 
     ratio = rent_info.get("HousingPlotRentalPriceRatio", DEFAULT_HOUSING_RATIO)
     max_days = rent_info.get("MaxHousingPlotRentalDays", 15)
@@ -68,8 +105,12 @@ async def handle_rent(event, player, character, ctx):
     )
     if event["data"].get("Blocked") and ctx.http_client_mod:
         house_guid = event["data"].get("HouseGuid")
-        rent_cost = await _compute_rent_cost(ctx.http_client_mod, house_guid)
+        rent_info = await _fetch_rent_info(ctx.http_client_mod, house_guid)
+        rent_cost = await _compute_rent_cost(
+            ctx.http_client_mod, house_guid, rent_info=rent_info
+        )
 
+        refunded = False
         if rent_cost > 0:
             try:
                 await transfer_money(
@@ -78,6 +119,7 @@ async def handle_rent(event, player, character, ctx):
                     "House Rent Refund",
                     str(player.unique_id),
                 )
+                refunded = True
                 logger.info(
                     "Refunded rent of %d to player=%s character=%s house=%s",
                     rent_cost, player.unique_id, character.guid, house_guid,
@@ -88,10 +130,13 @@ async def handle_rent(event, player, character, ctx):
                     rent_cost, character.guid, exc_info=True,
                 )
 
+        message = RENT_BLOCKED_POPUP.format(plot=_plot_label(rent_info, house_guid))
+        if refunded:
+            message += "\n\nYour in-game payment has been refunded."
         try:
             await show_popup(
                 ctx.http_client_mod,
-                "House rentals must be done through Discord. Use /house buy in Discord. Your money has been refunded.",
+                message,
                 character_guid=str(character.guid),
             )
         except Exception:
@@ -107,10 +152,14 @@ async def handle_rent_extend(event, player, character, ctx):
         return 0, 0, 0, 0
 
     if data.get("Blocked") and ctx.http_client_mod:
+        house_guid = data.get("HouseGuid")
+        rent_info = await _fetch_rent_info(ctx.http_client_mod, house_guid)
         try:
             await show_popup(
                 ctx.http_client_mod,
-                "House rent extensions must be done through Discord. Use /house extend in Discord.",
+                RENT_EXTEND_BLOCKED_POPUP.format(
+                    plot=_plot_label(rent_info, house_guid)
+                ),
                 character_guid=str(character.guid),
             )
         except Exception:
