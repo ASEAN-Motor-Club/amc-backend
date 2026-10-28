@@ -216,6 +216,20 @@ ROUTE_HISTORY_MIN_DISTINCT_PAYMENTS = 3
 ROUTE_HISTORY_WEIGHT_BAND_LO = 0.6
 ROUTE_HISTORY_WEIGHT_BAND_HI = 1.4
 
+# --- Recovered-quote tolerance --------------------------------------------
+# A quote recovered from the quote cache for an arrival that lost its
+# delivery id describes a REGISTRATION, not this delivery: the game draws the
+# price at pickup and the demand/supply/balance multipliers move it between
+# hauls (2026-10-27 case: a 7-hour-old 632 quote was enforced on a 728 payout
+# and clawed 9,600 from a legitimate haul — the same 728 was paid in full to
+# another player on the same lane four days earlier).  Payments up to this
+# multiple of a recovered quote are therefore treated as legitimate; the
+# exact quote is still reported as `expected`, and it stays the enforcement
+# value when the gate fires.  Applies ONLY to id-less arrivals matched
+# through the cache — a quote that belongs to the delivery itself (live
+# snapshot or same-delivery-id cache row) is exact and never gated.
+RECOVERED_QUOTE_PAYMENT_TOLERANCE = 1.5
+
 # Per-passenger-type payment ceilings (before bonus additions).
 # Derived from p99 of legitimate deliveries (excluding known cheats).
 PASSENGER_PAYMENT_CEILINGS: dict[int, int] = {
@@ -430,6 +444,7 @@ async def validate_cargo_payment(
     destination_point: DeliveryPoint | None,
     unit_weight: float | None = None,
     expected_payment: int | None = None,
+    expected_payment_gate: int | None = None,
 ) -> int:
     """Validate a single cargo delivery payment against baselines.
 
@@ -439,13 +454,20 @@ async def validate_cargo_payment(
 
     `expected_payment` (per unit, when known) is the game's own computed
     price for this delivery — `Net_Payment.BaseValue` captured from the
-    in-flight cargo by delivery telemetry.  When present it is PRIMARY:
+    in-flight cargo by delivery telemetry, or recovered from the quote cache
+    when the arrival lost its delivery id.  When present it is PRIMARY:
     the game priced this exact delivery, so any payment above it is an
     anomaly regardless of what history says, and any payment at or below
     it is legitimate even if history disagrees (demand repricing moves
     the game's price far beyond any historical window — 2026-10-21 cases:
     Moonshine paid $51,857/unit vs a $40,104 history ceiling, and
     HiddenMethBed $42,863 == BaseValue yet clawed $4,977).
+
+    `expected_payment_gate` (per unit) applies ONLY to a quote recovered for
+    an id-less arrival: it is the tolerance ceiling above `expected_payment`
+    inside which the payment is accepted as a legitimate re-pricing (see
+    RECOVERED_QUOTE_PAYMENT_TOLERANCE).  The exact quote is untouched — it
+    is still what an enforcement above the gate is measured against.
 
     Returns the excess amount to claw back (0 if legitimate).
     """
@@ -456,6 +478,19 @@ async def validate_cargo_payment(
     if expected_payment is not None and int(expected_payment) > 0:
         expected = int(expected_payment)
         if payment <= expected:
+            return 0
+        if expected_payment_gate is not None and payment <= expected_payment_gate:
+            # Recovered quote: within the tolerance the difference is a
+            # legitimate demand re-pricing, not fraud.  Deliberate blind
+            # spot — see RECOVERED_QUOTE_PAYMENT_TOLERANCE.
+            logger.warning(
+                "FRAUD-TOLERATED cargo=%s payment=%d within recovered-quote "
+                "gate %d (quote %d) — not clawed",
+                cargo_key,
+                payment,
+                expected_payment_gate,
+                expected,
+            )
             return 0
         excess = payment - expected
         logger.warning(

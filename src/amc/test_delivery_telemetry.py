@@ -526,6 +526,37 @@ class QuoteCacheTests(TestCase):
         self.assertEqual(telemetry["game_payment_base"], 180)
         self.assertEqual(telemetry["delivery_id"], 556)
 
+    def test_nonzero_arrival_only_sees_its_own_registration(self):
+        """A delivery that kept its id must never borrow another haul's quote.
+
+        2026-10-26 FreyFrey: arrival 165942 was validated against 166310's
+        registration (a heavier bag on another destination) and clawed 28
+        units of a legitimate payout.
+        """
+        delivery_telemetry.record_quote_cache(
+            {
+                555: [self._entry(game_payment_base=152)],
+                556: [self._entry(delivery_id=556, game_payment_base=180)],
+            }
+        )
+        telemetry = self._lookup(arrival_delivery_id=556)
+        self.assertIsNotNone(telemetry)
+        self.assertEqual(telemetry["delivery_id"], 556)
+        self.assertEqual(telemetry["game_payment_base"], 180)
+
+    def test_nonzero_arrival_without_its_own_registration_gets_nothing(self):
+        """No quote for this delivery => fall through to history, never
+        borrow a same-shape quote the way the heuristic does."""
+        self._write()  # only 555 is cached
+        self.assertIsNone(self._lookup(arrival_delivery_id=999))
+
+    def test_idless_arrival_keeps_the_heuristic_match(self):
+        """The reconnect case this cache exists for still works."""
+        self._write()
+        telemetry = self._lookup(arrival_delivery_id=0)
+        self.assertIsNotNone(telemetry)
+        self.assertEqual(telemetry["delivery_id"], 555)
+
     def test_duplicate_units_collapse_to_one_row(self):
         # A vehicle hauling N units of one cargo reports N entries with the
         # same (character, delivery_id, cargo, weight) key.  Postgres rejects
