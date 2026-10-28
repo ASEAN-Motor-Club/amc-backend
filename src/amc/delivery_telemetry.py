@@ -559,6 +559,7 @@ def lookup_quote_cache(
     weight: Any,
     sender_point=None,
     destination_point=None,
+    arrival_delivery_id: Optional[int] = None,
 ) -> Optional[dict[str, Any]]:
     """Recover the game's own price for an arrival that lost its id.
 
@@ -566,6 +567,15 @@ def lookup_quote_cache(
     telemetry-shaped dict (source ``quote_cache``) so downstream validation
     consumes it exactly like a live snapshot quote, or None when nothing
     matches — never a guess from another cargo or another route.
+
+    ``arrival_delivery_id`` identity rule: when the arrival still carries an
+    id, ONLY that delivery's own cached registration may answer (the tick saw
+    it earlier and it has since left the vehicle list).  A different
+    registration on the same character/cargo/weight/route is a different
+    haul — 2026-10-26: arrival 165942 was clawed against 166310's quote, a
+    differently-weighted bag on another destination.  When the arrival has no
+    id (the reconnect case this cache exists for), fall back to the
+    character + cargo + weight + route match, which cannot distinguish hauls.
     """
     if not character_id or not cargo_key or weight is None:
         return None
@@ -575,14 +585,16 @@ def lookup_quote_cache(
         from amc.models import DeliveryQuoteCache
 
         now = timezone.now()
-        rows = list(
-            DeliveryQuoteCache.objects.filter(
-                character_id=character_id,
-                cargo_key=cargo_key,
-                base_value__gt=0,
-                last_seen__gte=now - QUOTE_CACHE_MAX_AGE,
-            ).order_by("-last_seen")[:QUOTE_CACHE_MAX_CANDIDATES]
+        candidates = DeliveryQuoteCache.objects.filter(
+            character_id=character_id,
+            cargo_key=cargo_key,
+            base_value__gt=0,
+            last_seen__gte=now - QUOTE_CACHE_MAX_AGE,
         )
+        if arrival_delivery_id:
+            # The arrival kept its id: only that registration may answer.
+            candidates = candidates.filter(delivery_id=arrival_delivery_id)
+        rows = list(candidates.order_by("-last_seen")[:QUOTE_CACHE_MAX_CANDIDATES])
     except Exception:  # noqa: BLE001 — lookup is best-effort
         logger.error("quote cache lookup failed", exc_info=True)
         return None

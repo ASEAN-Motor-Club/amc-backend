@@ -141,6 +141,60 @@ class ValidateCargoPaymentTests(TestCase):
         )
         self.assertEqual(excess, 450_000)
 
+    def test_recovered_quote_gate_tolerates_demand_repricing(self):
+        """2026-10-27 Kuzmich: an id-less arrival matched the same player's
+        7-hour-old registration at 632 while the game paid 728 — a legitimate
+        demand re-pricing that was clawed 9,600 in full.  Inside the gate
+        nothing is clawed, and the exact quote stays the enforcement value."""
+        import asyncio
+
+        excess = asyncio.run(
+            validate_cargo_payment(
+                cargo_key="CrudeOil",
+                payment=728,
+                quantity=1,
+                sender_point=None,
+                destination_point=None,
+                expected_payment=632,
+                expected_payment_gate=948,
+            )
+        )
+        self.assertEqual(excess, 0)
+
+    def test_recovered_quote_gate_claws_above_the_tolerance(self):
+        """Above the gate the claw is still measured from the exact quote,
+        so the tolerance costs at most the difference, not the whole overpay."""
+        import asyncio
+
+        excess = asyncio.run(
+            validate_cargo_payment(
+                cargo_key="CrudeOil",
+                payment=2_000,
+                quantity=1,
+                sender_point=None,
+                destination_point=None,
+                expected_payment=632,
+                expected_payment_gate=948,
+            )
+        )
+        self.assertEqual(excess, 1_368)
+
+    def test_absent_gate_keeps_the_quote_exact(self):
+        """A quote that belongs to the delivery itself is never gated."""
+        import asyncio
+
+        excess = asyncio.run(
+            validate_cargo_payment(
+                cargo_key="CrudeOil",
+                payment=728,
+                quantity=1,
+                sender_point=None,
+                destination_point=None,
+                expected_payment=632,
+            )
+        )
+        self.assertEqual(excess, 96)
+
     def test_expected_payment_zero_or_missing_uses_legacy_path(self):
         import asyncio
 

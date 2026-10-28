@@ -51,6 +51,7 @@ from amc.mod_server import (
     transfer_money,
 )
 from amc.fraud_detection import (
+    RECOVERED_QUOTE_PAYMENT_TOLERANCE,
     TELEPORT_BURST_ALERT_COOLDOWN_S,
     check_delivery_rate,
     teleport_enforce_enabled,
@@ -121,6 +122,30 @@ def _expected_total_with_bonus(
         return None
     base = int(telemetry_base)
     return base + get_cargo_bonus(cargo_key, base, damage or 0)
+
+
+def _recovered_quote_gate(
+    log: Any, telemetry_info: Optional[dict], expected_total: Optional[int]
+) -> Optional[int]:
+    """Per-unit tolerance ceiling for a quote borrowed from the quote cache.
+
+    Returns None when the quote is exact and must enforce as-is:
+    - no expected price at all, or
+    - the quote belongs to this delivery (``vehicle_cargos`` live snapshot,
+      or a cache row carrying this arrival's own delivery id).
+
+    Returns ``expected * RECOVERED_QUOTE_PAYMENT_TOLERANCE`` when an id-less
+    arrival borrowed another registration's quote: the game drew that price
+    at pickup and demand multipliers legitimately move it (2026-10-27
+    Kuzmich: 632 cached 7 h earlier, 728 paid, clawed 9,600).
+    """
+    if expected_total is None or not telemetry_info:
+        return None
+    if telemetry_info.get("source") != "quote_cache":
+        return None
+    if getattr(log, "delivery_id", 0):
+        return None
+    return int(expected_total * RECOVERED_QUOTE_PAYMENT_TOLERANCE)
 
 
 @register("ServerCargoArrived")
@@ -203,21 +228,26 @@ async def handle_cargo_arrived(event, player, character, ctx):
             log.sender_point_id,
             log.destination_point_id,
         )
+        telemetry_info = None
+        telemetry_base = None
+        if log.data and isinstance(log.data.get("amc_delivery_telemetry"), dict):
+            telemetry_info = log.data["amc_delivery_telemetry"]
+            telemetry_base = telemetry_info.get("game_payment_base")
+        # The game's BaseValue is the pre-bonus Net_Payment; the handler
+        # already added the game-level bonus (e.g. Log_Oak_12ft safety
+        # bonus = 100% of base at 0 damage) to log.payment above.  The
+        # comparison must therefore be against base + that same bonus,
+        # or every bonus cargo reads as a 100% overpay (2026-10-22
+        # Test310: 8 x Log_Oak_12ft safety bonuses clawed in full).
+        expected_total = _expected_total_with_bonus(
+            log.cargo_key, telemetry_base, log.damage or 0
+        )
+        # Identity decides tolerance: a quote that belongs to THIS delivery
+        # (live snapshot, or a cache row with the same delivery id) is exact;
+        # a quote borrowed from a registration for an id-less arrival is a
+        # different haul's price and only enforces above the tolerance gate.
+        expected_gate = _recovered_quote_gate(log, telemetry_info, expected_total)
         if validation_key not in validated_excess:
-            telemetry_base = None
-            if log.data and isinstance(log.data.get("amc_delivery_telemetry"), dict):
-                telemetry_base = log.data["amc_delivery_telemetry"].get(
-                    "game_payment_base"
-                )
-            # The game's BaseValue is the pre-bonus Net_Payment; the handler
-            # already added the game-level bonus (e.g. Log_Oak_12ft safety
-            # bonus = 100% of base at 0 damage) to log.payment above.  The
-            # comparison must therefore be against base + that same bonus,
-            # or every bonus cargo reads as a 100% overpay (2026-10-22
-            # Test310: 8 x Log_Oak_12ft safety bonuses clawed in full).
-            expected_total = _expected_total_with_bonus(
-                log.cargo_key, telemetry_base, log.damage or 0
-            )
             validated_excess[validation_key] = await validate_cargo_payment(
                 cargo_key=log.cargo_key,
                 payment=log.payment,
@@ -226,8 +256,21 @@ async def handle_cargo_arrived(event, player, character, ctx):
                 destination_point=log.destination_point,
                 unit_weight=log.weight,
                 expected_payment=expected_total,
+                expected_payment_gate=expected_gate,
             )
         excess = validated_excess[validation_key]
+        if expected_gate is not None and log.data is not None:
+            # Record what the recovered-quote lane thought, including the
+            # payments it let through under the tolerance: without this the
+            # blind spot is unmeasurable (the `amc` logger runs at ERROR).
+            log.data["amc_quote_gate"] = {
+                "expected": expected_total,
+                "gate": expected_gate,
+                "paid": log.payment,
+                "clawed": excess,
+                "delivery_id": (telemetry_info or {}).get("delivery_id"),
+                "cache_age_seconds": (telemetry_info or {}).get("cache_age_seconds"),
+            }
         if excess > 0:
             total_fraud_excess += excess
             log.payment = max(0, log.payment - excess)
@@ -751,6 +794,7 @@ async def process_cargo_log(cargo, player, character, timestamp):
             log.weight,
             sender,
             destination,
+            log.delivery_id or None,
         )
     if telemetry is not None and log.data is not None:
         log.data["amc_delivery_telemetry"] = telemetry
