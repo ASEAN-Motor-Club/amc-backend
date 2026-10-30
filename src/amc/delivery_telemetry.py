@@ -276,10 +276,14 @@ def telemetry_for_delivery(
     A delivery id can legitimately cover several batches of the same cargo
     (pickup-spot refreshes re-price the same route), so the snapshot holds a
     LIST per id.  Candidates are filtered by cargo key first — a Corn quote
-    must never excuse a Pumpkin payout — then by weight.  When more than one
-    candidate survives, the highest quote is the enforcement value
-    (`game_payment_base`) and every distinct quote is reported in
-    `game_payment_bases` so all legitimate batches pass.
+    must never excuse a Pumpkin payout — then by weight ONLY to choose which
+    registration's context is reported.  Enforcement always spans the whole
+    delivery id: when more than one quote exists, the highest is the
+    enforcement value (`game_payment_base`) and every distinct quote is
+    reported in `game_payment_bases` so all legitimate batches pass.  The
+    weight of a sibling registration must never lower the ceiling — the same
+    batch is often registered both per unit (5,000 kg) and as one aggregate
+    entry (21,803 kg), and the two carry different prices.
 
     Fail-safe: no candidate after filtering returns None, never a quote
     belonging to another cargo or another stack.
@@ -302,6 +306,15 @@ def telemetry_for_delivery(
     # 2. prefer the stack whose weight matches the arrived cargo; fall back
     #    to all cargo matches when nothing does (per-unit weight variance,
     #    float noise) so coverage is never silently lost.
+    #
+    #    This narrowing only picks which registration's CONTEXT is reported
+    #    (vehicle, weight, locations).  It must NOT narrow enforcement: the
+    #    same delivery id can be registered twice at different weights — an
+    #    aggregate truck entry (e.g. 21,803 kg) next to a per-unit one
+    #    (5,000 kg) — and the arrival's weight then matches only the cheaper
+    #    of the two.  That is how a legitimate 3,301/unit payout was clawed
+    #    against a 1,478/unit sibling registration (2026-10-30 JunWu).
+    cargo_scoped = entries
     if weight is not None:
         try:
             row_weight = float(weight)
@@ -312,12 +325,20 @@ def telemetry_for_delivery(
             if matched:
                 entries = matched
 
-    quotes: list[int] = []
-    for entry in entries:
-        base = entry.get("game_payment_base")
-        if isinstance(base, (int, float)) and base > 0:
-            quotes.append(int(base))
-    distinct = sorted(set(quotes))
+    quoted = [
+        int(e["game_payment_base"])
+        for e in cargo_scoped
+        if isinstance(e.get("game_payment_base"), (int, float))
+        and e["game_payment_base"] > 0
+    ]
+    distinct = sorted(set(quoted))
+
+    weight_matched = [
+        int(e["game_payment_base"])
+        for e in entries
+        if isinstance(e.get("game_payment_base"), (int, float))
+        and e["game_payment_base"] > 0
+    ]
 
     # An entry with no computed price (board registrations) still enriches the
     # row with its multiplier/path context; it simply carries no enforcement
@@ -336,6 +357,11 @@ def telemetry_for_delivery(
     # Highest quote wins enforcement: under-clawing is acceptable, never
     # compare a batch against another batch's lower registration.
     result["game_payment_base"] = distinct[-1]
+    if weight_matched and max(weight_matched) < distinct[-1]:
+        # The enforced quote came from a different registration of the same
+        # delivery id (usually the aggregate-weight sibling).  Keep the
+        # weight-scoped value on the row for auditability.
+        result["weight_scoped_base"] = max(weight_matched)
     if len(distinct) > 1:
         result["game_payment_bases"] = distinct
         result["multi_quote"] = True

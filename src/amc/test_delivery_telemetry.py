@@ -383,7 +383,13 @@ class MultiStackQuoteTests(TestCase):
         self.assertIsNotNone(telemetry)
         self.assertEqual(telemetry["game_payment_base"], 5000)
 
-    def test_weight_separates_distinct_stacks_when_they_differ(self):
+    def test_weight_scoping_never_lowers_the_enforcement_quote(self):
+        """Weight picks the reported stack, not the ceiling.
+
+        The same delivery id can be registered per unit and again as one
+        aggregate entry; the two carry different prices and the arrival's
+        weight matches only one of them.
+        """
         self._ingest(
             [
                 self._entry(11, "IronOre", 2000.0, 4000, "Atlas_8x4_Dump_C"),
@@ -393,8 +399,35 @@ class MultiStackQuoteTests(TestCase):
         light = delivery_telemetry.telemetry_for_delivery(
             11, cargo_key="IronOre", weight=2000.0
         )
-        self.assertEqual(light["game_payment_base"], 4000)
-        self.assertNotIn("multi_quote", light)
+        # enforcement spans the delivery id — highest quote wins
+        self.assertEqual(light["game_payment_base"], 5500)
+        self.assertEqual(light["weight_scoped_base"], 4000)
+        self.assertEqual(light["game_payment_bases"], [4000, 5500])
+        # ...but the row still reports the stack that actually arrived
+        self.assertEqual(light["vehicle"], "Atlas_8x4_Dump_C")
+
+    def test_aggregate_sibling_registration_sets_the_ceiling(self):
+        """2026-10-30 JunWu: delivery 151426 was registered twice — 5,000 kg
+        per unit at 1,478 and one 21,803 kg aggregate at 3,301.  The arrival
+        weighed 5,000, matched the cheap entry, and a legitimate 3,301/unit
+        payout was clawed 1,823/unit (7,292 over four units)."""
+        self._ingest(
+            [
+                self._entry(
+                    151426, "WoodPlank_14ft_5t", 5000.00048828125, 1478, "Flanker3S_C"
+                ),
+                self._entry(
+                    151426, "WoodPlank_14ft_5t", 21803.841796875, 3301, "Olbe_C"
+                ),
+            ]
+        )
+        telemetry = delivery_telemetry.telemetry_for_delivery(
+            151426, cargo_key="WoodPlank_14ft_5t", weight=5000.00048828125
+        )
+        self.assertEqual(telemetry["game_payment_base"], 3301)
+        self.assertEqual(telemetry["weight_scoped_base"], 1478)
+        self.assertEqual(telemetry["vehicle"], "Flanker3S_C")
+        self.assertTrue(telemetry["multi_quote"])
 
     def test_stale_snapshot_returns_none(self):
         self._ingest([self._entry(42, "Coal", 600.0, 1523, "Oldum_C")])
