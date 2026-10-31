@@ -158,11 +158,25 @@ SECTOR_CARGO_TYPE_EXEMPT: dict[str, dict[str, set[str]]] = {
 }
 
 
+# Whole DP types that never participate in a sector's supply health, whatever
+# cargo they hold. Residents are a demand sink, not a buffer: the Resident
+# blueprint consumes 1 GroceryBag per 1200 s with `bStoreInputCargo: false`, so
+# the storage row is an outstanding-request queue that delivery satisfies
+# immediately — it can never hold stock. Counting 150+ houses (each a 1-3 slot
+# row) made retail read as permanently starved and supplied most of the
+# starved-site count, swamping the sectors that do have real buffers.
+SECTOR_DP_TYPE_EXEMPT: dict[str, set[str]] = {
+    "retail": {"Resident"},
+}
+
+
 def row_in_sector(sector: str, cargo_key: str, dp_type: str | None) -> bool:
     """Does this INPUT row count the DP toward / fill `sector`?"""
     if sector == "other":
         return True
     if cargo_key not in SECTORS.get(sector, []):
+        return False
+    if dp_type in SECTOR_DP_TYPE_EXEMPT.get(sector, set()):
         return False
     exempt_types = SECTOR_CARGO_TYPE_EXEMPT.get(sector, {}).get(cargo_key, set())
     if dp_type in exempt_types:

@@ -624,3 +624,50 @@ async def test_depot_storages_active_only(db):
         from amc.models import Player
 
         await Player.objects.all().adelete()
+
+
+async def test_resident_excluded_from_retail(db):
+    """Residents are a demand sink (bStoreInputCargo=false, 1200 s cycle), so
+    their INPUT rows never count toward retail health or the drilldown."""
+    house = await _point("econ-retail-house", "Resident", type="Resident")
+    shop = await _point("econ-retail-shop", "Corner Shop", type="Supermarket")
+    try:
+        # a house that is "starved" for groceries — must be invisible
+        await DeliveryPointStorage.objects.acreate(
+            delivery_point=house,
+            kind=DeliveryPointStorage.Kind.INPUT,
+            cargo_key="GroceryBag",
+            amount=0,
+            capacity=3,
+        )
+        # a real retail consumer with 0/3 toy slot — must still count
+        await DeliveryPointStorage.objects.acreate(
+            delivery_point=shop,
+            kind=DeliveryPointStorage.Kind.INPUT,
+            cargo_key="ToyBoxes",
+            amount=0,
+            capacity=3,
+        )
+
+        health = {s["sector"]: s for s in await sector_health()}
+        assert health["retail"]["capacity"] == 3
+        assert health["retail"]["starved_sites"] == 1
+
+        detail = await sector_drilldown("retail")
+        assert detail is not None
+        guids = [s["guid"] for s in detail["sites"]]
+        assert shop.guid in guids
+        assert house.guid not in guids
+
+        # row_in_sector is the single gate both call sites share
+        from amc.economy_weights import row_in_sector
+
+        assert row_in_sector("retail", "GroceryBag", "Resident") is False
+        assert row_in_sector("retail", "ToyBoxes", "Supermarket") is True
+        # exemption is sector-scoped: other sectors keep their Resident rows
+        assert row_in_sector("food", "Milk", "Resident") is True
+    finally:
+        await DeliveryPointStorage.objects.all().adelete()
+        await DeliveryPoint.objects.filter(
+            guid__in=("econ-retail-house", "econ-retail-shop")
+        ).adelete()
