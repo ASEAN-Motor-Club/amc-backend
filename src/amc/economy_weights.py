@@ -169,14 +169,30 @@ SECTOR_DP_TYPE_EXEMPT: dict[str, set[str]] = {
     "retail": {"Resident"},
 }
 
+# Same idea keyed on the DP name, for points whose `type` column is blank.
+# The game's /delivery/sites payload carries only guid/name/location/is_depot
+# plus inventories — NO mission-point type — so `DeliveryPoint.type` is legacy
+# data that only some rows ever received (2026-10-31: 153 houses typed, 70
+# identical houses blank). The mission-point name is the stable signal.
+SECTOR_DP_NAME_EXEMPT: dict[str, set[str]] = {
+    "retail": {"Resident"},
+}
 
-def row_in_sector(sector: str, cargo_key: str, dp_type: str | None) -> bool:
+
+def row_in_sector(
+    sector: str,
+    cargo_key: str,
+    dp_type: str | None,
+    dp_name: str | None = None,
+) -> bool:
     """Does this INPUT row count the DP toward / fill `sector`?"""
     if sector == "other":
         return True
     if cargo_key not in SECTORS.get(sector, []):
         return False
     if dp_type in SECTOR_DP_TYPE_EXEMPT.get(sector, set()):
+        return False
+    if dp_name in SECTOR_DP_NAME_EXEMPT.get(sector, set()):
         return False
     exempt_types = SECTOR_CARGO_TYPE_EXEMPT.get(sector, {}).get(cargo_key, set())
     if dp_type in exempt_types:

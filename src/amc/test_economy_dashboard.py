@@ -628,13 +628,24 @@ async def test_depot_storages_active_only(db):
 
 async def test_resident_excluded_from_retail(db):
     """Residents are a demand sink (bStoreInputCargo=false, 1200 s cycle), so
-    their INPUT rows never count toward retail health or the drilldown."""
+    their INPUT rows never count toward retail health or the drilldown — even
+    when the DP's `type` column is blank, which is the common case (the game
+    API carries no mission-point type)."""
     house = await _point("econ-retail-house", "Resident", type="Resident")
+    blank_house = await _point("econ-retail-house-blank", "Resident", type="")
     shop = await _point("econ-retail-shop", "Corner Shop", type="Supermarket")
     try:
         # a house that is "starved" for groceries — must be invisible
         await DeliveryPointStorage.objects.acreate(
             delivery_point=house,
+            kind=DeliveryPointStorage.Kind.INPUT,
+            cargo_key="GroceryBag",
+            amount=0,
+            capacity=3,
+        )
+        # same house, but with the blank type the sync actually writes
+        await DeliveryPointStorage.objects.acreate(
+            delivery_point=blank_house,
             kind=DeliveryPointStorage.Kind.INPUT,
             cargo_key="GroceryBag",
             amount=0,
@@ -658,16 +669,18 @@ async def test_resident_excluded_from_retail(db):
         guids = [s["guid"] for s in detail["sites"]]
         assert shop.guid in guids
         assert house.guid not in guids
+        assert blank_house.guid not in guids
 
         # row_in_sector is the single gate both call sites share
         from amc.economy_weights import row_in_sector
 
         assert row_in_sector("retail", "GroceryBag", "Resident") is False
+        assert row_in_sector("retail", "GroceryBag", "", "Resident") is False
         assert row_in_sector("retail", "ToyBoxes", "Supermarket") is True
         # exemption is sector-scoped: other sectors keep their Resident rows
         assert row_in_sector("food", "Milk", "Resident") is True
     finally:
         await DeliveryPointStorage.objects.all().adelete()
         await DeliveryPoint.objects.filter(
-            guid__in=("econ-retail-house", "econ-retail-shop")
+            guid__in=("econ-retail-house", "econ-retail-house-blank", "econ-retail-shop")
         ).adelete()
