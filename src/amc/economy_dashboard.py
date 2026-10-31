@@ -182,14 +182,15 @@ async def sector_health():
     {sector, amount, capacity, fill, starved_sites} where starved_sites
     counts (site, cargo) INPUT rows at or below 15% fill.
     """
-    # INPUT rows: (dp_id, dp_type, cargo, amount, capacity) — plus a map of
-    # same-cargo OUTPUT stock per site: a site whose OUTPUT side holds stock
-    # of the cargo isn't starved (for storage warehouses the output IS the
-    # storage; only factories with a genuinely empty intake count).
+    # INPUT rows: (dp_id, dp_type, dp_name, cargo, amount, capacity) — plus a
+    # map of same-cargo OUTPUT stock per site: a site whose OUTPUT side holds
+    # stock of the cargo isn't starved (for storage warehouses the output IS
+    # the storage; only factories with a genuinely empty intake count).
     in_rows = [
         (
             r["delivery_point_id"],
             r["delivery_point__type"],
+            r["delivery_point__name"],
             r["cargo_key"],
             r["amount"],
             r["capacity"],
@@ -199,6 +200,7 @@ async def sector_health():
         .values(
             "delivery_point_id",
             "delivery_point__type",
+            "delivery_point__name",
             "cargo_key",
             "amount",
             "capacity",
@@ -208,8 +210,8 @@ async def sector_health():
     # (e.g. warehouse pallet stock: game doesn't meter it, Pallet default 50)
 
     in_rows = [
-        (dp_id, dp_type, cargo_key, amount, eff)
-        for dp_id, dp_type, cargo_key, amount, capacity in in_rows
+        (dp_id, dp_type, dp_name, cargo_key, amount, eff)
+        for dp_id, dp_type, dp_name, cargo_key, amount, capacity in in_rows
         if (eff := await effective_capacity(cargo_key, capacity))
     ]
     out_stock: dict[tuple[int, str], int] = {}
@@ -223,9 +225,11 @@ async def sector_health():
     from amc.economy_weights import row_in_sector
 
     by_sector: dict[str, dict] = {}
-    for dp_id, dp_type, cargo_key, amount, capacity in in_rows:
+    for dp_id, dp_type, dp_name, cargo_key, amount, capacity in in_rows:
         sector = sector_of(cargo_key)
-        if sector == "other" or not row_in_sector(sector, cargo_key, dp_type):
+        if sector == "other" or not row_in_sector(
+            sector, cargo_key, dp_type, dp_name
+        ):
             continue
         s = by_sector.setdefault(sector, {"amount": 0, "capacity": 0, "starved": 0})
         s["amount"] += amount
@@ -369,7 +373,8 @@ async def sector_drilldown(
     for s in storages:
         s["capacity"] = await effective_capacity(s["cargo"], s["capacity"])
         in_sector = s["kind"] == "IN" and (
-            sector == "other" or row_in_sector(sector, s["cargo"], s["type"])
+            sector == "other"
+            or row_in_sector(sector, s["cargo"], s["type"], s["name"])
         )
         relevant = sector == "other" or s["cargo"] in sector_cargo
         if not relevant:
