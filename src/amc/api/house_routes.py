@@ -10,6 +10,9 @@ assembled):
   meters, Y-up, origin = actor root).
 - `GET /api/houses/ground/{color|normal}.png` — the Jeju landscape grass the plot sits on.
 
+Both asset routes are static per game version, so they answer `immutable` for a year; the `?v=`
+carries `HOUSE_MODELS_VERSION` and is what actually invalidates them after a regenerate.
+
 Plot geometry (coord, size, yaw, cost) is deliberately not served: amc-web already ships the
 game's own `out_house.json` and merges it client-side, so this API only carries what the site
 cannot know — ownership, placement and the static assets.
@@ -47,6 +50,11 @@ GROUND_KINDS = {"color", "normal"}
 _world_cache: tuple[float, dict] | None = None
 # Published model names (`<buildingKey>_<step>`), keyed by the models dir's mtime.
 _models_cache: tuple[float, set[str]] | None = None
+
+# Models and ground PNGs only change when the set is republished, and every URL carries
+# `?v=<HOUSE_MODELS_VERSION>`, so let browsers keep them for a year instead of re-downloading
+# up to 76 MB per view. Bumping the version is the only way to evict them.
+ASSET_CACHE_CONTROL = "public, max-age=31536000, immutable"
 
 
 def load_world() -> dict:
@@ -97,11 +105,6 @@ def _model_url(building_key: str, step: int) -> str:
     )
 
 
-def _ground_url(kind: str) -> str:
-    version = settings.HOUSE_MODELS_VERSION
-    return f"{_models_url()}/ground/{kind}.png?v={version}"
-
-
 def _building(building: dict) -> dict | None:
     building_key = building.get("buildingKey")
     if not building_key:
@@ -128,8 +131,7 @@ def get_model(request, building_key: str, step: int):
         raise Http404()
 
     response = FileResponse(path.open("rb"), content_type="model/gltf-binary")
-    # Models only change with the pak; let the browser keep them (`?v=` busts after a regenerate).
-    response["Cache-Control"] = "public, max-age=86400"
+    response["Cache-Control"] = ASSET_CACHE_CONTROL
     return response
 
 
@@ -143,7 +145,7 @@ def get_ground(request, kind: str):
         raise Http404()
 
     response = FileResponse(path.open("rb"), content_type="image/png")
-    response["Cache-Control"] = "public, max-age=86400"
+    response["Cache-Control"] = ASSET_CACHE_CONTROL
     return response
 
 
@@ -174,12 +176,10 @@ def get_house(request, housing_key: str):
             continue
         buildings.append(building)
 
+    # No ground texture URLs: the two PNGs are the same for every plot, so the client builds
+    # their paths itself (`src/lib/api/houseViewer.ts`) instead of paying for them per call.
     return {
         "housingKey": key,
         "ownerName": owner_name,
-        "groundTextures": {
-            "color": _ground_url("color"),
-            "normal": _ground_url("normal"),
-        },
         "buildings": buildings,
     }
