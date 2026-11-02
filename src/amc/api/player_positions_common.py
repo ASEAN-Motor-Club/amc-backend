@@ -1,4 +1,5 @@
 import logging
+import time
 from datetime import timedelta
 
 from asgiref.sync import sync_to_async
@@ -16,6 +17,12 @@ POSITION_UPDATE_SLEEP = 1.0 / POSITION_UPDATE_RATE
 HEARTBEAT_INTERVAL = 15
 MOD_PLAYERS_CACHE_TTL = 2
 POLICE_ONLINE_THRESHOLD_SECONDS = 60
+# A C++ snapshot whose capture time is older than this is a FROZEN feed: the
+# game-thread sampler publishes at ~2 Hz, so a 5 s gap means it stopped
+# publishing (observed when the last player logs out and the sampler skips the
+# publish). A frozen snapshot is counted as an EMPTY server — it must never be
+# reported as live players.
+CPP_SNAPSHOT_MAX_AGE_S = 5.0
 
 
 def _get_hidden_player_unique_ids_sync():
@@ -173,18 +180,27 @@ async def get_positions_masked(session, mgmt_session):
     sets (Wanted / costume / police) are applied here exactly as in
     get_players_mod_masked: the mask is the single source of truth.
 
-    When the C++ endpoint is unavailable (get_players_locations returns
-    None), falls back to the Lua-only masked path.
+    The Lua roster is an IDENTITY source only, never a roster source: when
+    the C++ feed is unavailable (`get_players_locations` returns None) or the
+    snapshot it serves is frozen (capture time older than
+    `CPP_SNAPSHOT_MAX_AGE_S`), the returned roster is EMPTY. A frozen feed's
+    last entry is a player who has already left, so replaying it invents a
+    phantom player on every stream surface.
 
     Returns (roster, cpp_ts): `cpp_ts` is the C++ feed's snapshot capture
     time in epoch seconds (from `timestamp_ms` on the mod response), or
-    None on the Lua fallback — callers fall back to their own query time.
+    None when the feed is unavailable/frozen — callers fall back to their
+    own query time.
     """
     locations = await get_players_locations(mgmt_session, use_cache=False)
     if locations is None:
-        return await get_players_mod_masked(session, use_cache=False), None
+        return [], None
     identity_players = await get_players_mod(session, use_cache=True)
-    return await _merge_masked_roster(locations, identity_players)
+    roster, cpp_ts = await _merge_masked_roster(locations, identity_players)
+    if cpp_ts is None or (time.time() - cpp_ts) > CPP_SNAPSHOT_MAX_AGE_S:
+        # Frozen or un-timestamped snapshot: count as empty, not as players.
+        return [], None
+    return roster, cpp_ts
 
 
 async def _merge_masked_roster(locations, identity_players):

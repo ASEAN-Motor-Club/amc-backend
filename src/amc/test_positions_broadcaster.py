@@ -186,11 +186,13 @@ class DefaultFetchTests(SimpleTestCase):
         identity from the Lua roster (cache-read allowed — identity only)."""
         from amc.api.player_positions_common import get_positions_masked
 
+        now_ms = int(time.time() * 1000)
         locations = [
             {
                 "CharacterGuid": "GUID-1",
                 "Location": {"X": 5, "Y": 6, "Z": 7},
                 "VehicleKey": None,  # get_players_locations yields None when empty
+                "TimestampMS": now_ms,
             }
         ]
         identity = [
@@ -219,19 +221,53 @@ class DefaultFetchTests(SimpleTestCase):
             self.assertEqual(roster[0]["Location"], {"X": 5, "Y": 6, "Z": 7})
             self.assertEqual(roster[0]["VehicleKey"], "")
             self.assertFalse(roster[0]["hidden"])
-            # No TimestampMS on the fixture entries -> cpp_ts falls back to None
+            self.assertAlmostEqual(cpp_ts, now_ms / 1000.0, places=2)
+
+    async def test_frozen_snapshot_counts_as_empty(self):
+        """A snapshot older than CPP_SNAPSHOT_MAX_AGE_S is a frozen feed: the
+        roster must be EMPTY, never the frozen entry, and the Lua roster must
+        not be used as a substitute roster source."""
+        from amc.api.player_positions_common import get_positions_masked
+
+        stale_ms = int((time.time() - 60) * 1000)
+        locations = [
+            {
+                "CharacterGuid": "GUID-1",
+                "Location": {"X": 5, "Y": 6, "Z": 7},
+                "VehicleKey": None,
+                "TimestampMS": stale_ms,
+            }
+        ]
+        # The leaving player is gone from the Lua roster now that he logged out.
+        identity_mock = AsyncMock(return_value=[])
+        with (
+            patch(
+                "amc.api.player_positions_common.get_players_locations",
+                new=AsyncMock(return_value=locations),
+            ),
+            patch(
+                "amc.api.player_positions_common.get_players_mod",
+                new=identity_mock,
+            ),
+            patch(
+                "amc.api.player_positions_common._get_hidden_player_unique_ids",
+                new=AsyncMock(return_value=(set(), set(), set())),
+            ),
+        ):
+            roster, cpp_ts = await get_positions_masked(None, None)
+            self.assertEqual(roster, [])
             self.assertIsNone(cpp_ts)
 
-    async def test_cpp_capture_timestamp_flows_to_broadcaster(self):
-        """The C++ feed's snapshot timestamp_ms becomes the broadcaster ts
-        (which the WS proto sends as timestamp_ms); Lua fallback uses the
-        backend query time."""
+    async def test_snapshot_without_timestamp_counts_as_empty(self):
+        """No TimestampMS = freshness unprovable -> empty (fail closed)."""
         from amc.api.player_positions_common import get_positions_masked
-        from amc.api import positions_broadcaster
 
         locations = [
-            {"CharacterGuid": "GUID-1", "Location": {"X": 5, "Y": 6, "Z": 7},
-             "VehicleKey": None, "TimestampMS": 1790333815123}
+            {
+                "CharacterGuid": "GUID-1",
+                "Location": {"X": 5, "Y": 6, "Z": 7},
+                "VehicleKey": None,
+            }
         ]
         with (
             patch(
@@ -248,7 +284,37 @@ class DefaultFetchTests(SimpleTestCase):
             ),
         ):
             roster, cpp_ts = await get_positions_masked(None, None)
-            self.assertAlmostEqual(cpp_ts, 1790333815.123, places=3)
+            self.assertEqual(roster, [])
+            self.assertIsNone(cpp_ts)
+
+    async def test_cpp_capture_timestamp_flows_to_broadcaster(self):
+        """The C++ feed's snapshot timestamp_ms becomes the broadcaster ts
+        (which the WS proto sends as timestamp_ms); a None ts (feed
+        unavailable/frozen) uses the backend query time."""
+        from amc.api.player_positions_common import get_positions_masked
+        from amc.api import positions_broadcaster
+
+        now_ms = int(time.time() * 1000)
+        locations = [
+            {"CharacterGuid": "GUID-1", "Location": {"X": 5, "Y": 6, "Z": 7},
+             "VehicleKey": None, "TimestampMS": now_ms}
+        ]
+        with (
+            patch(
+                "amc.api.player_positions_common.get_players_locations",
+                new=AsyncMock(return_value=locations),
+            ),
+            patch(
+                "amc.api.player_positions_common.get_players_mod",
+                new=AsyncMock(return_value=[]),
+            ),
+            patch(
+                "amc.api.player_positions_common._get_hidden_player_unique_ids",
+                new=AsyncMock(return_value=(set(), set(), set())),
+            ),
+        ):
+            roster, cpp_ts = await get_positions_masked(None, None)
+            self.assertAlmostEqual(cpp_ts, now_ms / 1000.0, places=2)
 
         # Broadcaster _tick: C++ ts wins over time.time()
         with patch.object(
@@ -257,9 +323,9 @@ class DefaultFetchTests(SimpleTestCase):
         ):
             b = positions_broadcaster.PositionsBroadcaster()
             await b._tick()
-            self.assertAlmostEqual(b._ts, 1790333815.123, places=3)
+            self.assertAlmostEqual(b._ts, cpp_ts, places=2)
 
-        # Lua fallback (src_ts None) -> local query time
+        # No C++ ts (unavailable/frozen) -> local query time
         with patch.object(
             positions_broadcaster, "get_positions_masked",
             new=AsyncMock(return_value=([{"hidden": False}], None)),
@@ -269,12 +335,12 @@ class DefaultFetchTests(SimpleTestCase):
             await b2._tick()
             self.assertGreaterEqual(b2._ts, before)
 
-    async def test_default_fetch_falls_back_to_lua_when_cpp_unavailable(self):
-        """C++ feed down (None): fall back to the Lua-only masked path with
-        the cache bypassed."""
+    async def test_cpp_unavailable_counts_as_empty_without_lua_fallback(self):
+        """C++ feed down (None): the roster is EMPTY. The Lua-only masked path
+        must NOT be used as a fallback roster source."""
         from amc.api.player_positions_common import get_positions_masked
 
-        fallback = [{"UniqueID": "1", "PlayerName": "P1"}]
+        lua_mock = AsyncMock(return_value=[{"UniqueID": "1", "PlayerName": "P1"}])
         with (
             patch(
                 "amc.api.player_positions_common.get_players_locations",
@@ -282,11 +348,13 @@ class DefaultFetchTests(SimpleTestCase):
             ),
             patch(
                 "amc.api.player_positions_common.get_players_mod_masked",
-                new=AsyncMock(return_value=fallback),
+                new=lua_mock,
             ),
         ):
-            roster, _cpp_ts = await get_positions_masked(None, None)
-            self.assertIs(roster, fallback)
+            roster, cpp_ts = await get_positions_masked(None, None)
+            self.assertEqual(roster, [])
+            self.assertIsNone(cpp_ts)
+            lua_mock.assert_not_awaited()
 
     async def test_default_fetch_wiring(self):
         """The broadcaster default fetch delegates to get_positions_masked."""
