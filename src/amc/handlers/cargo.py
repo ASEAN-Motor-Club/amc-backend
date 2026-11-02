@@ -779,7 +779,13 @@ async def process_cargo_log(cargo, player, character, timestamp):
     from amc import delivery_telemetry
 
     telemetry = delivery_telemetry.telemetry_for_delivery(
-        log.delivery_id, cargo_key=log.cargo_key, weight=log.weight
+        log.delivery_id,
+        cargo_key=log.cargo_key,
+        weight=log.weight,
+        # Two players can haul the same contract at once — same delivery id,
+        # cargo and weight, different price draws — so the owner guid is the
+        # only thing that keeps one player's quote off another's payout.
+        character_guid=getattr(character, "guid", None),
     )
     if telemetry is None:
         # Reconnect recovery: the game resets Net_DeliveryId to 0 when a

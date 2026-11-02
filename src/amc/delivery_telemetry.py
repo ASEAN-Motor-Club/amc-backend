@@ -270,23 +270,27 @@ def telemetry_for_delivery(
     delivery_id: Optional[int],
     cargo_key: Optional[str] = None,
     weight: Any = None,
+    character_guid: Optional[str] = None,
 ) -> Optional[dict[str, Any]]:
     """Telemetry for a delivery id, scoped to the cargo and stack that arrived.
 
     A delivery id can legitimately cover several batches of the same cargo
     (pickup-spot refreshes re-price the same route), so the snapshot holds a
-    LIST per id.  Candidates are filtered by cargo key first — a Corn quote
-    must never excuse a Pumpkin payout — then by weight ONLY to choose which
-    registration's context is reported.  Enforcement always spans the whole
-    delivery id: when more than one quote exists, the highest is the
-    enforcement value (`game_payment_base`) and every distinct quote is
-    reported in `game_payment_bases` so all legitimate batches pass.  The
-    weight of a sibling registration must never lower the ceiling — the same
-    batch is often registered both per unit (5,000 kg) and as one aggregate
-    entry (21,803 kg), and the two carry different prices.
+    LIST per id.  Two players can also haul the SAME contract at the same
+    time — same delivery id, same cargo, same weight, independently priced —
+    so the owning character is the only field that tells those entries apart.
+    Candidates are filtered by owner first when the snapshot says who owns
+    them, then by cargo key (a Corn quote must never excuse a Pumpkin payout),
+    then by weight ONLY to choose which registration's context is reported.
+    Enforcement then spans every remaining registration of the delivery id:
+    the highest is the enforcement value (`game_payment_base`), and every
+    distinct quote is reported in `game_payment_bases` so all legitimate
+    batches pass.  A sibling registration's weight or owner must never lower
+    the ceiling — the same batch is often registered both per unit (5,000 kg)
+    and as one aggregate entry (21,803 kg), at different prices.
 
     Fail-safe: no candidate after filtering returns None, never a quote
-    belonging to another cargo or another stack.
+    belonging to another cargo or another player's haul.
     """
     if not delivery_id or delivery_id <= 0:
         return None
@@ -296,6 +300,22 @@ def telemetry_for_delivery(
     entries = _snapshot_deliveries.get(delivery_id)
     if not entries:
         return None
+
+    # 0. scope by owner — another player's quote for the same contract is a
+    #    different haul at a different price (2026-10-31 Deathstroke: his
+    #    delivery 39427 paid 4,083/unit was validated against ninja's
+    #    2,835/unit entry for the same contract).  Entries without a guid
+    #    stay in play so a thinner snapshot cannot lose coverage.
+    if character_guid:
+        wanted = str(character_guid).upper()
+        owned = [
+            e
+            for e in entries
+            if not e.get("character_guid")
+            or str(e.get("character_guid")).upper() == wanted
+        ]
+        if owned:
+            entries = owned
 
     # 1. scope by cargo — different cargoes must never share a quote
     if cargo_key:

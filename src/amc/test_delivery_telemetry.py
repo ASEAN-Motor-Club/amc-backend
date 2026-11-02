@@ -306,8 +306,8 @@ class MultiStackQuoteTests(TestCase):
         delivery_telemetry._snapshot_fetched_at = None
 
     @staticmethod
-    def _entry(delivery_id, cargo_key, weight, base, vehicle):
-        return {
+    def _entry(delivery_id, cargo_key, weight, base, vehicle, character_guid=None):
+        entry = {
             "delivery_id": delivery_id,
             "cargo_key": cargo_key,
             "vehicle": vehicle,
@@ -316,6 +316,9 @@ class MultiStackQuoteTests(TestCase):
             "game_payment_shadowed": base * 10,
             "source": "vehicle_cargos",
         }
+        if character_guid is not None:
+            entry["character_guid"] = character_guid
+        return entry
 
     def _ingest(self, entries):
         grouped = {}
@@ -337,6 +340,7 @@ class MultiStackQuoteTests(TestCase):
         self.assertEqual(telemetry["game_payment_bases"], [1523, 1920])
         self.assertTrue(telemetry["multi_quote"])
         # enforcement value is the HIGHEST registered quote
+        self.assertIsNotNone(telemetry)
         self.assertEqual(telemetry["game_payment_base"], 1920)
 
     def test_single_quote_payload_unchanged(self):
@@ -428,6 +432,60 @@ class MultiStackQuoteTests(TestCase):
         self.assertEqual(telemetry["weight_scoped_base"], 1478)
         self.assertEqual(telemetry["vehicle"], "Flanker3S_C")
         self.assertTrue(telemetry["multi_quote"])
+
+    def test_another_players_quote_for_the_same_contract_is_ignored(self):
+        """2026-10-31 Deathstroke/ninja: both hauled delivery 39427, same
+        cargo, same weight, same minute, independently priced — 4,083 vs
+        2,835.  Matching on the delivery id alone validated one player's
+        payout against the other's quote and clawed the difference."""
+        self._ingest(
+            [
+                self._entry(
+                    39427,
+                    "Log_Oak_12ft",
+                    2741.660888671875,
+                    2835,
+                    "Eastwood_C",
+                    character_guid="90C6424645C3527DA733CCAEDA37E1AC",
+                ),
+                self._entry(
+                    39427,
+                    "Log_Oak_12ft",
+                    2741.660888671875,
+                    4083,
+                    "Eastwood_C",
+                    character_guid="B0C72CB84F00C7FFFED03496C15794A5",
+                ),
+            ]
+        )
+        mine = delivery_telemetry.telemetry_for_delivery(
+            39427,
+            cargo_key="Log_Oak_12ft",
+            weight=2741.660888671875,
+            character_guid="B0C72CB84F00C7FFFED03496C15794A5",
+        )
+        self.assertIsNotNone(mine)
+        self.assertEqual(mine["game_payment_base"], 4083)
+        self.assertNotIn("weight_scoped_base", mine)
+
+        theirs = delivery_telemetry.telemetry_for_delivery(
+            39427,
+            cargo_key="Log_Oak_12ft",
+            weight=2741.660888671875,
+            character_guid="90C6424645C3527DA733CCAEDA37E1AC",
+        )
+        self.assertIsNotNone(theirs)
+        self.assertEqual(theirs["game_payment_base"], 2835)
+
+    def test_guid_scoping_falls_back_when_the_snapshot_has_no_owner(self):
+        """Coverage first: an entry with no character_guid must still match,
+        exactly as before the owner filter existed."""
+        self._ingest([self._entry(77, "Coal", 600.0, 1920, "Oldum_C")])
+        telemetry = delivery_telemetry.telemetry_for_delivery(
+            77, cargo_key="Coal", weight=600.0, character_guid="B0C72CB84F00C7FFFED03496C15794A5"
+        )
+        self.assertIsNotNone(telemetry)
+        self.assertEqual(telemetry["game_payment_base"], 1920)
 
     def test_stale_snapshot_returns_none(self):
         self._ingest([self._entry(42, "Coal", 600.0, 1523, "Oldum_C")])
