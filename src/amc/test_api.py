@@ -676,6 +676,77 @@ class DepotsAPITest(TestCase):
 
     @patch("amc.api.routes.get_world_last_modified")
     @patch("amc.api.routes.get_world")
+    def test_depots_owner_scan_is_single_pass(self, mock_get_world, mock_get_mtime):
+        """Unmapped depots must not rescan every building.
+
+        Regression: the owner lookup used a per-buildingGuid cache, and a
+        cached None is indistinguishable from a cache miss — so any depot
+        whose buildingGuid has no matching building rescanned the whole
+        buildings list on EVERY request.
+        """
+
+        class CountingBuilding(dict):
+            lookups = 0
+
+            def get(self, *args, **kwargs):
+                type(self).lookups += 1
+                return super().get(*args, **kwargs)
+
+        def building(guid, housing_key=None):
+            b = CountingBuilding(guid=guid)
+            if housing_key is not None:
+                b["housingKey"] = housing_key
+            return b
+
+        CountingBuilding.lookups = 0
+        mock_get_mtime.return_value = 946684800.0
+        mock_get_world.return_value = {
+            # Two depots with no matching building, one with a match.
+            "depots": [
+                {"name": "A", "storage": 1, "taxiDispatchLevel": 1, "buildingGuid": "nope-1"},
+                {"name": "B", "storage": 1, "taxiDispatchLevel": 1, "buildingGuid": "nope-2"},
+                {"name": "C", "storage": 1, "taxiDispatchLevel": 1, "buildingGuid": "guid-1"},
+            ],
+            "buildings": [building("guid-1", "House1") for _ in range(3)],
+        }
+
+        response = self.api_client.get("/depots/?owner=true")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json()[2]["owner"], "House1")
+        # One `guid` read + one `housingKey` read per building, once per
+        # request — independent of how many depots are unmapped.
+        self.assertLessEqual(CountingBuilding.lookups, 2 * 3)
+
+    @patch("amc.api.routes.get_world_last_modified")
+    @patch("amc.api.routes.get_world")
+    def test_depots_owner_not_cached_across_requests(self, mock_get_world, mock_get_mtime):
+        """Owner state must not persist between requests (guards a re-added cache)."""
+        from django.core.cache import cache
+
+        cache.clear()
+        mock_get_mtime.return_value = 946684800.0
+        mock_get_world.return_value = {
+            "depots": [
+                {"name": "A", "storage": 1, "taxiDispatchLevel": 1, "buildingGuid": "guid-1"},
+            ],
+            "buildings": [{"guid": "guid-1", "housingKey": "OldOwner"}],
+        }
+        first = self.api_client.get("/depots/?owner=true")
+        self.assertEqual(first.json()[0]["owner"], "OldOwner")
+
+        mock_get_world.return_value = {
+            "depots": [
+                {"name": "A", "storage": 1, "taxiDispatchLevel": 1, "buildingGuid": "guid-1"},
+            ],
+            "buildings": [{"guid": "guid-1", "housingKey": "NewOwner"}],
+        }
+        second = self.api_client.get("/depots/?owner=true")
+
+        self.assertEqual(second.json()[0]["owner"], "NewOwner")
+
+    @patch("amc.api.routes.get_world_last_modified")
+    @patch("amc.api.routes.get_world")
     def test_list_depots_empty(self, mock_get_world, mock_get_mtime):
         """Test GET /depots/ returns empty list when no depots"""
         mock_get_mtime.return_value = 946684800.0

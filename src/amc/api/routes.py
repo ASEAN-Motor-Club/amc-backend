@@ -131,9 +131,6 @@ def housing(request):
     return housings
 
 
-DEPOT_OWNER_CACHE_TIMEOUT = 604800  # 1 week in seconds
-
-
 @app_router.get("/depots/", response=list[DepotSchema])
 def depots(request, owner: bool = False):
     world_mtime = get_world_last_modified()
@@ -151,29 +148,27 @@ def depots(request, owner: bool = False):
     depots = world.get("depots", [])
 
     if owner:
-        response_data = []
-        for d in depots:
-            building_guid = d.get("buildingGuid", "").lower()
-            cache_key = f"depot_owner:{building_guid}"
-            cached_owner = cache.get(cache_key)
-            if cached_owner is None and building_guid:
-                for b in world.get("buildings", []):
-                    if b.get("guid", "").lower() == building_guid:
-                        cached_owner = b.get("housingKey")
-                        cache.set(
-                            cache_key, cached_owner, timeout=DEPOT_OWNER_CACHE_TIMEOUT
-                        )
-                        break
+        # Build the guid → housingKey lookup once per request. A per-guid
+        # cache can't represent "no owner" (a cached None is indistinguishable
+        # from a miss), so every depot whose buildingGuid has no matching
+        # building rescanned the whole buildings list on every request.
+        housing_key_by_guid = {
+            b["guid"].lower(): b.get("housingKey")
+            for b in world.get("buildings", [])
+            if b.get("guid")
+        }
 
-            response_data.append(
-                {
-                    "guid": building_guid,
-                    "name": d["name"],
-                    "storage": d["storage"],
-                    "taxiDispatchLevel": d["taxiDispatchLevel"],
-                    "owner": cached_owner,
-                }
-            )
+        response_data = [
+            {
+                "guid": building_guid,
+                "name": d["name"],
+                "storage": d["storage"],
+                "taxiDispatchLevel": d["taxiDispatchLevel"],
+                "owner": housing_key_by_guid.get(building_guid),
+            }
+            for d in depots
+            for building_guid in [d.get("buildingGuid", "").lower()]
+        ]
     else:
         response_data = [
             {
