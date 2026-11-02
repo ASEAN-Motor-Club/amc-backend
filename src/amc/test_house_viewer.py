@@ -80,9 +80,7 @@ class HouseViewerAPITest(TestCase):
         self.assertEqual(data["housingKey"], "FirstHouse")
         self.assertEqual(data["ownerName"], "freeman")
         # Plot geometry belongs to the client's own out_house.json, not this payload.
-        self.assertEqual(
-            set(data), {"housingKey", "ownerName", "groundTextures", "buildings"}
-        )
+        self.assertEqual(set(data), {"housingKey", "ownerName", "buildings"})
 
         self.assertEqual(len(data["buildings"]), 2)
         house, sofa = data["buildings"]
@@ -99,18 +97,14 @@ class HouseViewerAPITest(TestCase):
         )
 
     @patch("amc.api.house_routes.load_world")
-    def test_ground_textures_are_alongside_the_models(self, mock_world):
+    def test_ground_textures_are_not_per_plot(self, mock_world):
+        # Both PNGs are identical for every plot, so the client builds their paths itself and
+        # the payload stays ownership + placement only.
         mock_world.return_value = _world()
 
         data = self.client.get("/FirstHouse").json()
 
-        self.assertEqual(
-            data["groundTextures"],
-            {
-                "color": "/api/houses/ground/color.png?v=1",
-                "normal": "/api/houses/ground/normal.png?v=1",
-            },
-        )
+        self.assertNotIn("groundTextures", data)
 
     @patch("amc.api.house_routes.load_world")
     def test_housing_key_is_case_insensitive(self, mock_world):
@@ -182,7 +176,9 @@ class HouseViewerAssetsTest(TestCase):
         response = self.client.get("/models/SmallHouse_01/0.glb")
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response["Content-Type"], "model/gltf-binary")
-        self.assertEqual(response["Cache-Control"], "public, max-age=86400")
+        self.assertEqual(
+            response["Cache-Control"], "public, max-age=31536000, immutable"
+        )
         # Streaming bodies are already consumed by the test client; read the handler's own.
         self.assertEqual(
             b"".join(
@@ -213,6 +209,10 @@ class HouseViewerAssetsTest(TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertEqual(
             b"".join(house_routes.get_ground(None, "color").streaming_content), b"png"
+        )
+        self.assertEqual(
+            self.client.get("/ground/color.png")["Cache-Control"],
+            "public, max-age=31536000, immutable",
         )
         self.assertEqual(self.client.get("/ground/normal.png").status_code, 404)
         self.assertEqual(self.client.get("/ground/nope.png").status_code, 404)
