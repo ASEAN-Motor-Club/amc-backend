@@ -269,6 +269,18 @@ GDAL_LIBRARY_PATH = os.environ.get("GDAL_LIBRARY_PATH")
 GAME_SERVER_API_URL = os.environ.get("GAME_SERVER_API_URL", "http://127.0.0.1:8080")
 MOD_SERVER_API_URL = os.environ.get("MOD_SERVER_API_URL", "http://127.0.0.1:5001")
 
+# 3D house viewer (amc.api.house_routes). Building GLBs and the landscape ground textures are
+# static per game version: they are extracted by mt-map-extract's house-server (CUE4Parse is C#
+# only) and published into HOUSE_MODELS_PATH, which this backend serves — it is not something
+# Django can generate. Bump HOUSE_MODELS_VERSION when the published set is regenerated: it is
+# the `?v=` on every model URL, so browsers holding an old copy refetch.
+HOUSE_MODELS_PATH = os.environ.get(
+    "HOUSE_MODELS_PATH",
+    os.path.join(os.environ.get("DATA_PATH", "/srv/www"), "house-models"),
+)
+HOUSE_MODELS_URL = os.environ.get("HOUSE_MODELS_URL", "/api/houses")
+HOUSE_MODELS_VERSION = int(os.environ.get("HOUSE_MODELS_VERSION", "1"))
+
 # Pinned banner pushed to Motor Town after every server start. The banner is
 # runtime-only game state (GameState.Net_ServerConfig.PinnedAnnounce) — the
 # game clears it on boot, so the backend re-sets it when the ServerStarted log

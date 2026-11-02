@@ -39,6 +39,7 @@ api.add_router("/deliverypoints/", "amc.api.routes.deliverypoints_router")
 api.add_router("/deliveryjobs/", "amc.api.routes.deliveryjobs_router")
 api.add_router("/webui/deliveryjobs/", "amc.api.routes.webui_deliveryjobs_router")
 api.add_router("/", "amc.api.routes.app_router")
+api.add_router("/houses/", "amc.api.house_routes.house_router")
 
 # Phase 1: Public API Routers
 api.add_router("/cargos/", "amc.api.routes.cargos_router")
