@@ -14,7 +14,7 @@ from django.test import TestCase, override_settings
 from ninja.testing import TestClient
 
 from amc.api import house_routes
-from amc.api.house_routes import house_router, load_plots
+from amc.api.house_routes import house_router
 
 
 def _world(
@@ -70,7 +70,7 @@ class HouseViewerAPITest(TestCase):
         self.client = TestClient(house_router)
 
     @patch("amc.api.house_routes.load_world")
-    def test_returns_plot_geometry_and_buildings(self, mock_world):
+    def test_returns_owner_and_buildings(self, mock_world):
         mock_world.return_value = _world()
 
         response = self.client.get("/FirstHouse")
@@ -79,12 +79,10 @@ class HouseViewerAPITest(TestCase):
         data = response.json()
         self.assertEqual(data["housingKey"], "FirstHouse")
         self.assertEqual(data["ownerName"], "freeman")
-        # Houses-table values, in Unreal world cm.
-        self.assertEqual(data["size"], {"x": 2500.0, "y": 2300.0})
-        self.assertEqual(data["cost"], 300000)
-        self.assertIn("x", data["coord"])
-        # Rotated plot: the viewer builds its slab from this yaw.
-        self.assertAlmostEqual(data["yaw"], 96.06678009033203)
+        # Plot geometry belongs to the client's own out_house.json, not this payload.
+        self.assertEqual(
+            set(data), {"housingKey", "ownerName", "groundTextures", "buildings"}
+        )
 
         self.assertEqual(len(data["buildings"]), 2)
         house, sofa = data["buildings"]
@@ -136,12 +134,17 @@ class HouseViewerAPITest(TestCase):
         self.assertEqual(data["buildings"], [])
 
     @patch("amc.api.house_routes.load_world")
-    def test_unknown_housing_key_is_404(self, mock_world):
+    def test_unknown_housing_key_is_an_empty_plot(self, mock_world):
+        """The client owns the plot table, so a stray key must not error the viewer."""
         mock_world.return_value = _world()
 
         response = self.client.get("/NotAPlot")
 
-        self.assertEqual(response.status_code, 404)
+        self.assertEqual(response.status_code, 200)
+        data = response.json()
+        self.assertEqual(data["housingKey"], "NotAPlot")
+        self.assertIsNone(data["ownerName"])
+        self.assertEqual(data["buildings"], [])
 
     @patch("amc.api.house_routes.load_world")
     def test_building_without_a_key_is_skipped(self, mock_world):
@@ -252,20 +255,3 @@ class HouseViewerWorldCacheTest(TestCase):
         mock_mtime.return_value = 2000.0
         house_routes.load_world()
         self.assertEqual(mock_get_world.call_count, 2)
-
-
-class HousePlotTableTest(TestCase):
-    """`data/house_plots.json` is generated from the game data; a bad row breaks the viewer."""
-
-    def test_every_plot_is_complete(self):
-        plots = load_plots()
-
-        self.assertGreaterEqual(len(plots), 30)
-        for key, plot in plots.items():
-            self.assertEqual(plot["housingKey"].lower(), key)
-            self.assertIsInstance(plot["yaw"], (int, float))
-            self.assertIsInstance(plot["cost"], int)
-            self.assertEqual(set(plot["coord"]), {"x", "y", "z"})
-            self.assertEqual(set(plot["size"]), {"x", "y"})
-            self.assertGreater(plot["size"]["x"], 0)
-            self.assertGreater(plot["size"]["y"], 0)

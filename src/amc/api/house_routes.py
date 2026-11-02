@@ -4,23 +4,20 @@ The amc-web `/house/[housingKey]` page talks to three endpoints here (see its
 `HANDOFF-house-viewer.md` for the spec, and the POC's `house-server/README.md` for how a model is
 assembled):
 
-- `GET /api/houses/{housingKey}` — plot geometry + every building placed on it, each with a
-  model URL.
+- `GET /api/houses/{housingKey}` — who owns the plot and every building placed on it, each with
+  a model URL.
 - `GET /api/houses/models/{buildingKey}/{step}.glb` — the building as a GLB (glTF space:
   meters, Y-up, origin = actor root).
 - `GET /api/houses/ground/{color|normal}.png` — the Jeju landscape grass the plot sits on.
 
-Data sources:
+Plot geometry (coord, size, yaw, cost) is deliberately not served: amc-web already ships the
+game's own `out_house.json` and merges it client-side, so this API only carries what the site
+cannot know — ownership, placement and the static assets.
 
-- Plot geometry (`coord`, `size`, `cost`, `yaw`) comes from `amc/data/house_plots.json`:
-  `coord`/`size`/`cost` are the game's Houses table (byte-identical to the `out_house.json`
-  amc-web already ships), and `yaw` is the plot's House_C actor rotation, which
-  `out_house.json` drops but the viewer needs — plots are rotated, so a 25 m side can run along
-  world Y.
-- Ownership and placed buildings come from the world save (`amc.save_file.get_world`), the same
-  dump `/api/world/` serves. Placement stays save-driven, but the published model set decides
-  which rows can be drawn, so a save row with no Buildings-table entry (an event item, say) is
-  left out instead of 404ing the viewer's loader.
+Ownership and placed buildings come from the world save (`amc.save_file.get_world`), the same
+dump `/api/world/` serves. Placement stays save-driven, but the published model set decides which
+rows can be drawn, so a save row with no Buildings-table entry (an event item, say) is left out
+instead of 404ing the viewer's loader.
 - Models and ground textures are static per game version. Extracting them from the pak needs
   CUE4Parse, which is C# only, so this module serves the files instead of generating them:
   publish the mt-map-extract house-server's `out/house-server/glb-v<N>/` cache dir into
@@ -29,7 +26,6 @@ Data sources:
   cached copies.
 """
 
-import json
 import re
 from pathlib import Path
 from urllib.parse import quote
@@ -37,13 +33,10 @@ from urllib.parse import quote
 from django.conf import settings
 from django.http import FileResponse, Http404
 from ninja import Router
-from ninja.errors import HttpError
 
 from amc.save_file import get_world, get_world_last_modified
 
 house_router = Router()
-
-PLOTS_PATH = Path(__file__).resolve().parent.parent / "data" / "house_plots.json"
 
 # Building keys and ground texture kinds arrive in URLs; only ever open names that pass these.
 BUILDING_KEY_RE = re.compile(r"^[A-Za-z0-9_]+$")
@@ -54,13 +47,6 @@ GROUND_KINDS = {"color", "normal"}
 _world_cache: tuple[float, dict] | None = None
 # Published model names (`<buildingKey>_<step>`), keyed by the models dir's mtime.
 _models_cache: tuple[float, set[str]] | None = None
-
-
-def load_plots() -> dict[str, dict]:
-    """The plot table keyed by lowercased housing key (save keys differ in case)."""
-    with PLOTS_PATH.open() as f:
-        plots = json.load(f)
-    return {plot["housingKey"].lower(): plot for plot in plots}
 
 
 def load_world() -> dict:
@@ -163,23 +149,22 @@ def get_ground(request, kind: str):
 
 @house_router.get("/{housing_key}", response=dict)
 def get_house(request, housing_key: str):
-    plot = load_plots().get(housing_key.lower())
-    if plot is None:
-        raise HttpError(404, f"unknown housing key: {housing_key}")
-
-    key = plot["housingKey"]
     world = load_world()
     models = published_models()
 
+    # Any housing key is answered: the client owns the plot table, so an unknown key just comes
+    # back empty instead of erroring the viewer.
+    key = housing_key
     owner_name = None
     for housing in (world.get("housings") or {}).values():
-        if _same(housing.get("housingKey"), key):
+        if _same(housing.get("housingKey"), housing_key):
+            key = housing["housingKey"]
             owner_name = housing.get("ownerName")
             break
 
     buildings = []
     for row in world.get("buildings") or []:
-        if not _same(row.get("housingKey"), key):
+        if not _same(row.get("housingKey"), housing_key):
             continue
         building = _building(row)
         if building is None:
@@ -191,10 +176,6 @@ def get_house(request, housing_key: str):
 
     return {
         "housingKey": key,
-        "coord": plot["coord"],
-        "size": plot["size"],
-        "yaw": plot["yaw"],
-        "cost": plot["cost"],
         "ownerName": owner_name,
         "groundTextures": {
             "color": _ground_url("color"),
