@@ -18,6 +18,7 @@ from amc.models import (
     PlayerStatusLog,
     PlayerRestockDepotLog,
 )
+from amc.sessions import MAX_SESSION
 from amc.gov_employee import (
     calculate_gov_level,
     strip_gov_name,
@@ -183,9 +184,13 @@ class LeaderboardCog(commands.Cog):
             async for item in vehicles_qs
         ]
 
-        # 3. Most Active (Total Hours)
+        # 3. Most Active (Total Hours). Sessions over MAX_SESSION are
+        # log-corruption artefacts — see amc.sessions.
         active_qs = (
-            PlayerStatusLog.objects.filter(timespan__startswith__gte=start_date)
+            PlayerStatusLog.objects.filter(
+                timespan__startswith__gte=start_date,
+                duration__lte=MAX_SESSION,
+            )
             .values("character__name")
             .annotate(total=Sum("duration"))
             .filter(total__gt=timedelta(0))

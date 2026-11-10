@@ -1747,6 +1747,16 @@ class PlayerStatusLog(models.Model):
     character = models.ForeignKey(
         Character, on_delete=models.CASCADE, related_name="status_logs"
     )
+    host = models.CharField(
+        max_length=100,
+        blank=True,
+        default="",
+        help_text=(
+            "Game-server host that emitted the login event. Used so a restart "
+            "on one host closes only its own sessions. Empty for legacy rows "
+            "written before the column existed."
+        ),
+    )
     timespan = DateTimeRangeField()
     duration = models.GeneratedField(
         expression=F("timespan__endswith") - F("timespan__startswith"),
