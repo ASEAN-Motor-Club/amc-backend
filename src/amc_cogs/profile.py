@@ -24,6 +24,7 @@ from amc.models import (
     RescueRequest,
 )
 from amc.enums import CargoKey, VehicleKey
+from amc.sessions import MAX_SESSION
 from amc_finance.models import LedgerEntry
 
 if TYPE_CHECKING:
@@ -224,9 +225,11 @@ class PlayerProfileCog(commands.Cog):
         )
 
         # --- Activity ---
-        # Total play time
+        # Total play time. Ranges longer than MAX_SESSION are log-corruption
+        # artefacts (a lost logout used to leave a session running for weeks);
+        # counting them is what inflated profiles to thousands of hours.
         session_agg = await PlayerStatusLog.objects.filter(
-            character=character
+            character=character, duration__lte=MAX_SESSION
         ).aaggregate(total=Sum("duration", default=timedelta(0)))
         total_hours = session_agg["total"].total_seconds() / 3600
 

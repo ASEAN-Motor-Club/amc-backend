@@ -1,11 +1,12 @@
 import asyncio
 import random
 from django.utils import timezone
-from django.db import IntegrityError, connection, transaction
+from django.db import IntegrityError, transaction
 from django.db.models import Exists, F, OuterRef
 from django.contrib.gis.geos import Point
 from django.conf import settings
 from asgiref.sync import sync_to_async
+from psycopg.types.range import Range
 from amc.models import ServerLog
 from amc.server_logs import (
     parse_log_line,
@@ -829,104 +830,74 @@ async def handle_player_vehicle_mod_check(
             )
 
 
-async def process_login_event(character_id, timestamp):
-    """Use CTE to update and insert to the PlayerStatusLog table at the same time
-    to prevent race condition"""
-    raw_sql = """
-    WITH original_row AS (
-      SELECT id, timespan, lower(timespan) as login_time
-      FROM amc_playerstatuslog
-      WHERE character_id = %(character_id)s AND timespan @> %(timestamp)s
-      ORDER BY UPPER(timespan) ASC
-      LIMIT 1
-    ),
-    updated_row AS (
-      UPDATE amc_playerstatuslog
-      SET timespan = tstzrange(%(timestamp)s, upper(timespan), '[)')
-      WHERE id = (
-        SELECT id from original_row
-      )
-    )
-    INSERT INTO amc_playerstatuslog (character_id, timespan)
-    SELECT
-      %(character_id)s,
-      tstzrange(
-        (
-          CASE WHEN exists (SELECT 1 FROM original_row)
-          THEN (SELECT login_time FROM original_row)
-          ELSE %(timestamp)s
-          END
-        ),
-        NULL,
-        '[)'
-      )
-      WHERE NOT exists (SELECT 1 from original_row WHERE login_time is null)
-    ;
-  """
-    params = {
-        "character_id": character_id,
-        "timestamp": timestamp,
-    }
+async def process_login_event(character_id, timestamp, host=""):
+    """Open a play session, closing whatever was left open before it.
 
-    def _execute_raw_sql(sql, params):
-        with connection.cursor() as cursor:
-            cursor.execute(sql, params)
+    The close is delegated to :func:`amc.sessions.close_open_sessions` so a
+    dormant range is never stretched to ``timestamp`` — that is how the
+    multi-week "sessions" in the play-time totals were produced. A range with
+    no evidence for its end stays open (it contributes no duration) and is
+    reported for the repair command instead.
+    """
+    from amc import sessions
 
-    async_execute_raw_sql = sync_to_async(
-        _execute_raw_sql,
-        thread_sensitive=True,  # Important for database connections!
+    await sessions.close_open_sessions(character_id, timestamp, reason="login")
+
+    # Idempotent for replayed/duplicated log lines: a row already starting at
+    # this instant means the session is open, don't open a second one.
+    already_open = await PlayerStatusLog.objects.filter(
+        character_id=character_id, timespan__startswith=timestamp
+    ).aexists()
+    if already_open:
+        return
+    await PlayerStatusLog.objects.acreate(
+        character_id=character_id,
+        host=host or "",
+        timespan=Range(timestamp, None, bounds="[)"),
     )
-    await async_execute_raw_sql(raw_sql, params)
 
 
 async def process_logout_event(character_id, timestamp):
-    """Use CTE to update and insert to the PlayerStatusLog table at the same time
-    to prevent race condition"""
-    raw_sql = """
-    WITH original_row AS (
-      SELECT id, timespan, upper(timespan) as logout_time
-      FROM amc_playerstatuslog
-      WHERE character_id = %(character_id)s AND timespan @> %(timestamp)s
-      ORDER BY LOWER(timespan) DESC
-      LIMIT 1
-    ),
-    updated_row AS (
-      UPDATE amc_playerstatuslog
-      SET timespan = tstzrange(lower(timespan), %(timestamp)s, '[)')
-      WHERE id = (
-        SELECT id from original_row
-      )
-    )
-    INSERT INTO amc_playerstatuslog (character_id, timespan)
-    SELECT
-      %(character_id)s,
-      tstzrange(
-        NULL,
-        (
-          CASE WHEN exists (SELECT 1 FROM original_row)
-          THEN (SELECT logout_time FROM original_row)
-          ELSE %(timestamp)s
-          END
-        ),
-        '[)'
-      )
-      WHERE NOT exists (SELECT 1 from original_row WHERE logout_time is null)
-    ;
-  """
-    params = {
-        "character_id": character_id,
-        "timestamp": timestamp,
-    }
+    """Close the open session that contains ``timestamp``.
 
-    def _execute_raw_sql(sql, params):
-        with connection.cursor() as cursor:
-            cursor.execute(sql, params)
+    Ranges whose start is implausibly far back are not closed at ``timestamp``
+    (that converts a missing login line into a multi-day session); they are
+    closed at the evidence-backed end or left open for the repair command.
+    """
+    from amc import sessions
 
-    async_execute_raw_sql = sync_to_async(
-        _execute_raw_sql,
-        thread_sensitive=True,  # Important for database connections!
+    row = (
+        await PlayerStatusLog.objects.filter(
+            character_id=character_id,
+            timespan__upper_inf=True,
+            timespan__contains=timestamp,
+        )
+        .order_by("-timespan__startswith")
+        .afirst()
     )
-    await async_execute_raw_sql(raw_sql, params)
+    if row is None:
+        logger.error(
+            "Logout for character %s at %s matched no open session — the login "
+            "line was lost; run `manage.py repair_player_sessions --apply`",
+            character_id,
+            timestamp,
+        )
+        return
+
+    start = row.timespan.lower
+    end = await sessions.session_end(character_id, start, timestamp, row.host)
+    if end is None:
+        logger.error(
+            "Refusing to close the session of character %s starting %s at %s: "
+            "no evidence for its end",
+            character_id,
+            start,
+            timestamp,
+        )
+        return
+    await PlayerStatusLog.objects.filter(pk=row.pk).aupdate(
+        timespan=Range(start, end, bounds="[)")
+    )
 
 
 
@@ -1343,7 +1314,7 @@ async def process_log_event(
 
             # --- Immediate actions (no GUID needed) ---
             if character:
-                await process_login_event(character.id, timestamp)
+                await process_login_event(character.id, timestamp, hostname)
                 asyncio.create_task(send_player_messages(http_client_mod, player))
                 await refresh_player_name(character, http_client_mod)
                 # Non-blocking auto-moderation of the display name (LLM judge)
@@ -1679,6 +1650,14 @@ async def process_log_event(
                 ended_at=timezone.now()
             )
             logger.info("Closed stale police sessions on server start")
+
+            # Close the play sessions this restart interrupted. Only sessions
+            # that were plausibly live are closed, and only for this host —
+            # a restart of the event server must not truncate sessions on the
+            # main server. Stale open ranges are left to the repair command.
+            from amc import sessions as session_integrity
+
+            await session_integrity.close_sessions_on_restart(hostname, timestamp)
 
             # Staggered mod-API write batches. Each item retries transient
             # failures with backoff; a permanently failing item is logged and
