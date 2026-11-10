@@ -30,6 +30,7 @@ Usage::
 from __future__ import annotations
 
 import re
+from bisect import bisect_right
 from collections import defaultdict
 from datetime import timedelta
 
@@ -91,6 +92,15 @@ class Command(BaseCommand):
 
         ranges = session_integrity.build_session_ranges(events)
         ranges = self._resolve_oversized(ranges)
+        restart_violations = self._enforce_restart_bounds(ranges, events)
+        if restart_violations:
+            self.stdout.write(
+                self.style.WARNING(
+                    f"  clamped {restart_violations:,} range(s) that spanned a "
+                    f"restart of their own host (should be 0 — the pairing step "
+                    f"already splits on restarts)"
+                )
+            )
 
         targets = {cid for cid, *_ in ranges}
         if character_ids is not None:
@@ -225,6 +235,40 @@ class Command(BaseCommand):
                 end = evidence if evidence and evidence > start else start
             resolved.append((cid, start, end, host))
         return resolved
+
+    def _enforce_restart_bounds(self, ranges, events):
+        """No rebuilt range may span a restart of its own host.
+
+        The pairing step already closes a session at the restart that
+        interrupted it, so this is a self-check: a non-zero count means the
+        builder and this clamp disagree and the spans are untrustworthy.
+        Ranges with no host (legacy) are clamped by the earliest restart of
+        any host — that can only shorten them, never lengthen.
+        """
+        restarts: dict[str, list] = defaultdict(list)
+        for event in events:
+            if event.kind == "restart":
+                restarts[event.host].append(event.timestamp)
+        for host in restarts:
+            restarts[host].sort()
+
+        clamped = 0
+        for index, (cid, start, end, host) in enumerate(ranges):
+            if end is None:
+                continue
+            if host:
+                candidates = restarts.get(host, [])
+            else:
+                candidates = sorted(
+                    ts for timestamps in restarts.values() for ts in timestamps
+                )
+            if not candidates:
+                continue
+            position = bisect_right(candidates, start)
+            if position < len(candidates) and candidates[position] < end:
+                ranges[index] = (cid, start, candidates[position], host)
+                clamped += 1
+        return clamped
 
     def _existing_stats(self, targets):
         qs = PlayerStatusLog.objects.filter(character_id__in=targets)

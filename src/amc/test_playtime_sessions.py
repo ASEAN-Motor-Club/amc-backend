@@ -198,6 +198,60 @@ class TestRestarts(_SessionIntegrityBase):
         self.assertTrue(PlayerStatusLog.objects.get().timespan.upper_inf)
 
 
+class TestRestartAsEvidence(_SessionIntegrityBase):
+    """A restart disconnects everyone on that host, so it bounds the session."""
+
+    def restart_line(self, timestamp, hostname):
+        self.log_line(
+            timestamp, "DedicatedServer is started. version: 0.7.13", hostname
+        )
+
+    def test_login_closes_at_the_restart_when_the_logout_was_lost(self):
+        start = T0
+        self.open_session(start)  # host="h1"
+        restart_at = start + timedelta(hours=4)
+        self.restart_line(restart_at, "h1")
+        login_at = timezone.now()  # 30 days later, nothing else logged
+
+        async_to_sync(process_login_event)(self.character.id, login_at, "h1")
+
+        closed = PlayerStatusLog.objects.get(
+            character=self.character, timespan__upper_inf=False
+        )
+        self.assertEqual(closed.timespan.upper, restart_at)
+
+    def test_restart_of_another_host_is_not_evidence(self):
+        start = T0
+        self.open_session(start)  # host="h1"
+        self.restart_line(start + timedelta(hours=4), "h2")
+        login_at = timezone.now()
+
+        async_to_sync(process_login_event)(self.character.id, login_at, "h1")
+
+        # No proof for an h1 session ended: it must stay open, not be stretched.
+        self.assertEqual(
+            PlayerStatusLog.objects.filter(timespan__upper_inf=True).count(), 2
+        )
+
+    def test_restart_bounds_rebuilt_ranges(self):
+        from django.core.management import call_command
+
+        start = T0
+        restart_at = start + timedelta(hours=5)
+        self.log_line(start, f"Player Login: Goji ({self.player.unique_id})")
+        self.restart_line(restart_at, "asean-mt-server")
+        self.log_line(
+            start + timedelta(hours=9),
+            f"Player Logout: Goji ({self.player.unique_id})",
+        )
+
+        call_command("repair_player_sessions", "--apply", "--character", "Goji")
+
+        rows = self.rows()
+        self.assertEqual(len(rows), 1)
+        self.assertEqual(rows[0].timespan.upper, restart_at)
+
+
 class TestBuildSessionRanges(TestCase):
     def test_login_logout_pair(self):
         events = [

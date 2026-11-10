@@ -113,29 +113,63 @@ async def _player_unique_id(character_id: int) -> int | None:
     )
 
 
-async def _log_boundary(
-    character_id: int, start: datetime, boundary: datetime
+async def restart_boundary(
+    host: str, start: datetime, boundary: datetime
 ) -> datetime | None:
-    """Earliest login/logout log line for this player inside (start, boundary).
+    """Earliest dedicated-server (re)start of ``host`` inside (start, boundary).
 
-    A logout line is the exact end of the session; a login line is the end of
-    the previous one (the player had to be gone to log in again). Either way it
-    is proof the session did not continue past that timestamp.
+    A restart disconnects everyone on that host, so no session on it can
+    outlive the restart. This is the strongest bound available when the login
+    or logout line was lost with the restart — and it is proof, not a guess.
+    With an unknown (legacy) host the earliest restart of *any* host is used:
+    that can only shorten a range, never lengthen it.
     """
-    unique_id = await _player_unique_id(character_id)
-    if unique_id is None:
-        return None
-    line = (
-        await ServerLog.objects.filter(
-            timestamp__gt=start,
-            timestamp__lt=boundary,
-            text__contains=f"({unique_id})",
-        )
-        .filter(Q(text__startswith=LOGIN_PREFIX) | Q(text__startswith=LOGOUT_PREFIX))
-        .order_by("timestamp")
-        .afirst()
+    qs = ServerLog.objects.filter(
+        timestamp__gt=start,
+        timestamp__lt=boundary,
+        text__startswith=RESTART_PREFIX,
     )
+    if host:
+        qs = qs.filter(hostname=host)
+    line = await qs.order_by("timestamp").afirst()
     return line.timestamp if line else None
+
+
+async def _log_boundary(
+    character_id: int, start: datetime, boundary: datetime, host: str = ""
+) -> datetime | None:
+    """Earliest proof that the session ended, inside (start, boundary).
+
+    Candidates, earliest wins:
+
+    * a ``Player Logout`` line — the exact end of the session;
+    * a ``Player Login`` line — the player had to be gone to log in again;
+    * a dedicated-server restart of the same host — everyone was disconnected.
+    """
+    proofs: list[datetime] = []
+
+    unique_id = await _player_unique_id(character_id)
+    if unique_id is not None:
+        line = (
+            await ServerLog.objects.filter(
+                timestamp__gt=start,
+                timestamp__lt=boundary,
+                text__contains=f"({unique_id})",
+            )
+            .filter(
+                Q(text__startswith=LOGIN_PREFIX) | Q(text__startswith=LOGOUT_PREFIX)
+            )
+            .order_by("timestamp")
+            .afirst()
+        )
+        if line is not None:
+            proofs.append(line.timestamp)
+
+    restart = await restart_boundary(host, start, boundary)
+    if restart is not None:
+        proofs.append(restart)
+
+    return min(proofs) if proofs else None
 
 
 async def activity_boundary(
@@ -164,15 +198,16 @@ async def activity_boundary(
 
 
 async def session_end(
-    character_id: int, start: datetime, boundary: datetime
+    character_id: int, start: datetime, boundary: datetime, host: str = ""
 ) -> datetime | None:
     """Best evidence-backed end for a session that started at ``start``.
 
+    ``host`` scopes the restart bound; leave it empty for legacy rows.
     ``None`` means "no proof — leave the range open".
     """
     if boundary - start <= MAX_SESSION:
         return boundary
-    proof = await _log_boundary(character_id, start, boundary)
+    proof = await _log_boundary(character_id, start, boundary, host)
     if proof is not None:
         return proof
     return await activity_boundary(character_id, start, boundary)
@@ -194,7 +229,7 @@ async def close_open_sessions(
         start = row.timespan.lower
         if start is None or start >= boundary:
             continue
-        end = await session_end(character_id, start, boundary)
+        end = await session_end(character_id, start, boundary, row.host)
         if end is None:
             skipped += 1
             continue

@@ -885,7 +885,7 @@ async def process_logout_event(character_id, timestamp):
         return
 
     start = row.timespan.lower
-    end = await sessions.session_end(character_id, start, timestamp)
+    end = await sessions.session_end(character_id, start, timestamp, row.host)
     if end is None:
         logger.error(
             "Refusing to close the session of character %s starting %s at %s: "
