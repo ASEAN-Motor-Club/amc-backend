@@ -243,8 +243,26 @@ async def teleport_player(
     reset_trailers=None,
     reset_carried_vehicles=None,
     remove_cargo=None,
-    force=False,
+    force=True,
 ):
+    """Teleport a player through the mod webserver.
+
+    ``force`` must stay ON by default. Motor Town 0.7.20 hardened the
+    ``ServerTeleportCharacter`` RPC server-side and now drops any call that
+    reaches it without a charge — the mod's normal branch
+    (``PlayerManager.HandleTeleportPlayer``) calls
+    ``PC:ServerTeleportCharacter(location, false, false)``, so after the
+    0.7.20 upgrade every character teleport was refused with
+    ``[Security Alert] … Rejected no-charge ServerTeleportCharacter`` logged
+    game-side while the player simply saw nothing happen (the mod still
+    returned 200). ``Force`` makes the mod move the pawn with
+    ``K2_SetActorLocation`` + ``ClientTeleportedCharacter`` instead, which the
+    0.7.20 gate does not cover. Vehicle teleports ignore the flag — they go
+    through ``ClientResetVehicleAt`` / ``ServerResetVehicleAt``.
+
+    Backend-side gates (teleport-lock, wanted grace, police restrictions) run
+    before this call and are unaffected.
+    """
     await _write_limiter.acquire()
     data = {
         "Location": location,
