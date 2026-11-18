@@ -352,6 +352,13 @@
                   name = "amc_bot_reader";
                   ensureClauses.login = true;
                 }
+                {
+                  # Workshop site: column-scoped read-only access (see
+                  # sql/setup_workshop_ro.sql — the grants do not belong in
+                  # initialScript, which runs before migrations create tables).
+                  name = "amc_workshop_ro";
+                  ensureClauses.login = true;
+                }
               ];
               # Grant SELECT to bot reader + RLS on finance tables
               # Runs on first DB init only; for existing DBs run sql/setup_bot_reader.sql
@@ -382,6 +389,8 @@
                 host all all ::1/128 trust
                 # Bot read-only access from Tailscale subnet only
                 host amc amc_bot_reader 100.64.0.0/10 md5
+                # Workshop site (read-only, column-scoped) from Tailscale only
+                host amc amc_workshop_ro 100.64.0.0/10 md5
               '';
             };
             services.redis.servers."amc-backend".enable = true;
