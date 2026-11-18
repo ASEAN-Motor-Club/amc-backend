@@ -283,6 +283,12 @@ class VehicleKey(models.TextChoices):
     Brutus_Ambulance = "Brutus_Ambulance", "Brutus Ambulance"
     Crany = "Crany", "Crany"
     Brutus_FireEngine = "Brutus_FireEngine", "Brutus Fire Engine"
+    # 0.7.20 additions
+    Lamas = "Lamas", "Lamas"
+    Duro = "Duro", "Duro"
+    Atlas_6x2_Flatbed = "Atlas_6x2_Flatbed", "Atlas 6x2 Flatbed"
+    Trailer_Tippa = "Trailer_Tippa", "Tippa"
+    Trailer_Drover_Van = "Trailer_Drover_Van", "Drover Van"
 
 
 VehicleKeyByLabel = {label: value for value, label in VehicleKey.choices}
@@ -1162,6 +1168,32 @@ VEHICLE_DATA = {
         "asset_path": "/Game/Cars/Models/Shotan/Shotan.Shotan_10_C",
         "object_name": "Shotan_10_C",
         "cost": 160000,
+    },
+    # 0.7.20 additions (paths verified against the 0.7.20 server PAK)
+    "Lamas": {
+        "asset_path": "/Game/Cars/Models/Lamas/Lamas.Lamas_C",
+        "object_name": "Lamas_C",
+        "cost": 9000,
+    },
+    "Duro": {
+        "asset_path": "/Game/Cars/Models/Duro/Duro.Duro_C",
+        "object_name": "Duro_C",
+        "cost": 90000,
+    },
+    "Atlas_6x2_Flatbed": {
+        "asset_path": "/Game/Cars/Models/Atlas/Atlas_6x2_Flatbed.Atlas_6x2_Flatbed_C",
+        "object_name": "Atlas_6x2_Flatbed_C",
+        "cost": 150000,
+    },
+    "Trailer_Tippa": {
+        "asset_path": "/Game/Cars/Models/Tippa/Tippa.Tippa_C",
+        "object_name": "Tippa_C",
+        "cost": 220000,
+    },
+    "Trailer_Drover_Van": {
+        "asset_path": "/Game/Cars/Models/Trailer_Drover_Van/Trailer_Drover_Van.Trailer_Drover_Van_C",
+        "object_name": "Trailer_Drover_Van_C",
+        "cost": 100000,
     },
 }
 
