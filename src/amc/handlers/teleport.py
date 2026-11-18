@@ -37,6 +37,16 @@ CARGO_IGNORE_SECONDS = 300  # 5 minutes
 # last_location/last_online are refreshed by the positions monitor; only
 # trust them if they are at most this old when the reset arrives.
 LOCATION_FRESHNESS_SECONDS = 30
+# A roadside recovery happens while the player is ONLINE: the positions
+# monitor samples them every couple of seconds, so the driving row and the
+# current position are joined by an unbroken run of rows. A LOGIN breaks that
+# run — the game re-places the character (nearest-road / respawn correction)
+# and the pre-logout driving row sits kilometres away even though nobody
+# teleported. Any sampling gap this large between the driving row and the
+# reset means the two positions came from different sessions, so the distance
+# between them measures the login, not a recovery (freeman 2026-11-18).
+RECOVERY_SESSION_GAP_SECONDS = 120
+
 
 # Opaque by design: tells the player they were flagged and to contact an
 # admin — no mention of the cargo-ignore window or its duration.
@@ -46,6 +56,38 @@ FLAG_POPUP_TEXT = (
 )
 
 
+async def _largest_sampling_gap(character, since, now):
+    """Largest gap between consecutive sampled positions from ``since`` to ``now``.
+
+    The positions monitor samples online characters every couple of seconds, so
+    an unbroken gap means the character never left the server between ``since``
+    and ``now`` — i.e. both samples belong to the same session. A login (or a
+    game-side re-place) breaks the run instead.
+
+    Short-circuits as soon as the gap exceeds RECOVERY_SESSION_GAP_SECONDS:
+    the caller only needs "is there a session break", not its exact size.
+    """
+    from amc.models import CharacterLocation
+
+    prev = since
+    largest = 0.0
+    async for ts in (
+        CharacterLocation.objects.filter(character=character, timestamp__gte=since)
+        .order_by("timestamp")
+        .values_list("timestamp", flat=True)
+        .aiterator()
+    ):
+        gap = (ts - prev).total_seconds()
+        largest = max(largest, gap)
+        if largest > RECOVERY_SESSION_GAP_SECONDS:
+            return largest
+        prev = ts
+    # Tail: the stretch from the last sampled row (or from ``since`` itself
+    # when nothing was sampled) up to the reset.
+    tail = (now - prev).total_seconds()
+    return max(largest, tail)
+
+
 async def _reset_flag_reason(character, now):
     """Return (reason_text, delivery_point_name, distance_units) or all-None.
 
@@ -53,6 +95,12 @@ async def _reset_flag_reason(character, now):
     roadside recovery would teleport) is more than RESET_FAR_RECOVERY_UNITS
     from where they stand now. The near-delivery-point trigger was removed
     (freeman 2026-09-26): legit tow jobs deliver wrecks to delivery points.
+
+    The comparison is only meaningful inside ONE session: a real recovery
+    happens with the player online, so their samples run continuously from the
+    driving row to the reset. When the driving row is separated from now by a
+    sampling gap (login / respawn re-place), the distance measures the login,
+    not a teleport — skip the flag (freeman 2026-11-18).
     """
     import math
 
@@ -76,6 +124,17 @@ async def _reset_flag_reason(character, now):
             last_drive.location.y - character.last_location.y,
         )
         if recover_dist > RESET_FAR_RECOVERY_UNITS:
+            gap = await _largest_sampling_gap(character, last_drive.timestamp, now)
+            if gap > RECOVERY_SESSION_GAP_SECONDS:
+                logger.info(
+                    "Reset flag skipped for %s: %.0fs sampling gap since the "
+                    "last driving row %.0fs ago — different session "
+                    "(login/reset), not a roadside recovery",
+                    character.name,
+                    gap,
+                    (now - last_drive.timestamp).total_seconds(),
+                )
+                return None, None, None
             return (
                 "Roadside recovery teleported the vehicle "
                 f"{recover_dist / 100:.0f} m to the character",

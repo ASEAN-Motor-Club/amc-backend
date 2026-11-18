@@ -156,13 +156,28 @@ class ResetNearDeliveryPointTests(TestCase):
         character = await self._setup(x=0, y=0)
         # No delivery points needed — trigger 2 only.
         # The vehicle's last known driving position: 150,000 units (1.5 km)
-        # away, observed 2 minutes ago.
-        await CharacterLocation.objects.acreate(
+        # away, observed 2 minutes ago. The player stayed ONLINE afterwards
+        # (positions monitor samples them every couple of seconds), so the
+        # driving row and the reset belong to the same session.
+        #
+        # `CharacterLocation.timestamp` is `auto_now_add`, so a timestamp passed
+        # to create() is ignored — backdate with an UPDATE instead.
+        drive = await CharacterLocation.objects.acreate(
             character=character,
             location=Point(150_000, 0, 0),
             vehicle_key="Golima_Semi",
-            timestamp=timezone.now() - timedelta(minutes=2),
         )
+        await CharacterLocation.objects.filter(pk=drive.pk).aupdate(
+            timestamp=timezone.now() - timedelta(minutes=2)
+        )
+        # Standing-next-to-the-wreck samples up to the reset: same session.
+        for offset in range(105, 0, -15):
+            sample = await CharacterLocation.objects.acreate(
+                character=character, location=Point(0, 0, 0)
+            )
+            await CharacterLocation.objects.filter(pk=sample.pk).aupdate(
+                timestamp=timezone.now() - timedelta(seconds=offset)
+            )
 
         posted = []
         with patch(
@@ -182,6 +197,43 @@ class ResetNearDeliveryPointTests(TestCase):
         await character.arefresh_from_db()
         assert character.cargo_ignore_until is not None
         assert posted and "1.5 km" in str(posted[0].get("detail", "")) or posted and "1500 m" in str(posted[0].get("detail", ""))
+
+    @patch("amc.webhook.get_treasury_fund_balance", new_callable=AsyncMock, return_value=100_000)
+    @patch("amc.webhook.announce", new_callable=AsyncMock)
+    async def test_far_recovery_across_login_does_not_flag(
+        self, mock_announce, mock_treasury
+    ):
+        """A login reset must not flag.
+
+        The game re-places a logging-in character (nearest-road correction), so
+        the pre-logout driving row sits kilometres away. Nothing was sampled
+        between that row and the reset, which is the tell: a roadside recovery
+        happens with the player online and leaves an unbroken sample stream.
+        """
+        from amc.models import CharacterLocation
+        from amc.webhook import process_events
+
+        character = await self._setup(x=0, y=0)
+        # Pre-logout driving position 8 km away, sampled 4 minutes ago...
+        # (`timestamp` is `auto_now_add`, so backdate via UPDATE.)
+        drive = await CharacterLocation.objects.acreate(
+            character=character,
+            location=Point(800_000, 0, 0),
+            vehicle_key="Golima_Semi",
+        )
+        await CharacterLocation.objects.filter(pk=drive.pk).aupdate(
+            timestamp=timezone.now() - timedelta(minutes=4)
+        )
+        # ...then the session died: no rows at all until the reset arrives.
+        with patch("amc.handlers.teleport.show_popup", new_callable=AsyncMock):
+            await process_events(
+                [_reset_event(character.guid)],
+                http_client=MagicMock(),
+                http_client_mod=MagicMock(),
+            )
+
+        await character.arefresh_from_db()
+        assert character.cargo_ignore_until is None
 
     @patch("amc.webhook.get_treasury_fund_balance", new_callable=AsyncMock, return_value=100_000)
     @patch("amc.webhook.announce", new_callable=AsyncMock)
