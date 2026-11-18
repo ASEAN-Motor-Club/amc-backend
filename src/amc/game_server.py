@@ -5,6 +5,7 @@ from typing import Any, cast
 import urllib.parse
 import aiohttp
 from yarl import URL
+from django.conf import settings
 from django.core.cache import cache
 
 logger = logging.getLogger(__name__)
@@ -15,6 +16,12 @@ _NEG_SENTINEL = "__none__"
 async def game_api_request(
     session, url, method="get", password="", params={}, timeout=15
 ):
+    # Fall back to the configured Host Web API password.  0.7.20+ rejects every
+    # request while the server-side password is empty, so callers that omit it
+    # would otherwise silently get {"succeeded": false, "message": "Invalid
+    # password"} for everything (that is exactly how /player/list broke).
+    if not password:
+        password = getattr(settings, "GAME_SERVER_API_PASSWORD", "")
     req_params = {"password": password, **params}
     params_str = urllib.parse.urlencode(
         req_params, quote_via=cast(Any, urllib.parse.quote)

@@ -267,6 +267,11 @@ GEOS_LIBRARY_PATH = os.environ.get("GEOS_LIBRARY_PATH")
 GDAL_LIBRARY_PATH = os.environ.get("GDAL_LIBRARY_PATH")
 
 GAME_SERVER_API_URL = os.environ.get("GAME_SERVER_API_URL", "http://127.0.0.1:8080")
+# Host Web API password.  Motor Town 0.7.20+ is fail-closed: while the server's
+# HostWebAPIServerPassword is empty, EVERY Host Web API request is rejected with
+# "Invalid password" (see ReadMe.txt, [Host Web API Settings]).  Must match
+# services.motortown-server.dedicatedServerConfig.HostWebAPIServerPassword.
+GAME_SERVER_API_PASSWORD = os.environ.get("GAME_SERVER_API_PASSWORD", "")
 MOD_SERVER_API_URL = os.environ.get("MOD_SERVER_API_URL", "http://127.0.0.1:5001")
 
 # 3D house viewer (amc.api.house_routes). Building GLBs and the landscape ground textures are
