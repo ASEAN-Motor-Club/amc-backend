@@ -1,10 +1,15 @@
+import ast
+import importlib
+import inspect
 from datetime import timedelta
+from pathlib import Path
 
 import pytest
 from asgiref.sync import sync_to_async
 from django.contrib.gis.geos import Point
 from django.utils import timezone
 
+import amc
 from amc.economy_dashboard import (
     contribution_leaderboard,
     sector_drilldown,
@@ -684,3 +689,70 @@ async def test_resident_excluded_from_retail(db):
         await DeliveryPoint.objects.filter(
             guid__in=("econ-retail-house", "econ-retail-house-blank", "econ-retail-shop")
         ).adelete()
+
+
+async def test_snapshot_storages_accepts_arq_ctx():
+    """arq cron invokes every registered coroutine as ``fn(ctx)``.
+
+    A zero-argument signature raises ``TypeError: snapshot_storages() takes 0
+    positional arguments but 1 was given`` on every tick, so the hourly storage
+    snapshot never ran and the dashboard read stale data (silent: the worker
+    just logged the traceback). Regression guard for that signature.
+    """
+    params = inspect.signature(snapshot_storages).parameters
+    positional = [
+        p
+        for p in params.values()
+        if p.kind in (p.POSITIONAL_ONLY, p.POSITIONAL_OR_KEYWORD)
+    ]
+    assert positional, "snapshot_storages must accept the arq ctx argument"
+
+
+async def test_every_cron_coroutine_accepts_ctx():
+    """No cron target may be a zero-argument coroutine — check them all.
+
+    Resolves each ``cron(fn, ...)`` target in ``amc_backend/worker.py`` through
+    that module's own ``from x import fn`` statements and asserts the callable
+    takes at least one positional parameter. Covers the whole cron surface, so a
+    new job with the wrong signature fails here instead of quietly never running.
+    """
+    worker_src = Path(amc.__file__).parents[1] / "amc_backend" / "worker.py"
+    tree = ast.parse(worker_src.read_text())
+
+    origins = {}
+    for node in ast.walk(tree):
+        if isinstance(node, ast.ImportFrom) and node.module:
+            for alias in node.names:
+                origins[alias.asname or alias.name] = node.module
+
+    targets = set()
+    for node in ast.walk(tree):
+        if (
+            isinstance(node, ast.Call)
+            and isinstance(node.func, ast.Name)
+            and node.func.id == "cron"
+            and node.args
+            and isinstance(node.args[0], ast.Name)
+        ):
+            targets.add(node.args[0].id)
+
+    assert targets, "no cron targets parsed from worker.py — scan is stale"
+
+    bad = []
+    for name in sorted(targets):
+        module = origins.get(name)
+        if not module:
+            continue  # locally defined / indirect — not resolvable from imports
+        fn = getattr(importlib.import_module(module), name, None)
+        if fn is None:
+            continue
+        params = inspect.signature(fn).parameters
+        positional = [
+            p
+            for p in params.values()
+            if p.kind in (p.POSITIONAL_ONLY, p.POSITIONAL_OR_KEYWORD)
+        ]
+        if not positional:
+            bad.append(f"{module}.{name}")
+
+    assert not bad, f"arq cron coroutines must accept ctx: {bad}"
