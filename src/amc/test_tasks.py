@@ -47,7 +47,7 @@ class LoginWelcomeUsesForcedNameTests(TestCase):
         )
         greeted_with = []
 
-        def fake_get_welcome_message(name, is_new, last_online=None):
+        def fake_get_welcome_message(name, is_new, last_online=None, **_kwargs):
             greeted_with.append(name)
             return f"Welcome back {name}!", False
 
@@ -84,7 +84,7 @@ class LoginWelcomeUsesForcedNameTests(TestCase):
         )
         greeted_with = []
 
-        def fake_get_welcome_message(name, is_new, last_online=None):
+        def fake_get_welcome_message(name, is_new, last_online=None, **_kwargs):
             greeted_with.append(name)
             return f"Welcome back {name}!", False
 
@@ -149,7 +149,7 @@ class GetWelcomeMessageTests(SimpleTestCase):
         message, is_new = get_welcome_message(
             "TestPlayer", is_new=False, last_online=last_online
         )
-        self.assertEqual(message, "Long time no see! Welcome back TestPlayer")
+        self.assertEqual(message, "Long time no see! Welcome back TestPlayer!")
         self.assertFalse(is_new)
 
     def test_total_seconds_not_seconds(self):
@@ -163,7 +163,7 @@ class GetWelcomeMessageTests(SimpleTestCase):
         message, _ = get_welcome_message(
             "TestPlayer", is_new=False, last_online=last_online
         )
-        self.assertEqual(message, "Long time no see! Welcome back TestPlayer")
+        self.assertEqual(message, "Long time no see! Welcome back TestPlayer!")
 
     def test_just_over_1_hour(self):
         """Just over 1 hour returns 'Welcome back'."""

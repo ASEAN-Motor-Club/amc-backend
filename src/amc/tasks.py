@@ -47,6 +47,7 @@ from amc.models import (
     TeleportPoint,
 )
 from amc.game_server import announce, get_players, get_player_info
+from amc.login_reward import claim_daily_login_reward, format_streak_clause
 from amc.police import is_police_vehicle, deactivate_police
 from amc.utils import forward_to_discord
 from amc.mod_server import (
@@ -368,22 +369,36 @@ async def on_vehicle_sold(character, vehicle_name, http_client_mod):
         )
 
 
-def get_welcome_message(player_name, is_new, last_online=None):
+def get_welcome_message(
+    player_name, is_new, last_online=None, login_streak=None, reward_amount=None
+):
+    """Build the login greeting.
+
+    ``login_streak``/``reward_amount`` are set when a daily login reward was
+    claimed on this login; the streak is then part of the announcement and the
+    message is never suppressed (a quick relog on a new day still gets it).
+    """
+    streak_clause = ""
+    if login_streak is not None and reward_amount:
+        streak_clause = " " + format_streak_clause(login_streak, reward_amount)
+
     if is_new:
         return (
-            f"Welcome {player_name}! Use /help to see the available commands on this server. Join the discord at aseanmotorclub.com. Have fun!",
+            f"Welcome {player_name}! Use /help to see the available commands on this server. Join the discord at aseanmotorclub.com. Have fun!{streak_clause}",
             True,
         )
     if not last_online:
         # Existing player but last_online not yet populated — generic greeting
-        return f"Welcome back {player_name}!", False
+        return f"Welcome back {player_name}!{streak_clause}", False
     sec_since_online = (timezone.now() - last_online).total_seconds()
     if sec_since_online > (3600 * 24 * 7):
-        return f"Long time no see! Welcome back {player_name}", False
-    if sec_since_online > 3600:
-        return f"Welcome back {player_name}!", False        
+        greeting = f"Long time no see! Welcome back {player_name}!"
+    elif sec_since_online > 3600 or streak_clause:
+        greeting = f"Welcome back {player_name}!"
+    else:
+        return None, False
 
-    return None, False
+    return f"{greeting}{streak_clause}", False
 
 
 async def _resolve_guid_from_game_server(http_client, player_id, force_refresh=False):
@@ -1337,10 +1352,24 @@ async def process_log_event(
                 # Deterministic — no LLM gating on login.
                 try:
                     welcome_name = player.forced_name or character.name
+                    # Daily login reward (per character, one per calendar
+                    # day). Claim before building the greeting so the
+                    # announcement can carry the streak.
+                    login_reward = None
+                    if character is not None:
+                        login_reward = await claim_daily_login_reward(
+                            character, player, http_client_mod
+                        )
                     welcome_message, _is_new = get_welcome_message(
                         welcome_name,
                         is_new=is_new_player,
                         last_online=character.last_online,
+                        login_streak=(
+                            login_reward.streak if login_reward else None
+                        ),
+                        reward_amount=(
+                            login_reward.amount if login_reward else None
+                        ),
                     )
                     if welcome_message:
                         asyncio.create_task(
