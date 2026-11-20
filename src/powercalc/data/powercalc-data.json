@@ -3594,6 +3594,33 @@
    "type": "Engine",
    "vehicle_types": []
   },
+  "MediumDuty_290HP": {
+   "category": "truck",
+   "cost": 32000,
+   "engine_asset": "MediumDuty_290HP",
+   "engine_asset_raw": "MediumDuty_290HP",
+   "intake": {
+    "BaseRPMRatio": 0.5,
+    "IntakeSpeedEfficencyMultiplier": 1,
+    "Slope": 0,
+    "_StructType": "MTVehiclePartIntake"
+   },
+   "mass_kg": 600,
+   "name": "C27A083E57814F65BCD4BF1D7B927E09",
+   "truck_classes": [],
+   "turbocharger": {
+    "BaseTorqueMultiplier": 1,
+    "FuelConsumptionMultiplier": 1,
+    "HeatingMultiplier": 1,
+    "IntakePressureMultiplier": 1,
+    "TorqueMultiplier": 1,
+    "TurbineAspectRatio": 1,
+    "TurbineWeight": 1,
+    "bIsValid": false
+   },
+   "type": "Engine",
+   "vehicle_types": []
+  },
   "MediumDuty_330HP": {
    "category": "truck",
    "cost": 50000,
@@ -4606,6 +4633,33 @@
    },
    "mass_kg": 240,
    "name": null,
+   "truck_classes": [],
+   "turbocharger": {
+    "BaseTorqueMultiplier": 1,
+    "FuelConsumptionMultiplier": 1,
+    "HeatingMultiplier": 1,
+    "IntakePressureMultiplier": 1,
+    "TorqueMultiplier": 1,
+    "TurbineAspectRatio": 1,
+    "TurbineWeight": 1,
+    "bIsValid": false
+   },
+   "type": "Engine",
+   "vehicle_types": []
+  },
+  "V6Sport_200HP": {
+   "category": "car",
+   "cost": 10000,
+   "engine_asset": "V6Sport_200HP",
+   "engine_asset_raw": "V6Sport_200HP",
+   "intake": {
+    "BaseRPMRatio": 0.5,
+    "IntakeSpeedEfficencyMultiplier": 1,
+    "Slope": 0,
+    "_StructType": "MTVehiclePartIntake"
+   },
+   "mass_kg": 215,
+   "name": "9DC246083E1D4495BA607D5B9E37FFAD",
    "truck_classes": [],
    "turbocharger": {
     "BaseTorqueMultiplier": 1,
@@ -8997,6 +9051,22 @@
    "curve": "DieselTruck",
    "name": "MediumDuty_250HP"
   },
+  "MediumDuty_290HP": {
+   "FrictionCoulombCoeff": 2580000,
+   "FrictionViscosityCoeff": 5250,
+   "FuelConsumption": 300,
+   "FuelType": "Diesel",
+   "IdleThrottle": 0.017,
+   "Inertia": 40000,
+   "MaxRPM": 2400,
+   "MaxRegenTorqueRatio": null,
+   "MaxTorque": 15500000,
+   "MotorMaxPower": null,
+   "MotorMaxVoltage": null,
+   "StarterTorque": 3000000,
+   "curve": "DieselTruck",
+   "name": "MediumDuty_290HP"
+  },
   "MediumDuty_330HP": {
    "FrictionCoulombCoeff": 2940000,
    "FrictionViscosityCoeff": 6000,
@@ -9044,6 +9114,22 @@
    "StarterTorque": 20000,
    "curve": "SmallBlock",
    "name": "Scooter_15HP"
+  },
+  "V6Sport_200HP": {
+   "FrictionCoulombCoeff": 260000,
+   "FrictionViscosityCoeff": 650,
+   "FuelConsumption": 180,
+   "FuelType": "Petrol",
+   "IdleThrottle": 0.003,
+   "Inertia": 2600,
+   "MaxRPM": 6800,
+   "MaxRegenTorqueRatio": null,
+   "MaxTorque": 3050000,
+   "MotorMaxPower": null,
+   "MotorMaxVoltage": null,
+   "StarterTorque": 200000,
+   "curve": "DOHC",
+   "name": "V6Sport_200HP"
   },
   "V6Sport_400HP": {
    "FrictionCoulombCoeff": 430000,
@@ -9904,6 +9990,7 @@
   "Ambi": "SmallBlock_240HP",
   "Atlas_4x2_Semi": "HeavyDuty_260HP",
   "Atlas_6x2_Dryvan": "HeavyDuty_350HP",
+  "Atlas_6x2_Flatbed": "HeavyDuty_350HP",
   "Atlas_6x2_Garbage": "HeavyDuty_350HP",
   "Atlas_6x2_Semi": "HeavyDuty_350HP",
   "Atlas_6x2_Tanker": "HeavyDuty_350HP",
@@ -9930,6 +10017,7 @@
   "Duke": "SmallBlock_180HP",
   "Dumbi": "Bus_230HP",
   "DumpTruck_01": "HeavyDuty_350HP",
+  "Duro": "SmallBlock_320HP",
   "EVan": "Electric_130HP",
   "Elisa": "SmallBlock_180HP",
   "Elisa2": "SmallBlock_180HP",
@@ -9962,6 +10050,7 @@
   "Kuda_Dryvan_4x2": "HeavyDuty_350HP",
   "Kuda_Flatbed_4x2": "HeavyDuty_350HP",
   "Kuda_LiveFishTank_4x2": "HeavyDuty_350HP",
+  "Lamas": "I4_50HP",
   "Liliput": "Bus_140HP",
   "Lobo": "HeavyDuty_350HP",
   "Longhorn_Rollback": "HeavyDuty_350HP",

@@ -1,8 +1,8 @@
 {
   "schema": "powercalc-provenance/1",
   "model_version": "1.1.0",
-  "data_version": "2026.09.3",
-  "generated": "2026-09-10",
+  "data_version": "2026.11.1",
+  "generated": "2026-11-20",
   "validation": {
     "method": "in-game dyno comparison (Yuuka, 2026-09-01)",
     "case": "FordSmalBlock302_V8_5L_240HP + Intake 201 + Turbocharger_Stage1",
@@ -62,6 +62,14 @@
       "pak_version": "V3",
       "files": 243,
       "adds": "16 engine DataAssets + 9 torque curves + superset Engines DataTable (36 vanilla + 152 MoreTuning rows byte-equal + 16 new); vanilla rows keep stock physics but lose VehicleTypes/tag-query gating (universal fitment is the pack design)"
+    },
+    "vanilla_0_7_20": {
+      "game_version": "0.7.20",
+      "pak_ref": "/var/lib/data/mt-steam-0720/client/MotorTown/Content/Paks/MotorTown-Windows.pak",
+      "sha256": "aacf2e68c768a468891e059bd21ed193f325925e83d0c18f36bf822b56d990bb",
+      "bytes": 2995219698,
+      "gamedata": "gamedata.db 0.7.20 (vehicle_default_engine, vanilla engines)",
+      "note": "all 36 pre-existing vanilla engine assets re-parsed from this pak: 0 value drift vs the 0.7.19 bake; the 8 vanilla torque curves are byte-identical; 0.7.20 adds 2 engines (MediumDuty_290HP, V6Sport_200HP)"
     }
   },
   "engine_categories": "heuristic from part-row name patterns (bike/truck/pickup/car) + raw MassKg/VehicleTypes/TruckClasses from the Engines DataTable; categories are advisory, mass and tags are authoritative",
