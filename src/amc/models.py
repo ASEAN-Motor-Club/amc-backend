@@ -345,6 +345,11 @@ class Character(models.Model):
     last_location = models.PointField(srid=0, dim=3, null=True, blank=True)
     last_vehicle_key = models.CharField(max_length=100, null=True, blank=True)
     last_online = models.DateTimeField(null=True, blank=True)
+    # Daily login reward (per character): consecutive calendar days
+    # (Asia/Bangkok) on which a reward was claimed, and the last claim date so
+    # a second login on the same day cannot pay twice.
+    login_streak = models.PositiveIntegerField(default=0)
+    last_login_reward_date = models.DateField(null=True, blank=True)
     # Set to timezone.now() by _check_shortcut_zones when a player
     # penetrates BEYOND the shortcut zone's 20m grace buffer (a shallow
     # entry is not penalised); read by webhook.process_events as a rolling
