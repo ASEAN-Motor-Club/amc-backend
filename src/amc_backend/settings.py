@@ -119,6 +119,15 @@ LOGGING = {
             "level": "INFO",
             "propagate": False,
         },
+        # Daily login reward: per-claim INFO line (character, streak, amount)
+        # and the WARNING when the treasury floor blocks a payout. The parent
+        # "amc" logger runs at ERROR with propagate=False and would swallow
+        # both, making a silently-unpaid reward invisible in the journal.
+        "amc.login_reward": {
+            "handlers": ["console"],
+            "level": "INFO",
+            "propagate": False,
+        },
     },
 }
 
