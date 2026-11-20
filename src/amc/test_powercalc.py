@@ -21,7 +21,7 @@ DYNO = provenance()["validation"]
 
 def test_versions_present():
     assert model_version() == "1.1.0"
-    assert data_version() == "2026.09.3"
+    assert data_version() == "2026.11.1"
 
 
 def test_golden_dyno_case():
@@ -49,6 +49,15 @@ def test_golden_integra_dyno_case():
 def test_rating_vanilla_240hp_stock():
     res = compute_setup("SmallBlock_240HP")
     assert res.peak_power_hp == pytest.approx(238.6, abs=1.0)
+
+
+def test_rating_0720_new_engines():
+    """0.7.20 added two vanilla engines; both must reproduce their nameplate."""
+    res = compute_setup("MediumDuty_290HP")
+    assert res.peak_power_hp == pytest.approx(290.4, abs=1.0)
+    assert res.peak_torque_nm == pytest.approx(1550.8, abs=2.0)
+    res = compute_setup("V6Sport_200HP")
+    assert res.peak_power_hp == pytest.approx(206.5, abs=1.0)
 
 
 def test_rating_mt_tuned_engine():
@@ -315,10 +324,11 @@ def test_teh_engine_pack_mt_rows_untouched():
     assert part["engine_asset"] == "MT_20tfsi"
     vanilla = pdata.engine_part("SmallBlock_240HP")
     assert vanilla["cost"] == 15000  # stock row intact
-    # total counts: 188 pre-existing engines + 16 new = 204
+    # total counts: 188 pre-existing engines + 16 pack = 204, +2 vanilla
+    # engines added by 0.7.20 (MediumDuty_290HP, V6Sport_200HP) = 206 / 203
     snap = pdata._snapshot()
-    assert len(snap["engines"]) == 204
-    assert len(snap["engine_parts"]) == 201
+    assert len(snap["engines"]) == 206
+    assert len(snap["engine_parts"]) == 203
 
 
 def test_teh_engine_pack_popup_lines():
