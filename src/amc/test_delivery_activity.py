@@ -13,6 +13,7 @@ import asyncio
 import datetime
 import time
 import uuid
+from unittest.mock import AsyncMock, patch
 
 from asgiref.sync import sync_to_async
 from django.contrib.gis.geos import Point
@@ -33,6 +34,11 @@ from amc.models import (
     DeliveryPoint,
     Player,
     ServerCargoArrivedLog,
+)
+from amc.commands.jobs import (
+    cmd_jobs,
+    format_active_workers,
+    get_active_workers_by_job,
 )
 from amc.webhook import process_event
 
@@ -141,7 +147,6 @@ class _ActivityTestBase(TestCase):
 
 
 class DeliveryActivityTests(_ActivityTestBase):
-
     @staticmethod
     def _accept_event(delivery_id, player):
         return {
@@ -347,3 +352,108 @@ class DeliveryActivityWebhookTests(_ActivityTestBase):
 
         row = await DeliveryActivityLog.objects.filter(delivery_id=6001).aget()
         self.assertEqual(row.delivery_id, 6001)
+
+
+class _StubContext:
+    """Minimal CommandContext for /jobs rendering."""
+
+    def __init__(self):
+        self.timestamp = timezone.now()
+        self.character = None
+        self.http_client_mod = None
+        self.messages = []
+
+    async def reply(self, message):
+        self.messages.append(message)
+
+
+class JobsPopupActivityTests(_ActivityTestBase):
+    """/jobs shows who is on a job right now."""
+
+    def test_active_workers_helper_groups_by_job(self):
+        asyncio.run(self._active_workers_helper_groups_by_job())
+
+    async def _active_workers_helper_groups_by_job(self):
+        player, character = await self._character()
+        sender, receiver = await self._points()
+        job = await self._job(sender, receiver)
+        now = timezone.now()
+        await DeliveryActivityLog.objects.acreate(
+            timestamp=now,
+            kind="accepted",
+            player=player,
+            character=character,
+            delivery_id=7001,
+            job=job,
+        )
+        await DeliveryActivityLog.objects.acreate(
+            timestamp=now,
+            kind="picked_up",
+            player=player,
+            character=character,
+            delivery_id=7001,
+            job=job,
+        )
+        # Same hauler, second haul of the same job.
+        await DeliveryActivityLog.objects.acreate(
+            timestamp=now,
+            kind="picked_up",
+            player=player,
+            character=character,
+            delivery_id=7002,
+            job=job,
+        )
+
+        workers = await get_active_workers_by_job()
+
+        entry = workers[job.pk]
+        self.assertEqual(list(entry["names"].values()), [character.name])
+        self.assertEqual(entry["deliveries"], {7001, 7002})
+
+    def test_format_caps_names(self):
+        entry = {
+            "names": {1: "Ana", 2: "Bob", 3: "Cid", 4: "Dee"},
+            "deliveries": {1, 2},
+        }
+        line = format_active_workers(entry)
+        self.assertIn("Ana, Bob, Cid +1", line)
+        self.assertIn("2 in transit", line)
+
+    def test_cmd_jobs_shows_working_line(self):
+        asyncio.run(self._cmd_jobs_shows_working_line())
+
+    async def _cmd_jobs_shows_working_line(self):
+        from unittest.mock import MagicMock
+
+        player, character = await self._character()
+        sender, receiver = await self._points()
+        job = await self._job(sender, receiver)
+        await DeliveryActivityLog.objects.acreate(
+            timestamp=timezone.now(),
+            kind="picked_up",
+            player=player,
+            character=character,
+            delivery_id=7003,
+            job=job,
+        )
+
+        config = MagicMock()
+        config.treasury_equilibrium = 1_000_000.0
+        config.treasury_sensitivity = 1.0
+        config.treasury_cap_ratio = 2.0
+        ctx = _StubContext()
+        with (
+            patch(
+                "amc.commands.jobs.JobPostingConfig.aget_config",
+                new=AsyncMock(return_value=config),
+            ),
+            patch(
+                "amc.commands.jobs.get_treasury_fund_balance",
+                new=AsyncMock(return_value=1_000_000),
+            ),
+        ):
+            await cmd_jobs(ctx)
+
+        self.assertEqual(len(ctx.messages), 1)
+        self.assertIn("Working: ", ctx.messages[0])
+        self.assertIn(character.name, ctx.messages[0])

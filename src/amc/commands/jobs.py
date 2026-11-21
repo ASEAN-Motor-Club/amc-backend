@@ -1,5 +1,10 @@
 from amc.command_framework import registry, CommandContext
-from amc.models import DeliveryJob, JobPostingConfig, BotInvocationLog
+from amc.models import (
+    BotInvocationLog,
+    DeliveryActivityLog,
+    DeliveryJob,
+    JobPostingConfig,
+)
 from amc.utils import get_time_difference_string
 from amc.subsidies import get_subsidies_text
 from amc.jobs import calculate_treasury_multiplier
@@ -8,6 +13,45 @@ from amc.webhook import PARTY_BONUS_ENABLED, PARTY_BONUS_RATE
 from amc.mod_server import get_parties, get_party_size_for_character
 from django.db.models import F
 from django.utils.translation import gettext as _, gettext_lazy
+
+# How long an accepted-but-not-delivered haul keeps a job's "Working" line
+# alive.  Deliveries in transit are minutes-to-hours; anything older is an
+# abandoned accept and should not advertise the job as staffed.
+ACTIVE_WORK_WINDOW_MINUTES = 180
+MAX_WORKER_NAMES = 3
+
+
+async def get_active_workers_by_job(
+    minutes: int = ACTIVE_WORK_WINDOW_MINUTES,
+) -> dict[int, dict]:
+    """Map DeliveryJob id -> the characters hauling it right now.
+
+    Built from ``DeliveryActivityLog.active()``: accepts and cargo pickups
+    whose game delivery has not arrived yet.  Read-only, one query.
+    """
+    workers: dict[int, dict] = {}
+    async for row in (
+        DeliveryActivityLog.objects.active(minutes)
+        .filter(job__isnull=False)
+        .select_related("character")
+    ):
+        entry = workers.setdefault(row.job_id, {"names": {}, "deliveries": set()})
+        if row.character is not None:
+            entry["names"][row.character_id] = row.character.name
+        if row.delivery_id:
+            entry["deliveries"].add(row.delivery_id)
+    return workers
+
+
+def format_active_workers(entry: dict) -> str:
+    """One short line: who is on the job and how many hauls are in transit."""
+    names = sorted(entry["names"].values())
+    shown = ", ".join(names[:MAX_WORKER_NAMES])
+    if len(names) > MAX_WORKER_NAMES:
+        shown += f" +{len(names) - MAX_WORKER_NAMES}"
+    return _("<Secondary>Working: {names} ({count} in transit)</>").format(
+        names=shown, count=len(entry["deliveries"])
+    )
 
 
 @registry.register(
@@ -55,6 +99,8 @@ async def cmd_jobs(ctx: CommandContext):
                 "\n<Secondary>Join a party for +{rate_pct}% per member!</>"
             ).format(rate_pct=rate_pct)
 
+    active_workers = await get_active_workers_by_job()
+
     jobs_str_list: list[str] = []
     async for job in jobs:
         cargo_key = (
@@ -79,6 +125,9 @@ async def cmd_jobs(ctx: CommandContext):
             title += "\n" + _("<Secondary>ONLY to: {points}</>").format(
                 points=", ".join([p.name for p in destination_points])
             )
+
+        if worker_entry := active_workers.get(job.id):
+            title += "\n" + format_active_workers(worker_entry)
 
         jobs_str_list.append(title)
 
