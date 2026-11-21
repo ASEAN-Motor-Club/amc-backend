@@ -15,6 +15,7 @@ from django.utils import timezone
 
 from amc.commands.faction import _build_player_locations, perform_arrest
 from amc.handlers import register
+from amc.handlers.delivery_activity import record_cargo_pickup
 from amc.player_tags import refresh_player_name
 from amc.special_cargo import ILLICIT_CARGO_KEYS
 from amc.models import (
@@ -255,7 +256,17 @@ CONFISCATION_ANNOUNCE_DELAY = 30  # seconds
 
 @register("ServerPickupCargo")
 async def handle_pickup_cargo(event, player, character, ctx):
-    """Handle ServerPickupCargo: confiscate illicit cargo if picker is police."""
+    """Handle ServerPickupCargo: confiscate illicit cargo if picker is police.
+
+    Also the single entry point for pickup telemetry (this module owns the
+    hook in the registry): every delivery cargo pickup is logged before the
+    confiscation logic, which only applies to illicit cargo carried by police.
+    """
+    try:
+        await record_cargo_pickup(event, player, character)
+    except Exception:  # noqa: BLE001 — telemetry must never break confiscation
+        logger.warning("Failed to record cargo pickup activity", exc_info=True)
+
     cargo = event["data"].get("Cargo", {})
     cargo_key = cargo.get("Net_CargoKey")
     if cargo_key not in ILLICIT_CARGO_KEYS:

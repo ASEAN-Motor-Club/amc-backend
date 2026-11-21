@@ -2831,6 +2831,113 @@ class DeliveryJob(models.Model):
 
 
 @final
+class DeliveryActivityLogQuerySet(models.QuerySet):
+    def active(self, minutes: int = 120):
+        """Accepted / picked-up deliveries with no arrival inside the window.
+
+        This is the "who is actively working a delivery right now" view: an
+        accept or pickup that never reached an arrival inside ``minutes`` is
+        either abandoned or still in transit.
+        """
+        cutoff = timezone.now() - timedelta(minutes=minutes)
+        arrived = ServerCargoArrivedLog.objects.filter(
+            delivery_id=OuterRef("delivery_id"), timestamp__gte=cutoff
+        )
+        return (
+            self.filter(timestamp__gte=cutoff, delivery_id__gt=0)
+            .annotate(arrived=Exists(arrived))
+            .filter(arrived=False)
+        )
+
+
+@final
+class DeliveryActivityLogManager(
+    models.Manager.from_queryset(
+        DeliveryActivityLogQuerySet
+    )  # pyrefly: ignore [invalid-inheritance]
+):  # type: ignore[misc]
+    pass
+
+
+@final
+class DeliveryActivityLog(models.Model):
+    """Who accepted / picked up which game delivery, and which AMC job it feeds.
+
+    One row per hook event, NOT per cargo unit: ``ServerAcceptDelivery`` fires
+    when a player takes a delivery off the board, ``ServerPickupCargo`` when a
+    cargo actor is picked up.  The game ``delivery_id`` is the join key across
+    accept → pickup → arrival (``ServerCargoArrivedLog.delivery_id``), so the
+    whole chain can be reconstructed per player.
+
+    ``job`` is the AMC ``DeliveryJob`` the activity counts toward.  It is
+    resolved at write time from the live delivery snapshot when the route is
+    known, and (re)stamped by the arrival handler, which is where job
+    attribution is authoritative.
+    """
+
+    class Kind(models.TextChoices):
+        ACCEPTED = "accepted", "Accepted"
+        PICKED_UP = "picked_up", "Picked up"
+
+    timestamp = models.DateTimeField(db_index=True)
+    kind = models.CharField(max_length=20, choices=Kind.choices, db_index=True)
+    player = models.ForeignKey(
+        Player,
+        on_delete=models.SET_NULL,
+        null=True,
+        related_name="delivery_activities",
+    )
+    character = models.ForeignKey(
+        Character,
+        on_delete=models.SET_NULL,
+        null=True,
+        related_name="delivery_activities",
+    )
+    # Game-side delivery id (Net_DeliveryId / ServerAcceptDelivery DeliveryId).
+    delivery_id = models.BigIntegerField(null=True, blank=True, db_index=True)
+    cargo_key = models.CharField(max_length=200, db_index=True, null=True, blank=True)
+    sender_point = models.ForeignKey(
+        DeliveryPoint,
+        models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="delivery_activities_out",
+    )
+    destination_point = models.ForeignKey(
+        DeliveryPoint,
+        models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="delivery_activities_in",
+    )
+    payment = models.PositiveBigIntegerField(null=True, blank=True)
+    weight = models.FloatField(null=True, blank=True)
+    job = models.ForeignKey(
+        DeliveryJob,
+        models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="activities",
+    )
+    data = models.JSONField(null=True, blank=True)
+
+    objects: ClassVar[DeliveryActivityLogManager] = DeliveryActivityLogManager()
+
+    class Meta:
+        ordering = ["-timestamp"]
+        indexes = [
+            models.Index(
+                fields=["delivery_id", "kind"], name="del_activity_delivery_kind_idx"
+            ),
+            models.Index(fields=["job", "timestamp"], name="del_activity_job_ts_idx"),
+        ]
+
+    def __str__(self):
+        who = self.character.name if self.character else "unknown"
+        return f"{who} {self.kind} {self.cargo_key or '?'} (delivery {self.delivery_id})"
+
+
+@final
 class Ticket(models.Model):
     class Infringement(models.TextChoices):
         GRIEFING = "griefing", "Griefing"

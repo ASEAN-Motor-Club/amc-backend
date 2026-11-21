@@ -446,6 +446,16 @@ async def handle_cargo_arrived(event, player, character, ctx):
             job_id, quantity, delivery_data
         )
 
+        # Delivery activity attribution: the arrival match is authoritative
+        # (route + cargo against the live board), so stamp it onto the
+        # accept/pickup rows recorded for this delivery id.
+        if job is not None:
+            from amc.handlers.delivery_activity import stamp_job_for_delivery_ids
+
+            await stamp_job_for_delivery_ids(
+                [log.delivery_id for log in group_list], job.id
+            )
+
         # Job fulfillment
         if job and job.quantity_fulfilled >= job.quantity_requested:
             from amc.jobs import on_delivery_job_fulfilled
