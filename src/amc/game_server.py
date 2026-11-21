@@ -13,6 +13,10 @@ logger = logging.getLogger(__name__)
 _NEG_SENTINEL = "__none__"
 
 
+class GameApiError(RuntimeError):
+    """The Host Web API rejected a request (bad password, disabled route, ...)."""
+
+
 async def game_api_request(
     session, url, method="get", password="", params={}, timeout=15
 ):
@@ -320,6 +324,37 @@ async def ban_player(session, unique_id, hours=None, reason=None):
     if reason:
         params["reason"] = reason
     return await game_api_request(session, "/player/ban", method="post", params=params)
+
+
+async def unban_player(session, unique_id):
+    params = {"unique_id": unique_id}
+    return await game_api_request(session, "/player/unban", method="post", params=params)
+
+
+async def get_banned_players(session):
+    """Return the game server's ban list as a list of entry dicts.
+
+    Entries look like ``{"name", "unique_id", "reason", "left_time_seconds"}``;
+    ``left_time_seconds == 0`` means permanent. Raises ``GameApiError`` when the
+    server rejects the request (wrong/absent password, API disabled) so callers
+    can tell "no bans" apart from "could not ask".
+    """
+    data = await game_api_request(session, "/player/banlist")
+    if not isinstance(data, dict) or not data.get("succeeded"):
+        message = data.get("message") if isinstance(data, dict) else None
+        raise GameApiError(message or "ban list request failed")
+    entries = data.get("data") or {}
+    if isinstance(entries, dict):
+        return [entry for entry in entries.values() if entry]
+    return [entry for entry in entries if entry]
+
+
+async def get_banned_player_ids(session):
+    return {
+        str(entry.get("unique_id"))
+        for entry in await get_banned_players(session)
+        if entry.get("unique_id")
+    }
 
 
 async def add_player_role(session, unique_id, role):
