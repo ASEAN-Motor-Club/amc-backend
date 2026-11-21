@@ -27,9 +27,11 @@ from amc.handlers.delivery_activity import (
     stamp_job_for_delivery_ids,
 )
 from amc.models import (
+    Character,
     DeliveryActivityLog,
     DeliveryJob,
     DeliveryPoint,
+    Player,
     ServerCargoArrivedLog,
 )
 from amc.webhook import process_event
@@ -58,38 +60,71 @@ def _snapshot(delivery_id, cargo_key, sender_guid, receiver_guid):
     }
 
 
-class DeliveryActivityTests(TestCase):
+class _ActivityTestBase(TestCase):
+    """Fixture helpers plus explicit cleanup.
+
+    Async ORM writes COMMIT (the test transaction wraps the sync connection,
+    not the async one), so anything created here survives the test and would
+    corrupt the many global-count assertions elsewhere in the suite
+    (``DeliveryJob.objects.count()``, webhook delivery counts, ...).  Every
+    fixture PK is tracked and deleted in ``tearDown``.
+    """
+
     def setUp(self):
         delivery_telemetry._snapshot_deliveries = {}
         delivery_telemetry._snapshot_points = {}
         delivery_telemetry._snapshot_fetched_at = None
+        self._tracked_players = []
+        self._tracked_characters = []
+        self._tracked_points = []
+        self._tracked_jobs = []
 
     def tearDown(self):
+        asyncio.run(self._cleanup())
         delivery_telemetry._snapshot_deliveries = {}
         delivery_telemetry._snapshot_points = {}
         delivery_telemetry._snapshot_fetched_at = None
+
+    async def _cleanup(self):
+        if self._tracked_characters:
+            await DeliveryActivityLog.objects.filter(
+                character_id__in=self._tracked_characters
+            ).adelete()
+            await ServerCargoArrivedLog.objects.filter(
+                character_id__in=self._tracked_characters
+            ).adelete()
+        if self._tracked_jobs:
+            await DeliveryJob.objects.filter(pk__in=self._tracked_jobs).adelete()
+        if self._tracked_points:
+            await DeliveryPoint.objects.filter(guid__in=self._tracked_points).adelete()
+        if self._tracked_characters:
+            await Character.objects.filter(pk__in=self._tracked_characters).adelete()
+        if self._tracked_players:
+            await Player.objects.filter(pk__in=self._tracked_players).adelete()
 
     # -- helpers (async: they run inside the test's event loop) -------------
 
     async def _character(self):
         player = await sync_to_async(PlayerFactory)()
         character = await sync_to_async(CharacterFactory)(player=player)
+        self._tracked_players.append(player.pk)
+        self._tracked_characters.append(character.pk)
         return player, character
 
     async def _points(self):
-        # Async writes commit (the test transaction does not wrap the async
-        # connection), so fixture PKs must be unique per test.
-        sender_guid = uuid.uuid4().hex[:12]
-        receiver_guid = uuid.uuid4().hex[:12]
+        # Unique PKs: a leaked point would break the next test's create.
+        sender_guid = uuid.uuid4().hex[:12].upper()
+        receiver_guid = uuid.uuid4().hex[:12].upper()
         sender = await DeliveryPoint.objects.acreate(
-            guid=sender_guid.upper(), name="mine", type="mine", coord=Point(0, 0, 0)
+            guid=sender_guid, name="mine", type="mine", coord=Point(0, 0, 0)
         )
         receiver = await DeliveryPoint.objects.acreate(
-            guid=receiver_guid.upper(),
+            guid=receiver_guid,
             name="factory",
             type="factory",
             coord=Point(1000, 1000, 0),
         )
+        self._tracked_points.extend([sender_guid, receiver_guid])
         return sender, receiver
 
     async def _job(self, sender, receiver, cargo_key="Milk"):
@@ -101,7 +136,11 @@ class DeliveryActivityTests(TestCase):
         )
         await job.source_points.aadd(sender)
         await job.destination_points.aadd(receiver)
+        self._tracked_jobs.append(job.pk)
         return job
+
+
+class DeliveryActivityTests(_ActivityTestBase):
 
     @staticmethod
     def _accept_event(delivery_id, player):
@@ -285,15 +324,14 @@ class DeliveryActivityTests(TestCase):
         self.assertEqual(active, [5006])
 
 
-class DeliveryActivityWebhookTests(TestCase):
+class DeliveryActivityWebhookTests(_ActivityTestBase):
     """The registration path: process_event must dispatch the new hook."""
 
     def test_accept_delivery_hook_is_registered(self):
         asyncio.run(self._accept_delivery_hook_is_registered())
 
     async def _accept_delivery_hook_is_registered(self):
-        player = await sync_to_async(PlayerFactory)()
-        character = await sync_to_async(CharacterFactory)(player=player)
+        player, character = await self._character()
         event = {
             "hook": "ServerAcceptDelivery",
             "timestamp": int(time.time()),
