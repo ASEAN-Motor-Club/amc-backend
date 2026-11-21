@@ -48,6 +48,7 @@ from .models import (
     DeliveryPoint,
     DeliveryPointStorage,
     ServerCargoArrivedLog,
+    DeliveryActivityLog,
     ServerSignContractLog,
     ServerPassengerArrivedLog,
     ServerTowRequestArrivedLog,
@@ -837,6 +838,34 @@ class ServerCargoArrivedLogAdmin(admin.ModelAdmin):
     list_select_related = ["player"]
     search_fields = ["player__unique_id", "cargo_key"]
     autocomplete_fields = ["player", "character", "sender_point", "destination_point"]
+
+
+@admin.register(DeliveryActivityLog)
+class DeliveryActivityLogAdmin(admin.ModelAdmin):
+    """Who accepted / picked up a delivery — the live "who is working" board."""
+
+    list_display = [
+        "id",
+        "timestamp",
+        "kind",
+        "character",
+        "cargo_key",
+        "delivery_id",
+        "job",
+        "payment",
+        "weight",
+    ]
+    list_filter = ["kind", "timestamp"]
+    list_select_related = ["character", "player", "job"]
+    search_fields = ["character__name", "player__unique_id", "cargo_key"]
+    autocomplete_fields = [
+        "player",
+        "character",
+        "sender_point",
+        "destination_point",
+        "job",
+    ]
+    date_hierarchy = "timestamp"
 
 
 @admin.register(ServerSignContractLog)
