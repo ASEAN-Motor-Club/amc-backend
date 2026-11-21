@@ -103,6 +103,7 @@ from .models import (
 from amc_finance.services import send_fund_to_player
 from amc_finance.admin import AccountInlineAdmin
 from amc.dashboard_services import get_ministry_dashboard_stats
+from amc.game_server import GameApiError
 from .widgets import AMCOpenLayersWidget, AMCPointOpenLayersWidget
 from django.core.paginator import Paginator
 from django.http import HttpResponse
@@ -155,8 +156,94 @@ class PlayerTeamInlineAdmin(admin.TabularInline):
     autocomplete_fields = ["character"]
 
 
+# --- Player ban toggle ------------------------------------------------------
+# Ban state lives on the game server's own persistent ban list, not in the DB
+# (Player deliberately has no `banned` column).  The admin form therefore reads
+# the live ban list to seed the checkbox and writes changes back through the
+# Host Web API, so the panel always reflects what the server will enforce.
+
+
+def _game_api_call(coroutine_fn, *args):
+    """Run one Host Web API call from a synchronous Django admin view."""
+
+    async def _run():
+        timeout = aiohttp.ClientTimeout(total=10)
+        async with aiohttp.ClientSession(
+            base_url=settings.GAME_SERVER_API_URL, timeout=timeout
+        ) as session:
+            return await coroutine_fn(session, *args)
+
+    return async_to_sync(_run)()
+
+
+def _banned_player_ids():
+    """Set of steam ids the game server currently has banned."""
+    from amc.game_server import get_banned_player_ids
+
+    try:
+        return _game_api_call(get_banned_player_ids)
+    except (GameApiError, aiohttp.ClientError, TimeoutError, OSError) as exc:
+        raise GameApiError(f"game server API unavailable: {exc}") from exc
+
+
+def _banned_player_list():
+    """The game server's ban list as a list of entry dicts."""
+    from amc.game_server import get_banned_players
+
+    try:
+        return _game_api_call(get_banned_players)
+    except (GameApiError, aiohttp.ClientError, TimeoutError, OSError) as exc:
+        raise GameApiError(f"game server API unavailable: {exc}") from exc
+
+
+class PlayerBanForm(forms.ModelForm):
+    banned = forms.BooleanField(
+        required=False,
+        label="Banned",
+        help_text=(
+            "Read from the game server's ban list. Ticking bans the account "
+            "(permanent unless a duration is set); unticking unbans it."
+        ),
+    )
+    ban_hours = forms.IntegerField(
+        required=False,
+        min_value=1,
+        label="Ban duration (hours)",
+        help_text="Optional. Leave blank for a permanent ban.",
+    )
+    ban_reason = forms.CharField(
+        required=False,
+        max_length=200,
+        label="Ban reason",
+        help_text="Recorded on the server's ban list.",
+    )
+
+    class Meta:
+        model = Player
+        fields = "__all__"
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        field = self.fields.get("banned")
+        if field is None:
+            return
+        if self.instance.pk is None:
+            # Add form: there is no account to ban yet.
+            for name in ("banned", "ban_hours", "ban_reason"):
+                self.fields.pop(name, None)
+            return
+        try:
+            field.initial = str(self.instance.unique_id) in _banned_player_ids()
+        except GameApiError as exc:
+            # An unreadable ban list must never render as "not banned".
+            field.disabled = True
+            field.initial = None
+            field.help_text = f"Ban state unknown — {exc}"
+
+
 @admin.register(Player)
 class PlayerAdmin(admin.ModelAdmin):
+    form = PlayerBanForm
     list_display = [
         "unique_id",
         "character_names",
@@ -166,7 +253,73 @@ class PlayerAdmin(admin.ModelAdmin):
     ]
     search_fields = ["unique_id", "characters__name", "discord_user_id"]
     autocomplete_fields = ["user"]
+    readonly_fields = ["ban_status"]
     inlines = [CharacterInlineAdmin, PlayerTeamInlineAdmin, TicketInlineAdmin]
+
+    @admin.display(description="Ban status (live from game server)")
+    def ban_status(self, player):
+        try:
+            bans = {str(entry.get("unique_id")): entry for entry in _banned_player_list()}
+        except GameApiError as exc:
+            return f"unknown — {exc}"
+        entry = bans.get(str(player.unique_id))
+        if entry is None:
+            return "not banned"
+        reason = entry.get("reason") or "no reason recorded"
+        left = entry.get("left_time_seconds") or 0
+        if not left:
+            return f"banned (permanent) — {reason}"
+        return f"banned ({left // 3600}h remaining) — {reason}"
+
+    def save_model(self, request, obj, form, change):
+        super().save_model(request, obj, form, change)
+        if not change:
+            return
+        banned = form.cleaned_data.get("banned")
+        if banned is None:
+            # Toggle disabled because the ban list could not be read.
+            return
+        self._apply_ban_change(request, obj, banned, form)
+
+    def _apply_ban_change(self, request, obj, banned, form):
+        from amc.game_server import ban_player, unban_player
+
+        try:
+            currently_banned = str(obj.unique_id) in _banned_player_ids()
+        except GameApiError as exc:
+            self.message_user(
+                request, f"Ban state unknown, ban unchanged: {exc}", level="error"
+            )
+            return
+        if currently_banned == banned:
+            return
+
+        hours = form.cleaned_data.get("ban_hours")
+        reason = (form.cleaned_data.get("ban_reason") or "").strip()
+        try:
+            result = (
+                _game_api_call(ban_player, obj.unique_id, hours, reason)
+                if banned
+                else _game_api_call(unban_player, obj.unique_id)
+            )
+        except (GameApiError, aiohttp.ClientError, TimeoutError, OSError) as exc:
+            self.message_user(
+                request, f"Could not reach the game server: {exc}", level="error"
+            )
+            return
+        if not isinstance(result, dict) or not result.get("succeeded"):
+            message = result.get("message") if isinstance(result, dict) else None
+            self.message_user(
+                request,
+                f"Game server rejected the ban change: {message or 'unknown error'}",
+                level="error",
+            )
+            return
+        if banned:
+            horizon = f"{hours}h" if hours else "permanent"
+            self.message_user(request, f"{obj.unique_id} banned ({horizon}).")
+        else:
+            self.message_user(request, f"{obj.unique_id} unbanned.")
 
     def get_queryset(self, request):
         qs = super().get_queryset(request)
