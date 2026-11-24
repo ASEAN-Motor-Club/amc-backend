@@ -1,10 +1,11 @@
-"""Tests for the cargo definition rows (Schedule I / vanilla ingest)."""
+"""Tests for the cargo definition rows (Schedule I / vanilla / mod ingest)."""
 
 from django.test import SimpleTestCase
 
 from amc.cargo_definitions import (
     CARGO_ROWS,
     GAME_VERSION,
+    MOD_ROWS,
     SCHEDULE_I_ROWS,
     VANILLA_ROWS,
     cargo_is_known,
@@ -33,6 +34,20 @@ class CargoDefinitionsTests(SimpleTestCase):
         self.assertEqual(kerosene["payment_multiplier"], 2.0)
         self.assertEqual(kerosene["weight_max"], 800)
 
+    def test_mod_rows_present(self):
+        """TurbineEngine comes from Proxys Oversize Cargo V5 (0.7.20): its
+        row is identical in the pak's Cargos and Cargos_Proxy tables."""
+        self.assertEqual(len(MOD_ROWS), 1)
+        row = MOD_ROWS["TurbineEngine"]
+        self.assertEqual(get_cargo_row("TurbineEngine"), row)
+        self.assertEqual(row["payment_per_km"], 4000)
+        self.assertEqual(row["payment_multiplier"], 2.0)
+        self.assertEqual(row["base_payment"], 5000)
+        self.assertEqual(row["weight_min"], 200000)
+        self.assertEqual(row["weight_max"], 200000)
+        self.assertEqual(row["num_cargo_min"], 5)
+        self.assertEqual(row["num_cargo_max"], 20)
+
     def test_unknown_cargo_returns_none(self):
         """Fail-safe contract: unknown keys MUST return None (never a row
         with zero/empty bounds) so downstream checks can skip instead of
@@ -40,6 +55,7 @@ class CargoDefinitionsTests(SimpleTestCase):
         self.assertIsNone(get_cargo_row("NotACargoKey_999"))
         self.assertFalse(cargo_is_known("NotACargoKey_999"))
         self.assertTrue(cargo_is_known("Moonshine"))
+        self.assertTrue(cargo_is_known("TurbineEngine"))
 
     def test_rows_have_required_pricing_fields(self):
         for key, row in CARGO_ROWS.items():

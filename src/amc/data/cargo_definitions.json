@@ -1,6 +1,27 @@
 {
- "_comment": "Cargo definition rows for payment analysis. Vanilla: extracted from MotorTown v0.7.19 pak (mt-pak-extract). schedule-i: the Schedule I supply-chain mod's cargo_entries.json (mt-pak-extract worktree) (illicit cargo \u2014 NOT in the vanilla cargos table). payment_sqrt_ratio=1.0 and max_delivery_distance=0 (unlimited) are create_cargopack struct defaults. Regenerate when the mod config or game version changes.",
+ "_comment": "Cargo definition rows for payment analysis. Vanilla: extracted from MotorTown v0.7.19 pak (mt-pak-extract). schedule-i: the Schedule I supply-chain mod's cargo_entries.json (mt-pak-extract worktree) (illicit cargo \u2014 NOT in the vanilla cargos table). mod: third-party client-mod cargos, extracted from the shipped PAK (TurbineEngine = Proxys Oversize Cargo V5 0.7.20; identical row in Cargos and Cargos_Proxy). payment_sqrt_ratio=1.0 and max_delivery_distance=0 (unlimited) are create_cargopack struct defaults. Regenerate when the mod config or game version changes.",
  "game_version": "v0.7.19",
+ "mod": {
+  "TurbineEngine": {
+   "allow_stacking": false,
+   "base_payment": 5000,
+   "cargo_type": "None",
+   "fragile": 0.5,
+   "is_deprecated": false,
+   "max_delivery_distance": 0,
+   "min_delivery_distance": 0,
+   "num_cargo_max": 20,
+   "num_cargo_min": 5,
+   "payment_multiplier": 2.0,
+   "payment_per_km": 4000,
+   "payment_sqrt_ratio": 0.0,
+   "payment_sqrt_ratio_min_capacity": 0,
+   "spawn_probability": 10,
+   "volume_size": 1,
+   "weight_max": 200000,
+   "weight_min": 200000
+  }
+ },
  "schedule_i": {
   "Acetone": {
    "allow_stacking": false,
