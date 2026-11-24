@@ -1,11 +1,11 @@
 """Cargo definition rows for payment analysis.
 
 Source of truth: `src/amc/data/cargo_definitions.json`, generated from the
-game PAK extraction (vanilla) and the Schedule I supply-chain mod config
+game PAK extraction (vanilla), the Schedule I supply-chain mod config
 (illicit cargo — NOT in the vanilla `cargos` table, see the 2026-10-20
-Moonshine forensics).  Regenerate when the game version or mod config
-changes; keys are the cargo keys as they appear in webhook events
-(`Net_CargoKey`).
+Moonshine forensics), and third-party client-mod cargo tables (`mod`).
+Regenerate when the game version or a mod config changes; keys are the cargo
+keys as they appear in webhook events (`Net_CargoKey`).
 
 Access via `get_cargo_row` — returns None for unknown cargo keys so callers
 fail SAFE (skip the check rather than assume pay 0 or infinity).
@@ -29,11 +29,16 @@ with open(_DATA_FILE) as _f:
 
 VANILLA_ROWS: dict[str, dict[str, Any]] = _RAW["vanilla"]
 SCHEDULE_I_ROWS: dict[str, dict[str, Any]] = _RAW["schedule_i"]
+MOD_ROWS: dict[str, dict[str, Any]] = _RAW.get("mod", {})
 GAME_VERSION: str = _RAW.get("game_version", "unknown")
 
 # Mod rows OVERRIDE vanilla rows on key collision (a mod can legitimately
-# re-price a vanilla key); lookup order: schedule_i, then vanilla.
-CARGO_ROWS: dict[str, dict[str, Any]] = {**VANILLA_ROWS, **SCHEDULE_I_ROWS}
+# re-price a vanilla key); later sections win: vanilla, schedule_i, mod.
+CARGO_ROWS: dict[str, dict[str, Any]] = {
+    **VANILLA_ROWS,
+    **SCHEDULE_I_ROWS,
+    **MOD_ROWS,
+}
 
 
 def get_cargo_row(cargo_key: str) -> Optional[dict[str, Any]]:
