@@ -8,6 +8,7 @@ from amc_cogs.events import EventsCog
 from amc_cogs.economy import EconomyCog
 from amc_cogs.chat import ChatCog
 from amc_cogs.status import StatusCog
+from amc_cogs.shuto_status import ShutoStatusCog
 from amc_cogs.jobs import JobsCog
 from amc_cogs.roleplay import RoleplayCog
 from amc_cogs.leaderboard import LeaderboardCog
@@ -35,6 +36,8 @@ class AMCDiscordBot(commands.Bot):
     def __init__(self, *args, **kwargs):
         kwargs.setdefault("command_prefix", "/")
         super().__init__(*args, **kwargs)
+        # Shuto's native game web API (separate instance on amc-peripheral).
+        self.shuto_http_client_game: aiohttp.ClientSession
         # Live manual-review views keyed by NameModerationLog id (kept alive for
         # button callbacks).
         self._review_views: dict[int, discord.ui.View] = {}
@@ -52,6 +55,9 @@ class AMCDiscordBot(commands.Bot):
         self.event_http_client_mod = aiohttp.ClientSession(
             base_url=settings.EVENT_MOD_SERVER_API_URL
         )
+        self.shuto_http_client_game = aiohttp.ClientSession(
+            base_url=settings.SHUTO_GAME_SERVER_API_URL
+        )
         guild = discord.Object(id=settings.DISCORD_GUILD_ID)
         await self.add_cog(ModerationCog(self), guild=guild)
         await self.add_cog(AuthenticationCog(self), guild=guild)
@@ -59,6 +65,7 @@ class AMCDiscordBot(commands.Bot):
         await self.add_cog(EconomyCog(self), guild=guild)
         await self.add_cog(ChatCog(self), guild=guild)
         await self.add_cog(StatusCog(self), guild=guild)
+        await self.add_cog(ShutoStatusCog(self), guild=guild)
         await self.add_cog(JobsCog(self), guild=guild)
         await self.add_cog(RoleplayCog(self), guild=guild)
         await self.add_cog(LeaderboardCog(self), guild=guild)

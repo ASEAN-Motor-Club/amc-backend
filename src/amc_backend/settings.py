@@ -324,6 +324,22 @@ EVENT_MOD_MANAGEMENT_API_URL = os.environ.get(
     "EVENT_MOD_MANAGEMENT_API_URL", "http://127.0.0.1:5010"
 )
 
+# --- Shuto live-player board -------------------------------------------------
+# Shuto is a separate Motor Town instance on amc-peripheral
+# (motortown-server-shuto.service). Its native game web API listens on 8083
+# there; the prod bot reaches it over the tailnet. The password is the literal
+# already committed in the staging flake's Shuto instance config (a public test
+# server, not a secret).
+SHUTO_GAME_SERVER_API_URL = os.environ.get(
+    "SHUTO_GAME_SERVER_API_URL", "http://100.126.244.10:8083"
+)
+SHUTO_GAME_API_PASSWORD = os.environ.get("SHUTO_GAME_API_PASSWORD", "hackme")
+# The Shuto board shares this channel with the prod board; the two messages
+# are told apart by their embed titles.
+DISCORD_SHUTO_STATUS_CHANNEL_ID = int(
+    os.environ.get("DISCORD_SHUTO_STATUS_CHANNEL_ID", "1347246236234678423")
+)
+
 # Timezone used by the game server for log timestamps.
 # The Motor Town game server writes log timestamps in the system's local timezone,
 # so this must match the server's OS timezone setting.

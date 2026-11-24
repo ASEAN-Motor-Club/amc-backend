@@ -21,6 +21,12 @@ from amc.models import Character, ServerStatus
 
 logger = logging.getLogger(__name__)
 
+# Two status boards share one Discord channel and use the same visible title.
+# Track our own message by its exact footer so the Shuto board can't be
+# overwritten on restart (and vice versa).
+PROD_BOARD_TITLE = "Active Players"
+PROD_BOARD_FOOTER = "Updated every 30 seconds"
+
 
 class StatusCog(commands.Cog):
     def __init__(
@@ -140,7 +146,7 @@ class StatusCog(commands.Cog):
 
             # 4. Build Embed
             embed = discord.Embed(
-                title="Active Players",
+                title=PROD_BOARD_TITLE,
                 color=discord.Color.blue(),
                 timestamp=discord.utils.utcnow(),
             )
@@ -169,7 +175,7 @@ class StatusCog(commands.Cog):
                     inline=True,
                 )
 
-            embed.set_footer(text="Updated every 30 seconds")
+            embed.set_footer(text=PROD_BOARD_FOOTER)
 
             # Player List
             if active_players:
@@ -188,12 +194,17 @@ class StatusCog(commands.Cog):
 
             # 5. Message Handling Logic (CRASH FIX: Check author)
 
-            # If we don't have a tracked message, look for the bot's last message
+            # If we don't have a tracked message, look for OUR board only.
+            # The channel also carries the Shuto board with the SAME title;
+            # the footer is what tells the two apart. Grabbing the wrong one
+            # would make both cogs edit the same message forever.
             if self.last_embed_message is None:
-                async for message in channel.history(limit=5):
-                    if (
-                        message.author == self.bot.user
-                    ):  # Only grab messages the bot owns
+                async for message in channel.history(limit=10):
+                    if message.author == self.bot.user and any(
+                        embed.title == PROD_BOARD_TITLE
+                        and (embed.footer.text or "") == PROD_BOARD_FOOTER
+                        for embed in message.embeds
+                    ):
                         self.last_embed_message = message
                         break
 
