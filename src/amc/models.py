@@ -376,19 +376,6 @@ class Character(models.Model):
     gov_employee_level = models.PositiveIntegerField(default=0)
     gov_employee_contributions = models.PositiveBigIntegerField(default=0)
 
-    # Teleport-reset flag: set when roadside recovery teleports the
-    # vehicle >1 km back to the character. While now < cargo_ignore_until
-    # every ServerCargoArrived event from this character is ignored (no
-    # validation, no payment). Timestamp-based so it expires on its own.
-    cargo_ignore_until = models.DateTimeField(
-        null=True,
-        blank=True,
-        help_text=(
-            "Cargo arrivals are ignored until this timestamp (set by a "
-            "vehicle reset near a delivery point; expires on its own)."
-        ),
-    )
-
     # /markwanted flag: while now < marked_wanted_until, the character's next
     # illegal delivery triggers a Wanted with 100% chance (the 1km
     # cop-proximity attenuation still applies). Timestamp-based so it expires
