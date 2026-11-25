@@ -1,12 +1,11 @@
-"""Rescue /tp must move the player's vehicle server-authoritatively.
+"""Every vehicle-keeping /tp must use the same authoritative reset as /tp2marker.
 
-A rescue responder keeps their vehicle (no_vehicles=False). If the backend
-omits bRemoveCargo, the mod falls back to its legacy client-side
-ClientResetVehicleAt RPC; the game rejects the resulting
+If the backend omits bRemoveCargo, the mod falls back to its legacy
+ClientResetVehicleAt RPC. The game rejects the resulting
 ServerResetVehicleAtResponse as unsolicited, so the vehicle is never moved
-authoritatively and despawns when the driver exits. Sending bRemoveCargo
-selects the server-authoritative ServerResetVehicleAt branch, which keeps
-cargo attached when the value is False.
+authoritatively and despawns when the driver exits. Sending bRemoveCargo=True
+selects the server-authoritative ServerResetVehicleAt branch and strips
+cargo, matching /tp2marker.
 """
 
 from contextlib import ExitStack
@@ -78,9 +77,25 @@ def _make_rescue():
     return rescue
 
 
-def _patches(rescues=()):
+def _make_point():
+    point = MagicMock()
+    point.name = "arena"
+    point.location.x = 100
+    point.location.y = 200
+    point.location.z = 300
+    return point
+
+
+def _patches(rescues=(), points=()):
     return [
-        patch("amc.commands.teleport.TeleportPoint.objects.filter", return_value=_FakeQuerySet([])),
+        patch(
+            "amc.commands.teleport.TeleportPoint.objects.filter",
+            return_value=_FakeQuerySet(points),
+        ),
+        patch(
+            "amc.commands.teleport.TeleportPoint.objects.aget",
+            new=AsyncMock(return_value=points[0] if points else None),
+        ),
         patch(
             "amc.commands.teleport.PoliceSession.objects.filter",
             return_value=_FakeQuerySet([]),
@@ -102,9 +117,18 @@ def _patches(rescues=()):
     ]
 
 
+def _assert_authoritative_strip(mock_tp, **expected):
+    mock_tp.assert_awaited_once()
+    assert mock_tp.await_args is not None
+    kwargs = mock_tp.await_args.kwargs
+    assert kwargs["remove_cargo"] is True, "bRemoveCargo selects ServerResetVehicleAt"
+    for key, value in expected.items():
+        assert kwargs[key] is value
+
+
 @pytest.mark.asyncio
-async def test_rescue_tp_keeps_cargo_but_uses_authoritative_vehicle_reset():
-    """Rescue responders get bRemoveCargo=False so the mod moves the vehicle server-side."""
+async def test_rescue_tp_uses_authoritative_reset_and_strips_cargo():
+    """Rescue responders keep the vehicle but lose cargo, like /tp2marker."""
     ctx = _make_ctx(is_admin=False)
 
     with ExitStack() as stack:
@@ -115,18 +139,12 @@ async def test_rescue_tp_keeps_cargo_but_uses_authoritative_vehicle_reset():
             stack.enter_context(p)
         await cmd_tp_name(ctx, "")
 
-    mock_tp.assert_awaited_once()
-    assert mock_tp.await_args is not None
-    kwargs = mock_tp.await_args.kwargs
-    assert kwargs["no_vehicles"] is False, "rescue responders must keep their vehicle"
-    assert kwargs["remove_cargo"] is False, (
-        "bRemoveCargo=False selects ServerResetVehicleAt, keeping cargo attached"
-    )
+    _assert_authoritative_strip(mock_tp, no_vehicles=False)
 
 
 @pytest.mark.asyncio
-async def test_non_rescue_custom_tp_keeps_existing_vehicle_behaviour():
-    """Admin custom-destination /tp must not gain a bRemoveCargo field."""
+async def test_admin_custom_tp_uses_authoritative_reset_and_strips_cargo():
+    """Admin bare /tp is no longer a legacy client-side vehicle reset."""
     ctx = _make_ctx(is_admin=True)
 
     with ExitStack() as stack:
@@ -137,5 +155,20 @@ async def test_non_rescue_custom_tp_keeps_existing_vehicle_behaviour():
             stack.enter_context(p)
         await cmd_tp_name(ctx, "")
 
-    mock_tp.assert_awaited_once()
-    assert mock_tp.await_args.kwargs["remove_cargo"] is None
+    _assert_authoritative_strip(mock_tp, no_vehicles=False)
+
+
+@pytest.mark.asyncio
+async def test_admin_named_tp_uses_authoritative_reset_and_strips_cargo():
+    """Named-point /tp (the path that still despawned in the live test) is covered too."""
+    ctx = _make_ctx(is_admin=True)
+
+    with ExitStack() as stack:
+        mock_tp = stack.enter_context(
+            patch("amc.commands.teleport.teleport_player", new=AsyncMock())
+        )
+        for p in _patches(points=[_make_point()]):
+            stack.enter_context(p)
+        await cmd_tp_name(ctx, "arena")
+
+    _assert_authoritative_strip(mock_tp, no_vehicles=False)
