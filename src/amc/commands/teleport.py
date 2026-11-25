@@ -626,13 +626,12 @@ async def cmd_tp_name(ctx: CommandContext, name: str = ""):
     if await _check_police_tp_near_wanted(ctx, location):
         return
 
-    # Rescue responders keep their vehicle (no_vehicles=False). Send
-    # bRemoveCargo so the mod uses the server-authoritative
-    # ServerResetVehicleAt branch instead of the legacy client-side
-    # ClientResetVehicleAt: the latter's acknowledgement is rejected by
-    # the game, leaving the vehicle desynced and despawning it on exit.
-    # False keeps cargo attached; None for other /tp paths leaves their
-    # existing behaviour unchanged.
+    # Mirror /tp2marker's vehicle branch: bRemoveCargo must be present for
+    # the mod to use the server-authoritative ServerResetVehicleAt instead of
+    # the legacy client-side ClientResetVehicleAt, whose acknowledgement the
+    # game rejects (vehicle then despawns on exit). True strips cargo on every
+    # vehicle-keeping /tp, matching /tp2marker. no_vehicles still decides who
+    # is allowed to take their vehicle along.
     await teleport_player(
         ctx.http_client_mod,
         ctx.player.unique_id,
@@ -640,7 +639,7 @@ async def cmd_tp_name(ctx: CommandContext, name: str = ""):
         no_vehicles=no_vehicles,
         reset_trailers=not player_info.get("bIsAdmin"),
         reset_carried_vehicles=not player_info.get("bIsAdmin"),
-        remove_cargo=False if rescue_tp_data else None,
+        remove_cargo=True,
     )
 
 
