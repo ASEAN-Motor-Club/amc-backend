@@ -1,8 +1,12 @@
-"""Daily login rewards — one claim per character per calendar day.
+"""Daily login rewards — one claim per Steam account per calendar day.
 
 The reward is 100,000 on the first claim and grows linearly with the
 consecutive-day login streak, reaching 200,000 at a 7-day streak and staying
 capped there. A missed calendar day resets the streak to 1.
+
+Streak state lives on ``amc_player`` (SteamID64), not on a character: one
+account owns several characters and a login that resolves to a different
+character row must not restart their streak.
 
 Payout follows the canonical treasury-funded shape used by UBI/subsidies:
 ``check_treasury_floor`` -> ``send_fund_to_player_wallet`` (the ledger leg) ->
@@ -18,7 +22,7 @@ from decimal import Decimal
 from django.utils import timezone
 
 from amc.mod_server import transfer_money
-from amc.models import Character
+from amc.models import Character, Player
 from amc_finance.services import check_treasury_floor, send_fund_to_player_wallet
 
 logger = logging.getLogger("amc.login_reward")
@@ -66,30 +70,34 @@ def next_streak(
 
 async def claim_daily_login_reward(
     character: Character,
-    player,
+    player: Player,
     http_client_mod,
     today: date | None = None,
 ) -> LoginReward | None:
-    """Claim today's reward for *character*; None when already claimed.
+    """Claim today's reward for *player*; None when already claimed.
 
-    The claim is marked in the DB *before* paying so a concurrent login (or a
-    retried log line) cannot pay twice: the conditional UPDATE only matches a
-    row whose ``last_login_reward_date`` is not already today.
+    ``character`` is only used for the wallet payout and the log/announcement
+    name — the streak itself is account-wide. The claim is marked in the DB
+    *before* paying so a concurrent login (or a retried log line) cannot pay
+    twice: the conditional UPDATE only matches a row whose
+    ``last_login_reward_date`` is not already today.
     """
     today = today or timezone.localdate()
-    streak = next_streak(character.login_streak or 0, character.last_login_reward_date, today)
+    streak = next_streak(
+        player.login_streak or 0, player.last_login_reward_date, today
+    )
     amount = reward_amount_for_streak(streak)
 
     claimed = (
-        await Character.objects.filter(pk=character.pk)
+        await Player.objects.filter(unique_id=player.unique_id)
         .exclude(last_login_reward_date=today)
         .aupdate(login_streak=streak, last_login_reward_date=today)
     )
     if not claimed:
         return None
 
-    character.login_streak = streak
-    character.last_login_reward_date = today
+    player.login_streak = streak
+    player.last_login_reward_date = today
 
     if amount <= 0:
         return None

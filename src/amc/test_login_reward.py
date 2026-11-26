@@ -1,4 +1,12 @@
-"""Tests for the per-character daily login reward (amc.login_reward)."""
+"""Tests for the account-wide daily login reward (amc.login_reward).
+
+The streak is keyed by SteamID64 (Player), not by character — one Steam
+account owns several characters and a login resolving to a different one must
+not restart the streak.
+
+Async-ORM writes run outside pytest-django's per-test transaction in this
+suite, so every DB test deletes its own players (cascade removes characters).
+"""
 
 from datetime import date, timedelta
 from unittest.mock import AsyncMock, patch
@@ -17,8 +25,6 @@ from amc.login_reward import (
 from amc.models import Character, Player
 from amc.tasks import get_welcome_message
 
-# Async-ORM writes run outside pytest-django's per-test transaction in this
-# suite, so every DB test deletes its own players (cascade removes characters).
 DAY_ONE = date(2026, 11, 10)
 
 
@@ -26,10 +32,12 @@ async def _cleanup_players(*unique_ids: int) -> None:
     await Player.objects.filter(unique_id__in=list(unique_ids)).adelete()
 
 
-async def _make_character(unique_id: int, **fields) -> tuple[Player, Character]:
-    player = await Player.objects.acreate(unique_id=unique_id)
+async def _make_character(
+    unique_id: int, **player_fields
+) -> tuple[Player, Character]:
+    player = await Player.objects.acreate(unique_id=unique_id, **player_fields)
     character = await Character.objects.acreate(
-        name=f"Login{unique_id}", player=player, guid=f"guid{unique_id}", **fields
+        name=f"Login{unique_id}", player=player, guid=f"guid{unique_id}"
     )
     return player, character
 
@@ -96,7 +104,7 @@ async def test_first_claim_pays_base_and_sets_day_one():
         assert transfer.await_args.args[1] == 100_000
         assert transfer.await_args.args[2] == "Daily Login Reward"
 
-        stored = await Character.objects.aget(pk=character.pk)
+        stored = await Player.objects.aget(unique_id=910001)
         assert stored.login_streak == 1
         assert stored.last_login_reward_date == DAY_ONE
     finally:
@@ -170,10 +178,54 @@ async def test_missed_day_resets_streak():
 
         assert reward is not None
         assert (reward.streak, reward.amount) == (1, 100_000)
-        stored = await Character.objects.aget(pk=character.pk)
+        stored = await Player.objects.aget(unique_id=910004)
         assert stored.login_streak == 1
     finally:
         await _cleanup_players(910004)
+
+
+@pytest.mark.asyncio
+@pytest.mark.django_db
+async def test_streak_follows_account_across_characters():
+    """A login on a second character of the same SteamID64 continues the streak.
+
+    This is the regression behind a player being told "Login streak: 1 day"
+    after their login was resolved to an old duplicate character row.
+    """
+    try:
+        player = await Player.objects.acreate(unique_id=910007)
+        first = await Character.objects.acreate(
+            name="First", player=player, guid="guid910007a"
+        )
+        second = await Character.objects.acreate(
+            name="Second", player=player, guid="guid910007b"
+        )
+        transfer = AsyncMock()
+        with (
+            patch("amc.login_reward.check_treasury_floor", AsyncMock(return_value=True)),
+            patch("amc.login_reward.send_fund_to_player_wallet", AsyncMock()),
+            patch("amc.login_reward.transfer_money", transfer),
+        ):
+            day_one = await claim_daily_login_reward(
+                first, player, MagicMockSession(), today=DAY_ONE
+            )
+            day_two = await claim_daily_login_reward(
+                second, player, MagicMockSession(), today=DAY_ONE + timedelta(days=1)
+            )
+            # A same-day retry on a THIRD character still cannot double-pay.
+            retry = await claim_daily_login_reward(
+                first, player, MagicMockSession(), today=DAY_ONE + timedelta(days=1)
+            )
+
+        assert (day_one.streak, day_one.amount) == (1, 100_000)
+        assert (day_two.streak, day_two.amount) == (2, 116_666)
+        assert retry is None
+        assert transfer.await_count == 2
+        stored = await Player.objects.aget(unique_id=910007)
+        assert stored.login_streak == 2
+        assert stored.last_login_reward_date == DAY_ONE + timedelta(days=1)
+    finally:
+        await _cleanup_players(910007)
 
 
 @pytest.mark.asyncio
@@ -196,7 +248,7 @@ async def test_treasury_floor_blocks_payment():
         transfer.assert_not_awaited()
         ledger.assert_not_awaited()
         # The day still counts as claimed: no retry storm, no double pay.
-        stored = await Character.objects.aget(pk=character.pk)
+        stored = await Player.objects.aget(unique_id=910005)
         assert stored.last_login_reward_date == DAY_ONE
     finally:
         await _cleanup_players(910005)
@@ -279,4 +331,3 @@ class MagicMockSession:
 
     def post(self, *args, **kwargs):  # pragma: no cover - never reached
         raise AssertionError("transfer_money must be patched in these tests")
-
