@@ -38,6 +38,7 @@ from amc.factories import (
 from amc.models import (
     Character,
     RaceSetup,
+    ScheduledEvent,
     PlayerStatusLog,
     PlayerRestockDepotLog,
     CharacterLocation,
@@ -289,14 +290,29 @@ class ScheduledEventRouteAPITest(TestCase):
         self.api_client = TestAsyncClient(scheduled_events_router)
         self.race_setup_client = TestAsyncClient(race_setups_router)
 
+    @staticmethod
+    def _cleanup(se_id, rs_id=None):
+        # sync_to_async ORM writes are not rolled back by TestCase here.
+        async def delete():
+            await sync_to_async(
+                ScheduledEvent.objects.filter(id=se_id).delete
+            )()
+            if rs_id is not None:
+                await sync_to_async(RaceSetup.objects.filter(id=rs_id).delete)()
+
+        asyncio.run(delete())
+
     def test_route_is_empty_when_event_has_no_race_setup(self):
         async def body():
             se = await sync_to_async(ScheduledEventFactory)()
-            return await cast(Any, self.api_client.get(f"/{se.id}/route/"))
+            return se.id, await cast(Any, self.api_client.get(f"/{se.id}/route/"))
 
-        response = asyncio.run(body())
-        self.assertEqual(response.status_code, 200)
-        self.assertEqual(response.json(), {})
+        se_id, response = asyncio.run(body())
+        try:
+            self.assertEqual(response.status_code, 200)
+            self.assertEqual(response.json(), {})
+        finally:
+            self._cleanup(se_id)
 
     def test_route_payload_matches_hash_endpoint(self):
         config = {
@@ -319,16 +335,19 @@ class ScheduledEventRouteAPITest(TestCase):
             se = await sync_to_async(ScheduledEventFactory)(race_setup=rs)
             se_response = await cast(Any, self.api_client.get(f"/{se.id}/route/"))
             hash_response = await cast(Any, self.race_setup_client.get(f"/{rs.hash}/"))
-            return se_response, hash_response
+            return se.id, rs.id, se_response, hash_response
 
-        se_response, hash_response = asyncio.run(body())
-        self.assertEqual(se_response.status_code, 200)
-        payload = se_response.json()
-        self.assertEqual(payload["routeName"], "RaceCam Test")
-        wp = payload["waypoints"][0]
-        self.assertEqual(wp["translation"], wp["location"])
-        self.assertEqual(wp["scale3D"]["y"], 18)
-        self.assertEqual(payload, hash_response.json())
+        se_id, rs_id, se_response, hash_response = asyncio.run(body())
+        try:
+            self.assertEqual(se_response.status_code, 200)
+            payload = se_response.json()
+            self.assertEqual(payload["routeName"], "RaceCam Test")
+            wp = payload["waypoints"][0]
+            self.assertEqual(wp["translation"], wp["location"])
+            self.assertEqual(wp["scale3D"]["y"], 18)
+            self.assertEqual(payload, hash_response.json())
+        finally:
+            self._cleanup(se_id, rs_id)
 
 
 class ScheduledEventAPITest(TestCase):
