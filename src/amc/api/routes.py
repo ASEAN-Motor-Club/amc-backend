@@ -452,9 +452,12 @@ async def depots_restocked_leaderboard(
 race_setups_router = Router()
 
 
-@race_setups_router.get("/{hash}/")
-async def get_race_setup_by_hash(request, hash):
-    race_setup = await RaceSetup.objects.aget(hash=hash)
+def route_payload(race_setup):
+    """Course payload shared by the hash and ScheduledEvent endpoints.
+
+    Lowercased first-char keys match the track-editor shape; `translation` is a
+    duplicate of `location` so a single client parser handles both endpoints.
+    """
     if race_setup.config is None:
         return {}
     route = lowercase_first_char_in_keys(race_setup.config.get("Route", {}))
@@ -464,6 +467,12 @@ async def get_race_setup_by_hash(request, hash):
         for waypoint in route_data.get("waypoints", [])
     ]
     return route_data
+
+
+@race_setups_router.get("/{hash}/")
+async def get_race_setup_by_hash(request, hash):
+    race_setup = await RaceSetup.objects.aget(hash=hash)
+    return route_payload(race_setup)
 
 
 teams_router = Router()
@@ -525,6 +534,15 @@ async def get_scheduled_event(request, id):
     return await ScheduledEvent.objects.select_related(
         "race_setup", "championship"
     ).aget(id=id)
+
+
+@scheduled_events_router.get("/{id}/route/", response=dict)
+async def get_scheduled_event_route(request, id):
+    """Course payload for a ScheduledEvent, for the RaceCam client importer."""
+    event = await ScheduledEvent.objects.select_related("race_setup").aget(id=id)
+    if event.race_setup_id is None:
+        return {}
+    return route_payload(event.race_setup)
 
 
 @scheduled_events_router.get("/{id}/results/", response=list[ParticipantSchema])

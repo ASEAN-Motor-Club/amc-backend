@@ -1,3 +1,4 @@
+import asyncio
 from datetime import timedelta
 from urllib.parse import quote
 from typing import cast, Any
@@ -14,6 +15,7 @@ from amc.api.routes import (
     stats_router,
     teams_router,
     scheduled_events_router,
+    race_setups_router,
     championships_router,
     results_router,
     deliveryjobs_router,
@@ -35,6 +37,7 @@ from amc.factories import (
 )
 from amc.models import (
     Character,
+    RaceSetup,
     PlayerStatusLog,
     PlayerRestockDepotLog,
     CharacterLocation,
@@ -277,6 +280,55 @@ class TeamsAPITest(TestCase):
         response = await cast(Any, self.api_client.get(f"/{team.id}/"))
         data = response.json()
         self.assertEqual(data["id"], team.id)
+
+
+class ScheduledEventRouteAPITest(TestCase):
+    """The ScheduledEvent -> course endpoint used by the RaceCam importer."""
+
+    def setUp(self):
+        self.api_client = TestAsyncClient(scheduled_events_router)
+        self.race_setup_client = TestAsyncClient(race_setups_router)
+
+    def test_route_is_empty_when_event_has_no_race_setup(self):
+        async def body():
+            se = await sync_to_async(ScheduledEventFactory)()
+            return await cast(Any, self.api_client.get(f"/{se.id}/route/"))
+
+        response = asyncio.run(body())
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json(), {})
+
+    def test_route_payload_matches_hash_endpoint(self):
+        config = {
+            "Route": {
+                "RouteName": "RaceCam Test",
+                "Waypoints": [
+                    {
+                        "Location": {"X": 439500.0, "Y": 1211728.0, "Z": -19505.0},
+                        "Rotation": {"X": 0, "Y": 0, "Z": 0.0, "W": 1.0},
+                        "Scale3D": {"X": 1, "Y": 18, "Z": 10},
+                    }
+                ],
+            }
+        }
+
+        async def body():
+            rs = await sync_to_async(RaceSetup.objects.create)(
+                hash="racecam-test-hash", config=config, name="RaceCam Test"
+            )
+            se = await sync_to_async(ScheduledEventFactory)(race_setup=rs)
+            se_response = await cast(Any, self.api_client.get(f"/{se.id}/route/"))
+            hash_response = await cast(Any, self.race_setup_client.get(f"/{rs.hash}/"))
+            return se_response, hash_response
+
+        se_response, hash_response = asyncio.run(body())
+        self.assertEqual(se_response.status_code, 200)
+        payload = se_response.json()
+        self.assertEqual(payload["routeName"], "RaceCam Test")
+        wp = payload["waypoints"][0]
+        self.assertEqual(wp["translation"], wp["location"])
+        self.assertEqual(wp["scale3D"]["y"], 18)
+        self.assertEqual(payload, hash_response.json())
 
 
 class ScheduledEventAPITest(TestCase):
