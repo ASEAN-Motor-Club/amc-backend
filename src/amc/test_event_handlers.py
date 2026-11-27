@@ -2610,3 +2610,23 @@ async def test_a5_same_player_join_runs_before_state_change(
     finally:
         await _cleanup_ws_a_rows()
 
+
+@pytest.mark.asyncio
+@pytest.mark.django_db
+async def test_a3_state3_after_closed_does_not_duplicate_row():
+    guid = "A3D3" * 8
+    await GameEvent.objects.filter(guid=guid).adelete()
+    try:
+        ev = await GameEvent.objects.acreate(
+            guid=guid, name="Closed Race", state=3
+        )
+        returned, transition = await _upsert_game_event(
+            {"EventGuid": guid, "EventName": "Closed Race", "State": 3}
+        )
+        assert returned.pk == ev.pk
+        assert transition is None
+        assert await GameEvent.objects.filter(guid=guid).acount() == 1
+    finally:
+        await GameEvent.objects.filter(guid=guid).adelete()
+
+

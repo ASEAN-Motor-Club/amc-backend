@@ -195,6 +195,11 @@ async def _upsert_game_event(event_data: dict):
         prior = await GameEvent.objects.filter(
             guid=event_guid
         ).order_by("-start_time").afirst()
+        if state == 3 and prior is not None and prior.state == 3:
+            # Event is already finished/closed (e.g. via ServerRemoveEvent or
+            # _maybe_finish_event); do not insert a duplicate state=3 row on
+            # subsequent ServerChangeEventState(3) deliveries.
+            return prior, None
         await GameEvent.objects.filter(
             guid=event_guid, state__lt=3
         ).aupdate(state=3)
