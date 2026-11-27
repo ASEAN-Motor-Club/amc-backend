@@ -25,7 +25,7 @@ from django.db.models import Exists, OuterRef, Prefetch
 from django.utils import timezone
 
 from amc.config import UNDERGROUND_CHAMPIONSHIP_NAME
-from amc.events import create_event_embed, show_results_popup
+from amc.events import create_event_embed, match_scheduled_event, show_results_popup
 from amc.handlers import register
 from amc.mod_server import get_event_state, get_events, transfer_exp
 from amc.models import (
@@ -34,7 +34,6 @@ from amc.models import (
     GameEventCharacter,
     LapSectionTime,
     RaceSetup,
-    ScheduledEvent,
     TTClass,
 )
 from amc.parts_audit import audit_event_join
@@ -149,19 +148,9 @@ async def _upsert_game_event(event_data: dict):
     # SE whose [start_time, end_time] window covers now. The owner-less
     # out-of-window fallback (added for auto-posted events) is gone — the
     # rotation no longer posts events, and a rogue setup copy must not
-    # inherit an SE's results.
-    scheduled_event = None
-    if race_setup:
-        scheduled_event = await (
-            ScheduledEvent.objects.filter(
-                race_setup=race_setup,
-                start_time__lte=timezone.now(),
-                end_time__gte=timezone.now(),
-            )
-            .order_by("start_time")  # deterministic pick if several match
-            .select_related("championship")
-            .afirst()
-        )
+    # inherit an SE's results.  match_scheduled_event also performs the
+    # IR-suffix name fallback when hash drift defeats the exact-match query.
+    scheduled_event = await match_scheduled_event(event_name, race_setup)
 
     # --- GameEvent upsert ---
     transition = None
@@ -200,9 +189,27 @@ async def _upsert_game_event(event_data: dict):
         # announcing the previous run's finish (no hookable event at
         # completion — freeman 2026-09-05): assume any prior run row still
         # marked In Progress was Finished before creating the new run's row.
+        # Record the latest prior state BEFORE closing it so the caller still
+        # sees a real transition (2→1 reset cancels the pending race alert
+        # and refreshes the carried-over Discord embed).
+        prior = await GameEvent.objects.filter(
+            guid=event_guid
+        ).order_by("-start_time").afirst()
+        if state == 3 and prior is not None and prior.state == 3:
+            # Event is already finished/closed (e.g. via ServerRemoveEvent or
+            # _maybe_finish_event); do not insert a duplicate state=3 row on
+            # subsequent ServerChangeEventState(3) deliveries.
+            return prior, None
         await GameEvent.objects.filter(
             guid=event_guid, state__lt=3
         ).aupdate(state=3)
+        if prior is not None and prior.state != state:
+            transition = (prior.state, state)
+        elif prior is None and state >= 2:
+            # Direct state-2 start with no prior row: give
+            # handle_change_event_state a transition so it reconciles the
+            # start line (DQ / illegal-race alert / embed update).
+            transition = (0, state)
         try:
             existing_event = await (
                 GameEvent.objects.filter(
@@ -997,11 +1004,42 @@ async def handle_passed_race_section(event, player, character, ctx):
         game_event=game_event, character__guid=character_guid
     ).select_related("character").afirst()
 
-    if not game_event_char:
+    if game_event_char is None:
+        # The start snapshot can miss a participant entirely (mid-countdown
+        # join).  Heal the row now from the hook's character — dropping the
+        # checkpoint would lose a lap from the results.  Keep a warning so
+        # the upstream drift stays visible.
+        char = character or await Character.objects.filter(
+            guid=character_guid
+        ).afirst()
+        if char is None:
+            logger.warning(
+                "ServerPassedRaceSection: GameEventCharacter and Character not found "
+                "for event %s, character %s",
+                event_guid, character_guid,
+            )
+            return 0, 0, 0, 0
+        game_event_char, _ = await GameEventCharacter.objects.aget_or_create(
+            game_event=game_event,
+            character=char,
+            defaults={"rank": 0, "best_lap_time": 0},
+        )
         logger.warning(
-            "ServerPassedRaceSection: GameEventCharacter not found for event %s, character %s",
+            "ServerPassedRaceSection: created missing GameEventCharacter for "
+            "event %s, character %s",
             event_guid, character_guid,
         )
+
+    # Duplicate/replayed S0 RPC: the total time never decreases within a
+    # run, so a non-increasing crossing at the section already recorded is
+    # the same checkpoint delivered twice.  Without this guard it double-
+    # counts the lap and can trigger Rule B finish prematurely.
+    if (
+        game_event_char.laps >= 1
+        and game_event_char.section_index == section_index
+        and game_event_char.last_section_total_time_seconds is not None
+        and total_time_seconds <= game_event_char.last_section_total_time_seconds
+    ):
         return 0, 0, 0, 0
 
     laptime_seconds = data.get("LaptimeSeconds", 0)
@@ -1163,7 +1201,21 @@ async def handle_passed_race_section(event, player, character, ctx):
 
 @register("ServerRemoveEvent")
 async def handle_remove_event(event, player, character, ctx):
-    """Handle ServerRemoveEvent: no-op (events are managed by game state)."""
+    """Handle ServerRemoveEvent: close open rows and cancel pending alerts."""
+    event_guid = event["data"].get("EventGuid", "")
+    if not event_guid:
+        return 0, 0, 0, 0
+
+    from amc.handlers.tt_police import cancel_pending_race_alert
+
+    cancel_pending_race_alert(event_guid)
+    closed = await GameEvent.objects.filter(
+        guid=event_guid, state__in=(1, 2)
+    ).aupdate(state=3)
+    if closed:
+        logger.info(
+            "ServerRemoveEvent: closed %s open row(s) for %s", closed, event_guid
+        )
     return 0, 0, 0, 0
 
 

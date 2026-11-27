@@ -13,7 +13,7 @@ from django.utils import timezone
 from amc.config import UNDERGROUND_CHAMPIONSHIP_NAME
 from amc.events import print_results
 from amc.factories import ChampionshipFactory, CharacterFactory, PlayerFactory
-from amc.handlers import dispatch
+from amc.handlers import REGISTRY, dispatch
 from amc.handlers.events import (
     _upsert_game_event,
     _upsert_game_event_character,
@@ -23,6 +23,7 @@ from amc.handlers.events import (
     handle_join_event,
     handle_leave_event,
     handle_passed_race_section,
+    handle_remove_event,
 )
 from amc.models import (
     Championship,
@@ -30,10 +31,12 @@ from amc.models import (
     GameEvent,
     GameEventCharacter,
     LapSectionTime,
+    Player,
     RaceSetup,
     ScheduledEvent,
     TTClass,
 )
+from amc.webhook import process_events
 from amc.webhook_context import EventContext
 
 
@@ -1905,7 +1908,7 @@ class RunRowResolutionTests(TestCase):
         self.assertIsNotNone(run2)
         self.assertNotEqual(run2.pk, run1.pk)
         self.assertEqual(run2.state, 1)
-        self.assertIsNone(transition)
+        self.assertEqual(transition, (2, 1))
         await run1.arefresh_from_db()
         self.assertEqual(run1.state, 3)  # assumed Finished
 
@@ -2213,4 +2216,417 @@ async def test_real_setup_on_later_hook_still_links():
     game_event = await GameEvent.objects.aget(pk=game_event.pk)
     assert game_event.race_setup_id == race_setup.pk
     await _cleanup_probe_rows()
+
+
+# ---------------------------------------------------------------------------
+# Workstream A — event integration hardening regressions
+# ---------------------------------------------------------------------------
+# Module-level async tests with pytest-asyncio markers: async methods on
+# django TestCase are never awaited under pytest (see the note above).
+
+A1_GUID = "A1" * 16
+A2_GUID = "A2" * 16
+A3_GUID = "A3" * 16
+A4_GUID = "A4" * 16
+A4_CHAR_GUID = "A4CHAR" + "0" * 26
+A4_UNIQUE_ID = 7656119000004001
+A5_CHAR_GUID = "A5CHAR" + "0" * 26
+A5_UNIQUE_ID = 7656119000005001
+A2_SE_NAME = "A2 Priest Run"
+A2_TEMPLATE_NAME = "A2 Template Route"
+A2_DRIFTED_NAME = "A2 Drifted Route"
+A4_SETUP_NAME = "A4 Test Route"
+A_WS_GUIDS = (A1_GUID, A2_GUID, A3_GUID, A4_GUID)
+
+
+def _a_setup(route_name):
+    """A copy of the base setup with a unique route name (unique hash)."""
+    setup = dict(RACE_SETUP_RAW)
+    setup["Route"] = dict(RACE_SETUP_RAW["Route"])
+    setup["Route"]["RouteName"] = route_name
+    return setup
+
+
+async def _cleanup_ws_a_rows():
+    """Async ORM writes commit outside pytest-django's rollback."""
+    await LapSectionTime.objects.filter(
+        game_event_character__game_event__guid__in=A_WS_GUIDS
+    ).adelete()
+    await GameEventCharacter.objects.filter(
+        game_event__guid__in=A_WS_GUIDS
+    ).adelete()
+    await GameEvent.objects.filter(guid__in=A_WS_GUIDS).adelete()
+    await Character.objects.filter(
+        guid__in=(A4_CHAR_GUID, A5_CHAR_GUID)
+    ).adelete()
+    await Player.objects.filter(
+        unique_id__in=(A4_UNIQUE_ID, A5_UNIQUE_ID)
+    ).adelete()
+    await ScheduledEvent.objects.filter(name=A2_SE_NAME).adelete()
+    await RaceSetup.objects.filter(
+        name__in=(A2_TEMPLATE_NAME, A2_DRIFTED_NAME, A4_SETUP_NAME)
+    ).adelete()
+
+
+async def _a1_prior_racing_row():
+    payload = _make_event_data(state=2)
+    payload["EventGuid"] = A1_GUID
+    payload["Players"] = []
+    return await _upsert_game_event(payload)
+
+
+def _a1_reset_payload(state=1):
+    payload = _make_event_data(state=state)
+    payload["EventGuid"] = A1_GUID
+    payload["Players"] = []
+    return payload
+
+
+# --- A1: transition on rerun reset and direct state-2 start ---
+
+
+@pytest.mark.asyncio
+@pytest.mark.django_db
+async def test_a1_rerun_reset_returns_transition_and_closes_prior_row():
+    await _cleanup_ws_a_rows()
+    try:
+        prior, _ = await _a1_prior_racing_row()
+        row, transition = await _upsert_game_event(_a1_reset_payload())
+        assert transition == (2, 1)
+        assert row.state == 1 and row.pk != prior.pk
+        await prior.arefresh_from_db()
+        assert prior.state == 3
+    finally:
+        await _cleanup_ws_a_rows()
+
+
+@pytest.mark.asyncio
+@pytest.mark.django_db
+@patch("amc.handlers.events._throttled_update_embed", new_callable=AsyncMock)
+@patch("amc.handlers.tt_police.cancel_pending_race_alert")
+async def test_a1_rerun_reset_cancels_pending_alert(mock_cancel, mock_embed):
+    await _cleanup_ws_a_rows()
+    try:
+        await _a1_prior_racing_row()
+        await handle_change_event_state(
+            {"data": {"Event": _a1_reset_payload()}}, None, None, _make_ctx()
+        )
+        mock_cancel.assert_called_once_with(A1_GUID)
+        await asyncio.sleep(0)
+    finally:
+        await _cleanup_ws_a_rows()
+
+
+@pytest.mark.asyncio
+@pytest.mark.django_db
+async def test_a1_direct_state_2_without_prior_row_returns_transition():
+    await _cleanup_ws_a_rows()
+    try:
+        payload = _a1_reset_payload(state=2)
+        row, transition = await _upsert_game_event(payload)
+        assert transition == (0, 2)
+        assert row.state == 2
+        assert await GameEvent.objects.filter(guid=A1_GUID).acount() == 1
+    finally:
+        await _cleanup_ws_a_rows()
+
+
+@pytest.mark.asyncio
+@pytest.mark.django_db
+@patch("amc.handlers.events._throttled_update_embed", new_callable=AsyncMock)
+@patch("amc.handlers.events._reconcile_event_players", new_callable=AsyncMock)
+async def test_a1_direct_state_2_triggers_start_reconcile(
+    mock_reconcile, mock_embed
+):
+    await _cleanup_ws_a_rows()
+    try:
+        await handle_change_event_state(
+            {"data": {"Event": _a1_reset_payload(state=2)}},
+            None, None, _make_ctx(http_client_mod=object()),
+        )
+        mock_reconcile.assert_awaited_once()
+        assert mock_reconcile.await_args.kwargs["require_state"] == 2
+        await asyncio.sleep(0)
+    finally:
+        await _cleanup_ws_a_rows()
+
+
+# --- A2: hash-drift fallback to the IR-suffix SE match ---
+
+
+@pytest.mark.asyncio
+@pytest.mark.django_db
+async def test_a2_hash_drift_falls_back_to_ir_suffix_and_preserves_illegality():
+    await _cleanup_ws_a_rows()
+    try:
+        underground, _ = await sync_to_async(Championship.objects.get_or_create)(
+            name=UNDERGROUND_CHAMPIONSHIP_NAME, defaults={"description": ""}
+        )
+        template = _a_setup(A2_TEMPLATE_NAME)
+        template_row, _ = await RaceSetup.objects.aget_or_create(
+            hash=RaceSetup.calculate_hash(template),
+            defaults={"config": template, "name": A2_TEMPLATE_NAME},
+        )
+        now = timezone.now()
+        se = await ScheduledEvent.objects.acreate(
+            name=A2_SE_NAME,
+            start_time=now - timedelta(minutes=5),
+            end_time=now + timedelta(minutes=5),
+            race_setup=template_row,
+            championship=underground,
+        )
+
+        payload = _make_event_data(state=1)
+        payload["EventGuid"] = A2_GUID
+        payload["EventName"] = f"{A2_SE_NAME} - IR - 480"
+        payload["RaceSetup"] = _a_setup(A2_DRIFTED_NAME)  # hash no longer matches
+
+        row, _ = await _upsert_game_event(payload)
+        assert row.scheduled_event_id == se.pk
+        assert row.race_legality == "illegal"
+    finally:
+        await _cleanup_ws_a_rows()
+
+
+# --- A3: ServerRemoveEvent closes open rows and cancels the alert ---
+
+
+@pytest.mark.asyncio
+@pytest.mark.django_db
+@patch("amc.handlers.tt_police.cancel_pending_race_alert")
+async def test_a3_remove_event_closes_open_rows_and_cancels_alert(mock_cancel):
+    await _cleanup_ws_a_rows()
+    try:
+        await GameEvent.objects.acreate(guid=A3_GUID, name="A3 ready", state=1)
+        await GameEvent.objects.acreate(guid=A3_GUID, name="A3 racing", state=2)
+        result = await handle_remove_event(
+            {"data": {"EventGuid": A3_GUID}}, None, None, _make_ctx()
+        )
+        assert result == (0, 0, 0, 0)
+        states = sorted(
+            [r.state async for r in GameEvent.objects.filter(guid=A3_GUID)]
+        )
+        assert states == [3, 3]
+        mock_cancel.assert_called_once_with(A3_GUID)
+    finally:
+        await _cleanup_ws_a_rows()
+
+
+@pytest.mark.asyncio
+@pytest.mark.django_db
+@patch("amc.handlers.tt_police.cancel_pending_race_alert")
+async def test_a3_remove_event_leaves_finished_row_untouched(mock_cancel):
+    await _cleanup_ws_a_rows()
+    try:
+        finished = await GameEvent.objects.acreate(
+            guid=A3_GUID, name="A3 finished", state=3, rewards_paid=True
+        )
+        await handle_remove_event(
+            {"data": {"EventGuid": A3_GUID}}, None, None, _make_ctx()
+        )
+        await finished.arefresh_from_db()
+        assert finished.state == 3
+        assert finished.rewards_paid is True
+        assert await GameEvent.objects.filter(guid=A3_GUID).acount() == 1
+        mock_cancel.assert_called_once_with(A3_GUID)
+    finally:
+        await _cleanup_ws_a_rows()
+
+
+# --- A4: heal missing participant + dedup duplicate section crossings ---
+
+
+def _a4_section_payload(total_time, section=0, lap_time=0.0):
+    return {
+        "data": {
+            "EventGuid": A4_GUID,
+            "CharacterGuid": A4_CHAR_GUID,
+            "SectionIndex": section,
+            "TotalTimeSeconds": total_time,
+            "LaptimeSeconds": lap_time,
+        }
+    }
+
+
+@pytest.mark.asyncio
+@pytest.mark.django_db
+@patch("amc.handlers.events._throttled_update_embed", new_callable=AsyncMock)
+async def test_a4_passed_section_creates_missing_participant_row(mock_embed):
+    await _cleanup_ws_a_rows()
+    try:
+        setup = _a_setup(A4_SETUP_NAME)
+        race_setup, _ = await RaceSetup.objects.aget_or_create(
+            hash=RaceSetup.calculate_hash(setup),
+            defaults={"config": setup, "name": A4_SETUP_NAME},
+        )
+        game_event = await GameEvent.objects.acreate(
+            guid=A4_GUID, name="A4 run", state=2, race_setup=race_setup
+        )
+        char, *_ = await Character.objects.aget_or_create_character_player(
+            "A4 Driver", A4_UNIQUE_ID, character_guid=A4_CHAR_GUID
+        )
+        # character arg is None: the handler must resolve the row by guid.
+        await handle_passed_race_section(
+            _a4_section_payload(6.5), None, None, _make_ctx()
+        )
+        gec = await GameEventCharacter.objects.filter(
+            game_event=game_event, character=char
+        ).afirst()
+        assert gec is not None
+        assert gec.laps == 1 and gec.section_index == 0
+        assert await LapSectionTime.objects.filter(
+            game_event_character=gec
+        ).acount() == 1
+        await asyncio.sleep(0)
+    finally:
+        await _cleanup_ws_a_rows()
+
+
+@pytest.mark.asyncio
+@pytest.mark.django_db
+@patch("amc.handlers.events._throttled_update_embed", new_callable=AsyncMock)
+async def test_a4_passed_section_ignores_duplicate_s0_crossing(mock_embed):
+    await _cleanup_ws_a_rows()
+    try:
+        game_event = await GameEvent.objects.acreate(
+            guid=A4_GUID, name="A4 run", state=2
+        )
+        char, *_ = await Character.objects.aget_or_create_character_player(
+            "A4 Driver", A4_UNIQUE_ID, character_guid=A4_CHAR_GUID
+        )
+        gec = await GameEventCharacter.objects.acreate(
+            game_event=game_event, character=char, rank=0,
+            laps=1, section_index=0,
+            first_section_total_time_seconds=4.0,
+            last_section_total_time_seconds=10.0,
+            best_lap_time=4.0, lap_times=[4.0],
+        )
+        await LapSectionTime.objects.acreate(
+            game_event_character=gec, section_index=0, lap=0,
+            total_time_seconds=10.0, rank=0,
+        )
+        # Duplicate/extra S0 RPC with a non-increasing total time.
+        await handle_passed_race_section(
+            _a4_section_payload(9.5, lap_time=4.0), None, char, _make_ctx()
+        )
+        await gec.arefresh_from_db()
+        assert gec.laps == 1
+        assert gec.lap_times == [4.0]
+        assert gec.last_section_total_time_seconds == 10.0
+        assert await LapSectionTime.objects.filter(
+            game_event_character=gec
+        ).acount() == 1
+        await asyncio.sleep(0)
+    finally:
+        await _cleanup_ws_a_rows()
+
+
+# --- A5: preserve arrival order for race hooks in process_events ---
+
+
+@pytest.mark.asyncio
+@pytest.mark.django_db
+@patch("amc.webhook.persist_watermarks")
+@patch("amc.webhook.deduplicate_events")
+async def test_a5_cross_player_state_change_runs_before_checkpoint(
+    mock_dedup, mock_persist
+):
+    """Player B's lower CharacterGuid must not sort its checkpoint ahead of
+    the host's state-2 change from player A."""
+    host_guid = "F" * 32
+    other_guid = "0" * 32
+    events = [
+        {
+            "hook": "ServerChangeEventState", "timestamp": 1, "_seq": 1,
+            "data": {"CharacterGuid": host_guid, "Event": {"State": 2}},
+        },
+        {
+            "hook": "ServerPassedRaceSection", "timestamp": 2, "_seq": 2,
+            "data": {"CharacterGuid": other_guid, "SectionIndex": 0},
+        },
+    ]
+    mock_dedup.return_value = (events, 2, 0)
+    calls = []
+
+    async def record_state(event, player, character, ctx):
+        calls.append(("state", event["data"]["CharacterGuid"]))
+        return 0, 0, 0, 0
+
+    async def record_section(event, player, character, ctx):
+        calls.append(("section", event["data"]["CharacterGuid"]))
+        return 0, 0, 0, 0
+
+    with patch.dict(REGISTRY, {
+        "ServerChangeEventState": record_state,
+        "ServerPassedRaceSection": record_section,
+    }):
+        await process_events(events)
+
+    assert calls == [("state", host_guid), ("section", other_guid)]
+    mock_persist.assert_called_once()
+
+
+@pytest.mark.asyncio
+@pytest.mark.django_db
+@patch("amc.webhook.persist_watermarks")
+@patch("amc.webhook.deduplicate_events")
+async def test_a5_same_player_join_runs_before_state_change(
+    mock_dedup, mock_persist
+):
+    await _cleanup_ws_a_rows()
+    try:
+        await Character.objects.aget_or_create_character_player(
+            "A5 Driver", A5_UNIQUE_ID, character_guid=A5_CHAR_GUID
+        )
+        events = [
+            {
+                "hook": "ServerJoinEvent", "timestamp": 1, "_seq": 1,
+                "data": {"CharacterGuid": A5_CHAR_GUID, "EventGuid": "A5" * 16},
+            },
+            {
+                "hook": "ServerChangeEventState", "timestamp": 2, "_seq": 2,
+                "data": {"CharacterGuid": A5_CHAR_GUID, "Event": {"State": 2}},
+            },
+        ]
+        mock_dedup.return_value = (events, 2, 0)
+        calls = []
+
+        async def record_join(event, player, character, ctx):
+            calls.append(("join", character.guid if character else None))
+            return 0, 0, 0, 0
+
+        async def record_state(event, player, character, ctx):
+            calls.append(("state", character.guid if character else None))
+            return 0, 0, 0, 0
+
+        with patch.dict(REGISTRY, {
+            "ServerJoinEvent": record_join,
+            "ServerChangeEventState": record_state,
+        }):
+            await process_events(events)
+
+        assert calls == [("join", A5_CHAR_GUID), ("state", A5_CHAR_GUID)]
+        mock_persist.assert_called_once()
+    finally:
+        await _cleanup_ws_a_rows()
+
+
+@pytest.mark.asyncio
+@pytest.mark.django_db
+async def test_a3_state3_after_closed_does_not_duplicate_row():
+    guid = "A3D3" * 8
+    await GameEvent.objects.filter(guid=guid).adelete()
+    try:
+        ev = await GameEvent.objects.acreate(
+            guid=guid, name="Closed Race", state=3
+        )
+        returned, transition = await _upsert_game_event(
+            {"EventGuid": guid, "EventName": "Closed Race", "State": 3}
+        )
+        assert returned.pk == ev.pk
+        assert transition is None
+        assert await GameEvent.objects.filter(guid=guid).acount() == 1
+    finally:
+        await GameEvent.objects.filter(guid=guid).adelete()
+
 
