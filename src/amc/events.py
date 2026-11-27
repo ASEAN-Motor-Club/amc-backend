@@ -1,4 +1,5 @@
 import asyncio
+import logging
 import math
 import random
 import re
@@ -38,6 +39,8 @@ from amc.models import (
 )
 from amc.utils import skip_if_running
 from amc_finance.services import check_treasury_floor, send_fund_to_player_wallet
+
+logger = logging.getLogger("amc.events")
 
 
 def generate_guid():
@@ -147,13 +150,25 @@ async def setup_event(timestamp, player_id, scheduled_event, http_client_mod):
         },
     )
 
-    async with http_client_mod.post("/events", json=data) as response:
-        if response.status >= 400:
-            error_body = await response.json()
-            raise Exception(
-                f"API Error: Received status {response.status} instead of 201. Body: {error_body}"
-            )
-        return True
+    # The row above is created before the POST so the add-hook upsert is a
+    # pure update. If the mod rejects the POST, drop it here: otherwise a
+    # retry (new guid) leaves an orphan row that crosscheck may resurrect as
+    # a phantom event.
+    failure = None
+    try:
+        async with http_client_mod.post("/events", json=data) as response:
+            if response.status < 400:
+                return True
+            failure = f"HTTP {response.status}: {await response.text()}"
+    except Exception as exc:
+        failure = f"request failed: {exc}"
+
+    await GameEvent.objects.filter(guid=event_guid).adelete()
+    logger.error("setup_event: mod rejected event %s: %s", event_guid, failure[:1000])
+    # Never surface the mod's raw Lua traceback to the player.
+    raise Exception(
+        "The game server could not create the event; please retry."
+    ) from None
 
 
 async def match_scheduled_event(name, race_setup):
