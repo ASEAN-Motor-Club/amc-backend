@@ -1352,7 +1352,16 @@ async def process_log_event(
                 # Deterministic — no LLM gating on login.
                 try:
                     welcome_name = player.forced_name or character.name
-                    # Daily login reward (per character, one per calendar
+                    # Greeting uses the account's most recent login, not this
+                    # character row's stale last_online — an old duplicate
+                    # character must not produce "Long time no see".
+                    latest_character = await player.get_latest_character()
+                    greeting_last_online = (
+                        latest_character.last_login
+                        if latest_character
+                        else character.last_online
+                    )
+                    # Daily login reward (per Steam account, one per calendar
                     # day). Claim before building the greeting so the
                     # announcement can carry the streak.
                     login_reward = None
@@ -1363,7 +1372,7 @@ async def process_log_event(
                     welcome_message, _is_new = get_welcome_message(
                         welcome_name,
                         is_new=is_new_player,
-                        last_online=character.last_online,
+                        last_online=greeting_last_online,
                         login_streak=(
                             login_reward.streak if login_reward else None
                         ),

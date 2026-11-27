@@ -101,6 +101,11 @@ class Player(models.Model):
         ),
     )
     social_score = models.IntegerField(default=0)
+    # Daily login streak is ACCOUNT-level (SteamID64), not per character: one
+    # Steam account owns several characters, and a login that resolves to a
+    # different character row must not restart the streak.
+    login_streak = models.PositiveIntegerField(default=0)
+    last_login_reward_date = models.DateField(null=True, blank=True)
     language = models.CharField(
         max_length=10,
         default="en-gb",
@@ -345,9 +350,9 @@ class Character(models.Model):
     last_location = models.PointField(srid=0, dim=3, null=True, blank=True)
     last_vehicle_key = models.CharField(max_length=100, null=True, blank=True)
     last_online = models.DateTimeField(null=True, blank=True)
-    # Daily login reward (per character): consecutive calendar days
-    # (Asia/Bangkok) on which a reward was claimed, and the last claim date so
-    # a second login on the same day cannot pay twice.
+    # Legacy per-character login reward columns, retained for rollback safety.
+    # Live streak state is account-level on Player (see above); these are no
+    # longer read or written. Consecutive calendar days are Asia/Bangkok.
     login_streak = models.PositiveIntegerField(default=0)
     last_login_reward_date = models.DateField(null=True, blank=True)
     # Set to timezone.now() by _check_shortcut_zones when a player
