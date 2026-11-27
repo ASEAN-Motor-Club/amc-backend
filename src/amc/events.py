@@ -192,6 +192,7 @@ async def match_scheduled_event(name, race_setup):
                 end_time__gte=timezone.now(),
             )
             .order_by("start_time")  # deterministic pick if several match
+            .select_related("championship")
             .afirst()
         )
         if scheduled_event is not None:
@@ -201,7 +202,7 @@ async def match_scheduled_event(name, race_setup):
     async for se in ScheduledEvent.objects.filter(
         start_time__lte=timezone.now(),
         end_time__gte=timezone.now(),
-    ).order_by("start_time"):
+    ).order_by("start_time").select_related("championship"):
         if not se.name:
             continue
         remainder = name[len(se.name) :]

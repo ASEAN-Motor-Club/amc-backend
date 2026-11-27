@@ -180,6 +180,46 @@ def aggregate_homogenous_events(sorted_events):
 # ---------------------------------------------------------------------------
 
 
+ORDERED_EVENT_HOOKS = frozenset({
+    "ServerAddEvent",
+    "ServerChangeEventState",
+    "ServerJoinEvent",
+    "ServerLeaveEvent",
+    "ServerPassedRaceSection",
+    "ServerRemoveEvent",
+})
+
+
+async def _resolve_ordered_actor(data: dict):
+    """Resolve the actor for a race hook with the profit pipeline's lookup.
+
+    Race hooks are dispatched outside that pipeline, so they need the same
+    guid/unique-id resolution to reach their handler with a real character.
+    """
+    character_guid = data.get("CharacterGuid", "") or data.get("PlayerId", "")
+    if not character_guid:
+        return None, None
+
+    character_q = Q(guid=character_guid, guid__isnull=False)
+    try:
+        character_q = character_q | Q(player__unique_id=int(character_guid))
+    except ValueError:
+        pass
+    try:
+        character = await (
+            Character.objects.select_related("player")
+            .with_last_login()
+            .filter(character_q)
+            .order_by("-last_login")
+            .afirst()
+        )
+        if character is None:
+            return None, None
+        return character.player, character
+    except Player.DoesNotExist:
+        return None, None
+
+
 async def process_events(
     events, http_client=None, http_client_mod=None, discord_client=None
 ):
@@ -189,9 +229,13 @@ async def process_events(
         return
 
     # Pre-process events: tag each with a character key and split into
-    # character-linked vs character-less buckets.  Character-less events
-    # (e.g. ServerAddEvent for ownerless auto-events) don't go through
-    # the profit pipeline — they are dispatched directly to their handler.
+    # ordered race hooks, character-linked and character-less buckets.
+    # Character-less events (e.g. ServerAddEvent for ownerless auto-events)
+    # don't go through the profit pipeline — they are dispatched directly
+    # to their handler.  Race hooks are ALWAYS dispatched directly, in the
+    # batch's original _seq order: the profit pipeline's (key_id, hook) sort
+    # and CharacterGuid groupby scramble start/checkpoint ordering.
+    ordered_events = []
     character_events = []
     characterless_events = []
     for event in events:
@@ -199,26 +243,38 @@ async def process_events(
         if not player_id:
             player_id = event["data"].get("PlayerId", "")
         event["key_id"] = player_id
-        if player_id:
+        if event["hook"] in ORDERED_EVENT_HOOKS:
+            ordered_events.append(event)
+        elif player_id:
             character_events.append(event)
         else:
             characterless_events.append(event)
 
-    # --- Dispatch character-less events directly (race events, etc.) ---
-    if characterless_events:
-        ctx = EventContext(
-            http_client=http_client,
-            http_client_mod=http_client_mod,
-            discord_client=discord_client,
-        )
-        for event in characterless_events:
-            try:
-                await dispatch(event["hook"], event, None, None, ctx)
-            except Exception:
-                logger.exception(
-                    "Failed to dispatch character-less event %s",
-                    event.get("hook"),
-                )
+    ctx = EventContext(
+        http_client=http_client,
+        http_client_mod=http_client_mod,
+        discord_client=discord_client,
+    )
+
+    # --- Dispatch ordered race events sequentially in arrival order ---
+    for event in ordered_events:
+        player, character = await _resolve_ordered_actor(event["data"])
+        try:
+            await dispatch(event["hook"], event, player, character, ctx)
+        except Exception:
+            logger.exception(
+                "Failed to dispatch ordered race event %s", event.get("hook")
+            )
+
+    # --- Dispatch remaining character-less events directly ---
+    for event in characterless_events:
+        try:
+            await dispatch(event["hook"], event, None, None, ctx)
+        except Exception:
+            logger.exception(
+                "Failed to dispatch character-less event %s",
+                event.get("hook"),
+            )
 
     if not character_events:
         # Nothing for the character-linked pipeline — just persist watermarks.
